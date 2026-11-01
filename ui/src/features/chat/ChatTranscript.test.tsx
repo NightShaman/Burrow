@@ -5,51 +5,122 @@ import type { SessionTurn } from '../../app/api';
 import { ChatTranscript } from './ChatTranscript';
 
 afterEach(cleanup);
-const child: Subagent = { id: 'child', name: 'Child', avatar: 'C', activity: '', context: null, stream: 'child' };
-const parent: Agent = { id: 'hatchet', name: 'Hatchet', avatar: 'H', activity: '', context: null, provider: '', model: '', effort: '', temperature: 1, workspace: '', files: [], subagents: [child] };
+const child: Subagent = {
+  id: 'child',
+  name: 'Child',
+  avatar: 'C',
+  activity: '',
+  context: null,
+  stream: 'child',
+};
+const parent: Agent = {
+  id: 'hatchet',
+  name: 'Hatchet',
+  avatar: 'H',
+  activity: '',
+  context: null,
+  provider: '',
+  model: '',
+  effort: '',
+  temperature: 1,
+  workspace: '',
+  files: [],
+  subagents: [child],
+};
 function show(turns: SessionTurn[], selected: Agent | Subagent = child) {
-  return render(<ChatTranscript selected={selected} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={turns} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  return render(
+    <ChatTranscript
+      selected={selected}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={turns}
+      isLoading={false}
+      error=""
+      isSending={false}
+      activeRunId=""
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
 }
-const message = (content: string, metadata?: SessionTurn['metadata']): SessionTurn => ({ type: 'message', role: 'user', content, metadata });
+const message = (content: string, metadata?: SessionTurn['metadata']): SessionTurn => ({
+  type: 'message',
+  role: 'user',
+  content,
+  metadata,
+});
 it('labels a child conversation as a Minion stream without changing its internal metadata', () => {
   show([message('Visible conversation')]);
   expect(screen.getByText('Minion stream')).toBeTruthy();
 });
 
 it('renders saved tool activity with a missing label instead of crashing the transcript', () => {
-  const malformedActivity = { runId: 'run-bad-label', items: [{ id: 'tool-1', status: 'ok' }] } as never;
-  show([{ type: 'message', role: 'assistant', content: 'Still visible', metadata: { toolActivity: malformedActivity } }], parent);
+  const malformedActivity = {
+    runId: 'run-bad-label',
+    items: [{ id: 'tool-1', status: 'ok' }],
+  } as never;
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'Still visible',
+        metadata: { toolActivity: malformedActivity },
+      },
+    ],
+    parent,
+  );
   expect(screen.getByText('Still visible')).toBeTruthy();
   expect(screen.getByText('Tool activity')).toBeTruthy();
 });
 it('hides modern and legacy generated context without altering stored turns or hiding operator followups', () => {
-  const turns = [message('runtime prompt', { kind: 'subagent-runtime-context' }), message('legacy prompt', { kind: 'subagent-task' }), message('debug prompt', { visibility: 'debug', promptEligible: false }), { ...message('debug event'), type: 'debug' }, message('Actual followup')];
+  const turns = [
+    message('runtime prompt', { kind: 'subagent-runtime-context' }),
+    message('legacy prompt', { kind: 'subagent-task' }),
+    message('debug prompt', { visibility: 'debug', promptEligible: false }),
+    { ...message('debug event'), type: 'debug' },
+    message('Actual followup'),
+  ];
   const before = JSON.stringify(turns);
   show(turns);
-  for (const text of ['runtime prompt', 'legacy prompt', 'debug prompt', 'debug event']) expect(screen.queryByText(text)).toBeNull();
+  for (const text of ['runtime prompt', 'legacy prompt', 'debug prompt', 'debug event'])
+    expect(screen.queryByText(text)).toBeNull();
   expect(screen.getByLabelText('Rob avatar')).toBeTruthy();
   expect(screen.getByText('Actual followup')).toBeTruthy();
   expect(JSON.stringify(turns)).toBe(before);
 });
-it.each([{ kind: 'subagent-delegated-task', parentAgentId: 'hatchet' }, { workerProfile: 'frontend', subagentId: 'child', parentAgentId: 'hatchet' }])('attributes delegated tasks to the known parent: %j', (metadata) => {
+it.each([
+  { kind: 'subagent-delegated-task', parentAgentId: 'hatchet' },
+  { workerProfile: 'frontend', subagentId: 'child', parentAgentId: 'hatchet' },
+])('attributes delegated tasks to the known parent: %j', (metadata) => {
   show([message('**Delegated task**', metadata), message('Operator followup')]);
   expect(screen.getByLabelText('Hatchet avatar')).toBeTruthy();
   expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
   expect(screen.getByText('Delegated task').tagName).toBe('STRONG');
 });
-it.each([{ kind: 'subagent-delegated-task' }, { workerProfile: 'frontend', subagentId: 'child' }])('uses Parent agent when attribution is unavailable, never the operator or workspace parent: %j', (metadata) => {
-  show([message('Task', metadata)]);
-  expect(screen.getByLabelText('Parent agent avatar')).toBeTruthy();
-  expect(screen.queryByLabelText('Rob avatar')).toBeNull();
-  expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
-});
+it.each([{ kind: 'subagent-delegated-task' }, { workerProfile: 'frontend', subagentId: 'child' }])(
+  'uses Parent agent when attribution is unavailable, never the operator or workspace parent: %j',
+  (metadata) => {
+    show([message('Task', metadata)]);
+    expect(screen.getByLabelText('Parent agent avatar')).toBeTruthy();
+    expect(screen.queryByLabelText('Rob avatar')).toBeNull();
+    expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
+  },
+);
 it('honors explicit parent identity rather than the workspace parent', () => {
   show([message('Task', { kind: 'subagent-delegated-task', parentAgentId: 'smatchet' })]);
   expect(screen.getByLabelText('smatchet avatar')).toBeTruthy();
   expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
 });
 it('preserves safe Markdown and line breaks in actual child replies', () => {
-  const { container } = show([{ type: 'message', role: 'assistant', content: '## Result\n\n**Done**\nNext line\n\n- Verified\n\n<script>alert(1)</script>' }]);
+  const { container } = show([
+    {
+      type: 'message',
+      role: 'assistant',
+      content: '## Result\n\n**Done**\nNext line\n\n- Verified\n\n<script>alert(1)</script>',
+    },
+  ]);
   expect(screen.getByRole('heading', { name: 'Result' })).toBeTruthy();
   expect(screen.getByText('Done').tagName).toBe('STRONG');
   expect(container.querySelector('br')).toBeTruthy();
@@ -58,7 +129,14 @@ it('preserves safe Markdown and line breaks in actual child replies', () => {
 });
 
 it('renders a fenced code block alongside a semantic GFM table without changing copy controls', () => {
-  const { container } = show([{ type: 'message', role: 'assistant', content: '| Mod owns | Core provides |\n|:---|---:|\n| Encrypted storage | Agent identity |\n\n```text\n| literal | code |\n```' }]);
+  const { container } = show([
+    {
+      type: 'message',
+      role: 'assistant',
+      content:
+        '| Mod owns | Core provides |\n|:---|---:|\n| Encrypted storage | Agent identity |\n\n```text\n| literal | code |\n```',
+    },
+  ]);
   const table = screen.getByRole('table');
   expect(table.querySelectorAll('th')).toHaveLength(2);
   expect(table.querySelector('tbody tr')?.textContent).toBe('Encrypted storageAgent identity');
@@ -69,7 +147,21 @@ it('renders a fenced code block alongside a semantic GFM table without changing 
 });
 
 it('renders tables in live assistant text as well as saved messages', () => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" liveProgress={[]} liveAnswer={'| A | B |\n|---|---|\n| one | two |'} />);
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="run-1"
+      liveProgress={[]}
+      liveAnswer={'| A | B |\n|---|---|\n| one | two |'}
+    />,
+  );
   expect(screen.getByRole('table').querySelector('td')?.textContent).toBe('one');
 });
 
@@ -80,12 +172,20 @@ it('copies only a fenced code block without its Markdown fence or surrounding me
     return true;
   });
   Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
-  show([{ type: 'message', role: 'assistant', content: 'Run this:\n\n```bash\necho "goblin"\nprintf "done"\n```\n\nThen continue.' }]);
+  show([
+    {
+      type: 'message',
+      role: 'assistant',
+      content: 'Run this:\n\n```bash\necho "goblin"\nprintf "done"\n```\n\nThen continue.',
+    },
+  ]);
 
   expect(screen.getByText('Run this:')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Copy code block' }));
 
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Copy code block' }).textContent).toContain('Copied'));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Copy code block' }).textContent).toContain('Copied'),
+  );
   expect(copied).toEqual(['echo "goblin"\nprintf "done"']);
 });
 
@@ -95,7 +195,42 @@ it('does not add a code copy button for inline code', () => {
 });
 
 it('shows an externally started task run before its first persisted chat turn', () => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="task-run" activeToolActivity={{ runId: 'task-run', items: [{ id: 'tool-1', label: 'Inspect status', status: 'pending' }] }} liveProgress={[{ id: 'thought-1', text: 'Checking the runtime.', ts: '2026-09-15T12:00:00.000Z', status: 'streaming' }]} liveAnswer="" runtimeUserMessage="Inspect task destination" a2aActivities={[{ id: 'a2a-1', status: 'running', parentAgentId: 'hatchet', recipient: { agentId: 'minion' }, progress: [] }]} />);
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="task-run"
+      activeToolActivity={{
+        runId: 'task-run',
+        items: [{ id: 'tool-1', label: 'Inspect status', status: 'pending' }],
+      }}
+      liveProgress={[
+        {
+          id: 'thought-1',
+          text: 'Checking the runtime.',
+          ts: '2026-09-15T12:00:00.000Z',
+          status: 'streaming',
+        },
+      ]}
+      liveAnswer=""
+      runtimeUserMessage="Inspect task destination"
+      a2aActivities={[
+        {
+          id: 'a2a-1',
+          status: 'running',
+          parentAgentId: 'hatchet',
+          recipient: { agentId: 'minion' },
+          progress: [],
+        },
+      ]}
+    />,
+  );
   expect(screen.getByText('Inspect task destination')).toBeTruthy();
   expect(screen.getByText('Checking the runtime.')).toBeTruthy();
   expect(screen.getAllByText('Inspect status')).toHaveLength(2);
@@ -103,30 +238,110 @@ it('shows an externally started task run before its first persisted chat turn', 
 });
 
 it('renders spawn_subagent as Spawn Minion without mutating stored tool evidence', () => {
-  const activity = { runId: 'run-1', items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'ok' as const }] };
-  show([{ type: 'message', role: 'assistant', content: 'Delegated.', metadata: { toolActivity: activity } }]);
+  const activity = {
+    runId: 'run-1',
+    items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'ok' as const }],
+  };
+  show([
+    {
+      type: 'message',
+      role: 'assistant',
+      content: 'Delegated.',
+      metadata: { toolActivity: activity },
+    },
+  ]);
   expect(screen.getByText('Spawn Minion')).toBeTruthy();
   expect(activity.items[0].label).toBe('spawn_subagent');
 });
 
 it('uses the Minion label for live tool activity too', () => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" activeToolActivity={{ runId: 'run-1', items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'pending' }] }} liveProgress={[]} liveAnswer="" />);
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="run-1"
+      activeToolActivity={{
+        runId: 'run-1',
+        items: [{ id: 'spawn-1', label: 'spawn_subagent', status: 'pending' }],
+      }}
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
   expect(screen.getAllByText('Spawn Minion')).toHaveLength(2);
 });
 
 it('places spawn activity before subsequent progress in live and persisted assistant turns', () => {
-  const activity = { runId: 'run-1', items: [{ id: 'spawn', label: 'spawn_subagent', status: 'ok' as const }] };
-  const progress = { items: [{ id: 'later', text: 'Waiting for model continuation', ts: '2026-09-19T12:00:00Z' }], status: 'complete' as const };
-  const { container, rerender } = render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run-1" activeToolActivity={activity} liveProgress={progress.items} liveAnswer="" />);
-  const order = () => Array.from(container.querySelectorAll('.message-content > .tool-activity, .message-content > .run-progress')).map((node) => node.classList.contains('tool-activity') ? 'spawn' : 'progress');
+  const activity = {
+    runId: 'run-1',
+    items: [{ id: 'spawn', label: 'spawn_subagent', status: 'ok' as const }],
+  };
+  const progress = {
+    items: [{ id: 'later', text: 'Waiting for model continuation', ts: '2026-09-19T12:00:00Z' }],
+    status: 'complete' as const,
+  };
+  const { container, rerender } = render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="run-1"
+      activeToolActivity={activity}
+      liveProgress={progress.items}
+      liveAnswer=""
+    />,
+  );
+  const order = () =>
+    Array.from(
+      container.querySelectorAll(
+        '.message-content > .tool-activity, .message-content > .run-progress',
+      ),
+    ).map((node) => (node.classList.contains('tool-activity') ? 'spawn' : 'progress'));
   expect(order()).toEqual(['spawn', 'progress']);
-  rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Done', runId: 'run-1', metadata: { toolActivity: activity, progress } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  rerender(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[
+        {
+          type: 'message',
+          role: 'assistant',
+          content: 'Done',
+          runId: 'run-1',
+          metadata: { toolActivity: activity, progress },
+        },
+      ]}
+      isLoading={false}
+      error=""
+      isSending={false}
+      activeRunId=""
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
   expect(order()).toEqual(['spawn', 'progress']);
 });
 
-
 it('renders generated artifact metadata and downloads through the encoded runtime route', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new TextEncoder().encode('audio bytes'), { status: 200, headers: { 'content-type': 'audio/wav' } }));
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(new TextEncoder().encode('audio bytes'), {
+      status: 200,
+      headers: { 'content-type': 'audio/wav' },
+    }),
+  );
   const objectUrl = vi.fn(() => 'blob:generated-audio');
   const revoke = vi.fn();
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -135,41 +350,128 @@ it('renders generated artifact metadata and downloads through the encoded runtim
   URL.createObjectURL = objectUrl;
   URL.revokeObjectURL = revoke;
   try {
-    render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Created it.', metadata: { outputArtifacts: [{ kind: 'audio', mimeType: 'audio/wav', name: 'forest song.wav', sizeBytes: 1536, storageReference: 'generated/audio take #1.wav', provenance: { provider: 'example', model: 'music-1' } }] } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet / one" />);
+    render(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[
+          {
+            type: 'message',
+            role: 'assistant',
+            content: 'Created it.',
+            metadata: {
+              outputArtifacts: [
+                {
+                  kind: 'audio',
+                  mimeType: 'audio/wav',
+                  name: 'forest song.wav',
+                  sizeBytes: 1536,
+                  storageReference: 'generated/audio take #1.wav',
+                  provenance: { provider: 'example', model: 'music-1' },
+                },
+              ],
+            },
+          },
+        ]}
+        isLoading={false}
+        error=""
+        isSending={false}
+        activeRunId=""
+        liveProgress={[]}
+        liveAnswer=""
+        attachmentAgentId="hatchet / one"
+      />,
+    );
     expect(screen.getByText('forest song.wav')).toBeTruthy();
     expect(screen.getByText('audio · audio/wav · 1.5 KB')).toBeTruthy();
     expect(screen.getByText('Created by example · music-1')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/generated-artifacts/hatchet%20%2F%20one/generated%2Faudio%20take%20%231.wav');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/generated-artifacts/hatchet%20%2F%20one/generated%2Faudio%20take%20%231.wav',
+    );
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(revoke).toHaveBeenCalledWith('blob:generated-audio');
   } finally {
-    fetchMock.mockRestore(); click.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke;
+    fetchMock.mockRestore();
+    click.mockRestore();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
   }
 });
 
 it('shows artifact metadata without fabricating a download when storage reference is absent', () => {
-  show([{ type: 'message', role: 'assistant', content: 'Metadata only.', metadata: { outputArtifacts: [{ kind: 'image', mimeType: 'image/png', name: 'concept.png' }] } }], parent);
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'Metadata only.',
+        metadata: {
+          outputArtifacts: [{ kind: 'image', mimeType: 'image/png', name: 'concept.png' }],
+        },
+      },
+    ],
+    parent,
+  );
   const action = screen.getByRole('button', { name: 'Download unavailable' });
   expect(action.hasAttribute('disabled')).toBe(true);
   expect(document.querySelector('.generated-artifact a')).toBeNull();
 });
 
 it('reports failed artifact downloads and allows retry', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response('', { status: 404 }));
   try {
-    render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ type: 'message', role: 'assistant', content: 'Created it.', metadata: { outputArtifacts: [{ kind: 'file', name: 'report.pdf', storageReference: 'generated/report.pdf' }] } }]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet" />);
+    render(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[
+          {
+            type: 'message',
+            role: 'assistant',
+            content: 'Created it.',
+            metadata: {
+              outputArtifacts: [
+                { kind: 'file', name: 'report.pdf', storageReference: 'generated/report.pdf' },
+              ],
+            },
+          },
+        ]}
+        isLoading={false}
+        error=""
+        isSending={false}
+        activeRunId=""
+        liveProgress={[]}
+        liveAnswer=""
+        attachmentAgentId="hatchet"
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry download' })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Retry download' })).toBeTruthy(),
+    );
     expect(screen.getByText('Download failed')).toBeTruthy();
-  } finally { fetchMock.mockRestore(); }
+  } finally {
+    fetchMock.mockRestore();
+  }
 });
 
 it('keeps an image visible while the send is pending, then loads the durable artifact after refresh', async () => {
   // jsdom's Blob does not implement stream(), which Node's native Response
   // requires when given a Blob body. Use bytes for the response fixture.
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new TextEncoder().encode('image bytes'), { status: 200, headers: { 'content-type': 'image/png' } }));
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(new TextEncoder().encode('image bytes'), {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    }),
+  );
   const objectUrl = vi.fn(() => 'blob:stored-image');
   const revoke = vi.fn();
   const originalCreate = URL.createObjectURL;
@@ -177,76 +479,216 @@ it('keeps an image visible while the send is pending, then loads the durable art
   URL.createObjectURL = objectUrl;
   URL.revokeObjectURL = revoke;
   try {
-    const pending = message('What is this?', { attachments: [{ index: 0, name: 'memory.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] });
+    const pending = message('What is this?', {
+      attachments: [
+        { index: 0, name: 'memory.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' },
+      ],
+    });
     const { rerender } = show([pending], parent);
-    expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe('data:image/png;base64,YQ==');
-    const persisted = message('What is this?', { attachments: [{ index: 0, name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/2026-image.png' }] });
-    rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[persisted]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" attachmentAgentId="hatchet" />);
-    await waitFor(() => expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe('blob:stored-image'));
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/attachments/hatchet/artifacts/attachments/2026-image.png');
-    rerender(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+    expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe(
+      'data:image/png;base64,YQ==',
+    );
+    const persisted = message('What is this?', {
+      attachments: [
+        {
+          index: 0,
+          name: 'memory.png',
+          type: 'image/png',
+          artifactPath: 'artifacts/attachments/2026-image.png',
+        },
+      ],
+    });
+    rerender(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[persisted]}
+        isLoading={false}
+        error=""
+        isSending={false}
+        activeRunId=""
+        liveProgress={[]}
+        liveAnswer=""
+        attachmentAgentId="hatchet"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'memory.png' }).getAttribute('src')).toBe(
+        'blob:stored-image',
+      ),
+    );
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/attachments/hatchet/artifacts/attachments/2026-image.png',
+    );
+    rerender(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[]}
+        isLoading={false}
+        error=""
+        isSending={false}
+        activeRunId=""
+        liveProgress={[]}
+        liveAnswer=""
+      />,
+    );
     expect(revoke).toHaveBeenCalledWith('blob:stored-image');
   } finally {
-    fetchMock.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke;
+    fetchMock.mockRestore();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
   }
 });
 
 it('keeps filename fallback for non-images and inaccessible images', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 404 }));
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response('', { status: 404 }));
   try {
-    show([message('Files', { attachments: [
-      { name: 'notes.txt', type: 'text/plain', artifactPath: 'artifacts/attachments/notes.txt' },
-      { name: 'expired.png', type: 'image/png', artifactPath: 'artifacts/attachments/expired.png' },
-    ] })], parent);
+    show(
+      [
+        message('Files', {
+          attachments: [
+            {
+              name: 'notes.txt',
+              type: 'text/plain',
+              artifactPath: 'artifacts/attachments/notes.txt',
+            },
+            {
+              name: 'expired.png',
+              type: 'image/png',
+              artifactPath: 'artifacts/attachments/expired.png',
+            },
+          ],
+        }),
+      ],
+      parent,
+    );
     await waitFor(() => expect(screen.getByText('expired.png')).toBeTruthy());
     expect(screen.getByText('notes.txt')).toBeTruthy();
     expect(screen.queryByRole('img', { name: 'expired.png' })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  } finally { fetchMock.mockRestore(); }
+  } finally {
+    fetchMock.mockRestore();
+  }
 });
 
 it('renders empty Forge attachment turns after completion and refresh, with authenticated download', async () => {
-  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(new Uint8Array([1, 2]), { headers: { 'content-type': 'image/png' } }));
+  const fetchMock = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(
+      async () =>
+        new Response(new Uint8Array([1, 2]), { headers: { 'content-type': 'image/png' } }),
+    );
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   const originalCreate = URL.createObjectURL;
   const originalRevoke = URL.revokeObjectURL;
-  URL.createObjectURL = vi.fn(() => 'blob:forge'); URL.revokeObjectURL = vi.fn();
+  URL.createObjectURL = vi.fn(() => 'blob:forge');
+  URL.revokeObjectURL = vi.fn();
   try {
-    const attached = message('', { attachments: [{ name: 'Forge image.png', type: 'image/png', artifactPath: 'artifacts/attachments/forge image.png' }] });
-    const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, isLoading: false, error: '', activeRunId: '', liveProgress: [], liveAnswer: '', attachmentAgentId: 'hatchet' };
+    const attached = message('', {
+      attachments: [
+        {
+          name: 'Forge image.png',
+          type: 'image/png',
+          artifactPath: 'artifacts/attachments/forge image.png',
+        },
+      ],
+    });
+    const props = {
+      selected: parent,
+      parent,
+      operator: { name: 'Rob', avatar: 'R' },
+      isNewSession: false,
+      isLoading: false,
+      error: '',
+      activeRunId: '',
+      liveProgress: [],
+      liveAnswer: '',
+      attachmentAgentId: 'hatchet',
+    };
     const { rerender } = render(<ChatTranscript {...props} turns={[]} isSending />);
-    rerender(<ChatTranscript {...props} turns={[attached, { type: 'message', role: 'assistant', content: 'Done' }]} isSending={false} />);
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Forge image.png' }).getAttribute('src')).toBe('blob:forge'));
-    const attachmentCard = screen.getByRole('img', { name: 'Forge image.png' }).closest('.message-attachment-card');
+    rerender(
+      <ChatTranscript
+        {...props}
+        turns={[attached, { type: 'message', role: 'assistant', content: 'Done' }]}
+        isSending={false}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Forge image.png' }).getAttribute('src')).toBe(
+        'blob:forge',
+      ),
+    );
+    const attachmentCard = screen
+      .getByRole('img', { name: 'Forge image.png' })
+      .closest('.message-attachment-card');
     expect(attachmentCard?.classList.contains('image')).toBe(true);
     expect(attachmentCard?.closest('.message.operator')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Download Forge image.png' }));
     await waitFor(() => expect(click).toHaveBeenCalledOnce());
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/attachments/hatchet/artifacts/attachments/forge%20image.png');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/attachments/hatchet/artifacts/attachments/forge%20image.png',
+    );
     rerender(<ChatTranscript {...props} turns={[{ ...attached }]} isSending={false} />);
     expect(screen.getAllByRole('img', { name: 'Forge image.png' })).toHaveLength(1);
-  } finally { fetchMock.mockRestore(); click.mockRestore(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
+  } finally {
+    fetchMock.mockRestore();
+    click.mockRestore();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+  }
 });
 
 it('still hides debug attachment turns and truly empty messages', () => {
-  show([message(''), message('', { visibility: 'debug', attachments: [{ name: 'secret.png', type: 'image/png' }] })], parent);
+  show(
+    [
+      message(''),
+      message('', {
+        visibility: 'debug',
+        attachments: [{ name: 'secret.png', type: 'image/png' }],
+      }),
+    ],
+    parent,
+  );
   expect(screen.queryByText('secret.png')).toBeNull();
   expect(document.querySelector('.message')).toBeNull();
 });
 
 it.each([true, false])('shows errors with an empty transcript (new=%s)', (isNewSession) => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={isNewSession} turns={[]} isLoading={false} error="Attachment rejected" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={isNewSession}
+      turns={[]}
+      isLoading={false}
+      error="Attachment rejected"
+      isSending={false}
+      activeRunId=""
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
   expect(screen.getByRole('alert').textContent).toBe('Attachment rejected');
 });
 it('attributes reloaded child assistant turns to child name and avatar', () => {
- show([{type:'message',role:'assistant',content:'Child answer'}]);
- expect(screen.getByLabelText('Child avatar')).toBeTruthy();
- expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
+  show([{ type: 'message', role: 'assistant', content: 'Child answer' }]);
+  expect(screen.getByLabelText('Child avatar')).toBeTruthy();
+  expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
 });
 it('live Markdown blocks protocol-relative image requests until consent', () => {
- const view = show([{type:'message',role:'assistant',content:'![tracking](//external.invalid/pixel.png)'}]);
- expect(view.container.querySelector('img[src="//external.invalid/pixel.png"]')).toBeNull();
- expect(screen.getByRole('button', {name:'Load external image: tracking'})).toBeTruthy();
+  const view = show([
+    { type: 'message', role: 'assistant', content: '![tracking](//external.invalid/pixel.png)' },
+  ]);
+  expect(view.container.querySelector('img[src="//external.invalid/pixel.png"]')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Load external image: tracking' })).toBeTruthy();
 });
 
 it.each([
@@ -256,43 +698,106 @@ it.each([
   ['request-intent', 'Model request prepared…'],
   ['model-completed', 'Model response received; continuing…'],
 ] as const)('shows evidence-based %s only in an otherwise empty live row', (stage, label) => {
-  const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, turns: [], isLoading: false, error: '', isSending: true, activeRunId: 'run', liveProgress: [], liveAnswer: '', liveStage: stage };
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    turns: [],
+    isLoading: false,
+    error: '',
+    isSending: true,
+    activeRunId: 'run',
+    liveProgress: [],
+    liveAnswer: '',
+    liveStage: stage,
+  };
   const { rerender } = render(<ChatTranscript {...props} />);
   expect(screen.getByRole('status').textContent).toBe(label);
-  expect(screen.queryByText(stage === 'dispatched' ? /accepted|sent to provider/i : /dispatch|sent to provider/i)).toBeNull();
+  expect(
+    screen.queryByText(
+      stage === 'dispatched' ? /accepted|sent to provider/i : /dispatch|sent to provider/i,
+    ),
+  ).toBeNull();
   rerender(<ChatTranscript {...props} liveAnswer="Visible text" />);
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText('Visible text')).toBeTruthy();
-  rerender(<ChatTranscript {...props} liveProgress={[{ id: 'thought', ts: '2026-10-09T00:00:00Z', text: 'Visible thought', status: 'streaming' }]} />);
+  rerender(
+    <ChatTranscript
+      {...props}
+      liveProgress={[
+        { id: 'thought', ts: '2026-10-09T00:00:00Z', text: 'Visible thought', status: 'streaming' },
+      ]}
+    />,
+  );
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText('Visible thought')).toBeTruthy();
-  rerender(<ChatTranscript {...props} activeToolActivity={{ runId: 'run', status: 'running', items: [{ id: 'tool', label: 'Actual tool', status: 'pending' }] }} />);
+  rerender(
+    <ChatTranscript
+      {...props}
+      activeToolActivity={{
+        runId: 'run',
+        status: 'running',
+        items: [{ id: 'tool', label: 'Actual tool', status: 'pending' }],
+      }}
+    />,
+  );
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getAllByText('Actual tool')).toBeTruthy();
-  rerender(<ChatTranscript {...props} turns={[{ type: 'message', role: 'assistant', runId: 'run', content: 'Final only' }]} />);
+  rerender(
+    <ChatTranscript
+      {...props}
+      turns={[{ type: 'message', role: 'assistant', runId: 'run', content: 'Final only' }]}
+    />,
+  );
   expect(screen.queryByText(label)).toBeNull();
   expect(screen.getByText('Final only')).toBeTruthy();
 });
 
- it('renders accepted chat-visible user events once and hides lifecycle and canonical projections', () => {
+it('renders accepted chat-visible user events once and hides lifecycle and canonical projections', () => {
   show([
     { type: 'event', role: 'user', content: 'Steer this run', metadata: { visibility: 'chat' } },
     { type: 'message', role: 'user', content: 'Steer this run', metadata: { visibility: 'debug' } },
-    { type: 'event', role: 'system', content: 'Delivered lifecycle', metadata: { visibility: 'chat' } },
+    {
+      type: 'event',
+      role: 'system',
+      content: 'Delivered lifecycle',
+      metadata: { visibility: 'chat' },
+    },
   ]);
   expect(screen.getAllByText('Steer this run')).toHaveLength(1);
   expect(screen.queryByText('Delivered lifecycle')).toBeNull();
- });
+});
 
 it('keeps steering at submission time exactly once across delivery, later turns and recovery', async () => {
   const { reconcileSteeringTurns } = await import('./chatTurnReconciliation');
-  const input = {id: 'steer', status: 'pending' as const, message: 'Wait I believe you', createdAt: '2026-10-10T10:27:00Z'};
+  const input = {
+    id: 'steer',
+    status: 'pending' as const,
+    message: 'Wait I believe you',
+    createdAt: '2026-10-10T10:27:00Z',
+  };
   const later: SessionTurn[] = [
-    {type:'message', role:'user', content:'Later question', ts:'2026-10-10T10:28:00Z'},
-    {type:'message', role:'assistant', content:'Later answer', ts:'2026-10-10T10:29:00Z'},
+    { type: 'message', role: 'user', content: 'Later question', ts: '2026-10-10T10:28:00Z' },
+    { type: 'message', role: 'assistant', content: 'Later answer', ts: '2026-10-10T10:29:00Z' },
   ];
-  const original: SessionTurn = {type:'event', role:'user', content:input.message, ts:input.createdAt, metadata:{visibility:'chat', steering:{id:input.id, status:'pending', createdAt:input.createdAt}}};
-  const delivery: SessionTurn = {type:'event', role:null, content:'User steering delivered.', ts:'2026-10-10T10:30:00Z', metadata:{steering:{id:input.id,status:'delivered'}}};
+  const original: SessionTurn = {
+    type: 'event',
+    role: 'user',
+    content: input.message,
+    ts: input.createdAt,
+    metadata: {
+      visibility: 'chat',
+      steering: { id: input.id, status: 'pending', createdAt: input.createdAt },
+    },
+  };
+  const delivery: SessionTurn = {
+    type: 'event',
+    role: null,
+    content: 'User steering delivered.',
+    ts: '2026-10-10T10:30:00Z',
+    metadata: { steering: { id: input.id, status: 'delivered' } },
+  };
   const view = show(reconcileSteeringTurns(later, [input]), parent);
   const check = () => {
     expect(screen.getAllByText(input.message)).toHaveLength(1);
@@ -302,8 +807,25 @@ it('keeps steering at submission time exactly once across delivery, later turns 
     expect(screen.queryByText(delivery.content!)).toBeNull();
   };
   check();
-  const update = (turns: SessionTurn[]) => view.rerender(<ChatTranscript selected={parent} parent={parent} operator={{name:'Rob',avatar:'R'}} isNewSession={false} turns={turns} isLoading={false} error="" isSending={false} activeRunId="" liveProgress={[]} liveAnswer="" />);
-  update(reconcileSteeringTurns([original, ...later, delivery], [{...input,status:'delivered'}]));
+  const update = (turns: SessionTurn[]) =>
+    view.rerender(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={turns}
+        isLoading={false}
+        error=""
+        isSending={false}
+        activeRunId=""
+        liveProgress={[]}
+        liveAnswer=""
+      />,
+    );
+  update(
+    reconcileSteeringTurns([original, ...later, delivery], [{ ...input, status: 'delivered' }]),
+  );
   check();
   expect(view.container.textContent).toContain('DELIVERED TO RUN');
   // Reload has no in-memory overlay; lifecycle evidence must still update the
@@ -316,76 +838,383 @@ it('keeps steering at submission time exactly once across delivery, later turns 
   expect(view.container.textContent).toContain('DELIVERED TO RUN');
 });
 
-it.each(['Hatchet', 'Smatchet'])('keeps %s name and avatar through pending, live and saved delegation', (name) => {
-  const owner = { ...parent, id: name.toLowerCase(), name, avatar: `https://example.invalid/${name}.png` };
-  const metadata = { kind: 'subagent-delegated-task', parentAgentId: owner.id, subagentId: child.id };
-  const props = { selected: child, parent: owner, operator: { name: 'Rob', avatar: 'R' }, isNewSession: true, isLoading: false, error: '', activeRunId: 'child-run', liveProgress: [], liveAnswer: '', runtimeUserMessage: 'Inspect hierarchy', runtimeUserMessageMetadata: metadata };
-  const view = render(<ChatTranscript {...props} turns={[]} isSending={false} />);
-  const check = () => {
-    expect(screen.getAllByLabelText(`${name} avatar`)).toHaveLength(1);
-    expect(screen.getByLabelText(`${name} avatar`).querySelector('img')?.getAttribute('src')).toBe(owner.avatar);
-    expect(screen.getAllByText('Inspect hierarchy')).toHaveLength(1);
-    expect(screen.queryByLabelText('Rob avatar')).toBeNull();
-  };
-  check();
-  view.rerender(<ChatTranscript {...props} turns={[]} isSending />);
-  check();
-  view.rerender(<ChatTranscript {...props} turns={[{ ...message('Inspect hierarchy', metadata), runId: 'child-run' }]} isSending={false} />);
-  check();
-  view.rerender(<ChatTranscript {...props} isNewSession={false} runtimeUserMessage="" turns={[{ ...message('Inspect hierarchy', metadata), runId: 'child-run' }, message('Actual operator followup')]} isSending={false} />);
-  expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
-  expect(screen.getByText('Actual operator followup')).toBeTruthy();
-});
+it.each(['Hatchet', 'Smatchet'])(
+  'keeps %s name and avatar through pending, live and saved delegation',
+  (name) => {
+    const owner = {
+      ...parent,
+      id: name.toLowerCase(),
+      name,
+      avatar: `https://example.invalid/${name}.png`,
+    };
+    const metadata = {
+      kind: 'subagent-delegated-task',
+      parentAgentId: owner.id,
+      subagentId: child.id,
+    };
+    const props = {
+      selected: child,
+      parent: owner,
+      operator: { name: 'Rob', avatar: 'R' },
+      isNewSession: true,
+      isLoading: false,
+      error: '',
+      activeRunId: 'child-run',
+      liveProgress: [],
+      liveAnswer: '',
+      runtimeUserMessage: 'Inspect hierarchy',
+      runtimeUserMessageMetadata: metadata,
+    };
+    const view = render(<ChatTranscript {...props} turns={[]} isSending={false} />);
+    const check = () => {
+      expect(screen.getAllByLabelText(`${name} avatar`)).toHaveLength(1);
+      expect(
+        screen.getByLabelText(`${name} avatar`).querySelector('img')?.getAttribute('src'),
+      ).toBe(owner.avatar);
+      expect(screen.getAllByText('Inspect hierarchy')).toHaveLength(1);
+      expect(screen.queryByLabelText('Rob avatar')).toBeNull();
+    };
+    check();
+    view.rerender(<ChatTranscript {...props} turns={[]} isSending />);
+    check();
+    view.rerender(
+      <ChatTranscript
+        {...props}
+        turns={[{ ...message('Inspect hierarchy', metadata), runId: 'child-run' }]}
+        isSending={false}
+      />,
+    );
+    check();
+    view.rerender(
+      <ChatTranscript
+        {...props}
+        isNewSession={false}
+        runtimeUserMessage=""
+        turns={[
+          { ...message('Inspect hierarchy', metadata), runId: 'child-run' },
+          message('Actual operator followup'),
+        ]}
+        isSending={false}
+      />,
+    );
+    expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
+    expect(screen.getByText('Actual operator followup')).toBeTruthy();
+  },
+);
 
 it('does not hide pending delegation behind identical text from a different run', () => {
-  render(<ChatTranscript selected={child} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[{ ...message('Same request'), runId: 'operator-run' }]} isLoading={false} error="" isSending activeRunId="child-run" liveProgress={[]} liveAnswer="" runtimeUserMessage="Same request" runtimeUserMessageMetadata={{ kind: 'subagent-delegated-task', parentAgentId: parent.id }} />);
+  render(
+    <ChatTranscript
+      selected={child}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[{ ...message('Same request'), runId: 'operator-run' }]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="child-run"
+      liveProgress={[]}
+      liveAnswer=""
+      runtimeUserMessage="Same request"
+      runtimeUserMessageMetadata={{ kind: 'subagent-delegated-task', parentAgentId: parent.id }}
+    />,
+  );
   expect(screen.getAllByText('Same request')).toHaveLength(2);
   expect(screen.getByLabelText('Rob avatar')).toBeTruthy();
   expect(screen.getByLabelText('Hatchet avatar')).toBeTruthy();
 });
 
 it('keeps runtime operator followups in child sessions attributed to the operator', () => {
-  render(<ChatTranscript selected={child} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="operator-run" liveProgress={[]} liveAnswer="" runtimeUserMessage="Actual operator request" />);
+  render(
+    <ChatTranscript
+      selected={child}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="operator-run"
+      liveProgress={[]}
+      liveAnswer=""
+      runtimeUserMessage="Actual operator request"
+    />,
+  );
   expect(screen.getByLabelText('Rob avatar')).toBeTruthy();
   expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
 });
 
 it('renders exact projected MCP and skill names live and after saving', () => {
-  const activity = { runId: 'r', items: [
-    { id: 'm', label: 'MCP · Goblin-DevTools · take_snapshot', detail: 'Goblin-DevTools · take_snapshot', status: 'ok' as const },
-    { id: 's', label: 'Load skill · react-review', detail: 'react-review · v2', status: 'pending' as const },
-  ] };
-  const props = { selected: parent, parent, operator: { name: 'Rob', avatar: 'R' }, isNewSession: false, isLoading: false, error: '', liveProgress: [], liveAnswer: '' };
-  const { container, rerender } = render(<ChatTranscript {...props} turns={[]} isSending activeRunId="r" activeToolActivity={activity} />);
-  expect(container.querySelector('.tool-activity summary')?.textContent).toContain('Load skill · react-review');
+  const activity = {
+    runId: 'r',
+    items: [
+      {
+        id: 'm',
+        label: 'MCP · Goblin-DevTools · take_snapshot',
+        detail: 'Goblin-DevTools · take_snapshot',
+        status: 'ok' as const,
+      },
+      {
+        id: 's',
+        label: 'Load skill · react-review',
+        detail: 'react-review · v2',
+        status: 'pending' as const,
+      },
+    ],
+  };
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    isLoading: false,
+    error: '',
+    liveProgress: [],
+    liveAnswer: '',
+  };
+  const { container, rerender } = render(
+    <ChatTranscript
+      {...props}
+      turns={[]}
+      isSending
+      activeRunId="r"
+      activeToolActivity={activity}
+    />,
+  );
+  expect(container.querySelector('.tool-activity summary')?.textContent).toContain(
+    'Load skill · react-review',
+  );
   expect(screen.getByText('MCP · Goblin-DevTools · take_snapshot')).toBeTruthy();
-  rerender(<ChatTranscript {...props} turns={[{ role: 'assistant', type: 'message', content: 'Done', runId: 'r', metadata: { toolActivity: activity } }]} isSending={false} activeRunId="" />);
+  rerender(
+    <ChatTranscript
+      {...props}
+      turns={[
+        {
+          role: 'assistant',
+          type: 'message',
+          content: 'Done',
+          runId: 'r',
+          metadata: { toolActivity: activity },
+        },
+      ]}
+      isSending={false}
+      activeRunId=""
+    />,
+  );
   expect(screen.getByText('MCP · Goblin-DevTools · take_snapshot')).toBeTruthy();
   expect(screen.getByText('Load skill · react-review')).toBeTruthy();
 });
 
-it.each(['CI', '', undefined])('attributes saved workflow input (%s) to GitHub, not the operator or delegated parent', (workflow) => {
-  show([message('Workflow completed', { source: 'workflow-event', completionEvent: { workflow }, parentAgentId: 'hatchet' }), message('Operator followup')]);
-  expect(screen.getByLabelText(`GitHub · ${workflow || 'workflow event'} avatar`)).toBeTruthy();
-  expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
-  expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
-});
+it.each(['CI', '', undefined])(
+  'attributes saved workflow input (%s) to GitHub, not the operator or delegated parent',
+  (workflow) => {
+    show([
+      message('Workflow completed', {
+        source: 'workflow-event',
+        completionEvent: { workflow },
+        parentAgentId: 'hatchet',
+      }),
+      message('Operator followup'),
+    ]);
+    expect(screen.getByLabelText(`GitHub · ${workflow || 'workflow event'} avatar`)).toBeTruthy();
+    expect(screen.queryByLabelText('Hatchet avatar')).toBeNull();
+    expect(screen.getAllByLabelText('Rob avatar')).toHaveLength(1);
+  },
+);
 
-it.each(['Release', undefined])('attributes live workflow input (%s) to GitHub without requiring saved turns', (workflow) => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="workflow-run" liveProgress={[]} liveAnswer="" runtimeUserMessage="Workflow completed" runtimeUserMessageMetadata={{ source: 'workflow-event', completionEvent: { workflow } }} />);
-  expect(screen.getByLabelText(`GitHub · ${workflow || 'workflow event'} avatar`)).toBeTruthy();
-  expect(screen.queryByLabelText('Rob avatar')).toBeNull();
-});
+it.each(['Release', undefined])(
+  'attributes live workflow input (%s) to GitHub without requiring saved turns',
+  (workflow) => {
+    render(
+      <ChatTranscript
+        selected={parent}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[]}
+        isLoading={false}
+        error=""
+        isSending
+        activeRunId="workflow-run"
+        liveProgress={[]}
+        liveAnswer=""
+        runtimeUserMessage="Workflow completed"
+        runtimeUserMessageMetadata={{ source: 'workflow-event', completionEvent: { workflow } }}
+      />,
+    );
+    expect(screen.getByLabelText(`GitHub · ${workflow || 'workflow event'} avatar`)).toBeTruthy();
+    expect(screen.queryByLabelText('Rob avatar')).toBeNull();
+  },
+);
 
 it('shows compaction status even alongside existing activity', () => {
-  render(<ChatTranscript selected={parent} parent={parent} operator={{ name: 'Rob', avatar: 'R' }} isNewSession={false} turns={[]} isLoading={false} error="" isSending activeRunId="run" activeToolActivity={{ runId: 'run', items: [{ id: 'tool', label: 'Earlier action', status: 'ok' }] }} liveProgress={[]} liveAnswer="" liveStage="compacting" />);
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[]}
+      isLoading={false}
+      error=""
+      isSending
+      activeRunId="run"
+      activeToolActivity={{
+        runId: 'run',
+        items: [{ id: 'tool', label: 'Earlier action', status: 'ok' }],
+      }}
+      liveProgress={[]}
+      liveAnswer=""
+      liveStage="compacting"
+    />,
+  );
   expect(screen.getByRole('status').textContent).toBe('Compacting context…');
   expect(screen.getAllByText('Earlier action').length).toBeGreaterThan(0);
 });
 
 it('shows compact acknowledgement and receipt while retaining other command filtering', () => {
-  show([message('/compact'), { type: 'message', role: 'assistant', content: 'Context compacted.' }, message('/help')], parent);
+  show(
+    [
+      message('/compact'),
+      { type: 'message', role: 'assistant', content: 'Context compacted.' },
+      message('/help'),
+    ],
+    parent,
+  );
   expect(screen.getByText('/compact')).toBeTruthy();
   expect(screen.getByText('Context compacted.')).toBeTruthy();
   expect(screen.queryByText('/help')).toBeNull();
+});
+
+it('keeps a genuine partial alongside a structured upstream card and copy button', () => {
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'The true partial answer',
+        metadata: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: {
+            origin: 'upstream',
+            code: 'provider_http_429',
+            retryable: true,
+            status: 429,
+          },
+        },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getByRole('alert').textContent).toContain('HTTP 429');
+  expect(screen.getByRole('alert').textContent).toContain('upstream model');
+  expect(screen.getByText('The true partial answer')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Copy Hatchet message/ })).toBeTruthy();
+});
+
+it('shows empty persisted failures, projected legacy errors and distinct cancellation without text parsing', () => {
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: { origin: 'burrow', code: 'model_result_invalid', retryable: false },
+        },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: { origin: 'unknown', code: 'model_failure_unknown', retryable: false },
+        },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: { chatResultVersion: 2, terminalStatus: 'cancelled' },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getAllByRole('alert')).toHaveLength(3);
+  expect(screen.getByText('The runtime received an invalid model result.')).toBeTruthy();
+  expect(screen.getByText('Run cancelled')).toBeTruthy();
+  expect(screen.queryByText('The upstream model is being stupid.')).toBeNull();
+});
+
+it('renders a literal marker response as ordinary successful assistant text', () => {
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '[model_error: literal from model]',
+        metadata: { chatResultVersion: 2, terminalStatus: 'completed' },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getByText('[model_error: literal from model]')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(document.querySelector('.model-error-card')).toBeNull();
+});
+
+it('does not display a second live assistant after an empty persisted terminal', () => {
+  render(
+    <ChatTranscript
+      selected={parent}
+      parent={parent}
+      operator={{ name: 'Rob', avatar: 'R' }}
+      isNewSession={false}
+      turns={[
+        {
+          type: 'message',
+          role: 'assistant',
+          runId: 'settled-run',
+          content: '',
+          metadata: { chatResultVersion: 2, terminalStatus: 'failed' },
+        },
+      ]}
+      isLoading={false}
+      error=""
+      isSending={true}
+      activeRunId="settled-run"
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(document.querySelector('.live-assistant-turn')).toBeNull();
+});
+
+it('does not turn an unknown failure origin into a confident upstream or local diagnosis', () => {
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: { origin: 'unknown', code: 'model_failure_unknown', retryable: false },
+        },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getByText('Run failed')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).not.toContain('not an upstream');
+  expect(screen.getByRole('alert').textContent).not.toContain('The chat is fine');
 });

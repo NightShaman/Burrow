@@ -1,35 +1,116 @@
 import { expect, it, vi } from 'vitest';
 import { streamChat } from './chatStream';
-vi.mock('../../app/api', () => ({ fetchApi: vi.fn(), answerFromChatResult: () => 'error' }));
+vi.mock('../../app/api', () => ({ fetchApi: vi.fn() }));
 import { fetchApi } from '../../app/api';
 
 it('settles on the first terminal envelope without EOF and cancels the reader', async () => {
   const cancel = vi.fn();
-  const body = new ReadableStream({ start(c) {
-    c.enqueue(new TextEncoder().encode('{"type":"run.completed","data":{"response":"ok"}}\n{"type":"late"}\n'));
-  }, cancel });
-  vi.mocked(fetchApi).mockResolvedValue(new Response(body, { headers: { 'content-type': 'application/x-ndjson' } }));
+  const body = new ReadableStream({
+    start(c) {
+      c.enqueue(
+        new TextEncoder().encode(
+          '{"type":"run.completed","data":{"response":"ok"}}\n{"type":"late"}\n',
+        ),
+      );
+    },
+    cancel,
+  });
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response(body, { headers: { 'content-type': 'application/x-ndjson' } }),
+  );
   const onEvent = vi.fn();
-  const result = await Promise.race([streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent }), new Promise(resolve => setTimeout(() => resolve('hung'), 100))]);
+  const result = await Promise.race([
+    streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent }),
+    new Promise((resolve) => setTimeout(() => resolve('hung'), 100)),
+  ]);
   expect(result).toEqual({ terminalType: 'run.completed', finalResult: 'ok' });
   expect(cancel).toHaveBeenCalled();
   expect(onEvent).toHaveBeenCalledTimes(1);
 });
 
 it('rejects EOF without a terminal envelope', async () => {
-  vi.mocked(fetchApi).mockResolvedValue(new Response('{"type":"delta"}\n', { headers: { 'content-type': 'application/x-ndjson' } }));
-  await expect(streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() })).rejects.toThrow('without a terminal');
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response('{"type":"delta"}\n', { headers: { 'content-type': 'application/x-ndjson' } }),
+  );
+  await expect(
+    streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() }),
+  ).rejects.toThrow('without a terminal');
 });
 
 it('does not accept rejected HTTP submissions (including busy409)', async () => {
- vi.mocked(fetchApi).mockResolvedValue(new Response(JSON.stringify({ error: 'chat_session_busy_use_explicit_intent' }), { status:409 }));
- const accepted = vi.fn();
- await expect(streamChat({ requestBody:{}, signal:new AbortController().signal, onEvent:vi.fn(), onAccepted:accepted })).rejects.toThrow();
- expect(accepted).not.toHaveBeenCalled();
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response(JSON.stringify({ error: 'chat_session_busy_use_explicit_intent' }), {
+      status: 409,
+    }),
+  );
+  const accepted = vi.fn();
+  await expect(
+    streamChat({
+      requestBody: {},
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+      onAccepted: accepted,
+    }),
+  ).rejects.toThrow();
+  expect(accepted).not.toHaveBeenCalled();
 });
 it('accepts after HTTP success, before any stream output', async () => {
- vi.mocked(fetchApi).mockResolvedValue(new Response('{"type":"run.completed","data":{"response":"ok"}}\n', { headers: { 'content-type':'application/x-ndjson' } }));
- const order: string[] = [];
- await streamChat({ requestBody:{}, signal:new AbortController().signal, onAccepted:() => order.push('accepted'), onEvent:() => order.push('event') });
- expect(order).toEqual(['accepted','event']);
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response('{"type":"run.completed","data":{"response":"ok"}}\n', {
+      headers: { 'content-type': 'application/x-ndjson' },
+    }),
+  );
+  const order: string[] = [];
+  await streamChat({
+    requestBody: {},
+    signal: new AbortController().signal,
+    onAccepted: () => order.push('accepted'),
+    onEvent: () => order.push('event'),
+  });
+  expect(order).toEqual(['accepted', 'event']);
+});
+
+it.each(['failed', 'cancelled', 'superseded'] as const)(
+  'classifies a successful JSON transport with a %s structured result as non-success',
+  async (status) => {
+    vi.mocked(fetchApi).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { chatResultVersion: 2, terminalStatus: status, answerText: '' },
+        }),
+        {
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    const accepted = vi.fn();
+    const response = await streamChat({
+      requestBody: {},
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+      onAccepted: accepted,
+    });
+    expect(accepted).toHaveBeenCalledOnce();
+    expect(response.terminalType).toBe(`run.${status}`);
+  },
+);
+
+it('classifies a JSON failed result with nested ok:false even without v2 fields', async () => {
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response(JSON.stringify({ ok: true, result: { ok: false } })),
+  );
+  expect(
+    (await streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() }))
+      .terminalType,
+  ).toBe('run.failed');
+});
+
+it('rejects malformed stream content without fabricating a terminal answer', async () => {
+  vi.mocked(fetchApi).mockResolvedValue(
+    new Response('{broken-json}\n', { headers: { 'content-type': 'application/x-ndjson' } }),
+  );
+  await expect(
+    streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() }),
+  ).rejects.toThrow('streaming response was malformed');
 });

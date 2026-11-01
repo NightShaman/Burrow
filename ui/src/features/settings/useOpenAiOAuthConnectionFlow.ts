@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { modelConnectionsApi, type OpenAiOAuthConnection, type OpenAiOAuthLogin } from './modelConnectionsApi';
+import {
+  modelConnectionsApi,
+  type OpenAiOAuthConnection,
+  type OpenAiOAuthLogin,
+} from './modelConnectionsApi';
 
 type RequestState = 'idle' | 'starting' | 'submitting' | 'cancelling';
 
@@ -8,12 +12,16 @@ type Options = {
   onAuthorized: (connection: OpenAiOAuthConnection, isCurrent: () => boolean) => Promise<void>;
 };
 
-const pollingStatuses = new Set(['starting', 'waiting_for_callback', 'waiting_for_code', 'exchanging']);
+const pollingStatuses = new Set([
+  'starting',
+  'waiting_for_callback',
+  'waiting_for_code',
+  'exchanging',
+]);
 const pollDelay = 2_000;
 
-const errorMessage = (action: string, error: unknown) => error instanceof Error
-  ? `Could not ${action}: ${error.message}`
-  : `Could not ${action}.`;
+const errorMessage = (action: string, error: unknown) =>
+  error instanceof Error ? `Could not ${action}: ${error.message}` : `Could not ${action}.`;
 
 export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Options) {
   const [login, setLogin] = useState<OpenAiOAuthLogin | null>(null);
@@ -31,8 +39,8 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
   useEffect(() => {
     mounted.current = true;
     return () => {
-    mounted.current = false;
-    actionGeneration.current += 1;
+      mounted.current = false;
+      actionGeneration.current += 1;
     };
   }, []);
 
@@ -60,9 +68,11 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
         if (result.login.error) setError(result.login.error);
         await completeAuthorizedLogin(result.login);
       } catch (cause) {
-        if (mounted.current && generation === actionGeneration.current) setError(errorMessage('refresh ChatGPT login', cause));
+        if (mounted.current && generation === actionGeneration.current)
+          setError(errorMessage('refresh ChatGPT login', cause));
       } finally {
-        if (!cancelled && mounted.current && generation === actionGeneration.current) timer = window.setTimeout(poll, pollDelay);
+        if (!cancelled && mounted.current && generation === actionGeneration.current)
+          timer = window.setTimeout(poll, pollDelay);
       }
     };
 
@@ -84,7 +94,8 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
       onConnectionRef.current(result.connection);
       setLogin(result.login);
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('start ChatGPT login', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('start ChatGPT login', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
@@ -103,7 +114,8 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
       setCode('');
       await completeAuthorizedLogin(result.login);
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('submit ChatGPT callback', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('submit ChatGPT callback', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
@@ -118,7 +130,8 @@ export function useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }: Opt
       const result = await modelConnectionsApi.cancelOpenAiOAuth(login.id);
       if (mounted.current && generation === actionGeneration.current) setLogin(result.login);
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('cancel ChatGPT login', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('cancel ChatGPT login', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { modelConnectionsApi, type ClaudeCodeLogin, type OpenAiOAuthConnection } from './modelConnectionsApi';
+import {
+  modelConnectionsApi,
+  type ClaudeCodeLogin,
+  type OpenAiOAuthConnection,
+} from './modelConnectionsApi';
 
 type RequestState = 'idle' | 'starting' | 'submitting' | 'importing' | 'cancelling';
 
@@ -9,12 +13,19 @@ type Options = {
   autoImport?: boolean;
 };
 
-const pollingStatuses = new Set(['starting', 'waiting_for_url', 'waiting_for_code', 'code_submitted', 'authorizing', 'authorized', 'ready_to_import']);
+const pollingStatuses = new Set([
+  'starting',
+  'waiting_for_url',
+  'waiting_for_code',
+  'code_submitted',
+  'authorizing',
+  'authorized',
+  'ready_to_import',
+]);
 const pollDelay = 2_000;
 
-const errorMessage = (action: string, cause: unknown) => cause instanceof Error
-  ? `Could not ${action}: ${cause.message}`
-  : `Could not ${action}.`;
+const errorMessage = (action: string, cause: unknown) =>
+  cause instanceof Error ? `Could not ${action}: ${cause.message}` : `Could not ${action}.`;
 
 export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = false }: Options) {
   const [login, setLogin] = useState<ClaudeCodeLogin | null>(null);
@@ -33,8 +44,8 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
   useEffect(() => {
     mounted.current = true;
     return () => {
-    mounted.current = false;
-    actionGeneration.current += 1;
+      mounted.current = false;
+      actionGeneration.current += 1;
     };
   }, []);
 
@@ -51,9 +62,11 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
         setLogin(result.login);
         if (result.login.error) setError(result.login.error);
       } catch (cause) {
-        if (!cancelled && mounted.current && generation === actionGeneration.current) setError(errorMessage('refresh Claude Code login', cause));
+        if (!cancelled && mounted.current && generation === actionGeneration.current)
+          setError(errorMessage('refresh Claude Code login', cause));
       } finally {
-        if (!cancelled && mounted.current && generation === actionGeneration.current) timer = window.setTimeout(poll, pollDelay);
+        if (!cancelled && mounted.current && generation === actionGeneration.current)
+          timer = window.setTimeout(poll, pollDelay);
       }
     };
 
@@ -80,7 +93,8 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
       }
       setLogin(result.login);
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('start Claude Code login', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('start Claude Code login', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
@@ -97,7 +111,8 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
       setLogin(result.login);
       setCode('');
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('submit Claude callback code', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('submit Claude callback code', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
@@ -112,7 +127,8 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
       const result = await modelConnectionsApi.cancelClaudeCodeLogin(login.id);
       if (mounted.current && generation === actionGeneration.current) setLogin(result.login);
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('cancel Claude Code login', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('cancel Claude Code login', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
@@ -127,19 +143,33 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
     setRequestState('importing');
     setError('');
     try {
-      const result = await modelConnectionsApi.importClaudeCodeLogin(login.id, connectionId ?? existingConnectionId);
+      const result = await modelConnectionsApi.importClaudeCodeLogin(
+        login.id,
+        connectionId ?? existingConnectionId,
+      );
       if (!mounted.current || generation !== actionGeneration.current) return;
       setLogin(result.login);
-      if (result.login.status === 'imported') await onImportedRef.current(result.login, () => mounted.current && generation === actionGeneration.current);
+      if (result.login.status === 'imported')
+        await onImportedRef.current(
+          result.login,
+          () => mounted.current && generation === actionGeneration.current,
+        );
     } catch (cause) {
-      if (mounted.current && generation === actionGeneration.current) setError(errorMessage('import Claude Code auth', cause));
+      if (mounted.current && generation === actionGeneration.current)
+        setError(errorMessage('import Claude Code auth', cause));
     } finally {
       if (mounted.current && generation === actionGeneration.current) setRequestState('idle');
     }
   };
 
   useEffect(() => {
-    if (!autoImport || !login?.id || !['authorized', 'ready_to_import'].includes(login.status) || autoImportLoginId.current === login.id) return;
+    if (
+      !autoImport ||
+      !login?.id ||
+      !['authorized', 'ready_to_import'].includes(login.status) ||
+      autoImportLoginId.current === login.id
+    )
+      return;
     autoImportLoginId.current = login.id;
     void importCredentials();
   }, [autoImport, login?.id, login?.status]);
@@ -154,5 +184,17 @@ export function useClaudeCodeLoginFlow({ onConnection, onImported, autoImport = 
     autoImportLoginId.current = null;
   };
 
-  return { login, code, setCode, requestState, error, setError, start, submit, cancel, importCredentials, reset };
+  return {
+    login,
+    code,
+    setCode,
+    requestState,
+    error,
+    setError,
+    start,
+    submit,
+    cancel,
+    importCredentials,
+    reset,
+  };
 }

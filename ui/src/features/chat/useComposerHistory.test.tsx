@@ -5,7 +5,11 @@ import { useState } from 'react';
 import { useComposerHistory } from './useComposerHistory';
 
 function event(key: string, value: string, caret: number) {
-  return { key, currentTarget: { value, selectionStart: caret, selectionEnd: caret }, preventDefault() {} } as unknown as KeyboardEvent<HTMLTextAreaElement>;
+  return {
+    key,
+    currentTarget: { value, selectionStart: caret, selectionEnd: caret },
+    preventDefault() {},
+  } as unknown as KeyboardEvent<HTMLTextAreaElement>;
 }
 
 describe('useComposerHistory', () => {

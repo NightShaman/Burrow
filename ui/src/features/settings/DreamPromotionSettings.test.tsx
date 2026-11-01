@@ -3,8 +3,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { DreamPromotionSettings } from './DreamPromotionSettings';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
-const toggle = () => screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement;
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+const toggle = () =>
+  screen.getByRole('checkbox', { name: 'Promote Dreams to memory' }) as HTMLInputElement;
 it('defaults missing values to true and persists both values across remount', async () => {
   let settings = {};
   vi.mocked(api).mockImplementation(async (_path, init) => {
@@ -18,30 +22,44 @@ it('defaults missing values to true and persists both values across remount', as
     fireEvent.click(toggle());
     await waitFor(() => expect(toggle().disabled).toBe(false));
     expect(settings).toEqual({ promoteDreamsToMemory: value });
-    view.unmount(); view = render(<DreamPromotionSettings />);
+    view.unmount();
+    view = render(<DreamPromotionSettings />);
     await waitFor(() => expect(toggle().disabled).toBe(false));
     expect(toggle().checked).toBe(value);
   }
 });
 it('blocks edits on failed read, retries, and preserves failed save draft', async () => {
-  vi.mocked(api).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ promoteDreamsToMemory: false }).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ promoteDreamsToMemory: true });
+  vi.mocked(api)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({ promoteDreamsToMemory: false })
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValue({ promoteDreamsToMemory: true });
   render(<DreamPromotionSettings />);
-  await screen.findByRole('alert'); expect(toggle().disabled).toBe(true);
+  await screen.findByRole('alert');
+  expect(toggle().disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Retry loading promotion settings' }));
   await waitFor(() => expect(toggle().disabled).toBe(false));
   expect(toggle().checked).toBe(false);
   fireEvent.click(toggle());
-  await screen.findByText(/Could not save/); expect(toggle().checked).toBe(true);
+  await screen.findByText(/Could not save/);
+  expect(toggle().checked).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Retry saving promotion settings' }));
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 });
 it('ignores a late save after navigation', async () => {
   let resolve!: (value: unknown) => void;
-  vi.mocked(api).mockImplementation(async (_path, init) => init?.method === 'PUT' ? new Promise(r => { resolve = r; }) : { promoteDreamsToMemory: true });
+  vi.mocked(api).mockImplementation(async (_path, init) =>
+    init?.method === 'PUT'
+      ? new Promise((r) => {
+          resolve = r;
+        })
+      : { promoteDreamsToMemory: true },
+  );
   const view = render(<DreamPromotionSettings />);
   await waitFor(() => expect(toggle().disabled).toBe(false));
   fireEvent.click(toggle());
-  view.unmount(); render(<DreamPromotionSettings />);
+  view.unmount();
+  render(<DreamPromotionSettings />);
   await waitFor(() => expect(toggle().disabled).toBe(false));
   await act(async () => resolve({ promoteDreamsToMemory: false }));
   expect(toggle().checked).toBe(true);

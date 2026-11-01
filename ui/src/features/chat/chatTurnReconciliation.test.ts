@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatSession, SessionTurn } from '../../app/api';
-import { cachedTurnsForSession, mergeSessionActivities, reconcileConversationTurns, reconcileSessionTurns } from './chatTurnReconciliation';
+import {
+  cachedTurnsForSession,
+  mergeSessionActivities,
+  reconcileConversationTurns,
+  reconcileSessionTurns,
+} from './chatTurnReconciliation';
 
-const turn = (role: 'user' | 'assistant', content: string, runId: string, ts: string, metadata?: SessionTurn['metadata']): SessionTurn => ({ role, content, runId, ts, metadata });
+const turn = (
+  role: 'user' | 'assistant',
+  content: string,
+  runId: string,
+  ts: string,
+  metadata?: SessionTurn['metadata'],
+): SessionTurn => ({ role, content, runId, ts, metadata });
 
 describe('chat turn reconciliation', () => {
   it.each([
@@ -14,7 +25,10 @@ describe('chat turn reconciliation', () => {
     },
     {
       name: 'discards cached turns before a valid reset boundary',
-      session: { id: 'default', metadata: { resetAt: '2026-08-26T10:00:00.000Z' } } satisfies ChatSession,
+      session: {
+        id: 'default',
+        metadata: { resetAt: '2026-08-26T10:00:00.000Z' },
+      } satisfies ChatSession,
       cached: [
         turn('assistant', 'old', 'run-old', '2026-08-25T12:00:00.000Z'),
         turn('user', 'new', 'run-new', '2026-08-26T10:00:01.000Z'),
@@ -23,7 +37,10 @@ describe('chat turn reconciliation', () => {
     },
     {
       name: 'discards undated turns after a reset because their generation is unknowable',
-      session: { id: 'default', metadata: { resetAt: '2026-08-26T10:00:00.000Z' } } satisfies ChatSession,
+      session: {
+        id: 'default',
+        metadata: { resetAt: '2026-08-26T10:00:00.000Z' },
+      } satisfies ChatSession,
       cached: [{ role: 'assistant', content: 'undated', runId: 'run-undated' }],
       expected: [],
     },
@@ -44,69 +61,152 @@ describe('chat turn reconciliation', () => {
     ];
     const server = [turn('assistant', 'Persisted answer', 'run-1', '2026-08-26T10:00:01.000Z')];
 
-    expect(reconcileConversationTurns(server, cached)).toEqual([
-      cached[0],
-      server[0],
-    ]);
+    expect(reconcileConversationTurns(server, cached)).toEqual([cached[0], server[0]]);
   });
 
   it('retains optimistic attachment metadata until the server snapshot catches up', () => {
     const attachments = [{ name: 'diagram.png', type: 'image/png', size: 42 }];
-    const cached = [turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', { attachments })];
+    const cached = [
+      turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', { attachments }),
+    ];
     const server = [turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z')];
 
-    expect(reconcileConversationTurns(server, cached)[0].metadata?.attachments).toEqual(attachments);
+    expect(reconcileConversationTurns(server, cached)[0].metadata?.attachments).toEqual(
+      attachments,
+    );
   });
 
   it('prefers attachment metadata already persisted by the server', () => {
     const cachedAttachments = [{ name: 'local.png', type: 'image/png', size: 42 }];
     const serverAttachments = [{ name: 'server.png', type: 'image/png', size: 43 }];
-    const cached = [turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', { attachments: cachedAttachments })];
-    const server = [turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', { attachments: serverAttachments })];
+    const cached = [
+      turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', {
+        attachments: cachedAttachments,
+      }),
+    ];
+    const server = [
+      turn('user', 'See attachment', 'run-1', '2026-08-26T10:00:00.000Z', {
+        attachments: serverAttachments,
+      }),
+    ];
 
-    expect(reconcileConversationTurns(server, cached)[0].metadata?.attachments).toEqual(serverAttachments);
+    expect(reconcileConversationTurns(server, cached)[0].metadata?.attachments).toEqual(
+      serverAttachments,
+    );
   });
 
   it('retains streamed answer and finalized thought progress until the server persists them', () => {
-    const progress = { status: 'complete' as const, items: [{ id: 'thought-1', text: 'Reasoning', ts: '2026-08-26T10:00:00.000Z', status: 'complete' as const }] };
-    const cached = [turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z', { streamedAnswer: 'Streamed answer', progress })];
+    const progress = {
+      status: 'complete' as const,
+      items: [
+        {
+          id: 'thought-1',
+          text: 'Reasoning',
+          ts: '2026-08-26T10:00:00.000Z',
+          status: 'complete' as const,
+        },
+      ],
+    };
+    const cached = [
+      turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z', {
+        streamedAnswer: 'Streamed answer',
+        progress,
+      }),
+    ];
     const server = [turn('assistant', 'Answer', 'run-1', '2026-08-26T10:00:00.000Z')];
 
-    expect(reconcileConversationTurns(server, cached)[0].metadata).toMatchObject({ streamedAnswer: 'Streamed answer', progress });
+    expect(reconcileConversationTurns(server, cached)[0].metadata).toMatchObject({
+      streamedAnswer: 'Streamed answer',
+      progress,
+    });
   });
 
   it('normalizes content and merges server tool activity', () => {
-    const turns = mergeSessionActivities([{ role: 'assistant', content: 'Done', runId: 'run-1' }], [{
-      runId: 'run-1',
-      summary: 'Read files',
-      items: [{ label: 'Read file', detail: 'app.ts', status: 'error' }],
-    }]);
+    const turns = mergeSessionActivities(
+      [{ role: 'assistant', content: 'Done', runId: 'run-1' }],
+      [
+        {
+          runId: 'run-1',
+          summary: 'Read files',
+          items: [{ label: 'Read file', detail: 'app.ts', status: 'error' }],
+        },
+      ],
+    );
 
     expect(turns[0]).toMatchObject({
       content: 'Done',
-      metadata: { toolActivity: { runId: 'run-1', summary: 'Read files', status: 'warn', items: [{ id: 'run-1:0', status: 'error' }] } },
+      metadata: {
+        toolActivity: {
+          runId: 'run-1',
+          summary: 'Read files',
+          status: 'warn',
+          items: [{ id: 'run-1:0', status: 'error' }],
+        },
+      },
     });
   });
 
   it('applies the reset boundary before reconciling a session', () => {
-    const session: ChatSession = { id: 'default', metadata: { resetAt: '2026-08-26T10:00:00.000Z' }, turns: [] };
+    const session: ChatSession = {
+      id: 'default',
+      metadata: { resetAt: '2026-08-26T10:00:00.000Z' },
+      turns: [],
+    };
     const cached = [turn('assistant', 'Yesterday', 'old-run', '2026-08-25T10:00:00.000Z')];
 
     expect(reconcileSessionTurns(session, cached)).toEqual([]);
   });
 });
 
-
 it('keeps a pending image preview until the persisted artifact loads, without losing its durable path', () => {
-  const server = [turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', { attachments: [{ index: 0, name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/attachments/photo.png' }] })];
-  const pending = [turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', { attachments: [{ index: 0, name: 'photo.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] })];
-  expect(reconcileConversationTurns(server, pending)[0].metadata?.attachments).toEqual([{ index: 0, name: 'photo.png', type: 'image/png', artifactPath: 'artifacts/attachments/photo.png', preview: 'data:image/png;base64,YQ==' }]);
+  const server = [
+    turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', {
+      attachments: [
+        {
+          index: 0,
+          name: 'photo.png',
+          type: 'image/png',
+          artifactPath: 'artifacts/attachments/photo.png',
+        },
+      ],
+    }),
+  ];
+  const pending = [
+    turn('user', 'Look', 'run-image', '2026-08-26T10:00:00.000Z', {
+      attachments: [
+        { index: 0, name: 'photo.png', type: 'image/png', preview: 'data:image/png;base64,YQ==' },
+      ],
+    }),
+  ];
+  expect(reconcileConversationTurns(server, pending)[0].metadata?.attachments).toEqual([
+    {
+      index: 0,
+      name: 'photo.png',
+      type: 'image/png',
+      artifactPath: 'artifacts/attachments/photo.png',
+      preview: 'data:image/png;base64,YQ==',
+    },
+  ]);
 });
 
 it('preserves attachment-only Forge turns without duplicating them through terminal refresh and reload', () => {
-  const attached: SessionTurn = { type: 'message', role: 'user', content: '', metadata: { attachments: [{ name: 'forge.png', type: 'image/png', artifactPath: 'artifacts/attachments/forge.png' }] } };
-  const session: ChatSession = { id: 'default', turns: [attached, turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z')] };
-  const completed = reconcileSessionTurns(session, [turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z')]);
+  const attached: SessionTurn = {
+    type: 'message',
+    role: 'user',
+    content: '',
+    metadata: {
+      attachments: [
+        { name: 'forge.png', type: 'image/png', artifactPath: 'artifacts/attachments/forge.png' },
+      ],
+    },
+  };
+  const session: ChatSession = {
+    id: 'default',
+    turns: [attached, turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z')],
+  };
+  const completed = reconcileSessionTurns(session, [
+    turn('assistant', 'Done', 'run-1', '2026-09-27T01:00:00Z'),
+  ]);
   expect(completed).toHaveLength(2);
   expect(completed[0].metadata?.attachments).toEqual(attached.metadata?.attachments);
   expect(reconcileSessionTurns(session, completed)).toEqual(completed);
@@ -114,5 +214,38 @@ it('preserves attachment-only Forge turns without duplicating them through termi
 });
 
 it('does not resurrect cached runs absent from an authoritative empty snapshot', () => {
-  expect(reconcileSessionTurns({ id: 'default', turns: [] }, [turn('assistant', 'purged', 'old', '2026-08-25T12:00:00Z')])).toEqual([]);
+  expect(
+    reconcileSessionTurns({ id: 'default', turns: [] }, [
+      turn('assistant', 'purged', 'old', '2026-08-25T12:00:00Z'),
+    ]),
+  ).toEqual([]);
+});
+
+it('server v2 terminal metadata wins over stale cached failures (including stale progress)', () => {
+  const cached = turn('assistant', '', 'r', '2026-08-26T10:00:01.000Z', {
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: { origin: 'upstream', code: 'provider_rate_limited', retryable: true },
+    progress: { status: 'failed', items: [{ id: 'p', text: 'Old', ts: '2026-08-26' }] },
+  });
+  const completed = turn('assistant', 'New answer', 'r', cached.ts!, {
+    chatResultVersion: 2,
+    terminalStatus: 'completed',
+  });
+  expect(reconcileConversationTurns([completed], [cached])).toEqual([completed]);
+  expect(
+    reconcileConversationTurns([{ ...completed, metadata: undefined }], [cached])[0].metadata,
+  ).toBeUndefined();
+});
+
+it('keeps projected server legacy failure metadata and recovery on refresh', () => {
+  const projected = turn('assistant', '', 'legacy', '2026-08-26T10:00:01.000Z', {
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: { origin: 'unknown', code: 'model_failure_unknown', retryable: false },
+    modelRecovery: { version: 1, retryCount: 1, requests: [{ state: 'exhausted' }] },
+  });
+  expect(
+    reconcileConversationTurns([projected], [turn('assistant', 'old', 'legacy', projected.ts!)]),
+  ).toEqual([projected]);
 });

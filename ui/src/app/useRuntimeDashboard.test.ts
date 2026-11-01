@@ -14,10 +14,14 @@ const provider = (changes: Partial<SavedProvider> = {}): SavedProvider => ({
 
 describe('OpenAI OAuth usage connections', () => {
   it('recognizes OAuth metadata when the connection has a custom display name', () => {
-    expect(isOpenAiOAuthConnection(provider({ auth: { type: 'oauth', source: 'openai-oauth' } }))).toBe(true);
+    expect(
+      isOpenAiOAuthConnection(provider({ auth: { type: 'oauth', source: 'openai-oauth' } })),
+    ).toBe(true);
   });
 
   it('does not treat an API-key OpenAI-compatible connection as OAuth', () => {
-    expect(isOpenAiOAuthConnection(provider({ auth: { type: 'api_key', source: 'legacy-api-key' } }))).toBe(false);
+    expect(
+      isOpenAiOAuthConnection(provider({ auth: { type: 'api_key', source: 'legacy-api-key' } })),
+    ).toBe(false);
   });
 });

@@ -3,7 +3,13 @@ import { api } from '../../app/api';
 import type { ModPanel } from '../../app/modPanels';
 
 type Cleanup = void | (() => void) | { unmount: () => void };
-type ControlModule = { mountControl?: (context: { modId: string; root: HTMLElement; api: <T = unknown>(path: string, init?: RequestInit) => Promise<T> }) => Cleanup | Promise<Cleanup> };
+type ControlModule = {
+  mountControl?: (context: {
+    modId: string;
+    root: HTMLElement;
+    api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  }) => Cleanup | Promise<Cleanup>;
+};
 
 export function ModPanelHost({ panel }: { panel: ModPanel }) {
   const root = useRef<HTMLDivElement>(null);
@@ -16,26 +22,75 @@ export function ModPanelHost({ panel }: { panel: ModPanel }) {
     if (!host) return;
     const node = document.createElement('div');
     host.replaceChildren(node);
-    const disposeSafely = (candidate?: () => void) => { try { candidate?.(); } catch { /* Isolate mod cleanup. */ } };
-    const timer = window.setTimeout(() => { if (!disposed) { disposed = true; node.remove(); disposeSafely(cleanup); setLoading(false); setError('The mod panel took too long to load.'); } }, 15000);
-    setError(''); setLoading(true);
+    const disposeSafely = (candidate?: () => void) => {
+      try {
+        candidate?.();
+      } catch {
+        /* Isolate mod cleanup. */
+      }
+    };
+    const timer = window.setTimeout(() => {
+      if (!disposed) {
+        disposed = true;
+        node.remove();
+        disposeSafely(cleanup);
+        setLoading(false);
+        setError('The mod panel took too long to load.');
+      }
+    }, 15000);
+    setError('');
+    setLoading(true);
     const url = panel.controlUrl + (panel.version ? `?v=${encodeURIComponent(panel.version)}` : '');
-    void import(/* @vite-ignore */ url).then(async (module: ControlModule) => {
-      if (disposed) return;
-      if (typeof module.mountControl !== 'function') throw new Error('The mod does not export mountControl.');
-      const result = await module.mountControl({ modId: panel.modId, root: node, api: <T,>(path: string, init?: RequestInit) => {
-        const normalized = path.startsWith('/') ? path : `/${path}`;
-        if (normalized.includes('..') || normalized.includes('?') || normalized.includes('#')) return Promise.reject(new Error('Invalid mod API path.'));
-        return api<T>(`/api/mods/${panel.modId}${normalized}`, init);
-      } });
-      const dispose = typeof result === 'function' ? result : result?.unmount;
-      if (disposed) { disposeSafely(dispose); node.replaceChildren(); } else { cleanup = dispose; window.clearTimeout(timer); setLoading(false); }
-    }).catch((cause) => { if (!disposed) { window.clearTimeout(timer); setLoading(false); setError(cause instanceof Error ? cause.message : 'Could not load mod panel.'); } });
-    return () => { disposed = true; window.clearTimeout(timer); node.remove(); disposeSafely(cleanup); node.replaceChildren(); };
+    void import(/* @vite-ignore */ url)
+      .then(async (module: ControlModule) => {
+        if (disposed) return;
+        if (typeof module.mountControl !== 'function')
+          throw new Error('The mod does not export mountControl.');
+        const result = await module.mountControl({
+          modId: panel.modId,
+          root: node,
+          api: <T,>(path: string, init?: RequestInit) => {
+            const normalized = path.startsWith('/') ? path : `/${path}`;
+            if (normalized.includes('..') || normalized.includes('?') || normalized.includes('#'))
+              return Promise.reject(new Error('Invalid mod API path.'));
+            return api<T>(`/api/mods/${panel.modId}${normalized}`, init);
+          },
+        });
+        const dispose = typeof result === 'function' ? result : result?.unmount;
+        if (disposed) {
+          disposeSafely(dispose);
+          node.replaceChildren();
+        } else {
+          cleanup = dispose;
+          window.clearTimeout(timer);
+          setLoading(false);
+        }
+      })
+      .catch((cause) => {
+        if (!disposed) {
+          window.clearTimeout(timer);
+          setLoading(false);
+          setError(cause instanceof Error ? cause.message : 'Could not load mod panel.');
+        }
+      });
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      node.remove();
+      disposeSafely(cleanup);
+      node.replaceChildren();
+    };
   }, [panel.modId, panel.controlUrl, panel.version]);
-  return <div className="page-view mod-panel-page" data-mod-id={panel.modId}>
-    {loading && !error && <p role="status">Loading {panel.name}…</p>}
-    {error && <section className="setting-section"><h2>{panel.name} unavailable</h2><p role="alert">{error}</p></section>}
-    <div ref={root} />
-  </div>;
+  return (
+    <div className="page-view mod-panel-page" data-mod-id={panel.modId}>
+      {loading && !error && <p role="status">Loading {panel.name}…</p>}
+      {error && (
+        <section className="setting-section">
+          <h2>{panel.name} unavailable</h2>
+          <p role="alert">{error}</p>
+        </section>
+      )}
+      <div ref={root} />
+    </div>
+  );
 }

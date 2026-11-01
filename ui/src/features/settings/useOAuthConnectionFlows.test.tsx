@@ -1,7 +1,11 @@
 import { StrictMode, type ReactNode } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { modelConnectionsApi, type ClaudeCodeLogin, type OpenAiOAuthLogin } from './modelConnectionsApi';
+import {
+  modelConnectionsApi,
+  type ClaudeCodeLogin,
+  type OpenAiOAuthLogin,
+} from './modelConnectionsApi';
 import { useClaudeCodeLoginFlow } from './useClaudeCodeLoginFlow';
 import { useOpenAiOAuthConnectionFlow } from './useOpenAiOAuthConnectionFlow';
 
@@ -23,7 +27,9 @@ vi.mock('./modelConnectionsApi', async (importOriginal) => ({
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => { resolve = next; });
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
   return { promise, resolve };
 };
 
@@ -42,19 +48,26 @@ afterEach(() => {
 
 describe('OAuth connection flow polling', () => {
   it('serializes OpenAI polling and completes an authorized login once', async () => {
-    vi.mocked(modelConnectionsApi.startOpenAiOAuth).mockResolvedValue({ connection: { id: 'openai' }, login: openAiLogin('waiting_for_callback') });
+    vi.mocked(modelConnectionsApi.startOpenAiOAuth).mockResolvedValue({
+      connection: { id: 'openai' },
+      login: openAiLogin('waiting_for_callback'),
+    });
     const poll = deferred<{ login: OpenAiOAuthLogin }>();
     vi.mocked(modelConnectionsApi.getOpenAiOAuthLogin).mockReturnValue(poll.promise);
     const onConnection = vi.fn();
     const onAuthorized = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }));
+    const { result } = renderHook(() =>
+      useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized }),
+    );
 
     await act(() => result.current.start());
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(modelConnectionsApi.getOpenAiOAuthLogin).toHaveBeenCalledOnce();
 
-    await act(async () => poll.resolve({ login: { ...openAiLogin('authorized'), connection: { id: 'openai' } } }));
+    await act(async () =>
+      poll.resolve({ login: { ...openAiLogin('authorized'), connection: { id: 'openai' } } }),
+    );
     expect(onAuthorized).toHaveBeenCalledOnce();
     expect(onConnection).toHaveBeenCalledTimes(2);
     await act(() => vi.advanceTimersByTimeAsync(10_000));
@@ -62,16 +75,23 @@ describe('OAuth connection flow polling', () => {
   });
 
   it('ignores an obsolete OpenAI poll after reset', async () => {
-    vi.mocked(modelConnectionsApi.startOpenAiOAuth).mockResolvedValue({ connection: { id: 'openai' }, login: openAiLogin('waiting_for_callback') });
+    vi.mocked(modelConnectionsApi.startOpenAiOAuth).mockResolvedValue({
+      connection: { id: 'openai' },
+      login: openAiLogin('waiting_for_callback'),
+    });
     const poll = deferred<{ login: OpenAiOAuthLogin }>();
     vi.mocked(modelConnectionsApi.getOpenAiOAuthLogin).mockReturnValue(poll.promise);
     const onAuthorized = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useOpenAiOAuthConnectionFlow({ onConnection: vi.fn(), onAuthorized }));
+    const { result } = renderHook(() =>
+      useOpenAiOAuthConnectionFlow({ onConnection: vi.fn(), onAuthorized }),
+    );
 
     await act(() => result.current.start());
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     act(() => result.current.reset());
-    await act(async () => poll.resolve({ login: { ...openAiLogin('authorized'), connection: { id: 'openai' } } }));
+    await act(async () =>
+      poll.resolve({ login: { ...openAiLogin('authorized'), connection: { id: 'openai' } } }),
+    );
 
     expect(result.current.login).toBeNull();
     expect(onAuthorized).not.toHaveBeenCalled();
@@ -81,19 +101,36 @@ describe('OAuth connection flow polling', () => {
     const start = deferred<{ connection: { id: string }; login: OpenAiOAuthLogin }>();
     vi.mocked(modelConnectionsApi.startOpenAiOAuth).mockReturnValue(start.promise);
     const onConnection = vi.fn();
-    const view = renderHook(() => useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized: vi.fn().mockResolvedValue(undefined) }));
+    const view = renderHook(() =>
+      useOpenAiOAuthConnectionFlow({
+        onConnection,
+        onAuthorized: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
 
-    act(() => { void view.result.current.start(); });
+    act(() => {
+      void view.result.current.start();
+    });
     view.unmount();
-    await act(async () => start.resolve({ connection: { id: 'openai' }, login: openAiLogin('waiting_for_callback') }));
+    await act(async () =>
+      start.resolve({ connection: { id: 'openai' }, login: openAiLogin('waiting_for_callback') }),
+    );
     expect(onConnection).not.toHaveBeenCalled();
   });
 
   it('serializes Claude polling and ignores an obsolete response after reset', async () => {
-    vi.mocked(modelConnectionsApi.startClaudeCodeLogin).mockResolvedValue({ connection: { id: 'claude' }, login: claudeLogin('waiting_for_code') });
+    vi.mocked(modelConnectionsApi.startClaudeCodeLogin).mockResolvedValue({
+      connection: { id: 'claude' },
+      login: claudeLogin('waiting_for_code'),
+    });
     const poll = deferred<{ login: ClaudeCodeLogin }>();
     vi.mocked(modelConnectionsApi.getClaudeCodeLogin).mockReturnValue(poll.promise);
-    const { result } = renderHook(() => useClaudeCodeLoginFlow({ onConnection: vi.fn(), onImported: vi.fn().mockResolvedValue(undefined) }));
+    const { result } = renderHook(() =>
+      useClaudeCodeLoginFlow({
+        onConnection: vi.fn(),
+        onImported: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
 
     await act(() => result.current.start());
     await act(() => vi.advanceTimersByTimeAsync(2_000));
@@ -106,10 +143,17 @@ describe('OAuth connection flow polling', () => {
   });
 
   it('auto-imports each authorized Claude login only once', async () => {
-    vi.mocked(modelConnectionsApi.startClaudeCodeLogin).mockResolvedValue({ connection: { id: 'claude' }, login: claudeLogin('authorized') });
-    vi.mocked(modelConnectionsApi.importClaudeCodeLogin).mockResolvedValue({ login: claudeLogin('imported') });
+    vi.mocked(modelConnectionsApi.startClaudeCodeLogin).mockResolvedValue({
+      connection: { id: 'claude' },
+      login: claudeLogin('authorized'),
+    });
+    vi.mocked(modelConnectionsApi.importClaudeCodeLogin).mockResolvedValue({
+      login: claudeLogin('imported'),
+    });
     const onImported = vi.fn().mockResolvedValue(undefined);
-    const { result } = renderHook(() => useClaudeCodeLoginFlow({ onConnection: vi.fn(), onImported, autoImport: true }));
+    const { result } = renderHook(() =>
+      useClaudeCodeLoginFlow({ onConnection: vi.fn(), onImported, autoImport: true }),
+    );
 
     await act(() => result.current.start());
     await act(async () => undefined);
@@ -119,21 +163,47 @@ describe('OAuth connection flow polling', () => {
   });
 });
 
-it.each(['openai', 'claude'])('FE027 %s accepts StrictMode setup and rejects reset response', async kind => {
- const start = kind === 'openai' ? modelConnectionsApi.startOpenAiOAuth : modelConnectionsApi.startClaudeCodeLogin;
- vi.mocked(start).mockResolvedValue({connection:{id:'p'},login:{id:'l',status:'waiting_for_code'}});
- const onConnection = vi.fn();
- const {result} = renderHook(() => kind === 'openai'
-   ? useOpenAiOAuthConnectionFlow({onConnection,onAuthorized:vi.fn()})
-   : useClaudeCodeLoginFlow({onConnection,onImported:vi.fn(),autoImport:false}),
-   {reactStrictMode:true,wrapper:({children}:{children:ReactNode}) => <StrictMode>{children}</StrictMode>});
- await act(() => result.current.start());
- expect(result.current.requestState).toBe('idle');
- expect(result.current.login?.id).toBe('l');
- expect(onConnection).toHaveBeenCalledOnce();
- const pending = deferred<any>(); vi.mocked(start).mockReturnValue(pending.promise);
- let work!:Promise<void>; act(() => {work=result.current.start();});
- act(() => result.current.reset());
- await act(async () => {pending.resolve({connection:{id:'stale'},login:{id:'old',status:'waiting_for_code'}});await work;});
- expect(result.current.login).toBeNull(); expect(onConnection).toHaveBeenCalledOnce();
-});
+it.each(['openai', 'claude'])(
+  'FE027 %s accepts StrictMode setup and rejects reset response',
+  async (kind) => {
+    const start =
+      kind === 'openai'
+        ? modelConnectionsApi.startOpenAiOAuth
+        : modelConnectionsApi.startClaudeCodeLogin;
+    vi.mocked(start).mockResolvedValue({
+      connection: { id: 'p' },
+      login: { id: 'l', status: 'waiting_for_code' },
+    });
+    const onConnection = vi.fn();
+    const { result } = renderHook(
+      () =>
+        kind === 'openai'
+          ? useOpenAiOAuthConnectionFlow({ onConnection, onAuthorized: vi.fn() })
+          : useClaudeCodeLoginFlow({ onConnection, onImported: vi.fn(), autoImport: false }),
+      {
+        reactStrictMode: true,
+        wrapper: ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>,
+      },
+    );
+    await act(() => result.current.start());
+    expect(result.current.requestState).toBe('idle');
+    expect(result.current.login?.id).toBe('l');
+    expect(onConnection).toHaveBeenCalledOnce();
+    const pending = deferred<any>();
+    vi.mocked(start).mockReturnValue(pending.promise);
+    let work!: Promise<void>;
+    act(() => {
+      work = result.current.start();
+    });
+    act(() => result.current.reset());
+    await act(async () => {
+      pending.resolve({
+        connection: { id: 'stale' },
+        login: { id: 'old', status: 'waiting_for_code' },
+      });
+      await work;
+    });
+    expect(result.current.login).toBeNull();
+    expect(onConnection).toHaveBeenCalledOnce();
+  },
+);

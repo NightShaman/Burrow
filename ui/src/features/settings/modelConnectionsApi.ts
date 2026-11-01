@@ -37,26 +37,62 @@ const jsonPost = (body: unknown) => ({
 });
 
 export const modelConnectionsApi = {
-  discover: (connection: { id?: string; provider: string; apiType: string; baseUrl?: string; apiKey?: string; pool?: ProviderPool; models: RuntimeModel[] }) =>
-    api<{ models: RuntimeModel[]; discovery?: { status?: string; error?: string } }>('/api/settings/model-connections/discover', jsonPost(connection)),
+  discover: (connection: {
+    id?: string;
+    provider: string;
+    apiType: string;
+    baseUrl?: string;
+    apiKey?: string;
+    pool?: ProviderPool;
+    models: RuntimeModel[];
+  }) =>
+    api<{ models: RuntimeModel[]; discovery?: { status?: string; error?: string } }>(
+      '/api/settings/model-connections/discover',
+      jsonPost(connection),
+    ),
 
   startOpenAiOAuth: (connectionId?: string) =>
-    api<{ connection: OpenAiOAuthConnection; login: OpenAiOAuthLogin }>('/api/settings/model-connections/openai-oauth/start', jsonPost(connectionId ? { connectionId } : {})),
+    api<{ connection: OpenAiOAuthConnection; login: OpenAiOAuthLogin }>(
+      '/api/settings/model-connections/openai-oauth/start',
+      jsonPost(connectionId ? { connectionId } : {}),
+    ),
   getOpenAiOAuthLogin: (loginId: string) =>
-    api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}`),
+    api<{ login: OpenAiOAuthLogin }>(
+      `/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}`,
+    ),
   submitOpenAiOAuthCode: (loginId: string, input: string) =>
-    api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/submit-code`, jsonPost({ input })),
+    api<{ login: OpenAiOAuthLogin }>(
+      `/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/submit-code`,
+      jsonPost({ input }),
+    ),
   cancelOpenAiOAuth: (loginId: string) =>
-    api<{ login: OpenAiOAuthLogin }>(`/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/cancel`, jsonMutation('POST')),
+    api<{ login: OpenAiOAuthLogin }>(
+      `/api/settings/model-connections/openai-oauth/${encodeURIComponent(loginId)}/cancel`,
+      jsonMutation('POST'),
+    ),
 
   startClaudeCodeLogin: (connectionId?: string) =>
-    api<{ connection?: OpenAiOAuthConnection | null; login: ClaudeCodeLogin }>('/api/settings/model-connections/claude-code-login/start', jsonPost(connectionId ? { connectionId } : {})),
+    api<{ connection?: OpenAiOAuthConnection | null; login: ClaudeCodeLogin }>(
+      '/api/settings/model-connections/claude-code-login/start',
+      jsonPost(connectionId ? { connectionId } : {}),
+    ),
   getClaudeCodeLogin: (loginId: string) =>
-    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}`),
+    api<{ login: ClaudeCodeLogin }>(
+      `/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}`,
+    ),
   submitClaudeCode: (loginId: string, code: string) =>
-    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/submit-code`, jsonPost({ code })),
+    api<{ login: ClaudeCodeLogin }>(
+      `/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/submit-code`,
+      jsonPost({ code }),
+    ),
   cancelClaudeCodeLogin: (loginId: string) =>
-    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/cancel`, jsonMutation('POST')),
+    api<{ login: ClaudeCodeLogin }>(
+      `/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/cancel`,
+      jsonMutation('POST'),
+    ),
   importClaudeCodeLogin: (loginId: string, connectionId?: string) =>
-    api<{ login: ClaudeCodeLogin }>(`/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/import`, jsonPost(connectionId ? { connectionId } : {})),
+    api<{ login: ClaudeCodeLogin }>(
+      `/api/settings/model-connections/claude-code-login/${encodeURIComponent(loginId)}/import`,
+      jsonPost(connectionId ? { connectionId } : {}),
+    ),
 };

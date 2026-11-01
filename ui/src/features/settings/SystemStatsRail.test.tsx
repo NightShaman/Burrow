@@ -4,13 +4,26 @@ import { api } from '../../app/api';
 import { SystemStatsRail } from './SystemStatsRail';
 
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 it('shows UI identity and backend provenance in the Burrow summary in system statistics', async () => {
   vi.stubGlobal('__BURROW_UI_BUILD_IDENTITY__', '1234567890abcdef');
-  vi.mocked(api).mockImplementation(async path => path === '/api/health'
-    ? { ok: true, version: '2026.10.11.11', releaseProvenance: { ui: 'different-packaged-ui', backend: 'abcdef0123456789', assembly: '2026.10.11.11' } }
-    : { ok: true, filesystem: {}, process: { cpu: {} }, load: {} });
+  vi.mocked(api).mockImplementation(async (path) =>
+    path === '/api/health'
+      ? {
+          ok: true,
+          version: '2026.10.11.11',
+          releaseProvenance: {
+            ui: 'different-packaged-ui',
+            backend: 'abcdef0123456789',
+            assembly: '2026.10.11.11',
+          },
+        }
+      : { ok: true, filesystem: {}, process: { cpu: {} }, load: {} },
+  );
   render(<SystemStatsRail active />);
   await screen.findByText('abcdef0');
   expect(screen.getByText('1234567').getAttribute('title')).toBe('1234567890abcdef');
@@ -35,9 +48,11 @@ it('keeps missing provenance explicit without fetching while closed', async () =
   const { rerender } = render(<SystemStatsRail active={false} />);
   expect(api).not.toHaveBeenCalled();
   expect(screen.getByText('Backend').nextElementSibling?.textContent).toBe('Unavailable');
-  vi.mocked(api).mockImplementation(async path => path === '/api/health'
-    ? { ok: true }
-    : { ok: true, filesystem: {}, process: { cpu: {} }, load: {} });
+  vi.mocked(api).mockImplementation(async (path) =>
+    path === '/api/health'
+      ? { ok: true }
+      : { ok: true, filesystem: {}, process: { cpu: {} }, load: {} },
+  );
   rerender(<SystemStatsRail active />);
   await waitFor(() => expect(screen.getByText('Healthy')).toBeTruthy());
   expect(screen.getByText('Backend').nextElementSibling?.textContent).toBe('Unavailable');

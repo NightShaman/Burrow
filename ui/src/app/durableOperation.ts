@@ -1,5 +1,8 @@
 // Only explicit operation payloads belong here; never provider/OAuth credentials.
-export function retainedOperation<T extends { operationId: string }>(key: string, payload: () => T): T {
+export function retainedOperation<T extends { operationId: string }>(
+  key: string,
+  payload: () => T,
+): T {
   const stored = localStorage.getItem(key);
   if (stored) return JSON.parse(stored) as T;
   const value = payload();

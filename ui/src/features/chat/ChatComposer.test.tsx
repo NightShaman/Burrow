@@ -12,10 +12,13 @@ describe('project conversation context syntax', () => {
     expect(projectContextQuery(value)).toBe(query);
   });
 
-  it.each(['project', '/project design', 'hello $project', '$project-design'])('does not recognize %s as project context', (value) => {
-    expect(isProjectContextDraft(value)).toBe(false);
-    expect(projectContextQuery(value)).toBeNull();
-  });
+  it.each(['project', '/project design', 'hello $project', '$project-design'])(
+    'does not recognize %s as project context',
+    (value) => {
+      expect(isProjectContextDraft(value)).toBe(false);
+      expect(projectContextQuery(value)).toBeNull();
+    },
+  );
 });
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -24,25 +27,50 @@ import { useState } from 'react';
 import { ChatComposer } from './ChatComposer';
 
 beforeAll(() => {
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 320; } });
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 300; } });
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get() {
+      return 320;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return 300;
+    },
+  });
   globalThis.IntersectionObserver = class implements IntersectionObserver {
     constructor(private callback: IntersectionObserverCallback) {}
     readonly root = null;
     readonly rootMargin = '0px';
     readonly thresholds = [0];
     observe(target: Element) {
-      this.callback([{ target, intersectionRatio: 1, isIntersecting: true } as IntersectionObserverEntry], this);
+      this.callback(
+        [{ target, intersectionRatio: 1, isIntersecting: true } as IntersectionObserverEntry],
+        this,
+      );
     }
     unobserve() {}
     disconnect() {}
-    takeRecords() { return []; }
+    takeRecords() {
+      return [];
+    }
   };
 });
 afterEach(cleanup);
 function ComposerFixture({ initial = '' }: { initial?: string }) {
   const [draft, setDraft] = useState(initial);
-  return <ChatComposer draft={draft} setDraft={setDraft} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => {}} placeholder="Message…" />;
+  return (
+    <ChatComposer
+      draft={draft}
+      setDraft={setDraft}
+      attached={[]}
+      onAttach={() => {}}
+      onRemoveAttachment={() => {}}
+      onSend={() => {}}
+      placeholder="Message…"
+    />
+  );
 }
 
 describe('composer emoji picker', () => {
@@ -53,14 +81,18 @@ describe('composer emoji picker', () => {
   afterEach(async () => {
     cleanup();
     try {
-      await act(async () => { await vi.runAllTimersAsync(); });
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
   });
   const findPickerElement = async (role: 'textbox' | 'button', name: string) => {
-    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
     return vi.waitFor(() => screen.getByRole(role, { name }), { timeout: 5000 });
   };
   it('inserts at cursor, replaces a selection and restores focus without sending', async () => {
@@ -70,7 +102,9 @@ describe('composer emoji picker', () => {
     message.setSelectionRange(6, 11);
     fireEvent.select(message);
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
-    expect(screen.getByRole('button', { name: 'Insert emoji' }).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Insert emoji' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
     const search = await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.change(search, { target: { value: 'grinning face' } });
     fireEvent.click(await findPickerElement('button', 'grinning face'));
@@ -82,7 +116,9 @@ describe('composer emoji picker', () => {
   it('can insert another emoji and close without changing the draft', async () => {
     render(<ComposerFixture initial="Hi" />);
     const message = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement;
-    message.focus(); message.setSelectionRange(2, 2); fireEvent.select(message);
+    message.focus();
+    message.setSelectionRange(2, 2);
+    fireEvent.select(message);
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
     const purpleSearch = await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.change(purpleSearch, { target: { value: 'purple heart' } });
@@ -93,7 +129,9 @@ describe('composer emoji picker', () => {
     fireEvent.click(await findPickerElement('button', 'middle finger'));
     expect(message.value).toBe('Hi💜🖕');
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Type to search for an emoji' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Type to search for an emoji' }), {
+      key: 'Escape',
+    });
     expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull();
     expect(document.activeElement).toBe(message);
     expect(message.value).toBe('Hi💜🖕');
@@ -103,24 +141,51 @@ describe('composer emoji picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Insert emoji' }));
     await findPickerElement('textbox', 'Type to search for an emoji');
     fireEvent.pointerDown(document.body);
-    await vi.waitFor(() => expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull());
-    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Still here');
+    await vi.waitFor(() =>
+      expect(screen.queryByRole('textbox', { name: 'Type to search for an emoji' })).toBeNull(),
+    );
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe(
+      'Still here',
+    );
   });
 });
 
 describe('IME submission', () => {
-  it.each([{ isComposing: true }, { keyCode: 229 }])('does not submit composition Enter: %j', (composition) => {
-    let sends = 0;
-    render(<ChatComposer draft="composition" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ...composition });
-    expect(sends).toBe(0);
-  });
+  it.each([{ isComposing: true }, { keyCode: 229 }])(
+    'does not submit composition Enter: %j',
+    (composition) => {
+      let sends = 0;
+      render(
+        <ChatComposer
+          draft="composition"
+          setDraft={() => {}}
+          attached={[]}
+          onAttach={() => {}}
+          onRemoveAttachment={() => {}}
+          onSend={() => sends++}
+          placeholder="Message"
+        />,
+      );
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ...composition });
+      expect(sends).toBe(0);
+    },
+  );
 });
 
 describe('FE015 composition lifecycle and submission eligibility', () => {
   it('keeps composing Enter local and submits once after composition ends', () => {
     let sends = 0;
-    render(<ChatComposer draft="日本語" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
+    render(
+      <ChatComposer
+        draft="日本語"
+        setDraft={() => {}}
+        attached={[]}
+        onAttach={() => {}}
+        onRemoveAttachment={() => {}}
+        onSend={() => sends++}
+        placeholder="Message"
+      />,
+    );
     const input = screen.getByRole('textbox');
     fireEvent.compositionStart(input);
     fireEvent.compositionUpdate(input, { data: '日本語' });
@@ -130,18 +195,43 @@ describe('FE015 composition lifecycle and submission eligibility', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(sends).toBe(1);
   });
-  it.each([{ draft: 'message', disabled: true }, { draft: '   ', disabled: false }])('blocks keyboard and button submission when ineligible %j', (props) => {
+  it.each([
+    { draft: 'message', disabled: true },
+    { draft: '   ', disabled: false },
+  ])('blocks keyboard and button submission when ineligible %j', (props) => {
     let sends = 0;
-    render(<ChatComposer {...props} setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={() => sends++} placeholder="Message" />);
+    render(
+      <ChatComposer
+        {...props}
+        setDraft={() => {}}
+        attached={[]}
+        onAttach={() => {}}
+        onRemoveAttachment={() => {}}
+        onSend={() => sends++}
+        placeholder="Message"
+      />,
+    );
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
     expect(sends).toBe(0);
-    expect((screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });
 describe('chat command autocomplete', () => {
   it('submits bare /context instead of intercepting Enter as an autocomplete selection', () => {
     const onSend = vi.fn();
-    render(<ChatComposer draft="/context" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={onSend} placeholder="Message" />);
+    render(
+      <ChatComposer
+        draft="/context"
+        setDraft={() => {}}
+        attached={[]}
+        onAttach={() => {}}
+        onRemoveAttachment={() => {}}
+        onSend={onSend}
+        placeholder="Message"
+      />,
+    );
     const input = screen.getByRole('textbox', { name: 'Message' });
 
     expect(screen.getByRole('listbox', { name: 'Chat commands' })).toBeTruthy();
@@ -152,7 +242,17 @@ describe('chat command autocomplete', () => {
 
   it('preserves autocomplete selection for a partial /context command', () => {
     const onSend = vi.fn();
-    render(<ChatComposer draft="/cont" setDraft={() => {}} attached={[]} onAttach={() => {}} onRemoveAttachment={() => {}} onSend={onSend} placeholder="Message" />);
+    render(
+      <ChatComposer
+        draft="/cont"
+        setDraft={() => {}}
+        attached={[]}
+        onAttach={() => {}}
+        onRemoveAttachment={() => {}}
+        onSend={onSend}
+        placeholder="Message"
+      />,
+    );
 
     fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), { key: 'Enter' });
 
@@ -166,9 +266,11 @@ describe('chat command autocomplete', () => {
     expect(input.getAttribute('aria-activedescendant')).toBe(options[0].id);
     fireEvent.keyDown(input, { key: 'End' });
     expect(input.getAttribute('aria-activedescendant')).toBe(options[options.length - 1].id);
-    fireEvent.keyDown(input, { key: 'Home' }); fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.keyDown(input, { key: 'Home' });
+    fireEvent.keyDown(input, { key: 'Enter' });
     expect((input as HTMLTextAreaElement).value).not.toBe('/');
-    fireEvent.change(input, { target: { value: '/' } }); fireEvent.keyDown(input, { key: 'Escape' });
+    fireEvent.change(input, { target: { value: '/' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 });

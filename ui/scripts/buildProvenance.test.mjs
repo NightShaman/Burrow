@@ -8,12 +8,29 @@ it('retains the exact supplied UI SHA in index-linked production JS without a UI
   const root = mkdtempSync(join(tmpdir(), 'burrow-provenance-'));
   const sha = '0123456789abcdef0123456789abcdef01234567';
   try {
-    writeFileSync(join(root, 'index.html'), '<div id="root"></div><script type="module" src="/entry.js"></script>');
+    writeFileSync(
+      join(root, 'index.html'),
+      '<div id="root"></div><script type="module" src="/entry.js"></script>',
+    );
     // Intentionally no build-identity reference: rendering must not own provenance.
-    writeFileSync(join(root, 'entry.js'), 'document.getElementById("root").textContent = "Burrow";');
-    execFileSync(process.execPath, [resolve('node_modules/vite/bin/vite.js'), 'build', root, '--config', resolve('vite.config.ts')], {
-      env: { ...process.env, BURROW_UI_SHA: sha }, stdio: 'pipe',
-    });
+    writeFileSync(
+      join(root, 'entry.js'),
+      'document.getElementById("root").textContent = "Burrow";',
+    );
+    execFileSync(
+      process.execPath,
+      [
+        resolve('node_modules/vite/bin/vite.js'),
+        'build',
+        root,
+        '--config',
+        resolve('vite.config.ts'),
+      ],
+      {
+        env: { ...process.env, BURROW_UI_SHA: sha },
+        stdio: 'pipe',
+      },
+    );
     const html = readFileSync(join(root, 'dist/index.html'), 'utf8');
     const entry = html.match(/src="(\/assets\/[^"\s]+\.js)"/)?.[1];
     expect(entry).toBeTruthy();

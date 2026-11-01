@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { conversationCacheKey, conversationCacheStorageKey, readConversationCache, writeConversationCache } from './chatConversationCache';
+import {
+  conversationCacheKey,
+  conversationCacheStorageKey,
+  readConversationCache,
+  writeConversationCache,
+} from './chatConversationCache';
 
 beforeEach(() => {
   localStorage.clear();
@@ -8,17 +13,27 @@ beforeEach(() => {
 
 describe('chat conversation cache', () => {
   it('returns an empty cache for malformed and outdated storage shapes', () => {
-    for (const value of ['not-json', '[]', JSON.stringify({ legacy: ['old turn'] }), JSON.stringify({ broken: { savedAt: 'today', turns: [] } })]) {
+    for (const value of [
+      'not-json',
+      '[]',
+      JSON.stringify({ legacy: ['old turn'] }),
+      JSON.stringify({ broken: { savedAt: 'today', turns: [] } }),
+    ]) {
       localStorage.setItem(conversationCacheStorageKey, value);
       expect(readConversationCache()).toEqual({});
     }
   });
 
   it('keeps only the 24 most recently saved conversations', () => {
-    const stored = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`agent:session-${index}`, {
-      savedAt: index,
-      turns: [{ role: 'assistant', content: `Turn ${index}` }],
-    }]));
+    const stored = Object.fromEntries(
+      Array.from({ length: 30 }, (_, index) => [
+        `agent:session-${index}`,
+        {
+          savedAt: index,
+          turns: [{ role: 'assistant', content: `Turn ${index}` }],
+        },
+      ]),
+    );
     localStorage.setItem(conversationCacheStorageKey, JSON.stringify(stored));
 
     const cache = readConversationCache();
@@ -31,24 +46,48 @@ describe('chat conversation cache', () => {
   it('writes a touched conversation without erasing valid untouched entries', () => {
     const untouchedKey = conversationCacheKey('luna', 'default');
     const touchedKey = conversationCacheKey('smatchet', 'default');
-    localStorage.setItem(conversationCacheStorageKey, JSON.stringify({
-      [untouchedKey]: { savedAt: 10, turns: [{ role: 'assistant', content: 'Untouched' }] },
-    }));
+    localStorage.setItem(
+      conversationCacheStorageKey,
+      JSON.stringify({
+        [untouchedKey]: { savedAt: 10, turns: [{ role: 'assistant', content: 'Untouched' }] },
+      }),
+    );
     vi.spyOn(Date, 'now').mockReturnValue(100);
 
     writeConversationCache({ [touchedKey]: [{ role: 'assistant', content: 'Fresh' }] }, touchedKey);
 
     const stored = JSON.parse(localStorage.getItem(conversationCacheStorageKey) ?? '{}');
     expect(stored.version).toBe(1);
-    expect(stored.value[untouchedKey]).toEqual({ savedAt: 10, turns: [{ role: 'assistant', content: 'Untouched' }] });
-    expect(stored.value[touchedKey]).toEqual({ savedAt: 100, turns: [{ role: 'assistant', content: 'Fresh' }] });
+    expect(stored.value[untouchedKey]).toEqual({
+      savedAt: 10,
+      turns: [{ role: 'assistant', content: 'Untouched' }],
+    });
+    expect(stored.value[touchedKey]).toEqual({
+      savedAt: 100,
+      turns: [{ role: 'assistant', content: 'Fresh' }],
+    });
   });
 
   it('stores durable artifact metadata without caching large optimistic image data', () => {
     const key = conversationCacheKey('hatchet', 'default');
-    const turn = { role: 'user', content: 'Image', metadata: { attachments: [{ name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/memory.png', preview: 'data:image/png;base64,YQ==' }] } };
+    const turn = {
+      role: 'user',
+      content: 'Image',
+      metadata: {
+        attachments: [
+          {
+            name: 'memory.png',
+            type: 'image/png',
+            artifactPath: 'artifacts/attachments/memory.png',
+            preview: 'data:image/png;base64,YQ==',
+          },
+        ],
+      },
+    };
     writeConversationCache({ [key]: [turn] }, key);
-    expect(readConversationCache()[key][0].metadata?.attachments).toEqual([{ name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/memory.png' }]);
+    expect(readConversationCache()[key][0].metadata?.attachments).toEqual([
+      { name: 'memory.png', type: 'image/png', artifactPath: 'artifacts/attachments/memory.png' },
+    ]);
     expect(turn.metadata.attachments[0].preview).toBe('data:image/png;base64,YQ==');
   });
 
@@ -56,10 +95,14 @@ describe('chat conversation cache', () => {
     const storage: Storage = {
       length: 0,
       clear: () => undefined,
-      getItem: () => { throw new Error('blocked'); },
+      getItem: () => {
+        throw new Error('blocked');
+      },
       key: () => null,
       removeItem: () => undefined,
-      setItem: () => { throw new Error('full'); },
+      setItem: () => {
+        throw new Error('full');
+      },
     };
 
     expect(readConversationCache(storage)).toEqual({});
@@ -68,21 +111,28 @@ describe('chat conversation cache', () => {
 });
 
 it('purge removes browser-default persistent storage and emits memory invalidation', async () => {
-  const { clearConversationCache, conversationCacheGeneration, conversationCacheInvalidated } = await import('./chatConversationCache');
+  const { clearConversationCache, conversationCacheGeneration, conversationCacheInvalidated } =
+    await import('./chatConversationCache');
   writeConversationCache({ 'a:s': [{ role: 'user', content: 'secret' }] });
-  const listener = vi.fn(); window.addEventListener(conversationCacheInvalidated, listener);
+  const listener = vi.fn();
+  window.addEventListener(conversationCacheInvalidated, listener);
   clearConversationCache();
   expect(readConversationCache()).toEqual({});
   expect(localStorage.getItem(conversationCacheStorageKey)).toBeNull();
   expect(listener).toHaveBeenCalledOnce();
-  expect((await import('./chatConversationCache')).conversationCacheGeneration).toBe(conversationCacheGeneration + 1);
+  expect((await import('./chatConversationCache')).conversationCacheGeneration).toBe(
+    conversationCacheGeneration + 1,
+  );
   window.removeEventListener(conversationCacheInvalidated, listener);
 });
 
 it('rejects malformed attachment metadata on read and write without throwing', () => {
   for (const attachments of [{}, [null], [{ name: 'bad', type: 3 }]]) {
     const turns = [{ role: 'user', content: 'bad', metadata: { attachments } }];
-    localStorage.setItem(conversationCacheStorageKey, JSON.stringify({ 'a:s': { savedAt: 1, turns } }));
+    localStorage.setItem(
+      conversationCacheStorageKey,
+      JSON.stringify({ 'a:s': { savedAt: 1, turns } }),
+    );
     expect(readConversationCache()).toEqual({});
     expect(() => writeConversationCache({ 'a:s': turns as never })).not.toThrow();
     expect(readConversationCache()['a:s']).toEqual([]);
@@ -90,17 +140,32 @@ it('rejects malformed attachment metadata on read and write without throwing', (
 });
 
 it('rejects cached tool activity with a missing label so it cannot crash after reload', () => {
-  const turns = [{ role: 'assistant', content: 'Done', metadata: { toolActivity: { runId: 'run-1', items: [{ id: 'tool-1', status: 'ok' }] } } }];
-  localStorage.setItem(conversationCacheStorageKey, JSON.stringify({ 'a:s': { savedAt: 1, turns } }));
+  const turns = [
+    {
+      role: 'assistant',
+      content: 'Done',
+      metadata: { toolActivity: { runId: 'run-1', items: [{ id: 'tool-1', status: 'ok' }] } },
+    },
+  ];
+  localStorage.setItem(
+    conversationCacheStorageKey,
+    JSON.stringify({ 'a:s': { savedAt: 1, turns } }),
+  );
   expect(readConversationCache()).toEqual({});
   expect(() => writeConversationCache({ 'a:s': turns as never }, 'a:s')).not.toThrow();
   expect(readConversationCache()['a:s']).toEqual([]);
 });
 
 it('bounds aggregate serialized content and metadata, retaining newest entries', () => {
-  const turns = Array.from({ length: 30 }, () => ({ role: 'assistant', content: 'x'.repeat(240 * 1024) }));
+  const turns = Array.from({ length: 30 }, () => ({
+    role: 'assistant',
+    content: 'x'.repeat(240 * 1024),
+  }));
   const values = new Map<string, string>();
-  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } as unknown as Storage;
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  } as unknown as Storage;
   writeConversationCache({ older: turns, newer: turns }, 'newer', storage);
   const stored = storage.getItem(conversationCacheStorageKey)!;
   expect(new TextEncoder().encode(stored).byteLength).toBeLessThan(8 * 1024 * 1024);
@@ -111,8 +176,24 @@ it('bounds aggregate serialized content and metadata, retaining newest entries',
 it('persists only the touched snapshot without traversing or mutating other active/pending memory', () => {
   const stable = [{ role: 'assistant', content: 'disk snapshot' }];
   writeConversationCache({ stable });
-  const memory = { active: [{ role: 'user', content: 'pending', runId: 'r', metadata: { attachments: [{ name: 'image', type: 'image/png', preview: 'data:image/png;base64,YQ==' }] } }], stable };
-  const unrelated = vi.fn(() => { throw new Error('unrelated transcript traversed'); });
+  const memory = {
+    active: [
+      {
+        role: 'user',
+        content: 'pending',
+        runId: 'r',
+        metadata: {
+          attachments: [
+            { name: 'image', type: 'image/png', preview: 'data:image/png;base64,YQ==' },
+          ],
+        },
+      },
+    ],
+    stable,
+  };
+  const unrelated = vi.fn(() => {
+    throw new Error('unrelated transcript traversed');
+  });
   Object.defineProperty(memory, 'stable', { enumerable: true, get: unrelated });
   const active = memory.active;
   writeConversationCache(memory, 'active');
@@ -121,4 +202,25 @@ it('persists only the touched snapshot without traversing or mutating other acti
   expect(active[0].metadata.attachments[0].preview).toContain('data:');
   expect(readConversationCache().stable).toEqual(stable);
   expect(readConversationCache().active[0]).toMatchObject({ content: 'pending', runId: 'r' });
+});
+
+it('round trips empty v2 failure metadata and recovery without synthesizing content', () => {
+  const key = conversationCacheKey('hatchet', 'default');
+  const turn = {
+    type: 'message',
+    role: 'assistant',
+    content: '',
+    metadata: {
+      chatResultVersion: 2 as const,
+      terminalStatus: 'failed' as const,
+      modelFailure: { origin: 'burrow' as const, code: 'model_result_invalid', retryable: false },
+      modelRecovery: {
+        version: 1 as const,
+        retryCount: 1,
+        requests: [{ state: 'exhausted' as const }],
+      },
+    },
+  };
+  writeConversationCache({ [key]: [turn] }, key);
+  expect(readConversationCache()[key]).toEqual([turn]);
 });

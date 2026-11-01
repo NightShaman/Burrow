@@ -1,31 +1,34 @@
 /* Theme-only treatments; geometry and all other palettes stay unchanged. */
-[data-theme="halloween"] :is(button, input, select, textarea, summary, [tabindex]):focus-visible,
-[data-theme="halloween"] input[type="checkbox"]:focus-visible {
+[data-theme='halloween'] :is(button, input, select, textarea, summary, [tabindex]):focus-visible,
+[data-theme='halloween'] input[type='checkbox']:focus-visible {
   outline-color: var(--focus-ring);
 }
-[data-theme="halloween"] .composer:focus-within {
+[data-theme='halloween'] .composer:focus-within {
   border-color: var(--focus-ring);
 }
 
 /* Bright pumpkin fills need dark foregrounds, not the normal light text role. */
-[data-theme="halloween"] .send:not(.stop),
-[data-theme="halloween"] .forge-primary,
-[data-theme="halloween"] .archive-calendar-grid button.active,
-[data-theme="halloween"] .group-mention-menu button:is(:hover, .is-active),
-[data-theme="halloween"] .group-mention-menu button:is(:hover, .is-active) small {
+[data-theme='halloween'] .send:not(.stop),
+[data-theme='halloween'] .forge-primary,
+[data-theme='halloween'] .archive-calendar-grid button.active,
+[data-theme='halloween'] .group-mention-menu button:is(:hover, .is-active),
+[data-theme='halloween'] .group-mention-menu button:is(:hover, .is-active) small {
   color: var(--on-accent);
 }
-[data-theme="halloween"] .workspace-toolbar .a2a-default-switch:checked::before {
+[data-theme='halloween'] .workspace-toolbar .a2a-default-switch:checked::before {
   background: var(--accent-contrast);
 }
 
 /* Quiet green indicators; pressure warnings keep their existing amber/red roles. */
-[data-theme="halloween"] .context-usage:not(.pressure-watch, .pressure-compress, .pressure-blocked) i b {
+[data-theme='halloween']
+  .context-usage:not(.pressure-watch, .pressure-compress, .pressure-blocked)
+  i
+  b {
   background: var(--ok);
 }
 
 /* Keep the operator bubble plum-dark; orange remains on actions, not body text. */
-[data-theme="halloween"] .message.operator .message-bubble {
+[data-theme='halloween'] .message.operator .message-bubble {
   background: #160e20;
   color: #f5eee6;
 }

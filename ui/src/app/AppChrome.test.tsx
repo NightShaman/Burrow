@@ -7,7 +7,13 @@ vi.mock('./ProviderPoolMetrics', () => ({ ProviderPoolMetrics: () => <div>Pool m
 
 const tabs: Tab[] = [
   { id: 'chat', label: 'Chat', kind: 'chat' },
-  { id: 'group:local:design', label: 'Design', kind: 'group', channelId: 'design', targetId: 'local' },
+  {
+    id: 'group:local:design',
+    label: 'Design',
+    kind: 'group',
+    channelId: 'design',
+    targetId: 'local',
+  },
 ];
 
 describe('DocumentTabs', () => {

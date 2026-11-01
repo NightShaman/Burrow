@@ -12,10 +12,28 @@ vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('./OperatorProfile', () => ({ optimizeAvatar: vi.fn() }));
 vi.mock('./DefaultMinionModel', () => ({ DefaultMinionModel: () => null }));
 vi.mock('./MinionDepthSettings', () => ({ MinionDepthSettings: () => null }));
-const agent = { id: 'ui-a', resourceId: 'node::a', name: 'Alpha', avatar: 'data:image/png;base64,AA', enabled: true, activity: 'Idle' } as Agent;
-const registryOnlyAgent = { ...agent, id: 'ui-empty', resourceId: 'node::empty', name: 'Registry only', avatar: 'R' } as Agent;
+const agent = {
+  id: 'ui-a',
+  resourceId: 'node::a',
+  name: 'Alpha',
+  avatar: 'data:image/png;base64,AA',
+  enabled: true,
+  activity: 'Idle',
+} as Agent;
+const registryOnlyAgent = {
+  ...agent,
+  id: 'ui-empty',
+  resourceId: 'node::empty',
+  name: 'Registry only',
+  avatar: 'R',
+} as Agent;
 const name = () => screen.getByLabelText('Displayed name') as HTMLInputElement;
-const writes = () => vi.mocked(api).mock.calls.map(([path, init]) => ({ path, method: init?.method, body: JSON.parse(init?.body as string) }));
+const writes = () =>
+  vi.mocked(api).mock.calls.map(([path, init]) => ({
+    path,
+    method: init?.method,
+    body: JSON.parse(init?.body as string),
+  }));
 let registry = { id: agent.resourceId!, name: agent.name, enabled: true };
 let identity = { id: agent.resourceId!, name: agent.name, avatar: agent.avatar };
 function accepted(_path: string, init?: RequestInit) {
@@ -27,22 +45,55 @@ function accepted(_path: string, init?: RequestInit) {
   identity = { ...identity, ...body };
   return { ok: true, agents: [{ id: 'other', name: 'Other', avatar: '' }, { ...identity }] };
 }
-function acceptWrites() { vi.mocked(api).mockImplementation(async (path, init) => accepted(path, init)); }
+function acceptWrites() {
+  vi.mocked(api).mockImplementation(async (path, init) => accepted(path, init));
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (cause: Error) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 function Leave({ leave }: { leave: () => void }) {
   const navigate = useUnsavedNavigation();
   return <button onClick={() => navigate(leave)}>Leave</button>;
 }
-function Form({ selected = agent, changed = async () => {}, leave = () => {} }: { selected?: Agent; changed?: () => Promise<void>; leave?: () => void }) {
-  return <ConfirmProvider><UnsavedChangesProvider><AgentSettings selected={selected} savedProviders={[]} onAgentsChanged={changed} section="details" /><Leave leave={leave} /></UnsavedChangesProvider></ConfirmProvider>;
+function Form({
+  selected = agent,
+  changed = async () => {},
+  leave = () => {},
+}: {
+  selected?: Agent;
+  changed?: () => Promise<void>;
+  leave?: () => void;
+}) {
+  return (
+    <ConfirmProvider>
+      <UnsavedChangesProvider>
+        <AgentSettings
+          selected={selected}
+          savedProviders={[]}
+          onAgentsChanged={changed}
+          section="details"
+        />
+        <Leave leave={leave} />
+      </UnsavedChangesProvider>
+    </ConfirmProvider>
+  );
 }
-beforeEach(() => { registry = { id: agent.resourceId!, name: agent.name, enabled: true }; identity = { id: agent.resourceId!, name: agent.name, avatar: agent.avatar }; acceptWrites(); vi.mocked(optimizeAvatar).mockResolvedValue('data:image/webp;base64,BB'); });
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+beforeEach(() => {
+  registry = { id: agent.resourceId!, name: agent.name, enabled: true };
+  identity = { id: agent.resourceId!, name: agent.name, avatar: agent.avatar };
+  acceptWrites();
+  vi.mocked(optimizeAvatar).mockResolvedValue('data:image/webp;base64,BB');
+});
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
 
 it('validates names on blur, trims once, and never writes while typing or for an unchanged value', async () => {
   render(<Form />);
@@ -59,7 +110,11 @@ it('validates names on blur, trims once, and never writes while typing or for an
   expect(name().value).toBe('Beta');
   expect(writes()).toEqual([
     { path: '/api/agents/node%3A%3Aa', method: 'PATCH', body: { name: 'Beta' } },
-    { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::a', name: 'Beta' } },
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::a', name: 'Beta' },
+    },
   ]);
   fireEvent.blur(name());
   expect(api).toHaveBeenCalledTimes(2);
@@ -72,7 +127,9 @@ it('enabled is an independent PATCH and even keyboard blur towards it cannot com
   fireEvent.blur(name(), { relatedTarget: enabled });
   fireEvent.click(enabled);
   await screen.findByText('Agent details saved.');
-  expect(writes()).toEqual([{ path: '/api/agents/node%3A%3Aa', method: 'PATCH', body: { enabled: false } }]);
+  expect(writes()).toEqual([
+    { path: '/api/agents/node%3A%3Aa', method: 'PATCH', body: { enabled: false } },
+  ]);
   expect(name().value).toBe('unfinished');
   fireEvent.click(screen.getByText('Leave'));
   expect(screen.getByText('Unsaved changes')).toBeTruthy();
@@ -91,14 +148,22 @@ it('creates a complete identity on the first registry-only write, then preserves
   await screen.findByText('Agent details saved.');
   expect(writes()).toEqual([
     { path: '/api/agents/node%3A%3Aempty', method: 'PATCH', body: { name: 'Named identity' } },
-    { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::empty', name: 'Named identity', avatar: '' } },
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::empty', name: 'Named identity', avatar: '' },
+    },
   ]);
   fireEvent.change(name(), { target: { value: 'Named again' } });
   fireEvent.blur(name());
   await waitFor(() => expect(name().disabled).toBe(false));
   expect(writes().slice(2)).toEqual([
     { path: '/api/agents/node%3A%3Aempty', method: 'PATCH', body: { name: 'Named again' } },
-    { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::empty', name: 'Named again' } },
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::empty', name: 'Named again' },
+    },
   ]);
 });
 
@@ -106,12 +171,22 @@ it('first avatar write for an empty identity includes the accepted registry name
   registry = { id: registryOnlyAgent.resourceId!, name: registryOnlyAgent.name, enabled: true };
   identity = { id: registryOnlyAgent.resourceId!, name: registryOnlyAgent.name, avatar: '' };
   const { container } = render(<Form selected={registryOnlyAgent} />);
-  fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
+  fireEvent.change(container.querySelector('input[type=file]')!, {
+    target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] },
+  });
   await screen.findByText('Agent details saved.');
-  expect(writes()).toEqual([{
-    path: '/api/settings/identities', method: 'PUT',
-    body: { kind: 'agent', id: 'node::empty', name: 'Registry only', avatar: 'data:image/webp;base64,BB' },
-  }]);
+  expect(writes()).toEqual([
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: {
+        kind: 'agent',
+        id: 'node::empty',
+        name: 'Registry only',
+        avatar: 'data:image/webp;base64,BB',
+      },
+    },
+  ]);
 });
 
 it('immediately saves avatar selection, paste, and removal with the accepted name, not an invalid draft', async () => {
@@ -120,13 +195,25 @@ it('immediately saves avatar selection, paste, and removal with the accepted nam
   const input = container.querySelector('input[type=file]')!;
   fireEvent.change(input, { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
   await screen.findByText('Agent details saved.');
-  expect(writes()).toEqual([{ path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::a', avatar: 'data:image/webp;base64,BB' } }]);
+  expect(writes()).toEqual([
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::a', avatar: 'data:image/webp;base64,BB' },
+    },
+  ]);
   expect(name().value).toBe(' ');
   fireEvent.click(screen.getByText('Remove image'));
   await waitFor(() => expect(name().disabled).toBe(false));
   expect(writes()[1].body).toEqual({ kind: 'agent', id: 'node::a', avatar: '' });
   vi.mocked(optimizeAvatar).mockResolvedValue('data:image/webp;base64,CC');
-  fireEvent.paste(screen.getByLabelText('Agent avatar image'), { clipboardData: { items: [{ type: 'image/png', getAsFile: () => new File(['y'], 'paste.png', { type: 'image/png' }) }] } });
+  fireEvent.paste(screen.getByLabelText('Agent avatar image'), {
+    clipboardData: {
+      items: [
+        { type: 'image/png', getAsFile: () => new File(['y'], 'paste.png', { type: 'image/png' }) },
+      ],
+    },
+  });
   await waitFor(() => expect(writes()).toHaveLength(3));
   await waitFor(() => expect(name().disabled).toBe(false));
   expect(writes()[2].body.avatar).toBe('data:image/webp;base64,CC');
@@ -158,7 +245,9 @@ it('keeps failed drafts guarded through Stay, a failed guard retry, and a succes
 
 it('guard Save persists an unblurred draft exactly once; blur plus navigation cannot duplicate pending saves', async () => {
   const pending = deferred<object>();
-  vi.mocked(api).mockImplementation((path, init) => pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    pending.promise.then(() => accepted(path, init)),
+  );
   const leave = vi.fn();
   render(<Form leave={leave} />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
@@ -176,7 +265,11 @@ it('guard Save persists an unblurred draft exactly once; blur plus navigation ca
 
 it('does not unlock partial saves until every request settles and retains the draft on partial failure', async () => {
   const pending = deferred<object>();
-  vi.mocked(api).mockImplementation((path, init) => init?.method === 'PATCH' ? Promise.reject(new Error('partial')) : pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    init?.method === 'PATCH'
+      ? Promise.reject(new Error('partial'))
+      : pending.promise.then(() => accepted(path, init)),
+  );
   render(<Form />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
   fireEvent.blur(name());
@@ -194,12 +287,16 @@ it('does not unlock partial saves until every request settles and retains the dr
 
 it('ignores old save success and errors after changing owners, including resource-only identity changes', async () => {
   const pending = deferred<object>();
-  vi.mocked(api).mockImplementation((path, init) => pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    pending.promise.then(() => accepted(path, init)),
+  );
   const changed = vi.fn(async () => {});
   const view = render(<Form changed={changed} />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
   fireEvent.blur(name());
-  view.rerender(<Form selected={{ ...agent, resourceId: 'node::b', name: 'Bravo' }} changed={changed} />);
+  view.rerender(
+    <Form selected={{ ...agent, resourceId: 'node::b', name: 'Bravo' }} changed={changed} />,
+  );
   await act(async () => pending.resolve({}));
   expect(name().value).toBe('Bravo');
   expect(changed).not.toHaveBeenCalled();
@@ -219,7 +316,9 @@ it('ignores optimized images after owner change or unmount, without writing or r
   vi.mocked(optimizeAvatar).mockReturnValue(pending.promise);
   const changed = vi.fn(async () => {});
   const view = render(<Form changed={changed} />);
-  fireEvent.change(view.container.querySelector('input[type=file]')!, { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
+  fireEvent.change(view.container.querySelector('input[type=file]')!, {
+    target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] },
+  });
   expect(screen.getByText('Processing agent avatar…')).toBeTruthy();
   view.rerender(<Form selected={{ ...agent, id: 'b', name: 'Bravo' }} changed={changed} />);
   await act(async () => pending.resolve('data:image/png;base64,OLD'));
@@ -228,7 +327,9 @@ it('ignores optimized images after owner change or unmount, without writing or r
   expect(name().value).toBe('Bravo');
   const second = deferred<string>();
   vi.mocked(optimizeAvatar).mockReturnValue(second.promise);
-  fireEvent.change(view.container.querySelector('input[type=file]')!, { target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] } });
+  fireEvent.change(view.container.querySelector('input[type=file]')!, {
+    target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] },
+  });
   view.unmount();
   await act(async () => second.resolve('data:image/png;base64,OLD'));
   expect(api).not.toHaveBeenCalled();
@@ -246,7 +347,7 @@ it('retries an avatar failure independently of an invalid name and preserves it 
   expect(screen.getByText('Retry saving agent')).toBeTruthy();
   fireEvent.click(screen.getByText('Retry saving agent'));
   await waitFor(() => expect(name().disabled).toBe(false));
-  expect(writes().map(write => write.body)).toEqual([
+  expect(writes().map((write) => write.body)).toEqual([
     { kind: 'agent', id: 'node::a', avatar: '' },
     { enabled: false },
     { kind: 'agent', id: 'node::a', avatar: '' },
@@ -258,7 +359,9 @@ it('retries an avatar failure independently of an invalid name and preserves it 
 it('publishes accepted baselines before refresh and retries only the latest catalog callback after refresh failure', async () => {
   const pending = deferred<object>();
   const catalog = deferred<void>();
-  vi.mocked(api).mockImplementation((path, init) => pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    pending.promise.then(() => accepted(path, init)),
+  );
   const oldChanged = vi.fn(async () => {});
   const changed = vi.fn(() => catalog.promise);
   const leave = vi.fn();
@@ -272,7 +375,9 @@ it('publishes accepted baselines before refresh and retries only the latest cata
   expect(name().value).toBe('Beta');
   expect(name().disabled).toBe(true);
   await act(async () => catalog.reject(new Error('refresh failed')));
-  expect(screen.getByRole('alert').textContent).toContain('Could not refresh agents: refresh failed');
+  expect(screen.getByRole('alert').textContent).toContain(
+    'Could not refresh agents: refresh failed',
+  );
   expect(screen.queryByText('Retry saving agent')).toBeNull();
   fireEvent.change(name(), { target: { value: 'unfinished' } });
   fireEvent.click(screen.getByText('Leave'));
@@ -293,7 +398,11 @@ it('publishes accepted baselines before refresh and retries only the latest cata
 
 for (const rejectedMethod of ['PATCH', 'PUT']) {
   it(`retries only the failed ${rejectedMethod} after a partial name save`, async () => {
-    vi.mocked(api).mockImplementation((path, init) => init?.method === rejectedMethod ? Promise.reject(new Error('partial')) : Promise.resolve(accepted(path, init)));
+    vi.mocked(api).mockImplementation((path, init) =>
+      init?.method === rejectedMethod
+        ? Promise.reject(new Error('partial'))
+        : Promise.resolve(accepted(path, init)),
+    );
     const changed = vi.fn(async () => {});
     const leave = vi.fn();
     render(<Form changed={changed} leave={leave} />);
@@ -307,7 +416,7 @@ for (const rejectedMethod of ['PATCH', 'PUT']) {
     acceptWrites();
     fireEvent.click(screen.getByText('Retry saving agent'));
     await screen.findByText('Agent details saved.');
-    expect(writes().map(write => write.method)).toEqual(['PATCH', 'PUT', rejectedMethod]);
+    expect(writes().map((write) => write.method)).toEqual(['PATCH', 'PUT', rejectedMethod]);
     fireEvent.click(screen.getByText('Leave'));
     expect(leave).toHaveBeenCalledOnce();
     expect(changed).toHaveBeenCalledTimes(2);
@@ -315,7 +424,11 @@ for (const rejectedMethod of ['PATCH', 'PUT']) {
 }
 
 it('uses each endpoint’s accepted name for unrelated updates after partial acceptance', async () => {
-  vi.mocked(api).mockImplementation((path, init) => init?.method === 'PATCH' ? Promise.reject(new Error('name denied')) : Promise.resolve(accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    init?.method === 'PATCH'
+      ? Promise.reject(new Error('name denied'))
+      : Promise.resolve(accepted(path, init)),
+  );
   render(<Form />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
   fireEvent.blur(name());
@@ -335,7 +448,11 @@ it('uses each endpoint’s accepted name for unrelated updates after partial acc
 });
 
 it('does not copy a name accepted by PATCH into an unrelated identity update after PUT failed', async () => {
-  vi.mocked(api).mockImplementation((path, init) => init?.method === 'PUT' ? Promise.reject(new Error('identity denied')) : Promise.resolve(accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    init?.method === 'PUT'
+      ? Promise.reject(new Error('identity denied'))
+      : Promise.resolve(accepted(path, init)),
+  );
   render(<Form />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
   fireEvent.blur(name());
@@ -351,7 +468,9 @@ it('does not copy a name accepted by PATCH into an unrelated identity update aft
 });
 
 it('accumulates avatar and enabled failures and retries both without committing an invalid unrelated name', async () => {
-  vi.mocked(api).mockRejectedValueOnce(new Error('avatar denied')).mockRejectedValueOnce(new Error('enabled denied'));
+  vi.mocked(api)
+    .mockRejectedValueOnce(new Error('avatar denied'))
+    .mockRejectedValueOnce(new Error('enabled denied'));
   render(<Form />);
   fireEvent.change(name(), { target: { value: ' ' } });
   fireEvent.click(screen.getByText('Remove image'));
@@ -362,17 +481,27 @@ it('accumulates avatar and enabled failures and retries both without committing 
   fireEvent.click(screen.getByText('Retry saving agent'));
   await waitFor(() => expect(screen.queryByText('Retry saving agent')).toBeNull());
   expect(writes()).toEqual([
-    { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::a', avatar: '' } },
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::a', avatar: '' },
+    },
     { path: '/api/agents/node%3A%3Aa', method: 'PATCH', body: { enabled: false } },
     { path: '/api/agents/node%3A%3Aa', method: 'PATCH', body: { enabled: false } },
-    { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: 'node::a', avatar: '' } },
+    {
+      path: '/api/settings/identities',
+      method: 'PUT',
+      body: { kind: 'agent', id: 'node::a', avatar: '' },
+    },
   ]);
   expect(name().value).toBe(' ');
 });
 
 it('suppresses a pending save callback after unmount', async () => {
   const pending = deferred<object>();
-  vi.mocked(api).mockImplementation((path, init) => pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    pending.promise.then(() => accepted(path, init)),
+  );
   const changed = vi.fn(async () => {});
   const view = render(<Form changed={changed} />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
@@ -384,7 +513,9 @@ it('suppresses a pending save callback after unmount', async () => {
 
 it('resumes the first navigation after blur autosave without a second click or duplicate mutation', async () => {
   const pending = deferred<object>();
-  vi.mocked(api).mockImplementation((path, init) => pending.promise.then(() => accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    pending.promise.then(() => accepted(path, init)),
+  );
   const leave = vi.fn();
   render(<Form leave={leave} />);
   fireEvent.change(name(), { target: { value: 'Beta' } });
@@ -414,7 +545,11 @@ it('reports avatar processing errors without a write and permits a fresh selecti
 });
 
 it('guard Save retries only the unaccepted endpoint and allows navigation despite a subsequent refresh failure', async () => {
-  vi.mocked(api).mockImplementation((path, init) => init?.method === 'PUT' ? Promise.reject(new Error('identity denied')) : Promise.resolve(accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    init?.method === 'PUT'
+      ? Promise.reject(new Error('identity denied'))
+      : Promise.resolve(accepted(path, init)),
+  );
   const changed = vi.fn(async () => {});
   const leave = vi.fn();
   render(<Form changed={changed} leave={leave} />);
@@ -426,9 +561,11 @@ it('guard Save retries only the unaccepted endpoint and allows navigation despit
   fireEvent.click(screen.getByText('Leave'));
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
   await waitFor(() => expect(leave).toHaveBeenCalledOnce());
-  expect(writes().map(write => write.method)).toEqual(['PATCH', 'PUT', 'PUT']);
+  expect(writes().map((write) => write.method)).toEqual(['PATCH', 'PUT', 'PUT']);
   expect(screen.queryByText('Retry saving agent')).toBeNull();
-  expect(screen.getByRole('alert').textContent).toContain('Could not refresh agents: catalog offline');
+  expect(screen.getByRole('alert').textContent).toContain(
+    'Could not refresh agents: catalog offline',
+  );
 });
 
 it('discard after a mixed guard Save retains accepted name/enabled changes but abandons the failed avatar', async () => {
@@ -441,7 +578,11 @@ it('discard after a mixed guard Save retains accepted name/enabled changes but a
   fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
   await screen.findByText('Could not save agent: avatar denied; enabled denied');
   fireEvent.change(name(), { target: { value: 'Beta' } });
-  vi.mocked(api).mockImplementation((path, init) => init?.method === 'PUT' ? Promise.reject(new Error('identity denied')) : Promise.resolve(accepted(path, init)));
+  vi.mocked(api).mockImplementation((path, init) =>
+    init?.method === 'PUT'
+      ? Promise.reject(new Error('identity denied'))
+      : Promise.resolve(accepted(path, init)),
+  );
   fireEvent.click(screen.getByText('Leave'));
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
   await screen.findByText('Could not save agent: identity denied');
@@ -459,11 +600,18 @@ it('discard after a mixed guard Save retains accepted name/enabled changes but a
 });
 
 for (const endpoint of ['registry', 'identity'] as const) {
-  const valid = endpoint === 'registry'
-    ? { ok: true, agent: { id: agent.resourceId, name: 'Alpha', enabled: false } }
-    : { ok: true, agents: [{ id: agent.resourceId, name: 'Alpha', avatar: '' }] };
+  const valid =
+    endpoint === 'registry'
+      ? { ok: true, agent: { id: agent.resourceId, name: 'Alpha', enabled: false } }
+      : { ok: true, agents: [{ id: agent.resourceId, name: 'Alpha', avatar: '' }] };
   const malformed: unknown[] = [
-    undefined, null, {}, 'not json', { ok: true }, { ...valid, ok: false }, { ...valid, ok: 'true' },
+    undefined,
+    null,
+    {},
+    'not json',
+    { ok: true },
+    { ...valid, ok: false },
+    { ...valid, ok: 'true' },
     endpoint === 'registry'
       ? { ok: true, agent: { id: agent.id, name: 'Alpha', enabled: false } }
       : { ok: true, agents: [{ id: agent.id, name: 'Alpha', avatar: '' }] },
@@ -474,30 +622,35 @@ for (const endpoint of ['registry', 'identity'] as const) {
       ? { ok: true, agent: { id: agent.resourceId, enabled: false } }
       : { ok: true, agents: [{ id: agent.resourceId, avatar: '' }] },
   ];
-  it.each(malformed)(`rejects malformed ${endpoint} ACK %# without refresh, cleanup, or draft loss`, async response => {
-    vi.mocked(api).mockResolvedValue(response);
-    const changed = vi.fn(async () => {});
-    const leave = vi.fn();
-    const view = render(<Form changed={changed} leave={leave} />);
-    if (endpoint === 'registry') fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
-    else fireEvent.click(screen.getByText('Remove image'));
-    await screen.findByText(/Invalid agent .* acknowledgement/);
-    expect(changed).not.toHaveBeenCalled();
-    expect(screen.queryByText('Agent details saved.')).toBeNull();
-    expect(screen.getByText('Retry saving agent')).toBeTruthy();
-    if (endpoint === 'registry') expect(screen.getByRole('checkbox', { name: 'Enabled' })).toHaveProperty('checked', false);
-    else expect(view.container.querySelector('.agent-avatar-preview img')).toBeNull();
-    fireEvent.click(screen.getByText('Leave'));
-    expect(screen.getByText('Unsaved changes')).toBeTruthy();
-    fireEvent.click(screen.getByText('Stay'));
-    acceptWrites();
-    fireEvent.click(screen.getByText('Retry saving agent'));
-    await screen.findByText('Agent details saved.');
-    expect(api).toHaveBeenCalledTimes(2);
-    expect(changed).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByText('Leave'));
-    expect(leave).toHaveBeenCalledOnce();
-  });
+  it.each(malformed)(
+    `rejects malformed ${endpoint} ACK %# without refresh, cleanup, or draft loss`,
+    async (response) => {
+      vi.mocked(api).mockResolvedValue(response);
+      const changed = vi.fn(async () => {});
+      const leave = vi.fn();
+      const view = render(<Form changed={changed} leave={leave} />);
+      if (endpoint === 'registry')
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+      else fireEvent.click(screen.getByText('Remove image'));
+      await screen.findByText(/Invalid agent .* acknowledgement/);
+      expect(changed).not.toHaveBeenCalled();
+      expect(screen.queryByText('Agent details saved.')).toBeNull();
+      expect(screen.getByText('Retry saving agent')).toBeTruthy();
+      if (endpoint === 'registry')
+        expect(screen.getByRole('checkbox', { name: 'Enabled' })).toHaveProperty('checked', false);
+      else expect(view.container.querySelector('.agent-avatar-preview img')).toBeNull();
+      fireEvent.click(screen.getByText('Leave'));
+      expect(screen.getByText('Unsaved changes')).toBeTruthy();
+      fireEvent.click(screen.getByText('Stay'));
+      acceptWrites();
+      fireEvent.click(screen.getByText('Retry saving agent'));
+      await screen.findByText('Agent details saved.');
+      expect(api).toHaveBeenCalledTimes(2);
+      expect(changed).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByText('Leave'));
+      expect(leave).toHaveBeenCalledOnce();
+    },
+  );
 }
 
 it('opening the unsaved modal suppresses name blur autosave until Save is chosen', async () => {
@@ -531,9 +684,16 @@ it('does not trim away a name draft or navigate on malformed acknowledgements', 
 });
 
 it('uses accepted response values for the draft, discard baseline, and subsequent no-op saves', async () => {
-  vi.mocked(api).mockImplementation(async (_path, init) => init?.method === 'PATCH'
-    ? { ok: true, agent: { id: agent.resourceId, name: 'Canonical', enabled: true } }
-    : { ok: true, agents: [{ id: agent.resourceId, name: 'Canonical', avatar: 'data:image/png;base64,SERVER' }] });
+  vi.mocked(api).mockImplementation(async (_path, init) =>
+    init?.method === 'PATCH'
+      ? { ok: true, agent: { id: agent.resourceId, name: 'Canonical', enabled: true } }
+      : {
+          ok: true,
+          agents: [
+            { id: agent.resourceId, name: 'Canonical', avatar: 'data:image/png;base64,SERVER' },
+          ],
+        },
+  );
   const leave = vi.fn();
   const view = render(<Form leave={leave} />);
   fireEvent.change(name(), { target: { value: 'Requested' } });
@@ -546,7 +706,9 @@ it('uses accepted response values for the draft, discard baseline, and subsequen
   // its actual accepted value. Neither submitted value becomes the baseline.
   fireEvent.click(screen.getByText('Remove image'));
   await waitFor(() => expect(name().disabled).toBe(false));
-  expect(view.container.querySelector('.agent-avatar-preview img')?.getAttribute('src')).toBe('data:image/png;base64,SERVER');
+  expect(view.container.querySelector('.agent-avatar-preview img')?.getAttribute('src')).toBe(
+    'data:image/png;base64,SERVER',
+  );
   fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
   await waitFor(() => expect(name().disabled).toBe(false));
   expect(screen.getByRole('checkbox', { name: 'Enabled' })).toHaveProperty('checked', true);
@@ -554,12 +716,16 @@ it('uses accepted response values for the draft, discard baseline, and subsequen
   fireEvent.click(screen.getByText('Leave'));
   fireEvent.click(screen.getByText('Discard'));
   expect(name().value).toBe('Canonical');
-  expect(view.container.querySelector('.agent-avatar-preview img')?.getAttribute('src')).toBe('data:image/png;base64,SERVER');
+  expect(view.container.querySelector('.agent-avatar-preview img')?.getAttribute('src')).toBe(
+    'data:image/png;base64,SERVER',
+  );
 });
 
 for (const malformedMethod of ['PATCH', 'PUT']) {
   it(`retains endpoint baselines after malformed ${malformedMethod}, Discard, and an unrelated guard Save`, async () => {
-    vi.mocked(api).mockImplementation(async (path, init) => init?.method === malformedMethod ? { ok: true } : accepted(path, init));
+    vi.mocked(api).mockImplementation(async (path, init) =>
+      init?.method === malformedMethod ? { ok: true } : accepted(path, init),
+    );
     const changed = vi.fn(async () => {});
     const leave = vi.fn();
     render(<Form changed={changed} leave={leave} />);
@@ -581,8 +747,16 @@ for (const malformedMethod of ['PATCH', 'PUT']) {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await waitFor(() => expect(leave).toHaveBeenCalledTimes(2));
     expect(writes().slice(2)).toEqual([
-      { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: agent.resourceId, avatar: '' } },
-      { path: '/api/settings/identities', method: 'PUT', body: { kind: 'agent', id: agent.resourceId, avatar: '' } },
+      {
+        path: '/api/settings/identities',
+        method: 'PUT',
+        body: { kind: 'agent', id: agent.resourceId, avatar: '' },
+      },
+      {
+        path: '/api/settings/identities',
+        method: 'PUT',
+        body: { kind: 'agent', id: agent.resourceId, avatar: '' },
+      },
     ]);
   });
 }

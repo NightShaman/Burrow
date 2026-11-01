@@ -1,95 +1,333 @@
 import { expect, it } from 'vitest';
 import type { ActiveChatRunsResponse } from '../../app/api';
 import { projectChatActivity } from './chatActivityProjection';
-const selection = { agentId: 'a', sessionId: 'parent', isChildSession: false, hadRuns: false, now: Date.parse('2026-10-15T00:02:00Z') };
+const selection = {
+  agentId: 'a',
+  sessionId: 'parent',
+  isChildSession: false,
+  hadRuns: false,
+  now: Date.parse('2026-10-15T00:02:00Z'),
+};
 it('is deterministic without mutating the response and keeps parent/child identity separate', () => {
-  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', steeringReady: true, answerText: ' partial ', progress: [] }], subagents: [
-    { id: 'c', agentId: 'a', runId: 'cr', parentRunId: 'r', parentSessionId: 'parent', sessionId: 'child', final: false, activity: { startedAt: '2026-10-15T00:00:00Z', tool: 'shell_exec' } },
-    { id: 'foreign', agentId: 'b', parentSessionId: 'parent', final: false },
-  ] } as ActiveChatRunsResponse;
+  const response = {
+    ok: true,
+    runs: [
+      {
+        status: 'running',
+        runId: 'r',
+        agentId: 'a',
+        sessionId: 'parent',
+        steeringReady: true,
+        answerText: ' partial ',
+        progress: [],
+      },
+    ],
+    subagents: [
+      {
+        id: 'c',
+        agentId: 'a',
+        runId: 'cr',
+        parentRunId: 'r',
+        parentSessionId: 'parent',
+        sessionId: 'child',
+        final: false,
+        activity: { startedAt: '2026-10-15T00:00:00Z', tool: 'shell_exec' },
+      },
+      { id: 'foreign', agentId: 'b', parentSessionId: 'parent', final: false },
+    ],
+  } as ActiveChatRunsResponse;
   const before = JSON.stringify(response);
   const first = projectChatActivity(response, selection);
   expect(projectChatActivity(response, selection)).toEqual(first);
   expect(JSON.stringify(response)).toBe(before);
-  expect(first.runtimeRun).toMatchObject({ runId: 'r', agentId: 'a', sessionId: 'parent', steeringReady: true, answerText: ' partial ' });
+  expect(first.runtimeRun).toMatchObject({
+    runId: 'r',
+    agentId: 'a',
+    sessionId: 'parent',
+    steeringReady: true,
+    answerText: ' partial ',
+  });
   expect(first.childActivities).toHaveLength(1);
   expect(first.childActivities[0].summary).toContain('elapsed 2m');
   expect(projectChatActivity({ ...response, runs: [] }, selection).runtimeRun).toBeNull();
-  expect(projectChatActivity({ ...response, runs: [] }, { ...selection, sessionId: 'child', isChildSession: true }).runtimeRun?.runId).toBe('cr');
+  expect(
+    projectChatActivity(
+      { ...response, runs: [] },
+      { ...selection, sessionId: 'child', isChildSession: true },
+    ).runtimeRun?.runId,
+  ).toBe('cr');
 });
 it('rejects foreign run/session progress for stage, thought and tool projection and never exposes MCP payloads', () => {
-  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', progress: [
-    { type: 'assistant.thought', runId: 'foreign', data: { delta: 'intruder' } },
-    { type: 'tool.started', sessionId: 'foreign', data: { tool: 'bad', activityId: 'foreign' } },
-    { type: 'model.dispatched', runId: 'r', data: { modelCall: 1 } },
-    { type: 'tool.completed', runId: 'r', data: { tool: 'mcp_call', mcpToolName: 'safe_name', activityId: 'good', output: 'secret', command: 'secret' } },
-  ] }] } as ActiveChatRunsResponse;
+  const response = {
+    ok: true,
+    runs: [
+      {
+        status: 'running',
+        runId: 'r',
+        agentId: 'a',
+        sessionId: 'parent',
+        progress: [
+          { type: 'assistant.thought', runId: 'foreign', data: { delta: 'intruder' } },
+          {
+            type: 'tool.started',
+            sessionId: 'foreign',
+            data: { tool: 'bad', activityId: 'foreign' },
+          },
+          { type: 'model.dispatched', runId: 'r', data: { modelCall: 1 } },
+          {
+            type: 'tool.completed',
+            runId: 'r',
+            data: {
+              tool: 'mcp_call',
+              mcpToolName: 'safe_name',
+              activityId: 'good',
+              output: 'secret',
+              command: 'secret',
+            },
+          },
+        ],
+      },
+    ],
+  } as ActiveChatRunsResponse;
   const { runtimeRun } = projectChatActivity(response, selection);
   expect(runtimeRun?.progress).toEqual([]);
-  expect(runtimeRun?.toolActivity?.items).toEqual([{ id: 'good', label: 'MCP · safe_name', status: 'ok', detail: 'safe_name' }]);
+  expect(runtimeRun?.toolActivity?.items).toEqual([
+    { id: 'good', label: 'MCP · safe_name', status: 'ok', detail: 'safe_name' },
+  ]);
   expect(JSON.stringify(runtimeRun)).not.toContain('secret');
 });
 it('requests one terminal refresh after activity disappears, and keeps child terminal writes refreshable', () => {
   expect(projectChatActivity({ ok: true, runs: [] }, selection).shouldRefresh).toBe(false);
-  expect(projectChatActivity({ ok: true, runs: [] }, { ...selection, hadRuns: true })).toMatchObject({ shouldRefresh: true, hadRuns: false });
-  expect(projectChatActivity({ ok: true, runs: [] }, { ...selection, isChildSession: true }).shouldRefresh).toBe(true);
+  expect(
+    projectChatActivity({ ok: true, runs: [] }, { ...selection, hadRuns: true }),
+  ).toMatchObject({ shouldRefresh: true, hadRuns: false });
+  expect(
+    projectChatActivity({ ok: true, runs: [] }, { ...selection, isChildSession: true })
+      .shouldRefresh,
+  ).toBe(true);
 });
 
-it.each(['cancelled', 'completed', 'failed', 'superseded'])('never projects a %s summary as live, including child fallback and A2A', (status) => {
-  const terminal = { runId: 'old', agentId: 'a', sessionId: 'parent', status, source: 'a2a', a2a: { parentAgentId: 'b' } };
-  const response = { ok: true, runs: [terminal], subagents: [{ id: 'child', runId: 'old', agentId: 'a', sessionId: 'parent', final: false }] };
-  expect(projectChatActivity(response, { ...selection, isChildSession: true })).toMatchObject({ runtimeRun: null, a2aActivities: [], shouldRefresh: true });
-  for (const liveStatus of ['running', 'cancelling']) {
-    expect(projectChatActivity({ ...response, runs: [terminal, { ...terminal, runId: 'new', status: liveStatus }] }, selection).runtimeRun?.runId).toBe('new');
-  }
-});
+it.each(['cancelled', 'completed', 'failed', 'superseded'])(
+  'never projects a %s summary as live, including child fallback and A2A',
+  (status) => {
+    const terminal = {
+      runId: 'old',
+      agentId: 'a',
+      sessionId: 'parent',
+      status,
+      source: 'a2a',
+      a2a: { parentAgentId: 'b' },
+    };
+    const response = {
+      ok: true,
+      runs: [terminal],
+      subagents: [{ id: 'child', runId: 'old', agentId: 'a', sessionId: 'parent', final: false }],
+    };
+    expect(projectChatActivity(response, { ...selection, isChildSession: true })).toMatchObject({
+      runtimeRun: null,
+      a2aActivities: [],
+      shouldRefresh: true,
+    });
+    for (const liveStatus of ['running', 'cancelling']) {
+      expect(
+        projectChatActivity(
+          { ...response, runs: [terminal, { ...terminal, runId: 'new', status: liveStatus }] },
+          selection,
+        ).runtimeRun?.runId,
+      ).toBe('new');
+    }
+  },
+);
 
-it.each(['hatchet', 'smatchet'])('carries %s delegation provenance from the active child, not provider role', (agentId) => {
-  const { runtimeRun } = projectChatActivity({ ok: true, runs: [], subagents: [{ id: 'child', runId: 'child-run', agentId, sessionId: 'child-session', parentSessionId: 'default', purpose: 'Review the interface', status: 'running' }] }, { ...selection, agentId, sessionId: 'child-session', isChildSession: true });
-  expect(runtimeRun).toMatchObject({ latestUserMessage: 'Review the interface', userMessageMetadata: { kind: 'subagent-delegated-task', parentAgentId: agentId, subagentId: 'child' } });
-  const operatorRun = projectChatActivity({ ok: true, runs: [{ agentId, sessionId: 'child-session', runId: 'operator-run', status: 'running', latestUserMessage: 'Actual operator followup' }] }, { ...selection, agentId, sessionId: 'child-session', isChildSession: true }).runtimeRun;
-  expect(operatorRun?.userMessageMetadata).toBeUndefined();
-});
+it.each(['hatchet', 'smatchet'])(
+  'carries %s delegation provenance from the active child, not provider role',
+  (agentId) => {
+    const { runtimeRun } = projectChatActivity(
+      {
+        ok: true,
+        runs: [],
+        subagents: [
+          {
+            id: 'child',
+            runId: 'child-run',
+            agentId,
+            sessionId: 'child-session',
+            parentSessionId: 'default',
+            purpose: 'Review the interface',
+            status: 'running',
+          },
+        ],
+      },
+      { ...selection, agentId, sessionId: 'child-session', isChildSession: true },
+    );
+    expect(runtimeRun).toMatchObject({
+      latestUserMessage: 'Review the interface',
+      userMessageMetadata: {
+        kind: 'subagent-delegated-task',
+        parentAgentId: agentId,
+        subagentId: 'child',
+      },
+    });
+    const operatorRun = projectChatActivity(
+      {
+        ok: true,
+        runs: [
+          {
+            agentId,
+            sessionId: 'child-session',
+            runId: 'operator-run',
+            status: 'running',
+            latestUserMessage: 'Actual operator followup',
+          },
+        ],
+      },
+      { ...selection, agentId, sessionId: 'child-session', isChildSession: true },
+    ).runtimeRun;
+    expect(operatorRun?.userMessageMetadata).toBeUndefined();
+  },
+);
 
 it('preserves exact MCP and skill identity across start/completion without copying payloads', () => {
-  const response = { ok: true, runs: [{ status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', progress: [
-    { type: 'tool.started', data: { tool: 'mcp_call', activityId: 'm', provider: 'Goblin-DevTools', mcpToolName: 'take_snapshot', detail: 'secret', output: 'secret' } },
-    { type: 'tool.completed', data: { tool: 'mcp_call', activityId: 'm', provider: 'Goblin-DevTools', mcpToolName: 'take_snapshot', ok: false } },
-    { type: 'tool.started', data: { tool: 'load_skill', activityId: 's', skillId: 'react-review', skillName: 'React review', version: 'v2', detail: 'secret', result: 'secret' } },
-  ] }] } as ActiveChatRunsResponse;
+  const response = {
+    ok: true,
+    runs: [
+      {
+        status: 'running',
+        runId: 'r',
+        agentId: 'a',
+        sessionId: 'parent',
+        progress: [
+          {
+            type: 'tool.started',
+            data: {
+              tool: 'mcp_call',
+              activityId: 'm',
+              provider: 'Goblin-DevTools',
+              mcpToolName: 'take_snapshot',
+              detail: 'secret',
+              output: 'secret',
+            },
+          },
+          {
+            type: 'tool.completed',
+            data: {
+              tool: 'mcp_call',
+              activityId: 'm',
+              provider: 'Goblin-DevTools',
+              mcpToolName: 'take_snapshot',
+              ok: false,
+            },
+          },
+          {
+            type: 'tool.started',
+            data: {
+              tool: 'load_skill',
+              activityId: 's',
+              skillId: 'react-review',
+              skillName: 'React review',
+              version: 'v2',
+              detail: 'secret',
+              result: 'secret',
+            },
+          },
+        ],
+      },
+    ],
+  } as ActiveChatRunsResponse;
   const activity = projectChatActivity(response, selection).runtimeRun?.toolActivity;
   expect(activity?.items).toEqual([
-    { id: 'm', label: 'MCP · Goblin-DevTools · take_snapshot', detail: 'Goblin-DevTools · take_snapshot', status: 'error' },
-    { id: 's', label: 'Load skill · React review · react-review', detail: 'React review · react-review · v2', status: 'pending' },
+    {
+      id: 'm',
+      label: 'MCP · Goblin-DevTools · take_snapshot',
+      detail: 'Goblin-DevTools · take_snapshot',
+      status: 'error',
+    },
+    {
+      id: 's',
+      label: 'Load skill · React review · react-review',
+      detail: 'React review · react-review · v2',
+      status: 'pending',
+    },
   ]);
   expect(JSON.stringify(activity)).not.toContain('secret');
 });
 
 it('projects workflow-event provenance intact for live input without attributing ordinary runs to GitHub', () => {
-  const completionEvent = { id: 'event-1', repository: 'owner/repo', workflow: 'CI', runId: 123, runAttempt: 2, headSha: 'abc', conclusion: 'success', url: 'https://github.com/owner/repo/actions/runs/123' };
-  const run = { agentId: 'a', sessionId: 'parent', runId: 'workflow-run', status: 'running', latestUserMessage: 'Workflow completed', source: 'workflow-event', completionEvent };
+  const completionEvent = {
+    id: 'event-1',
+    repository: 'owner/repo',
+    workflow: 'CI',
+    runId: 123,
+    runAttempt: 2,
+    headSha: 'abc',
+    conclusion: 'success',
+    url: 'https://github.com/owner/repo/actions/runs/123',
+  };
+  const run = {
+    agentId: 'a',
+    sessionId: 'parent',
+    runId: 'workflow-run',
+    status: 'running',
+    latestUserMessage: 'Workflow completed',
+    source: 'workflow-event',
+    completionEvent,
+  };
   const response = { ok: true, runs: [run] };
   const before = JSON.stringify(response);
-  expect(projectChatActivity(response, selection).runtimeRun).toMatchObject({ latestUserMessage: 'Workflow completed', userMessageMetadata: { source: 'workflow-event', completionEvent } });
+  expect(projectChatActivity(response, selection).runtimeRun).toMatchObject({
+    latestUserMessage: 'Workflow completed',
+    userMessageMetadata: { source: 'workflow-event', completionEvent },
+  });
   expect(JSON.stringify(response)).toBe(before);
-  expect(projectChatActivity({ ok: true, runs: [{ ...run, source: 'operator' }] }, selection).runtimeRun?.userMessageMetadata).toBeUndefined();
-  expect(projectChatActivity({ ok: true, runs: [{ ...run, completionEvent: undefined }] }, selection).runtimeRun?.userMessageMetadata?.source).toBe('workflow-event');
+  expect(
+    projectChatActivity({ ok: true, runs: [{ ...run, source: 'operator' }] }, selection).runtimeRun
+      ?.userMessageMetadata,
+  ).toBeUndefined();
+  expect(
+    projectChatActivity({ ok: true, runs: [{ ...run, completionEvent: undefined }] }, selection)
+      .runtimeRun?.userMessageMetadata?.source,
+  ).toBe('workflow-event');
 });
 
 it('side-question runs never own the main composer, readiness or Stop target', () => {
- const side = { runId:'side', lane:'side_question' as const, agentId:'agent', sessionId:'default', status:'running', steeringReady:true };
- const options = { agentId:'agent', sessionId:'default', isChildSession:false, hadRuns:false, now:0 };
- expect(projectChatActivity({ ok:true, runs:[side] }, options).runtimeRun).toBeNull();
- const main = { ...side, runId:'main', lane:'main' as const };
- expect(projectChatActivity({ ok:true, runs:[side,main] }, options).runtimeRun?.runId).toBe('main');
+  const side = {
+    runId: 'side',
+    lane: 'side_question' as const,
+    agentId: 'agent',
+    sessionId: 'default',
+    status: 'running',
+    steeringReady: true,
+  };
+  const options = {
+    agentId: 'agent',
+    sessionId: 'default',
+    isChildSession: false,
+    hadRuns: false,
+    now: 0,
+  };
+  expect(projectChatActivity({ ok: true, runs: [side] }, options).runtimeRun).toBeNull();
+  const main = { ...side, runId: 'main', lane: 'main' as const };
+  expect(projectChatActivity({ ok: true, runs: [side, main] }, options).runtimeRun?.runId).toBe(
+    'main',
+  );
 });
 
 it('recovers compaction status from the owning run progress', () => {
-  const run = { status: 'running', runId: 'r', agentId: 'a', sessionId: 'parent', progress: [
-    { type: 'context.compaction.started', runId: 'r', sessionId: 'parent' },
-    { type: 'context.compaction.failed', runId: 'other' },
-  ] };
-  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe('compacting');
+  const run = {
+    status: 'running',
+    runId: 'r',
+    agentId: 'a',
+    sessionId: 'parent',
+    progress: [
+      { type: 'context.compaction.started', runId: 'r', sessionId: 'parent' },
+      { type: 'context.compaction.failed', runId: 'other' },
+    ],
+  };
+  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe(
+    'compacting',
+  );
   run.progress.push({ type: 'context.compaction.completed', runId: 'r', sessionId: 'parent' });
-  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe('compaction-completed');
+  expect(projectChatActivity({ ok: true, runs: [run] }, selection).runtimeRun?.stage).toBe(
+    'compaction-completed',
+  );
 });

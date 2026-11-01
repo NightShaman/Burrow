@@ -2,7 +2,12 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { RuntimeModel } from '../../app/api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ModelCapabilityEditor, ModelResults, SavedProviders, modelConnectionApiTypes } from './ModelConnectionViews';
+import {
+  ModelCapabilityEditor,
+  ModelResults,
+  SavedProviders,
+  modelConnectionApiTypes,
+} from './ModelConnectionViews';
 import { claudeLoginStatusLabel, openAiLoginStatusLabel } from './ModelConnectionOAuthDialog';
 
 afterEach(cleanup);
@@ -13,19 +18,32 @@ describe('Model connection views', () => {
     const onSelectModel = vi.fn();
     const onDeleteManualModel = vi.fn();
     const onAddManualModel = vi.fn();
-    render(<ModelResults
-      models={[{ id: 'vision-model', displayName: 'Vision Model', selected: true, manual: true, discoveredInput: ['text', 'image'], discoveredOutput: ['text'] }]}
-      manualModel="new-model"
-      onManualModelChange={vi.fn()}
-      onAddManualModel={onAddManualModel}
-      onDeleteManualModel={onDeleteManualModel}
-      onToggleModel={onToggleModel}
-      onSelectModel={onSelectModel}
-    />);
+    render(
+      <ModelResults
+        models={[
+          {
+            id: 'vision-model',
+            displayName: 'Vision Model',
+            selected: true,
+            manual: true,
+            discoveredInput: ['text', 'image'],
+            discoveredOutput: ['text'],
+          },
+        ]}
+        manualModel="new-model"
+        onManualModelChange={vi.fn()}
+        onAddManualModel={onAddManualModel}
+        onDeleteManualModel={onDeleteManualModel}
+        onToggleModel={onToggleModel}
+        onSelectModel={onSelectModel}
+      />,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /Vision Model/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use Vision Model' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete manually added model vision-model' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete manually added model vision-model' }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
 
     expect(onSelectModel).toHaveBeenCalledWith('vision-model');
@@ -35,18 +53,55 @@ describe('Model connection views', () => {
   });
 
   it('shows discovered capabilities and unknown fallback in the detail editor', () => {
-    const model: RuntimeModel = { id: 'vision-model', displayName: 'Vision Model', discoveredInput: ['text', 'image'], acceptedInput: ['text', 'image'], acceptedOutput: ['text'], capabilityProvenance: { source: 'models.dev', snapshotAt: '2026-09-26T12:00:00.000Z', matchedProvider: 'OpenAI', matchedModel: 'gpt-4o' } };
-    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} />);
+    const model: RuntimeModel = {
+      id: 'vision-model',
+      displayName: 'Vision Model',
+      discoveredInput: ['text', 'image'],
+      acceptedInput: ['text', 'image'],
+      acceptedOutput: ['text'],
+      capabilityProvenance: {
+        source: 'models.dev',
+        snapshotAt: '2026-09-26T12:00:00.000Z',
+        matchedProvider: 'OpenAI',
+        matchedModel: 'gpt-4o',
+      },
+    };
+    render(
+      <ModelCapabilityEditor
+        model={model}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={vi.fn()}
+        onSetModelOutputAuto={vi.fn()}
+      />,
+    );
     expect(screen.getByText('Discovered: text, image')).toBeTruthy();
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
-    expect(screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026')).toBeTruthy();
+    expect(
+      screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026'),
+    ).toBeTruthy();
   });
 
   it('supports discovered context windows and positive manual overrides', () => {
     const onAuto = vi.fn();
     const onOverride = vi.fn();
-    const model: RuntimeModel = { id: 'context-model', discoveredContextWindow: 128000, contextWindow: 128000, capabilityProvenance: { source: 'models.dev' } };
-    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} onSetModelContextAuto={onAuto} onSetModelContextOverride={onOverride} />);
+    const model: RuntimeModel = {
+      id: 'context-model',
+      discoveredContextWindow: 128000,
+      contextWindow: 128000,
+      capabilityProvenance: { source: 'models.dev' },
+    };
+    render(
+      <ModelCapabilityEditor
+        model={model}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={vi.fn()}
+        onSetModelOutputAuto={vi.fn()}
+        onSetModelContextAuto={onAuto}
+        onSetModelContextOverride={onOverride}
+      />,
+    );
     expect(screen.getByText('Discovered: 128,000 tokens')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('radio', { name: 'Manual' })[0]);
     expect(onAuto).toHaveBeenCalledWith('context-model', false);
@@ -62,29 +117,49 @@ describe('Model connection views', () => {
       acceptedOutput: ['text'],
       acceptedOutputOverride: ['text'],
     };
-    render(<ModelCapabilityEditor model={model} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={onToggleModelOutput} onSetModelOutputAuto={vi.fn()} />);
+    render(
+      <ModelCapabilityEditor
+        model={model}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={onToggleModelOutput}
+        onSetModelOutputAuto={vi.fn()}
+      />,
+    );
 
     const audio = screen.getByRole('checkbox', { name: 'Output audio' });
     expect(audio.hasAttribute('disabled')).toBe(false);
-    expect(screen.getByRole('checkbox', { name: 'Output text' }).hasAttribute('checked')).toBe(true);
+    expect(screen.getByRole('checkbox', { name: 'Output text' }).hasAttribute('checked')).toBe(
+      true,
+    );
     fireEvent.click(audio);
     expect(onToggleModelOutput).toHaveBeenCalledWith('text-model', 'audio');
   });
 
   it('renders output manual changes when the editor state updates', () => {
     function Harness() {
-      const [model, setModel] = React.useState<RuntimeModel>({ id: 'text-model', acceptedOutput: ['text'], acceptedOutputOverride: ['text'] });
-      return <ModelCapabilityEditor
-        model={model}
-        onToggleModelInput={vi.fn()}
-        onSetModelInputAuto={vi.fn()}
-        onToggleModelOutput={(_, output) => setModel((current) => {
-          const acceptedOutput = current.acceptedOutput ?? [];
-          const next = acceptedOutput.includes(output) ? acceptedOutput.filter((value) => value !== output) : [...acceptedOutput, output];
-          return { ...current, acceptedOutput: next, acceptedOutputOverride: next };
-        })}
-        onSetModelOutputAuto={vi.fn()}
-      />;
+      const [model, setModel] = React.useState<RuntimeModel>({
+        id: 'text-model',
+        acceptedOutput: ['text'],
+        acceptedOutputOverride: ['text'],
+      });
+      return (
+        <ModelCapabilityEditor
+          model={model}
+          onToggleModelInput={vi.fn()}
+          onSetModelInputAuto={vi.fn()}
+          onToggleModelOutput={(_, output) =>
+            setModel((current) => {
+              const acceptedOutput = current.acceptedOutput ?? [];
+              const next = acceptedOutput.includes(output)
+                ? acceptedOutput.filter((value) => value !== output)
+                : [...acceptedOutput, output];
+              return { ...current, acceptedOutput: next, acceptedOutputOverride: next };
+            })
+          }
+          onSetModelOutputAuto={vi.fn()}
+        />
+      );
     }
     render(<Harness />);
     const audio = screen.getByRole('checkbox', { name: 'Output audio' }) as HTMLInputElement;
@@ -97,10 +172,27 @@ describe('Model connection views', () => {
   });
 
   it('renders saved authentication details and delegates provider actions', () => {
-    const provider = { id: 'openai', provider: 'OpenAI', apiType: 'openai-responses', url: 'https://example.test', apiKey: '', models: ['gpt-test'], oauthConfigured: true, authSource: 'browser' };
+    const provider = {
+      id: 'openai',
+      provider: 'OpenAI',
+      apiType: 'openai-responses',
+      url: 'https://example.test',
+      apiKey: '',
+      models: ['gpt-test'],
+      oauthConfigured: true,
+      authSource: 'browser',
+    };
     const onEdit = vi.fn();
     const onDelete = vi.fn();
-    render(<SavedProviders providers={[provider]} open onOpenChange={vi.fn()} onEdit={onEdit} onDelete={onDelete} />);
+    render(
+      <SavedProviders
+        providers={[provider]}
+        open
+        onOpenChange={vi.fn()}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />,
+    );
 
     expect(screen.getByText('OAuth configured')).toBeTruthy();
     expect(screen.queryByText('Source: browser')).toBeNull();
@@ -111,9 +203,26 @@ describe('Model connection views', () => {
   });
 
   it('selects an expanded provider without a separate Edit action or verbose model list', () => {
-    const provider = { id: 'openai', provider: 'OpenAI', apiType: 'openai-responses', url: 'https://example.test', apiKey: '', models: ['gpt-test'] };
+    const provider = {
+      id: 'openai',
+      provider: 'OpenAI',
+      apiType: 'openai-responses',
+      url: 'https://example.test',
+      apiKey: '',
+      models: ['gpt-test'],
+    };
     const onEdit = vi.fn();
-    render(<SavedProviders providers={[provider]} open onOpenChange={vi.fn()} onEdit={onEdit} onDelete={vi.fn()} selectedId="openai" expanded />);
+    render(
+      <SavedProviders
+        providers={[provider]}
+        open
+        onOpenChange={vi.fn()}
+        onEdit={onEdit}
+        onDelete={vi.fn()}
+        selectedId="openai"
+        expanded
+      />,
+    );
     const selector = screen.getByRole('button', { name: /OpenAI.*OpenAI Responses.*1 model/ });
     expect(selector.getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
@@ -123,7 +232,9 @@ describe('Model connection views', () => {
   });
 
   it('normalizes known and unknown OAuth statuses for display', () => {
-    expect(openAiLoginStatusLabel('waiting_for_callback')).toBe('Finish signing in in your browser');
+    expect(openAiLoginStatusLabel('waiting_for_callback')).toBe(
+      'Finish signing in in your browser',
+    );
     expect(openAiLoginStatusLabel('future_status')).toBe('future status');
     expect(claudeLoginStatusLabel('ready_to_import')).toBe('Ready to import');
     expect(claudeLoginStatusLabel()).toBe('Idle');
@@ -132,17 +243,53 @@ describe('Model connection views', () => {
 
 describe('Google Developer API model metadata', () => {
   it('preserves unknown capabilities and false/zero provider values without inferring modalities', () => {
-    render(<ModelCapabilityEditor model={{ id: 'google-unknown', supportedGenerationMethods: [], googleMetadata: { thinking: false, temperature: 0, version: 'v1' } }} onToggleModelInput={vi.fn()} onSetModelInputAuto={vi.fn()} onToggleModelOutput={vi.fn()} onSetModelOutputAuto={vi.fn()} />);
+    render(
+      <ModelCapabilityEditor
+        model={{
+          id: 'google-unknown',
+          supportedGenerationMethods: [],
+          googleMetadata: { thinking: false, temperature: 0, version: 'v1' },
+        }}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={vi.fn()}
+        onSetModelOutputAuto={vi.fn()}
+      />,
+    );
     expect(screen.getAllByText('Unknown')).toHaveLength(3);
     expect((screen.getByLabelText('Output token limit') as HTMLInputElement).value).toBe('Unknown');
     expect((screen.getByLabelText('Thinking') as HTMLTextAreaElement).value).toBe('false');
     expect((screen.getByLabelText('Temperature') as HTMLTextAreaElement).value).toBe('0');
-    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe('None reported');
+    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe(
+      'None reported',
+    );
   });
   it('offers native API type and renders discovered methods and token limits', () => {
-    expect(modelConnectionApiTypes).toContainEqual({ value: 'google-generative-language', label: 'Google Gemini (Developer API)' });
-    render(<ModelCapabilityEditor model={{ id: 'models/gemini-test', supportedGenerationMethods: ['generateContent'], googleMetadata: { description: 'Test model', inputTokenLimit: 1234, outputTokenLimit: 321 }, discoveredOutput: ['text'] }} onToggleModelInput={() => {}} onSetModelInputAuto={() => {}} onToggleModelOutput={() => {}} onSetModelOutputAuto={() => {}} />);
-    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe('generateContent');
+    expect(modelConnectionApiTypes).toContainEqual({
+      value: 'google-generative-language',
+      label: 'Google Gemini (Developer API)',
+    });
+    render(
+      <ModelCapabilityEditor
+        model={{
+          id: 'models/gemini-test',
+          supportedGenerationMethods: ['generateContent'],
+          googleMetadata: {
+            description: 'Test model',
+            inputTokenLimit: 1234,
+            outputTokenLimit: 321,
+          },
+          discoveredOutput: ['text'],
+        }}
+        onToggleModelInput={() => {}}
+        onSetModelInputAuto={() => {}}
+        onToggleModelOutput={() => {}}
+        onSetModelOutputAuto={() => {}}
+      />,
+    );
+    expect((screen.getByLabelText('Generation methods') as HTMLInputElement).value).toBe(
+      'generateContent',
+    );
     expect(screen.getByText('Provider metadata').parentElement?.hasAttribute('open')).toBe(false);
     expect(screen.queryByLabelText('Provider model metadata')).toBeNull();
     expect(screen.getByText('Discovered: 1,234 tokens')).toBeTruthy();

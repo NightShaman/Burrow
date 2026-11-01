@@ -2,10 +2,19 @@ import { useEffect, useRef } from 'react';
 import { clientBudgets } from './clientBudgets';
 
 export type IsPollingCancelled = () => boolean;
-export type PollRefresh = (isCancelled: IsPollingCancelled, signal: AbortSignal) => void | Promise<void>;
+export type PollRefresh = (
+  isCancelled: IsPollingCancelled,
+  signal: AbortSignal,
+) => void | Promise<void>;
 
 /** Runs the latest asynchronous refresh work immediately and on an interval without overlapping requests. */
-export function usePolling(refresh: PollRefresh, intervalMs: number, enabled = true, restartKey?: string, deadlineMs = clientBudgets.requestDeadlineMs) {
+export function usePolling(
+  refresh: PollRefresh,
+  intervalMs: number,
+  enabled = true,
+  restartKey?: string,
+  deadlineMs = clientBudgets.requestDeadlineMs,
+) {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
@@ -27,7 +36,11 @@ export function usePolling(refresh: PollRefresh, intervalMs: number, enabled = t
         .catch(() => {
           // Individual refreshers own domain-specific failure behavior.
         })
-        .finally(() => { window.clearTimeout(deadline); if (activeAbort === controller) activeAbort = null; refreshInFlight = false; });
+        .finally(() => {
+          window.clearTimeout(deadline);
+          if (activeAbort === controller) activeAbort = null;
+          refreshInFlight = false;
+        });
     };
 
     poll();

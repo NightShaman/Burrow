@@ -2,19 +2,30 @@ import { describe, expect, it } from 'vitest';
 import type { SessionTurn } from '../../app/api';
 import { formatConversationCopy } from './ChatComposer';
 
-const turn = (role: string, content: string, metadata?: SessionTurn['metadata']): SessionTurn => ({ role, content, metadata, ts: '2026-09-19T12:00:00.000Z' });
+const turn = (role: string, content: string, metadata?: SessionTurn['metadata']): SessionTurn => ({
+  role,
+  content,
+  metadata,
+  ts: '2026-09-19T12:00:00.000Z',
+});
 
 describe('conversation copy attribution', () => {
   it('uses each group turn speaker instead of labeling every response Assistant', () => {
-    const value = formatConversationCopy([
-      turn('user', 'Hello everyone'),
-      turn('assistant', 'Hatchet answer', { fromAgentId: 'hatchet' }),
-      turn('assistant', 'Smatchet answer', { fromAgentName: 'Smatchet', fromAgentId: 'smatchet' }),
-      turn('assistant', 'Unknown answer', { fromAgentId: 'new-goblin' }),
-    ], {
-      operatorName: 'Goblin King',
-      agentNames: new Map([['hatchet', 'Hatchet']]),
-    });
+    const value = formatConversationCopy(
+      [
+        turn('user', 'Hello everyone'),
+        turn('assistant', 'Hatchet answer', { fromAgentId: 'hatchet' }),
+        turn('assistant', 'Smatchet answer', {
+          fromAgentName: 'Smatchet',
+          fromAgentId: 'smatchet',
+        }),
+        turn('assistant', 'Unknown answer', { fromAgentId: 'new-goblin' }),
+      ],
+      {
+        operatorName: 'Goblin King',
+        agentNames: new Map([['hatchet', 'Hatchet']]),
+      },
+    );
 
     expect(value).toContain('Goblin King —');
     expect(value).toContain('Hatchet —');
@@ -24,10 +35,10 @@ describe('conversation copy attribution', () => {
   });
 
   it('uses the selected agent for ordinary chat and preserves fenced code', () => {
-    const value = formatConversationCopy([
-      turn('user', 'Show me'),
-      turn('assistant', '```ts\nconst answer = 42;\n```'),
-    ], { assistantName: 'Smatchet', operatorName: 'Rob' });
+    const value = formatConversationCopy(
+      [turn('user', 'Show me'), turn('assistant', '```ts\nconst answer = 42;\n```')],
+      { assistantName: 'Smatchet', operatorName: 'Rob' },
+    );
 
     expect(value).toContain('Rob —');
     expect(value).toContain('Smatchet —');
@@ -35,9 +46,10 @@ describe('conversation copy attribution', () => {
   });
 
   it('attributes delegated user-role turns to their parent agent', () => {
-    const value = formatConversationCopy([
-      turn('user', 'Delegated request', { parentAgentId: 'hatchet' }),
-    ], { operatorName: 'Rob', agentNames: new Map([['hatchet', 'Hatchet']]) });
+    const value = formatConversationCopy(
+      [turn('user', 'Delegated request', { parentAgentId: 'hatchet' })],
+      { operatorName: 'Rob', agentNames: new Map([['hatchet', 'Hatchet']]) },
+    );
 
     expect(value).toContain('Hatchet —');
     expect(value).not.toContain('Rob —');
@@ -45,7 +57,10 @@ describe('conversation copy attribution', () => {
 });
 
 it('does not invent an operator or parent identity for delegation without a parent ID', () => {
-  const result = formatConversationCopy([turn('user', 'Task', { kind: 'subagent-delegated-task' })], { operatorName: 'Rob' });
+  const result = formatConversationCopy(
+    [turn('user', 'Task', { kind: 'subagent-delegated-task' })],
+    { operatorName: 'Rob' },
+  );
   expect(result).toContain('Parent agent —');
   expect(result).not.toContain('Rob —');
 });

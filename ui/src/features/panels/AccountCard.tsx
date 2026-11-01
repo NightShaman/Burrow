@@ -18,11 +18,21 @@ export function AccountCard({
   children: ReactNode;
   className?: string;
 } & HTMLAttributes<HTMLElement>) {
-  return <article className={`account-card ${className}`.trim()} {...articleProps}>
-    <div className="account-top">
-      <span><b>{name}</b>{subtitle && <small>{subtitle}</small>}</span>
-      {status && <span className={`account-connection-status ${statusTone}`}><i className="dot" />{status}</span>}
-    </div>
-    {children}
-  </article>;
+  return (
+    <article className={`account-card ${className}`.trim()} {...articleProps}>
+      <div className="account-top">
+        <span>
+          <b>{name}</b>
+          {subtitle && <small>{subtitle}</small>}
+        </span>
+        {status && (
+          <span className={`account-connection-status ${statusTone}`}>
+            <i className="dot" />
+            {status}
+          </span>
+        )}
+      </div>
+      {children}
+    </article>
+  );
 }

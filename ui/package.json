@@ -1,13 +1,15 @@
 {
   "name": "burrow-ui",
   "private": true,
-  "version": "2026.11.01.18",
+  "version": "2026.11.01.19",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "body": "vite --host 0.0.0.0 --port 5174",
     "service": "vite --host 0.0.0.0 --port 5174",
     "build": "tsc -b && vite build",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.{ts,tsx,js,mjs,cjs,css}\" \"*.{ts,tsx,js,mjs,cjs,json,html}\" \"scripts/**/tsconfig.json\" \"scripts/**/*.html\" \"examples/**/*.html\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.{ts,tsx,js,mjs,cjs,css}\" \"*.{ts,tsx,js,mjs,cjs,json,html}\" \"scripts/**/tsconfig.json\" \"scripts/**/*.html\" \"examples/**/*.html\"",
     "preview": "vite preview --host 0.0.0.0",
     "preview:body": "vite preview --host 0.0.0.0 --port 4174",
     "test": "node scripts/test-isolated.mjs"
@@ -28,6 +30,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "jsdom": "^30.0.1",
+    "postcss": "8.5.26",
+    "prettier": "3.6.2",
     "vitest": "^4.1.11"
   }
 }

@@ -12,28 +12,46 @@ let nextFrame: number;
 const observers: ResizeObserverMock[] = [];
 const viewports: IntersectionObserverMock[] = [];
 class IntersectionObserverMock {
-  observe = vi.fn(); disconnect = vi.fn(); unobserve = vi.fn();
-  constructor(readonly callback: IntersectionObserverCallback) { viewports.push(this); }
-  show(nodes: Element[]) { this.callback(nodes.map(target => ({ target, isIntersecting: true })) as IntersectionObserverEntry[], this as unknown as IntersectionObserver); }
+  observe = vi.fn();
+  disconnect = vi.fn();
+  unobserve = vi.fn();
+  constructor(readonly callback: IntersectionObserverCallback) {
+    viewports.push(this);
+  }
+  show(nodes: Element[]) {
+    this.callback(
+      nodes.map((target) => ({ target, isIntersecting: true })) as IntersectionObserverEntry[],
+      this as unknown as IntersectionObserver,
+    );
+  }
 }
 class ResizeObserverMock {
   observe = vi.fn();
   disconnect = vi.fn();
   unobserve = vi.fn();
-  constructor(readonly callback: ResizeObserverCallback) { observers.push(this); }
+  constructor(readonly callback: ResizeObserverCallback) {
+    observers.push(this);
+  }
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   frames = new Map();
   nextFrame = 0;
-  observers.length = 0; viewports.length = 0;
+  observers.length = 0;
+  viewports.length = 0;
   vi.stubGlobal('IntersectionObserver', IntersectionObserverMock);
-  vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-    frames.set(++nextFrame, callback);
-    return nextFrame;
-  }));
-  vi.stubGlobal('cancelAnimationFrame', vi.fn((id: number) => frames.delete(id)));
+  vi.stubGlobal(
+    'requestAnimationFrame',
+    vi.fn((callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    }),
+  );
+  vi.stubGlobal(
+    'cancelAnimationFrame',
+    vi.fn((id: number) => frames.delete(id)),
+  );
   vi.stubGlobal('ResizeObserver', ResizeObserverMock);
 });
 afterEach(() => {
@@ -48,7 +66,7 @@ function paint() {
   act(() => {
     const callbacks = [...frames.values()];
     frames.clear();
-    callbacks.forEach(callback => callback(0));
+    callbacks.forEach((callback) => callback(0));
     vi.advanceTimersByTime(0);
   });
 }
@@ -58,25 +76,61 @@ function finishBodies() {
   expect(frames.size).toBe(0);
   expect(remaining).toBeGreaterThan(0);
 }
-const makeTurns = (count: number, prefix = 'Message'): SessionTurn[] => Array.from({ length: count }, (_, index) => ({ role: 'assistant', content: `${prefix} ${index}` }));
+const makeTurns = (count: number, prefix = 'Message'): SessionTurn[] =>
+  Array.from({ length: count }, (_, index) => ({
+    role: 'assistant',
+    content: `${prefix} ${index}`,
+  }));
 function Harness({ turns, scope = 'first' }: { turns: SessionTurn[]; scope?: string }) {
   const reader = useRef<HTMLDivElement>(null);
   const { ready, pending } = useArchiveBodies(turns, scope, reader);
-  return <div ref={reader} data-testid="reader" data-pending={pending}>
-    {turns.map((turn, index) => <article className="archive-turn" key={index} data-index={index} data-turn-id={archiveTurnId(turn)} data-ready={ready.has(turn)}>{ready.has(turn) ? String(turn.content) : 'Pending'}</article>)}
-  </div>;
+  return (
+    <div ref={reader} data-testid="reader" data-pending={pending}>
+      {turns.map((turn, index) => (
+        <article
+          className="archive-turn"
+          key={index}
+          data-index={index}
+          data-turn-id={archiveTurnId(turn)}
+          data-ready={ready.has(turn)}
+        >
+          {ready.has(turn) ? String(turn.content) : 'Pending'}
+        </article>
+      ))}
+    </div>
+  );
 }
 function readyIndices(container: HTMLElement) {
-  return [...container.querySelectorAll('[data-ready="true"]')].map(node => Number(node.getAttribute('data-index')));
+  return [...container.querySelectorAll('[data-ready="true"]')].map((node) =>
+    Number(node.getAttribute('data-index')),
+  );
 }
 const session: ArchiveSession = {
-  agentId: 'agent', agentName: 'Agent', sessionId: 'archive', id: 'archive', title: 'Archive', summary: '',
-  turnCount: 12, chatTurnCount: 12, createdAt: null, updatedAt: null, archived: true, archivedAt: null,
-  kind: null, lastRole: null, lastRunId: null,
+  agentId: 'agent',
+  agentName: 'Agent',
+  sessionId: 'archive',
+  id: 'archive',
+  title: 'Archive',
+  summary: '',
+  turnCount: 12,
+  chatTurnCount: 12,
+  createdAt: null,
+  updatedAt: null,
+  archived: true,
+  archivedAt: null,
+  kind: null,
+  lastRole: null,
+  lastRunId: null,
 };
 const readerProps = {
-  session, loading: false, error: '', earlierLoading: false, earlierError: '', historyUnavailable: false,
-  onLoadEarlier: () => {}, onRestart: () => {},
+  session,
+  loading: false,
+  error: '',
+  earlierLoading: false,
+  earlierError: '',
+  historyUnavailable: false,
+  onLoadEarlier: () => {},
+  onRestart: () => {},
 };
 
 describe('useArchiveBodies scheduling', () => {
@@ -96,7 +150,7 @@ describe('useArchiveBodies scheduling', () => {
       const current = readyIndices(container);
       expect(current.length - previous.length).toBeGreaterThan(0);
       expect(current.length - previous.length).toBeLessThanOrEqual(3);
-      previous.forEach(index => expect(current).toContain(index));
+      previous.forEach((index) => expect(current).toContain(index));
       previous = current;
     }
     expect(previous).toHaveLength(15);
@@ -108,7 +162,10 @@ describe('useArchiveBodies scheduling', () => {
     const turns = makeTurns(12);
     const view = render(<Harness turns={turns} />);
     finishBodies();
-    const next = [...makeTurns(6, 'Earlier'), ...turns.map((turn, i) => i === 4 ? { ...turn } : turn)];
+    const next = [
+      ...makeTurns(6, 'Earlier'),
+      ...turns.map((turn, i) => (i === 4 ? { ...turn } : turn)),
+    ];
     view.rerender(<Harness turns={next} />);
     finishBodies();
     expect(readyIndices(view.container)).toHaveLength(18);
@@ -122,7 +179,15 @@ describe('useArchiveBodies scheduling', () => {
     paint();
     expect(readyIndices(container)).toEqual(expect.arrayContaining([9, 10, 11]));
     expect(readyIndices(container)).not.toContain(0);
-    act(() => viewports[0].callback([{ target: rows[9], isIntersecting: false }, { target: rows[3], isIntersecting: true }] as IntersectionObserverEntry[], viewports[0] as unknown as IntersectionObserver));
+    act(() =>
+      viewports[0].callback(
+        [
+          { target: rows[9], isIntersecting: false },
+          { target: rows[3], isIntersecting: true },
+        ] as IntersectionObserverEntry[],
+        viewports[0] as unknown as IntersectionObserver,
+      ),
+    );
     paint();
     expect(readyIndices(container)).toEqual(expect.arrayContaining([3, 4, 5, 9, 10, 11]));
     expect(readyIndices(container)).not.toContain(0);
@@ -177,7 +242,9 @@ describe('ChatArchiveReader incremental regression', () => {
     const turns = makeTurns(12);
     const { container } = render(<ChatArchiveReader {...readerProps} detail={{ turns }} />);
     expect(container.querySelectorAll('.archive-turn')).toHaveLength(12);
-    expect([...container.querySelectorAll('.archive-turn-body')].map(node => node.textContent)).toEqual(['Message 9', 'Message 10', 'Message 11']);
+    expect(
+      [...container.querySelectorAll('.archive-turn-body')].map((node) => node.textContent),
+    ).toEqual(['Message 9', 'Message 10', 'Message 11']);
     expect(screen.getByText(/Rendering loaded messages/)).toBeTruthy();
     finishBodies();
     expect(container.querySelectorAll('.archive-turn-body')).toHaveLength(12);
@@ -192,7 +259,9 @@ describe('ChatArchiveReader incremental regression', () => {
     const retainedRows = [...view.container.querySelectorAll('.archive-turn')];
     const retainedBodies = [...view.container.querySelectorAll('.archive-turn-body')];
     const earlier = makeTurns(6, 'Earlier');
-    view.rerender(<ChatArchiveReader {...readerProps} detail={{ turns: [...earlier, ...turns] }} />);
+    view.rerender(
+      <ChatArchiveReader {...readerProps} detail={{ turns: [...earlier, ...turns] }} />,
+    );
     const after = [...view.container.querySelectorAll('.archive-turn')];
     retainedRows.forEach((row, index) => {
       expect(after[index + earlier.length]).toBe(row);
@@ -211,9 +280,53 @@ describe('ChatArchiveReader incremental regression', () => {
     const { container } = render(<ChatArchiveReader {...readerProps} detail={{ turns }} />);
     expect(container.querySelectorAll('.archive-turn-pending').length).toBeGreaterThan(0);
     expect(writeText).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy loaded chat as Markdown' })); });
-    expect(writeText).toHaveBeenCalledExactlyOnceWith(turns.map(turn => archiveTurnText(turn, 'Agent')).join('\n\n'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy loaded chat as Markdown' }));
+    });
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(
+      turns.map((turn) => archiveTurnText(turn, 'Agent')).join('\n\n'),
+    );
     expect(container.querySelectorAll('.archive-turn-pending').length).toBeGreaterThan(0);
     expect(frames.size).toBe(1);
   });
+});
+
+it('renders archived metadata-only failure and literal marker reply as separate readable rows', () => {
+  const turns: SessionTurn[] = [
+    {
+      role: 'assistant',
+      content: '',
+      metadata: {
+        chatResultVersion: 2,
+        terminalStatus: 'failed',
+        modelFailure: {
+          origin: 'upstream',
+          code: 'provider_http_429',
+          status: 429,
+          retryable: true,
+        },
+      },
+    },
+    {
+      role: 'assistant',
+      content: '[model_error: quoted in answer]',
+      metadata: { chatResultVersion: 2, terminalStatus: 'completed' },
+    },
+  ];
+  render(
+    <ChatArchiveReader
+      session={session}
+      detail={{ turns }}
+      loading={false}
+      error=""
+      earlierLoading={false}
+      earlierError=""
+      historyUnavailable={false}
+      onLoadEarlier={() => {}}
+      onRestart={() => {}}
+    />,
+  );
+  expect(screen.getByRole('alert').textContent).toContain('HTTP 429');
+  expect(screen.getByText('[model_error: quoted in answer]')).toBeTruthy();
+  expect(document.querySelectorAll('.archive-turn')).toHaveLength(2);
 });

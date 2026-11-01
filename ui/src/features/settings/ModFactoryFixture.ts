@@ -1,1 +1,3 @@
-export function createSettingsContribution() { throw new Error('factory failure'); }
+export function createSettingsContribution() {
+  throw new Error('factory failure');
+}

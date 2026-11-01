@@ -39,20 +39,52 @@ function formatUptime(seconds?: number | null) {
 }
 
 function percent(used?: number | null, total?: number | null) {
-  return used != null && total != null && total > 0 ? Math.min(100, Math.max(0, used / total * 100)) : null;
+  return used != null && total != null && total > 0
+    ? Math.min(100, Math.max(0, (used / total) * 100))
+    : null;
 }
 
 function Meter({ value, tone = 'accent' }: { value: number | null; tone?: 'accent' | 'warning' }) {
-  return <span className={`system-rail-meter ${tone}`} aria-hidden="true"><i style={{ width: `${value ?? 0}%` }} /></span>;
+  return (
+    <span className={`system-rail-meter ${tone}`} aria-hidden="true">
+      <i style={{ width: `${value ?? 0}%` }} />
+    </span>
+  );
 }
 
-function Stat({ label, value, detail, meter, warning = false }: { label: string; value: string; detail?: string; meter?: number | null; warning?: boolean }) {
-  return <div className="system-rail-stat"><div><span>{label}</span><b title={value}>{value}</b></div>{detail && <small>{detail}</small>}{meter !== undefined && <Meter value={meter} tone={warning ? 'warning' : 'accent'} />}</div>;
+function Stat({
+  label,
+  value,
+  detail,
+  meter,
+  warning = false,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  meter?: number | null;
+  warning?: boolean;
+}) {
+  return (
+    <div className="system-rail-stat">
+      <div>
+        <span>{label}</span>
+        <b title={value}>{value}</b>
+      </div>
+      {detail && <small>{detail}</small>}
+      {meter !== undefined && <Meter value={meter} tone={warning ? 'warning' : 'accent'} />}
+    </div>
+  );
 }
 
 function BuildStat({ label, value }: { label: string; value: string }) {
   const shortValue = /^[a-f0-9]{12,40}$/i.test(value) ? value.slice(0, 7) : value;
-  return <div className="system-rail-build"><strong>{label}</strong><span title={value}>{shortValue}</span></div>;
+  return (
+    <div className="system-rail-build">
+      <strong>{label}</strong>
+      <span title={value}>{shortValue}</span>
+    </div>
+  );
 }
 
 export function SystemStatsRail({ active }: { active: boolean }) {
@@ -65,7 +97,10 @@ export function SystemStatsRail({ active }: { active: boolean }) {
     if (!active) return;
     let alive = true;
     const load = () => {
-      void Promise.all([api<DetailedRuntimeHealth>('/api/health'), api<RuntimeMetrics>('/api/metrics')])
+      void Promise.all([
+        api<DetailedRuntimeHealth>('/api/health'),
+        api<RuntimeMetrics>('/api/metrics'),
+      ])
         .then(([nextHealth, nextMetrics]) => {
           if (!alive) return;
           setHealth(nextHealth);
@@ -73,49 +108,130 @@ export function SystemStatsRail({ active }: { active: boolean }) {
           setError(false);
           setUpdatedAt(new Date());
         })
-        .catch(() => { if (alive) setError(true); });
+        .catch(() => {
+          if (alive) setError(true);
+        });
     };
     load();
     const timer = window.setInterval(load, 10_000);
-    return () => { alive = false; window.clearInterval(timer); };
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
   }, [active]);
 
   const diskUsed = percent(metrics?.filesystem.usedBytes, metrics?.filesystem.totalBytes);
   const heapUsed = percent(metrics?.process.heapUsedBytes, metrics?.process.heapTotalBytes);
   const model = health?.model;
   const status = error ? 'Unavailable' : health?.ok && metrics?.ok ? 'Healthy' : 'Loading';
-  const updated = useMemo(() => updatedAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) ?? 'Waiting for data', [updatedAt]);
+  const updated = useMemo(
+    () =>
+      updatedAt?.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }) ?? 'Waiting for data',
+    [updatedAt],
+  );
 
-  return <div className="system-rail-content">
-    <section className="system-rail-summary">
-      <div><span className={`system-rail-status ${error ? 'error' : health?.ok ? 'healthy' : 'loading'}`}><i />{status}</span><small>Updated {updated}</small></div>
-      <strong>{health?.runtime ?? 'Burrow'} <span>{health?.version ?? '—'}</span></strong>
+  return (
+    <div className="system-rail-content">
+      <section className="system-rail-summary">
+        <div>
+          <span
+            className={`system-rail-status ${error ? 'error' : health?.ok ? 'healthy' : 'loading'}`}
+          >
+            <i />
+            {status}
+          </span>
+          <small>Updated {updated}</small>
+        </div>
+        <strong>
+          {health?.runtime ?? 'Burrow'} <span>{health?.version ?? '—'}</span>
+        </strong>
 
-      <BuildStat label="UI" value={__BURROW_UI_BUILD_IDENTITY__ || 'Unavailable'} />
-      <BuildStat label="Backend" value={health?.releaseProvenance?.backend ?? 'Unavailable'} />
-    </section>
+        <BuildStat label="UI" value={__BURROW_UI_BUILD_IDENTITY__ || 'Unavailable'} />
+        <BuildStat label="Backend" value={health?.releaseProvenance?.backend ?? 'Unavailable'} />
+      </section>
 
-    <section className="system-rail-group">
-      <h3>Host</h3>
-      <Stat label="CPU" value={metrics?.process.cpu.percent == null ? '—' : `${metrics.process.cpu.percent.toFixed(1)}%`} detail={metrics ? `Load ${metrics.load.oneMinute?.toFixed(2) ?? '—'} · ${metrics.load.fiveMinutes?.toFixed(2) ?? '—'} · ${metrics.load.fifteenMinutes?.toFixed(2) ?? '—'}` : undefined} />
-      <Stat label="Disk" value={diskUsed == null ? '—' : `${diskUsed.toFixed(1)}%`} detail={metrics ? `${formatBytes(metrics.filesystem.usedBytes)} used · ${formatBytes(metrics.filesystem.availableBytes)} free` : undefined} meter={diskUsed} warning={(diskUsed ?? 0) >= 85} />
-      <Stat label="Uptime" value={formatUptime(metrics?.process.uptimeSeconds)} />
-    </section>
+      <section className="system-rail-group">
+        <h3>Host</h3>
+        <Stat
+          label="CPU"
+          value={
+            metrics?.process.cpu.percent == null
+              ? '—'
+              : `${metrics.process.cpu.percent.toFixed(1)}%`
+          }
+          detail={
+            metrics
+              ? `Load ${metrics.load.oneMinute?.toFixed(2) ?? '—'} · ${metrics.load.fiveMinutes?.toFixed(2) ?? '—'} · ${metrics.load.fifteenMinutes?.toFixed(2) ?? '—'}`
+              : undefined
+          }
+        />
+        <Stat
+          label="Disk"
+          value={diskUsed == null ? '—' : `${diskUsed.toFixed(1)}%`}
+          detail={
+            metrics
+              ? `${formatBytes(metrics.filesystem.usedBytes)} used · ${formatBytes(metrics.filesystem.availableBytes)} free`
+              : undefined
+          }
+          meter={diskUsed}
+          warning={(diskUsed ?? 0) >= 85}
+        />
+        <Stat label="Uptime" value={formatUptime(metrics?.process.uptimeSeconds)} />
+      </section>
 
-    <section className="system-rail-group">
-      <h3>Process</h3>
-      <Stat label="Resident memory" value={formatBytes(metrics?.process.rssBytes)} />
-      <Stat label="JavaScript heap" value={heapUsed == null ? '—' : `${heapUsed.toFixed(1)}%`} detail={metrics ? `${formatBytes(metrics.process.heapUsedBytes)} / ${formatBytes(metrics.process.heapTotalBytes)}` : undefined} meter={heapUsed} warning={(heapUsed ?? 0) >= 85} />
-      <Stat label="External memory" value={formatBytes(metrics?.process.externalBytes)} />
-    </section>
+      <section className="system-rail-group">
+        <h3>Process</h3>
+        <Stat label="Resident memory" value={formatBytes(metrics?.process.rssBytes)} />
+        <Stat
+          label="JavaScript heap"
+          value={heapUsed == null ? '—' : `${heapUsed.toFixed(1)}%`}
+          detail={
+            metrics
+              ? `${formatBytes(metrics.process.heapUsedBytes)} / ${formatBytes(metrics.process.heapTotalBytes)}`
+              : undefined
+          }
+          meter={heapUsed}
+          warning={(heapUsed ?? 0) >= 85}
+        />
+        <Stat label="External memory" value={formatBytes(metrics?.process.externalBytes)} />
+      </section>
 
-    <section className="system-rail-group">
-      <h3>Runtime</h3>
-      <Stat label="Model provider" value={model?.providerName ?? model?.provider ?? 'Unavailable'} detail={model?.model} />
-      <Stat label="Model defaults" value={model?.reasoningEffort ?? '—'} detail={model?.contextWindow ? `${model.contextWindow.toLocaleString()} context · temp ${model.temperature ?? '—'}` : undefined} />
-      <Stat label="Authentication" value={health?.ui?.authEnabled ? health.ui.authMode ?? 'Enabled' : 'Disabled'} detail={health?.ui?.authSource ? `Source: ${health.ui.authSource}` : undefined} />
-      <Stat label="Memory" value={health?.memory?.configured ? 'Configured' : 'Not configured'} detail={health?.memory?.owner} />
-      <Stat label="Policy" value={`${health?.policy?.enabledHardBlockCount ?? 0} hard blocks`} detail={`${health?.policy?.packs ?? 0} packs loaded`} />
-    </section>
-  </div>;
+      <section className="system-rail-group">
+        <h3>Runtime</h3>
+        <Stat
+          label="Model provider"
+          value={model?.providerName ?? model?.provider ?? 'Unavailable'}
+          detail={model?.model}
+        />
+        <Stat
+          label="Model defaults"
+          value={model?.reasoningEffort ?? '—'}
+          detail={
+            model?.contextWindow
+              ? `${model.contextWindow.toLocaleString()} context · temp ${model.temperature ?? '—'}`
+              : undefined
+          }
+        />
+        <Stat
+          label="Authentication"
+          value={health?.ui?.authEnabled ? (health.ui.authMode ?? 'Enabled') : 'Disabled'}
+          detail={health?.ui?.authSource ? `Source: ${health.ui.authSource}` : undefined}
+        />
+        <Stat
+          label="Memory"
+          value={health?.memory?.configured ? 'Configured' : 'Not configured'}
+          detail={health?.memory?.owner}
+        />
+        <Stat
+          label="Policy"
+          value={`${health?.policy?.enabledHardBlockCount ?? 0} hard blocks`}
+          detail={`${health?.policy?.packs ?? 0} packs loaded`}
+        />
+      </section>
+    </div>
+  );
 }

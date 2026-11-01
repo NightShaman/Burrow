@@ -28,6 +28,10 @@
   background: var(--surface-input);
   font-weight: 700;
 }
-.markdown-table-scroll tr:last-child td { border-bottom: 0; }
+.markdown-table-scroll tr:last-child td {
+  border-bottom: 0;
+}
 .markdown-table-scroll th + th,
-.markdown-table-scroll td + td { border-left: 1px solid var(--line-soft); }
+.markdown-table-scroll td + td {
+  border-left: 1px solid var(--line-soft);
+}

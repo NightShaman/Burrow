@@ -1,1 +1,3 @@
-export function mountControl() { return () => {}; }
+export function mountControl() {
+  return () => {};
+}

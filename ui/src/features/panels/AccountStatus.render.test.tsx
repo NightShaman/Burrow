@@ -4,64 +4,168 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AccountStatus, accountUsageStatus, type AccountUsageCard } from './AccountStatus';
 import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
-vi.mock('../../app/api', async original => ({ ...await original<typeof import('../../app/api')>(), api: vi.fn() }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
-it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s', async oauth => {
- vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
- const provider: SavedProvider = { id:'anthropic', provider:'Anthropic', apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],apiKeyConfigured:true,oauthConfigured:oauth };
- render(<ConfirmProvider><AccountStatus providers={[provider]} /></ConfirmProvider>);
- if (oauth) {
-  await waitFor(() => expect(screen.getByText('Unknown')).toBeTruthy());
-  expect(vi.mocked(api).mock.calls.map(([path])=>path)).toEqual(['/api/anthropic/oauth/usage?connectionId=anthropic']);
- } else {
-  expect(screen.getByText('No Anthropic or OpenAI OAuth connections yet.')).toBeTruthy();
-  expect(api).not.toHaveBeenCalled();
- }
+vi.mock('../../app/api', async (original) => ({
+  ...(await original<typeof import('../../app/api')>()),
+  api: vi.fn(),
+}));
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+it.each([false, true])('FE010 rendered Anthropic API-key vs OAuth configured=%s', async (oauth) => {
+  vi.mocked(api).mockResolvedValue({ usage: { windows: [] } });
+  const provider: SavedProvider = {
+    id: 'anthropic',
+    provider: 'Anthropic',
+    apiType: 'anthropic-messages',
+    url: 'https://example.invalid',
+    apiKey: '',
+    models: [],
+    apiKeyConfigured: true,
+    oauthConfigured: oauth,
+  };
+  render(
+    <ConfirmProvider>
+      <AccountStatus providers={[provider]} />
+    </ConfirmProvider>,
+  );
+  if (oauth) {
+    await waitFor(() => expect(screen.getByText('Unknown')).toBeTruthy());
+    expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+      '/api/anthropic/oauth/usage?connectionId=anthropic',
+    ]);
+  } else {
+    expect(screen.getByText('No Anthropic or OpenAI OAuth connections yet.')).toBeTruthy();
+    expect(api).not.toHaveBeenCalled();
+  }
 });
 
 it('retains draggable cards without visible reorder controls', async () => {
- vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
- const providers: SavedProvider[] = ['First','Second'].map(name => ({id:name,provider:'Anthropic',name,apiType:'anthropic-messages',url:'https://example.invalid',apiKey:'',models:[],oauthConfigured:true}));
- const {container} = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
- expect(screen.queryByRole('button', {name:/^Move /})).toBeNull();
- expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
+  vi.mocked(api).mockResolvedValue({ usage: { windows: [] } });
+  const providers: SavedProvider[] = ['First', 'Second'].map((name) => ({
+    id: name,
+    provider: 'Anthropic',
+    name,
+    apiType: 'anthropic-messages',
+    url: 'https://example.invalid',
+    apiKey: '',
+    models: [],
+    oauthConfigured: true,
+  }));
+  const { container } = render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
+  expect(screen.queryByRole('button', { name: /^Move / })).toBeNull();
+  expect(container.querySelectorAll('[draggable="true"]')).toHaveLength(2);
 });
 
 it('shows a completed account without waiting for a slow peer and retains usage on remount', async () => {
- const providers: SavedProvider[] = ['fast-independent','slow-independent'].map(id => ({id,provider:'OpenAI',apiType:'openai-responses',url:'https://openai.com',apiKey:'',models:[],oauthConfigured:true}));
- let finishSlow!: (value: unknown) => void;
- vi.mocked(api).mockImplementation((path) => path.includes('/reset-credits') ? Promise.resolve({ok:false}) as ReturnType<typeof api> : path.includes('slow-independent') ? new Promise(resolve => { finishSlow = resolve; }) as ReturnType<typeof api> : Promise.resolve({usage:{windows:[{key:'primary',label:'Primary',usedPercent:20,resetAt:null}]}}) as ReturnType<typeof api>);
- const first = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- await waitFor(() => expect(screen.getByText('80%')).toBeTruthy());
- expect(screen.getByText('Checking')).toBeTruthy();
- finishSlow({usage:{windows:[]}});
- await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
- first.unmount();
- vi.mocked(api).mockImplementation(() => new Promise(() => {}));
- render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- expect(screen.getByText('80%')).toBeTruthy();
- expect(screen.queryByText('Loading usage')).toBeNull();
+  const providers: SavedProvider[] = ['fast-independent', 'slow-independent'].map((id) => ({
+    id,
+    provider: 'OpenAI',
+    apiType: 'openai-responses',
+    url: 'https://openai.com',
+    apiKey: '',
+    models: [],
+    oauthConfigured: true,
+  }));
+  let finishSlow!: (value: unknown) => void;
+  vi.mocked(api).mockImplementation((path) =>
+    path.includes('/reset-credits')
+      ? (Promise.resolve({ ok: false }) as ReturnType<typeof api>)
+      : path.includes('slow-independent')
+        ? (new Promise((resolve) => {
+            finishSlow = resolve;
+          }) as ReturnType<typeof api>)
+        : (Promise.resolve({
+            usage: {
+              windows: [{ key: 'primary', label: 'Primary', usedPercent: 20, resetAt: null }],
+            },
+          }) as ReturnType<typeof api>),
+  );
+  const first = render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('80%')).toBeTruthy());
+  expect(screen.getByText('Checking')).toBeTruthy();
+  finishSlow({ usage: { windows: [] } });
+  await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
+  first.unmount();
+  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+  render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  expect(screen.getByText('80%')).toBeTruthy();
+  expect(screen.queryByText('Loading usage')).toBeNull();
 });
 
 it('uses the same successful status label for both vendors and preserves unknown/limited Anthropic usage', () => {
- const base: AccountUsageCard = {id:'status', name:'Anthropic', vendor:'Anthropic', plan:null, state:'ready', bars:[{key:'five_hour',label:'Five Hour',remainingPercent:50,resetAt:null}]};
- expect(accountUsageStatus(base)).toEqual({label:'Available',tone:'active'});
- expect(accountUsageStatus({...base,vendor:'OpenAI',accountStatus:{status:'available',label:'Active',reason:'usage',scope:'account',resetAt:null,checkedAt:new Date().toISOString()}})).toMatchObject({label:'Available',tone:'active'});
- expect(accountUsageStatus({...base,bars:[]})).toEqual({label:'Unknown',tone:'paused'});
- expect(accountUsageStatus({...base,bars:[{...base.bars[0],remainingPercent:0}]})).toEqual({label:'Limit Exceeded',tone:'quota-exceeded'});
+  const base: AccountUsageCard = {
+    id: 'status',
+    name: 'Anthropic',
+    vendor: 'Anthropic',
+    plan: null,
+    state: 'ready',
+    bars: [{ key: 'five_hour', label: 'Five Hour', remainingPercent: 50, resetAt: null }],
+  };
+  expect(accountUsageStatus(base)).toEqual({ label: 'Available', tone: 'active' });
+  expect(
+    accountUsageStatus({
+      ...base,
+      vendor: 'OpenAI',
+      accountStatus: {
+        status: 'available',
+        label: 'Active',
+        reason: 'usage',
+        scope: 'account',
+        resetAt: null,
+        checkedAt: new Date().toISOString(),
+      },
+    }),
+  ).toMatchObject({ label: 'Available', tone: 'active' });
+  expect(accountUsageStatus({ ...base, bars: [] })).toEqual({ label: 'Unknown', tone: 'paused' });
+  expect(accountUsageStatus({ ...base, bars: [{ ...base.bars[0], remainingPercent: 0 }] })).toEqual(
+    { label: 'Limit Exceeded', tone: 'quota-exceeded' },
+  );
 });
 
 it('keeps only the Anthropic subtitle while retaining OpenAI reset controls', async () => {
- vi.mocked(api).mockResolvedValue({usage:{windows:[]}});
- const providers: SavedProvider[] = [
-  {id:'subtitle-anthropic',provider:'Ant-Goblin',apiType:'anthropic-messages',url:'',apiKey:'',models:[],oauthConfigured:true},
-  {id:'subtitle-openai',provider:'Rob Pro',apiType:'openai-responses',url:'https://openai.com',apiKey:'',models:[],oauthConfigured:true},
- ];
- const {container} = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
- expect(container.querySelectorAll('.account-top small')).toHaveLength(1);
- expect(container.querySelector('.account-top small')?.textContent).toBe('Anthropic');
- expect(screen.getByRole('button', {name:'Use reset'})).toBeTruthy();
- expect(container.querySelectorAll('.account-stack > .account-card')).toHaveLength(2);
+  vi.mocked(api).mockResolvedValue({ usage: { windows: [] } });
+  const providers: SavedProvider[] = [
+    {
+      id: 'subtitle-anthropic',
+      provider: 'Ant-Goblin',
+      apiType: 'anthropic-messages',
+      url: '',
+      apiKey: '',
+      models: [],
+      oauthConfigured: true,
+    },
+    {
+      id: 'subtitle-openai',
+      provider: 'Rob Pro',
+      apiType: 'openai-responses',
+      url: 'https://openai.com',
+      apiKey: '',
+      models: [],
+      oauthConfigured: true,
+    },
+  ];
+  const { container } = render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
+  expect(container.querySelectorAll('.account-top small')).toHaveLength(1);
+  expect(container.querySelector('.account-top small')?.textContent).toBe('Anthropic');
+  expect(screen.getByRole('button', { name: 'Use reset' })).toBeTruthy();
+  expect(container.querySelectorAll('.account-stack > .account-card')).toHaveLength(2);
 });

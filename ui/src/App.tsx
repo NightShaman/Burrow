@@ -12,13 +12,23 @@ import { api, attachmentDisplayName, type RuntimeHealth, type SetupStatus } from
 
 import { loadModPanels, modsChangedEvent, type ModPanel } from './app/modPanels';
 import { ModPanelHost } from './features/mods/ModPanelHost';
-import { clampRailSplit, listenResize, usePersistedTheme, usePersistedLayout } from './app/usePersistedLayout';
+import {
+  clampRailSplit,
+  listenResize,
+  usePersistedTheme,
+  usePersistedLayout,
+} from './app/usePersistedLayout';
 import { useAgentRailPreferences } from './app/useAgentRailPreferences';
 import { useAppTabs } from './app/useAppTabs';
 import { useRuntimeDashboard } from './app/useRuntimeDashboard';
 import { formatAgentActivity, useRuntimeAgents } from './app/useRuntimeAgents';
 import { useRuntimeSelection } from './app/useRuntimeSelection';
-import { AgentsPanel, SystemPanel, WorkspacePanel, WorkspaceRail } from './features/workspace/WorkspaceRail';
+import {
+  AgentsPanel,
+  SystemPanel,
+  WorkspacePanel,
+  WorkspaceRail,
+} from './features/workspace/WorkspaceRail';
 import { RightRail } from './features/panels/RightRail';
 import { AccountStatus } from './features/panels/AccountStatus';
 import { Chat, ChatModelSelector, Editor } from './features/chat/ChatPage';
@@ -27,14 +37,27 @@ import { useChatComposers } from './features/chat/useChatComposers';
 import { ChatComposerDialogs } from './features/chat/ChatComposerDialogs';
 import { AppStatusBar, DocumentTabs } from './app/AppChrome';
 
-
-const isSupportedAttachment = (file: File) => file.type.startsWith('image/') || file.type.startsWith('text/') || ['application/json', 'application/xml', 'application/rtf'].includes(file.type) || /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(file.name);
+const isSupportedAttachment = (file: File) =>
+  file.type.startsWith('image/') ||
+  file.type.startsWith('text/') ||
+  ['application/json', 'application/xml', 'application/rtf'].includes(file.type) ||
+  /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(
+    file.name,
+  );
 import { useWorkspaceFiles } from './features/workspace/useWorkspaceFiles';
 import { useChatSession } from './features/chat/useChatSession';
-const Settings = lazy(() => import('./features/settings/SettingsPage').then(({ Settings }) => ({ default: Settings })));
-const Tasks = lazy(() => import('./features/tasks/TasksPage').then(({ Tasks }) => ({ default: Tasks })));
-const Brains = lazy(() => import('./features/brains/BrainsPage').then(({ Brains }) => ({ default: Brains })));
-const Archive = lazy(() => import('./features/tasks/ArchivePage').then(({ Archive }) => ({ default: Archive })));
+const Settings = lazy(() =>
+  import('./features/settings/SettingsPage').then(({ Settings }) => ({ default: Settings })),
+);
+const Tasks = lazy(() =>
+  import('./features/tasks/TasksPage').then(({ Tasks }) => ({ default: Tasks })),
+);
+const Brains = lazy(() =>
+  import('./features/brains/BrainsPage').then(({ Brains }) => ({ default: Brains })),
+);
+const Archive = lazy(() =>
+  import('./features/tasks/ArchivePage').then(({ Archive }) => ({ default: Archive })),
+);
 import { GroupChannelsPage } from './features/groups/GroupChannelsPage';
 import { Forge } from './features/forge/ForgePage';
 
@@ -42,22 +65,56 @@ function AppContent() {
   useBrowserTabTitle();
   const navigate = useUnsavedNavigation();
   const [runtimeVersion, setRuntimeVersion] = useState<string | null>(null);
-  useEffect(() => { let live = true; void api<RuntimeHealth>('/api/health').then((health) => { if (live) setRuntimeVersion(health.version ?? null); }).catch(() => {}); return () => { live = false; }; }, []);
-  const previewFirstRun = new URLSearchParams(window.location.search).get('previewFirstRun') === '1';
+  useEffect(() => {
+    let live = true;
+    void api<RuntimeHealth>('/api/health')
+      .then((health) => {
+        if (live) setRuntimeVersion(health.version ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const previewFirstRun =
+    new URLSearchParams(window.location.search).get('previewFirstRun') === '1';
   const setupFinished = useRef(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const firstRun = previewFirstRun || setupStatus?.wizardStep === 'fresh' || setupStatus?.wizardStep === 'incomplete';
-  const [page, setPage] = useState<Page>(() => previewFirstRun ? 'settings' : 'chat'); const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => previewFirstRun ? 'agents' : 'general');
+  const firstRun =
+    previewFirstRun ||
+    setupStatus?.wizardStep === 'fresh' ||
+    setupStatus?.wizardStep === 'incomplete';
+  const [page, setPage] = useState<Page>(() => (previewFirstRun ? 'settings' : 'chat'));
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(() =>
+    previewFirstRun ? 'agents' : 'general',
+  );
   useEffect(() => {
     if (previewFirstRun) return;
     let cancelled = false;
-    void api<SetupStatus>('/api/setup/status').then((status) => { if (!cancelled && !setupFinished.current) setSetupStatus(status); }).catch(() => { if (!cancelled && !setupFinished.current) setSetupStatus(null); });
-    return () => { cancelled = true; };
+    void api<SetupStatus>('/api/setup/status')
+      .then((status) => {
+        if (!cancelled && !setupFinished.current) setSetupStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled && !setupFinished.current) setSetupStatus(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [previewFirstRun]);
   useEffect(() => {
-    if (firstRun) { setPage('settings'); setSettingsTab('agents'); }
+    if (firstRun) {
+      setPage('settings');
+      setSettingsTab('agents');
+    }
   }, [firstRun]);
-  const completeFirstRun = () => { setupFinished.current = true; setSetupStatus((status) => status ? { ...status, wizardStep: 'ready', configured: true } : status); setPage('chat'); };
+  const completeFirstRun = () => {
+    setupFinished.current = true;
+    setSetupStatus((status) =>
+      status ? { ...status, wizardStep: 'ready', configured: true } : status,
+    );
+    setPage('chat');
+  };
   // Burrow is a single local runtime. Node Goblin integrations are explicit mod-owned APIs.
   const [modPanels, setModPanels] = useState<ModPanel[]>([]);
   const [modsLoaded, setModsLoaded] = useState(false);
@@ -65,47 +122,175 @@ function AppContent() {
   useEffect(() => {
     let live = true;
     let sequence = 0;
-    const refresh = () => { const current = ++sequence; void loadModPanels().then((panels) => { if (live && current === sequence) { setModPanels(panels); setModsLoaded(true); } }).catch(() => { if (live && current === sequence) { setModPanels([]); setModsLoaded(true); } }); };
+    const refresh = () => {
+      const current = ++sequence;
+      void loadModPanels()
+        .then((panels) => {
+          if (live && current === sequence) {
+            setModPanels(panels);
+            setModsLoaded(true);
+          }
+        })
+        .catch(() => {
+          if (live && current === sequence) {
+            setModPanels([]);
+            setModsLoaded(true);
+          }
+        });
+    };
     refresh();
     window.addEventListener(modsChangedEvent, refresh);
     const interval = window.setInterval(refresh, 30000);
-    return () => { live = false; window.removeEventListener(modsChangedEvent, refresh); window.clearInterval(interval); };
+    return () => {
+      live = false;
+      window.removeEventListener(modsChangedEvent, refresh);
+      window.clearInterval(interval);
+    };
   }, []);
   const activeMod = modPanels.find((mod) => mod.modId === activeModId);
-  useEffect(() => { if (modsLoaded && activeModId && !activeMod) { setActiveModId(null); setPage('chat'); } }, [activeModId, activeMod, modsLoaded]);
-  const { expandedAgents, selectedAgentId, selectedStreamId, selectChildStream, selectParentStream, setSelectedAgentId, setSelectedStreamId, showParentStream, toggleAgentExpanded } = useRuntimeSelection();
+  useEffect(() => {
+    if (modsLoaded && activeModId && !activeMod) {
+      setActiveModId(null);
+      setPage('chat');
+    }
+  }, [activeModId, activeMod, modsLoaded]);
+  const {
+    expandedAgents,
+    selectedAgentId,
+    selectedStreamId,
+    selectChildStream,
+    selectParentStream,
+    setSelectedAgentId,
+    setSelectedStreamId,
+    showParentStream,
+    toggleAgentExpanded,
+  } = useRuntimeSelection();
   const { tabs, setTabs, activeTabId, setActiveTabId } = useAppTabs();
-  const { leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout, leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel } = usePersistedLayout();
-  const workspacePanelVisible = page === 'chat' && !leftCollapsed && (leftRailLayout === 'divided' ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace' : leftSinglePanel === 'workspace');
-  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({ tabs, selectedAgentId, setTabs, setActiveTabId, pollingEnabled: workspacePanelVisible });
-  const { composerResetGeneration, isAttachmentScopeCurrent, attached, setAttachment, clearAttachment, removeAttachment, isNewSession, leaveNewSessionForMessage, sessions, sessionId, turns, chatError, reportError, clearError, isLoadingConversation, draft, setDraft, refreshSessions, refreshConversation, selectSession: selectChatSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent, resetSession, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, a2aActivities, runtimeRun, runtimeChildActivities, cancelRuntimeRun, retireRuntimeRun } = useChatSession(selectedAgentId);
+  const {
+    leftCollapsed,
+    setLeftCollapsed,
+    rightCollapsed,
+    setRightCollapsed,
+    leftSplit,
+    setLeftSplit,
+    rightSplit,
+    setRightSplit,
+    leftTopPanel,
+    setLeftTopPanel,
+    leftBottomPanel,
+    setLeftBottomPanel,
+    rightTopPanel,
+    setRightTopPanel,
+    rightBottomPanel,
+    setRightBottomPanel,
+    leftRailLayout,
+    setLeftRailLayout,
+    rightRailLayout,
+    setRightRailLayout,
+    leftSinglePanel,
+    setLeftSinglePanel,
+    rightSinglePanel,
+    setRightSinglePanel,
+  } = usePersistedLayout();
+  const workspacePanelVisible =
+    page === 'chat' &&
+    !leftCollapsed &&
+    (leftRailLayout === 'divided'
+      ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace'
+      : leftSinglePanel === 'workspace');
+  const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({
+    tabs,
+    selectedAgentId,
+    setTabs,
+    setActiveTabId,
+    pollingEnabled: workspacePanelVisible,
+  });
+  const {
+    composerResetGeneration,
+    isAttachmentScopeCurrent,
+    attached,
+    setAttachment,
+    clearAttachment,
+    removeAttachment,
+    isNewSession,
+    leaveNewSessionForMessage,
+    sessions,
+    sessionId,
+    turns,
+    chatError,
+    reportError,
+    clearError,
+    isLoadingConversation,
+    draft,
+    setDraft,
+    refreshSessions,
+    refreshConversation,
+    selectSession: selectChatSession,
+    prepareAgentSelection,
+    selectChildSession,
+    parentSessionIdForAgent,
+    resetSession,
+    appendTurn,
+    appendTransientTurn,
+    storeToolActivity,
+    toolActivityForRun,
+    clearRunState,
+    a2aActivities,
+    runtimeRun,
+    runtimeChildActivities,
+    cancelRuntimeRun,
+    retireRuntimeRun,
+  } = useChatSession(selectedAgentId);
   const [isResettingSession, setIsResettingSession] = useState(false);
   const resettingSessionRef = useRef(false);
   const runtimeProviders = useRef([]);
-  const { agents, setAgents, refreshAgents, registryState, registryError, registryStale } = useRuntimeAgents({
-    selectedAgentId,
-    setSelectedAgentId,
-    selectedStreamId,
-    parentSessionIdForAgent,
-    runtimeProviders,
-    setSelectedStreamId,
-    // A configured Burrow may intentionally have no agents. Do not hijack
-    // navigation to Settings when the registry is empty or briefly unavailable.
-    onNoAgents: () => {},
-    reportError,
-  });
+  const { agents, setAgents, refreshAgents, registryState, registryError, registryStale } =
+    useRuntimeAgents({
+      selectedAgentId,
+      setSelectedAgentId,
+      selectedStreamId,
+      parentSessionIdForAgent,
+      runtimeProviders,
+      setSelectedStreamId,
+      // A configured Burrow may intentionally have no agents. Do not hijack
+      // navigation to Settings when the registry is empty or briefly unavailable.
+      onNoAgents: () => {},
+      reportError,
+    });
   const [theme, setTheme] = usePersistedTheme();
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
-    return () => { delete document.documentElement.dataset.theme; };
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
   }, [theme]);
   const [agentRailPreferences, setAgentRailPreferences] = useAgentRailPreferences();
   const availableAgents = enabledAgents(agents);
-  const loadedSelected = availableAgents.find((agent) => agent.id === selectedAgentId) ?? availableAgents[0];
+  const loadedSelected =
+    availableAgents.find((agent) => agent.id === selectedAgentId) ?? availableAgents[0];
   // Settings must remain reachable when the first agent has not been created yet.
   // The placeholder is only used for the settings form; chat still waits for a real agent.
-  const selected = loadedSelected ?? { id: '', name: '', avatar: '', activity: 'Disabled', context: null, provider: '', model: '', effort: '', temperature: 0.7, workspace: '', files: [], subagents: [] };
-  const { operatorProfile, providerConnectionStatus, refreshModelConnections, savedProviders, setOperatorProfile } = useRuntimeDashboard({ setAgents, runtimeProviders, reportError });
+  const selected = loadedSelected ?? {
+    id: '',
+    name: '',
+    avatar: '',
+    activity: 'Disabled',
+    context: null,
+    provider: '',
+    model: '',
+    effort: '',
+    temperature: 0.7,
+    workspace: '',
+    files: [],
+    subagents: [],
+  };
+  const {
+    operatorProfile,
+    providerConnectionStatus,
+    refreshModelConnections,
+    savedProviders,
+    setOperatorProfile,
+  } = useRuntimeDashboard({ setAgents, runtimeProviders, reportError });
   const visibleTabs = tabs;
   const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0];
   const railAgents = availableAgents;
@@ -126,7 +311,9 @@ function AppContent() {
     setActiveTabId('chat');
   };
   const selectSubagent = (agentId: string, subagentId: string) => {
-    const subagent = agents.find((agent) => agent.id === agentId)?.subagents.find((item) => item.id === subagentId);
+    const subagent = agents
+      .find((agent) => agent.id === agentId)
+      ?.subagents.find((item) => item.id === subagentId);
     if (!subagent) return;
 
     const childSessionId = subagent.resourceId ?? subagent.id;
@@ -139,18 +326,45 @@ function AppContent() {
   };
   const [pendingModelOwners, setPendingModelOwners] = useState<Set<string>>(new Set());
   const [modelSelectionBlocked, setModelSelectionBlocked] = useState(false);
-  const writeModelSelection = useModelSelectionWriter(savedProviders,
-    (id, patch) => setAgents(all => all.map(agent => agent.id === id ? { ...agent, ...patch } : agent)), reportError, (id, pending) => setPendingModelOwners(current => { const next = new Set(current); if (pending) next.add(id); else next.delete(id); return next; }));
+  const writeModelSelection = useModelSelectionWriter(
+    savedProviders,
+    (id, patch) =>
+      setAgents((all) => all.map((agent) => (agent.id === id ? { ...agent, ...patch } : agent))),
+    reportError,
+    (id, pending) =>
+      setPendingModelOwners((current) => {
+        const next = new Set(current);
+        if (pending) next.add(id);
+        else next.delete(id);
+        return next;
+      }),
+  );
   const updateAgent = async (patch: Partial<Agent>) => {
     if (!selected) return;
     if (patch.contextConfig) {
       const contextConfig = { a2aInDefault: patch.contextConfig.a2aInDefault };
       try {
-        await api(`/api/agents/${encodeURIComponent(selected.resourceId ?? selected.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contextConfig }) });
-        setAgents((all) => all.map((agent) => agent.id === selected.id ? { ...agent, contextConfig: { ...agent.contextConfig, ...contextConfig } } : agent));
-        await refreshSessions(selected.id).catch((error: Error) => reportError(`A2A routing saved, but could not refresh sessions: ${error.message}`));
+        await api(`/api/agents/${encodeURIComponent(selected.resourceId ?? selected.id)}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ contextConfig }),
+        });
+        setAgents((all) =>
+          all.map((agent) =>
+            agent.id === selected.id
+              ? { ...agent, contextConfig: { ...agent.contextConfig, ...contextConfig } }
+              : agent,
+          ),
+        );
+        await refreshSessions(selected.id).catch((error: Error) =>
+          reportError(`A2A routing saved, but could not refresh sessions: ${error.message}`),
+        );
       } catch (error) {
-        reportError(error instanceof Error ? `Could not update A2A routing: ${error.message}` : 'Could not update A2A routing.');
+        reportError(
+          error instanceof Error
+            ? `Could not update A2A routing: ${error.message}`
+            : 'Could not update A2A routing.',
+        );
       }
       return;
     }
@@ -158,21 +372,42 @@ function AppContent() {
   };
 
   const confirmDiscard = useConfirm();
-  const closeTab = async (id: string) => { if (id === 'chat') return; const tab = tabs.find(item => item.id === id); if (tab?.kind === 'file' && tab.savedContent !== undefined && tab.content !== tab.savedContent && !await confirmDiscard({ title: 'Discard unsaved edits?', message: `Close ${tab.label} without saving?`, confirmLabel: 'Discard edits', tone: 'danger' })) return; setTabs((all) => all.filter((tab) => tab.id !== id)); if (activeTabId === id) setActiveTabId('chat'); };
+  const closeTab = async (id: string) => {
+    if (id === 'chat') return;
+    const tab = tabs.find((item) => item.id === id);
+    if (
+      tab?.kind === 'file' &&
+      tab.savedContent !== undefined &&
+      tab.content !== tab.savedContent &&
+      !(await confirmDiscard({
+        title: 'Discard unsaved edits?',
+        message: `Close ${tab.label} without saving?`,
+        confirmLabel: 'Discard edits',
+        tone: 'danger',
+      }))
+    )
+      return;
+    setTabs((all) => all.filter((tab) => tab.id !== id));
+    if (activeTabId === id) setActiveTabId('chat');
+  };
   const startNewSession = async () => {
     if (!selectedAgentId || resettingSessionRef.current || activeRunId) return;
     resettingSessionRef.current = true;
     setIsResettingSession(true);
     clearError();
     try {
-      if (!await resetSession() || !isAttachmentScopeCurrent()) return;
+      if (!(await resetSession()) || !isAttachmentScopeCurrent()) return;
       setDraft('');
       clearAttachment();
       setActiveTabId('chat');
       await refreshSessions();
     } catch (error) {
       if (!isAttachmentScopeCurrent()) return;
-      reportError(error instanceof Error ? `Could not start a new session: ${error.message}` : 'Could not start a new session.');
+      reportError(
+        error instanceof Error
+          ? `Could not start a new session: ${error.message}`
+          : 'Could not start a new session.',
+      );
     } finally {
       resettingSessionRef.current = false;
       setIsResettingSession(false);
@@ -181,41 +416,178 @@ function AppContent() {
   const attachImage = (files: File[]) => {
     const admittedSizes = attached.map((item) => item.size);
     const accepted = files.filter((file) => {
-      if (!isSupportedAttachment(file)) { reportError(`${file.name}: Attach an image or text document. PDF extraction is not supported.`); return false; }
-      if (!isWithinAttachmentBudget(admittedSizes, file.size)) { reportError(`${file.name}: Attachment exceeds the client file, count, or batch safety budget.`); return false; }
+      if (!isSupportedAttachment(file)) {
+        reportError(
+          `${file.name}: Attach an image or text document. PDF extraction is not supported.`,
+        );
+        return false;
+      }
+      if (!isWithinAttachmentBudget(admittedSizes, file.size)) {
+        reportError(
+          `${file.name}: Attachment exceeds the client file, count, or batch safety budget.`,
+        );
+        return false;
+      }
       admittedSizes.push(file.size);
       return true;
     });
     if (!accepted.length) return;
-    void Promise.all(accepted.map((file, index) => readAttachment(file, attachmentDisplayName(file, index + 1)))).then((attachments) => { if (!isAttachmentScopeCurrent()) return; setAttachment(attachments); if (accepted.length === files.length) clearError(); }).catch(() => { if (isAttachmentScopeCurrent()) reportError('Could not read the attachment.'); });
+    void Promise.all(
+      accepted.map((file, index) => readAttachment(file, attachmentDisplayName(file, index + 1))),
+    )
+      .then((attachments) => {
+        if (!isAttachmentScopeCurrent()) return;
+        setAttachment(attachments);
+        if (accepted.length === files.length) clearError();
+      })
+      .catch(() => {
+        if (isAttachmentScopeCurrent()) reportError('Could not read the attachment.');
+      });
   };
   const setParentActivity = (agentId: string, status: string) => {
-    setAgents((current) => current.map((agent) => agent.id === agentId ? { ...agent, activity: formatAgentActivity(status.toLowerCase()) } : agent));
+    setAgents((current) =>
+      current.map((agent) =>
+        agent.id === agentId
+          ? { ...agent, activity: formatAgentActivity(status.toLowerCase()) }
+          : agent,
+      ),
+    );
   };
-  const { activeRunForSelection, activeRunId, sendMessage, cancelRun, liveProgress, liveAnswer, liveStage } = useChatRun({ selectedAgentId, selected, savedProviders, session: { attached, clearAttachment, sessionId, draft, setDraft, clearError, reportError, leaveNewSessionForMessage, appendTurn, appendTransientTurn, storeToolActivity, toolActivityForRun, clearRunState, refreshSessions, refreshConversation }, setAgentActivity: setParentActivity, onRunStopped: retireRuntimeRun, onCompactionFinished: () => { void refreshAgents(); } });
+  const {
+    activeRunForSelection,
+    activeRunId,
+    sendMessage,
+    cancelRun,
+    liveProgress,
+    liveAnswer,
+    liveStage,
+  } = useChatRun({
+    selectedAgentId,
+    selected,
+    savedProviders,
+    session: {
+      attached,
+      clearAttachment,
+      sessionId,
+      draft,
+      setDraft,
+      clearError,
+      reportError,
+      leaveNewSessionForMessage,
+      appendTurn,
+      appendTransientTurn,
+      storeToolActivity,
+      toolActivityForRun,
+      clearRunState,
+      refreshSessions,
+      refreshConversation,
+    },
+    setAgentActivity: setParentActivity,
+    onRunStopped: retireRuntimeRun,
+    onCompactionFinished: () => {
+      void refreshAgents();
+    },
+  });
   const displayedRun = activeRunForSelection ?? runtimeRun;
-  const cancelDisplayedRun = activeRunForSelection ? cancelRun : runtimeRun ? () => cancelRuntimeRun(runtimeRun) : () => {};
-  const composers = useChatComposers({ agents: availableAgents, sessionId, selectedAgentId, activeRunId, sessions, refreshSessions, selectSession, reportError, clearError, tabs, setTabs, setActiveTabId });
-  const resizeVertical = (kind: 'left' | 'right', event: PointerEvent) => { const start = event.clientY; const initial = kind === 'left' ? leftSplit : rightSplit; const host = (event.currentTarget as HTMLElement).parentElement?.getBoundingClientRect(); if (!host) return; const move = (e: globalThis.PointerEvent) => { const next = initial + ((e.clientY - start) / host.height) * 100; if (kind === 'left') setLeftSplit(clampRailSplit(next)); else setRightSplit(clampRailSplit(next)); }; listenResize(move); };
-  const [settingsNavigationTarget, setSettingsNavigationTarget] = useState<HTMLDivElement | null>(null);
+  const cancelDisplayedRun = activeRunForSelection
+    ? cancelRun
+    : runtimeRun
+      ? () => cancelRuntimeRun(runtimeRun)
+      : () => {};
+  const composers = useChatComposers({
+    agents: availableAgents,
+    sessionId,
+    selectedAgentId,
+    activeRunId,
+    sessions,
+    refreshSessions,
+    selectSession,
+    reportError,
+    clearError,
+    tabs,
+    setTabs,
+    setActiveTabId,
+  });
+  const resizeVertical = (kind: 'left' | 'right', event: PointerEvent) => {
+    const start = event.clientY;
+    const initial = kind === 'left' ? leftSplit : rightSplit;
+    const host = (event.currentTarget as HTMLElement).parentElement?.getBoundingClientRect();
+    if (!host) return;
+    const move = (e: globalThis.PointerEvent) => {
+      const next = initial + ((e.clientY - start) / host.height) * 100;
+      if (kind === 'left') setLeftSplit(clampRailSplit(next));
+      else setRightSplit(clampRailSplit(next));
+    };
+    listenResize(move);
+  };
+  const [settingsNavigationTarget, setSettingsNavigationTarget] = useState<HTMLDivElement | null>(
+    null,
+  );
   const settingsNavigationVisible = page === 'settings' && !activeMod;
-  const style = { '--left': leftCollapsed ? '38px' : '320px', '--right': rightCollapsed ? '38px' : '320px', '--left-split': `${leftSplit}%`, '--right-split': `${rightSplit}%` } as React.CSSProperties;
+  const style = {
+    '--left': leftCollapsed ? '38px' : '320px',
+    '--right': rightCollapsed ? '38px' : '320px',
+    '--left-split': `${leftSplit}%`,
+    '--right-split': `${rightSplit}%`,
+  } as React.CSSProperties;
   // An empty registry is a valid configured state: keep the cockpit visible so
   // operators can inspect the chat and open Settings instead of hitting a
   // full-page dead end. Only block while the registry is still loading or
   // genuinely unavailable.
-  if (!loadedSelected && (registryState === 'loading' || registryState === 'unavailable') && page !== 'settings' && page !== 'archive' && page !== 'brains' && !activeMod) {
-    const registryMessage = registryState === 'unavailable'
-      ? `Local runtime is unavailable${registryError ? `: ${registryError}` : '.'}`
-      : 'Loading Burrow agents…';
-    return <main className="cockpit loading-app" data-theme={theme}><p role={registryState === 'unavailable' ? 'alert' : 'status'}>{registryMessage}</p>{registryState !== 'loading' && <button type="button" onClick={() => setPage('settings')}>Open settings</button>}</main>;
+  if (
+    !loadedSelected &&
+    (registryState === 'loading' || registryState === 'unavailable') &&
+    page !== 'settings' &&
+    page !== 'archive' &&
+    page !== 'brains' &&
+    !activeMod
+  ) {
+    const registryMessage =
+      registryState === 'unavailable'
+        ? `Local runtime is unavailable${registryError ? `: ${registryError}` : '.'}`
+        : 'Loading Burrow agents…';
+    return (
+      <main className="cockpit loading-app" data-theme={theme}>
+        <p role={registryState === 'unavailable' ? 'alert' : 'status'}>{registryMessage}</p>
+        {registryState !== 'loading' && (
+          <button type="button" onClick={() => setPage('settings')}>
+            Open settings
+          </button>
+        )}
+      </main>
+    );
   }
   const renderRailPanel = (panel: PanelId) => {
-    if (panel === 'agents') return <AgentsPanel agents={railAgents} view={agentRailPreferences.view} order={agentRailPreferences.order} selectedStreamId={selectedStreamId} expandedAgents={expandedAgents} onToggleAgent={toggleAgentExpanded} onSelectAgent={selectAgent} onSelectSubagent={selectSubagent} />;
-    if (panel === 'system') return <SystemPanel provider={selected.provider} providerConnectionStatus={providerConnectionStatus} />;
-    if (panel === 'workspace') return <WorkspacePanel selected={{ ...selected, files: workspaceFiles }} onOpenFile={openFile} />;
+    if (panel === 'agents')
+      return (
+        <AgentsPanel
+          agents={railAgents}
+          view={agentRailPreferences.view}
+          order={agentRailPreferences.order}
+          selectedStreamId={selectedStreamId}
+          expandedAgents={expandedAgents}
+          onToggleAgent={toggleAgentExpanded}
+          onSelectAgent={selectAgent}
+          onSelectSubagent={selectSubagent}
+        />
+      );
+    if (panel === 'system')
+      return (
+        <SystemPanel
+          provider={selected.provider}
+          providerConnectionStatus={providerConnectionStatus}
+        />
+      );
+    if (panel === 'workspace')
+      return (
+        <WorkspacePanel selected={{ ...selected, files: workspaceFiles }} onOpenFile={openFile} />
+      );
     if (panel === 'accounts') return <AccountStatus providers={savedProviders} />;
-    return <div className="panel-body"><p className="hint">No panel selected.</p></div>;
+    return (
+      <div className="panel-body">
+        <p className="hint">No panel selected.</p>
+      </div>
+    );
   };
   const changePage = (nextPage: Page) => {
     if (!activeMod && nextPage === page) return;
@@ -224,39 +596,284 @@ function AppContent() {
       setActiveModId(null);
       setPage(nextPage);
       if (nextPage === 'chat' && page !== 'chat') {
-        void Promise.all([refreshSessions(), refreshConversation()]).catch((error: Error) => reportError(`Could not refresh chat: ${error.message}`));
+        void Promise.all([refreshSessions(), refreshConversation()]).catch((error: Error) =>
+          reportError(`Could not refresh chat: ${error.message}`),
+        );
       }
     });
   };
   // AgentSchedules calls this inside the existing unsaved-navigation guard.
   // Match task dispatch: select the parent agent and its exact saved session.
   const openScheduledChat = (targetSessionId: string, agentId: string) => {
-    const agent = agents.find(item => (item.resourceId ?? item.id) === agentId);
-    if (!agent) { reportError('Could not open scheduled run: agent is unavailable.'); return; }
+    const agent = agents.find((item) => (item.resourceId ?? item.id) === agentId);
+    if (!agent) {
+      reportError('Could not open scheduled run: agent is unavailable.');
+      return;
+    }
     selectParentStream(agent.id);
     selectChatSession(targetSessionId, agent.id);
-    setActiveTabId('chat'); setActiveModId(null); setPage('chat');
-    void Promise.all([refreshSessions(agent.id), refreshConversation(agent.id, targetSessionId)])
-      .catch((error: Error) => reportError(`Could not refresh scheduled chat: ${error.message}`));
+    setActiveTabId('chat');
+    setActiveModId(null);
+    setPage('chat');
+    void Promise.all([
+      refreshSessions(agent.id),
+      refreshConversation(agent.id, targetSessionId),
+    ]).catch((error: Error) => reportError(`Could not refresh scheduled chat: ${error.message}`));
   };
-  return <main className={`cockpit ${page === 'tasks' || page === 'archive' || page === 'brains' ? 'tasks-mode' : page === 'forge' ? 'forge-mode' : page === 'settings' ? `settings-mode${settingsNavigationVisible ? ' settings-top-navigation' : ''}` : activeMod ? 'mod-mode' : ''}`} data-theme={theme} style={style}>
-    <div className="app-navigation-stack">
-    <header className="app-header">
-      <nav className="page-tabs" aria-label="Primary navigation">
-        {(['chat', 'tasks', 'archive', 'brains', 'forge'] as Page[]).map((item) => <button className={!activeMod && page === item ? 'active' : ''} onClick={() => changePage(item)} key={item} aria-current={!activeMod && page === item ? 'page' : undefined}>{item === 'brains' ? 'Brains' : item === 'forge' ? 'Forge' : item}</button>)}
-        {modPanels.map((mod) => <button type="button" key={mod.modId} className={activeModId === mod.modId ? 'active' : ''} aria-current={activeModId === mod.modId ? 'page' : undefined} onClick={() => navigate(() => setActiveModId(mod.modId))}>{mod.name}</button>)}
-        <button className={!activeMod && page === 'settings' ? 'active' : ''} onClick={() => changePage('settings')} aria-current={!activeMod && page === 'settings' ? 'page' : undefined}>settings</button>
-      </nav>
-    </header>
-    {settingsNavigationVisible && <div className="settings-navigation-card" ref={setSettingsNavigationTarget} />}
-    </div>
-    {page === 'chat' && !activeMod && <WorkspaceRail collapsed={leftCollapsed} topPanel={leftTopPanel} bottomPanel={leftBottomPanel} layout={leftRailLayout} singlePanel={leftSinglePanel} renderPanel={renderRailPanel} onExpand={() => setLeftCollapsed(false)} onCollapse={() => setLeftCollapsed(true)} split={leftSplit} onSplitChange={setLeftSplit} onResizeSplit={(event) => resizeVertical('left', event)} />}
-    <section className={`workspace ${page === 'tasks' || page === 'archive' || page === 'brains' ? 'tasks-workspace' : page === 'forge' ? 'forge-workspace' : page === 'settings' ? 'settings-workspace' : activeMod ? 'mod-workspace' : ''}`}><div className="workspace-watermark" aria-hidden="true"><img src="/burrow-logo.png" alt="" /></div><Suspense fallback={<div className="page-loading" role="status">Loading page…</div>}>{activeMod ? <ModPanelHost key={activeMod.modId + activeMod.controlUrl + (activeMod.version ?? '')} panel={activeMod} /> : page === 'tasks' ? <Tasks agents={agents} onDispatch={(targetSessionId, agentId) => { const agent = agents.find(item => (item.resourceId ?? item.id) === agentId); if (!agent) { reportError('Could not open dispatched task: assigned agent is unavailable.'); return; } selectParentStream(agent.id); selectChatSession(targetSessionId, agent.id); setActiveTabId('chat'); changePage('chat'); }} /> : page === 'brains' ? <Brains agents={availableAgents} /> : page === 'archive' ? <Archive agents={agents} operatorName={operatorProfile.name} /> : page === 'forge' ? <Forge agents={agents} selectedAgentId={selectedAgentId} sessionId={sessionId} /> : page === 'settings' ? <Settings key="local" onOpenChat={openScheduledChat} navigationTarget={settingsNavigationVisible ? settingsNavigationTarget : null} tab={settingsTab} setTab={setSettingsTab} agents={agents} selected={selected} onOperatorProfileChanged={setOperatorProfile} onFirstRunComplete={completeFirstRun} savedProviders={savedProviders} onModelConnectionsChanged={refreshModelConnections} onAgentsChanged={refreshAgents} leftTopPanel={leftTopPanel} setLeftTopPanel={setLeftTopPanel} leftBottomPanel={leftBottomPanel} setLeftBottomPanel={setLeftBottomPanel} rightTopPanel={rightTopPanel} setRightTopPanel={setRightTopPanel} rightBottomPanel={rightBottomPanel} setRightBottomPanel={setRightBottomPanel} leftSinglePanel={leftSinglePanel} setLeftSinglePanel={setLeftSinglePanel} rightSinglePanel={rightSinglePanel} setRightSinglePanel={setRightSinglePanel} leftRailLayout={leftRailLayout} setLeftRailLayout={setLeftRailLayout} rightRailLayout={rightRailLayout} setRightRailLayout={setRightRailLayout} theme={theme} setTheme={setTheme} agentRailPreferences={agentRailPreferences} setAgentRailPreferences={setAgentRailPreferences} previewFirstRun={previewFirstRun} /> : <><DocumentTabs tabs={visibleTabs} activeTabId={activeTab.id} onSelect={setActiveTabId} onClose={closeTab} /><ChatModelSelector savingSelection={pendingModelOwners.has(selected.id)} onSelectionBlockedChange={setModelSelectionBlocked} selected={selected} savedProviders={savedProviders} updateAgent={updateAgent} sessions={sessions} sessionId={sessionId} onSessionChange={selectSession} onNewSession={startNewSession} isResettingSession={isResettingSession} onNewNamedSession={composers.session.open} onCreateGroup={composers.group.open} locked={Boolean(displayedRun)} />{activeTab.kind === 'file' ? <Editor tab={activeTab} setTabs={setTabs} onSave={saveFile} /> : activeTab.kind === 'group' && activeTab.channelId ? <GroupChannelsPage key={activeTab.channelId} channelId={activeTab.channelId} agents={agents} operator={operatorProfile} /> : <Chat selectionBlocked={modelSelectionBlocked || pendingModelOwners.has(selected.id)} composerResetGeneration={composerResetGeneration} key={`${selectedAgentId}:${sessionId}`} selected={selected.subagents.find(child => child.id === selectedStreamId || child.stream === selectedStreamId || (child.resourceId ?? child.id) === sessionId) ?? selected} parent={selected} operator={operatorProfile} draft={draft} setDraft={setDraft} attached={attached} onAttach={attachImage} onRemoveAttachment={removeAttachment} isNewSession={isNewSession} turns={turns} isLoading={isLoadingConversation} error={chatError} isSending={Boolean(displayedRun)} steeringReady={Boolean(displayedRun && runtimeRun?.runId === displayedRun.runId && runtimeRun.steeringReady)} activeRunId={displayedRun?.runId ?? ''} activeToolActivity={activeRunForSelection ? toolActivityForRun(activeRunForSelection.runId) : runtimeRun?.toolActivity} runtimeChildActivities={runtimeChildActivities} liveProgress={activeRunForSelection ? liveProgress : runtimeRun?.progress ?? []} liveStage={activeRunForSelection ? liveStage : runtimeRun?.stage} liveAnswer={activeRunForSelection ? liveAnswer : runtimeRun?.answerText ?? ''} a2aActivities={a2aActivities} runtimeUserMessageMetadata={runtimeRun && !activeRunForSelection ? runtimeRun.userMessageMetadata : undefined} runtimeUserMessage={runtimeRun && !activeRunForSelection ? runtimeRun.latestUserMessage : ''} onSend={sendMessage} onCancel={cancelDisplayedRun} selectedAgentId={selectedAgentId} resourceAgentId={selected?.resourceId ?? selectedAgentId} sessionId={sessionId}  />}</>}</Suspense></section>
-    {page === 'chat' && !activeMod && <RightRail collapsed={rightCollapsed} topPanel={rightTopPanel} bottomPanel={rightBottomPanel} layout={rightRailLayout} singlePanel={rightSinglePanel} renderPanel={renderRailPanel} onExpand={() => setRightCollapsed(false)} onCollapse={() => setRightCollapsed(true)} split={rightSplit} onSplitChange={setRightSplit} onResizeSplit={(event) => resizeVertical('right', event)} />}
-    <ChatComposerDialogs agents={availableAgents} session={composers.session} group={composers.group} />
-    <AppStatusBar runtimeVersion={runtimeVersion} registryStale={registryStale} />
-  </main>;
+  return (
+    <main
+      className={`cockpit ${page === 'tasks' || page === 'archive' || page === 'brains' ? 'tasks-mode' : page === 'forge' ? 'forge-mode' : page === 'settings' ? `settings-mode${settingsNavigationVisible ? ' settings-top-navigation' : ''}` : activeMod ? 'mod-mode' : ''}`}
+      data-theme={theme}
+      style={style}
+    >
+      <div className="app-navigation-stack">
+        <header className="app-header">
+          <nav className="page-tabs" aria-label="Primary navigation">
+            {(['chat', 'tasks', 'archive', 'brains', 'forge'] as Page[]).map((item) => (
+              <button
+                className={!activeMod && page === item ? 'active' : ''}
+                onClick={() => changePage(item)}
+                key={item}
+                aria-current={!activeMod && page === item ? 'page' : undefined}
+              >
+                {item === 'brains' ? 'Brains' : item === 'forge' ? 'Forge' : item}
+              </button>
+            ))}
+            {modPanels.map((mod) => (
+              <button
+                type="button"
+                key={mod.modId}
+                className={activeModId === mod.modId ? 'active' : ''}
+                aria-current={activeModId === mod.modId ? 'page' : undefined}
+                onClick={() => navigate(() => setActiveModId(mod.modId))}
+              >
+                {mod.name}
+              </button>
+            ))}
+            <button
+              className={!activeMod && page === 'settings' ? 'active' : ''}
+              onClick={() => changePage('settings')}
+              aria-current={!activeMod && page === 'settings' ? 'page' : undefined}
+            >
+              settings
+            </button>
+          </nav>
+        </header>
+        {settingsNavigationVisible && (
+          <div className="settings-navigation-card" ref={setSettingsNavigationTarget} />
+        )}
+      </div>
+      {page === 'chat' && !activeMod && (
+        <WorkspaceRail
+          collapsed={leftCollapsed}
+          topPanel={leftTopPanel}
+          bottomPanel={leftBottomPanel}
+          layout={leftRailLayout}
+          singlePanel={leftSinglePanel}
+          renderPanel={renderRailPanel}
+          onExpand={() => setLeftCollapsed(false)}
+          onCollapse={() => setLeftCollapsed(true)}
+          split={leftSplit}
+          onSplitChange={setLeftSplit}
+          onResizeSplit={(event) => resizeVertical('left', event)}
+        />
+      )}
+      <section
+        className={`workspace ${page === 'tasks' || page === 'archive' || page === 'brains' ? 'tasks-workspace' : page === 'forge' ? 'forge-workspace' : page === 'settings' ? 'settings-workspace' : activeMod ? 'mod-workspace' : ''}`}
+      >
+        <div className="workspace-watermark" aria-hidden="true">
+          <img src="/burrow-logo.png" alt="" />
+        </div>
+        <Suspense
+          fallback={
+            <div className="page-loading" role="status">
+              Loading page…
+            </div>
+          }
+        >
+          {activeMod ? (
+            <ModPanelHost
+              key={activeMod.modId + activeMod.controlUrl + (activeMod.version ?? '')}
+              panel={activeMod}
+            />
+          ) : page === 'tasks' ? (
+            <Tasks
+              agents={agents}
+              onDispatch={(targetSessionId, agentId) => {
+                const agent = agents.find((item) => (item.resourceId ?? item.id) === agentId);
+                if (!agent) {
+                  reportError('Could not open dispatched task: assigned agent is unavailable.');
+                  return;
+                }
+                selectParentStream(agent.id);
+                selectChatSession(targetSessionId, agent.id);
+                setActiveTabId('chat');
+                changePage('chat');
+              }}
+            />
+          ) : page === 'brains' ? (
+            <Brains agents={availableAgents} />
+          ) : page === 'archive' ? (
+            <Archive agents={agents} operatorName={operatorProfile.name} />
+          ) : page === 'forge' ? (
+            <Forge agents={agents} selectedAgentId={selectedAgentId} sessionId={sessionId} />
+          ) : page === 'settings' ? (
+            <Settings
+              key="local"
+              onOpenChat={openScheduledChat}
+              navigationTarget={settingsNavigationVisible ? settingsNavigationTarget : null}
+              tab={settingsTab}
+              setTab={setSettingsTab}
+              agents={agents}
+              selected={selected}
+              onOperatorProfileChanged={setOperatorProfile}
+              onFirstRunComplete={completeFirstRun}
+              savedProviders={savedProviders}
+              onModelConnectionsChanged={refreshModelConnections}
+              onAgentsChanged={refreshAgents}
+              leftTopPanel={leftTopPanel}
+              setLeftTopPanel={setLeftTopPanel}
+              leftBottomPanel={leftBottomPanel}
+              setLeftBottomPanel={setLeftBottomPanel}
+              rightTopPanel={rightTopPanel}
+              setRightTopPanel={setRightTopPanel}
+              rightBottomPanel={rightBottomPanel}
+              setRightBottomPanel={setRightBottomPanel}
+              leftSinglePanel={leftSinglePanel}
+              setLeftSinglePanel={setLeftSinglePanel}
+              rightSinglePanel={rightSinglePanel}
+              setRightSinglePanel={setRightSinglePanel}
+              leftRailLayout={leftRailLayout}
+              setLeftRailLayout={setLeftRailLayout}
+              rightRailLayout={rightRailLayout}
+              setRightRailLayout={setRightRailLayout}
+              theme={theme}
+              setTheme={setTheme}
+              agentRailPreferences={agentRailPreferences}
+              setAgentRailPreferences={setAgentRailPreferences}
+              previewFirstRun={previewFirstRun}
+            />
+          ) : (
+            <>
+              <DocumentTabs
+                tabs={visibleTabs}
+                activeTabId={activeTab.id}
+                onSelect={setActiveTabId}
+                onClose={closeTab}
+              />
+              <ChatModelSelector
+                savingSelection={pendingModelOwners.has(selected.id)}
+                onSelectionBlockedChange={setModelSelectionBlocked}
+                selected={selected}
+                savedProviders={savedProviders}
+                updateAgent={updateAgent}
+                sessions={sessions}
+                sessionId={sessionId}
+                onSessionChange={selectSession}
+                onNewSession={startNewSession}
+                isResettingSession={isResettingSession}
+                onNewNamedSession={composers.session.open}
+                onCreateGroup={composers.group.open}
+                locked={Boolean(displayedRun)}
+              />
+              {activeTab.kind === 'file' ? (
+                <Editor tab={activeTab} setTabs={setTabs} onSave={saveFile} />
+              ) : activeTab.kind === 'group' && activeTab.channelId ? (
+                <GroupChannelsPage
+                  key={activeTab.channelId}
+                  channelId={activeTab.channelId}
+                  agents={agents}
+                  operator={operatorProfile}
+                />
+              ) : (
+                <Chat
+                  selectionBlocked={modelSelectionBlocked || pendingModelOwners.has(selected.id)}
+                  composerResetGeneration={composerResetGeneration}
+                  key={`${selectedAgentId}:${sessionId}`}
+                  selected={
+                    selected.subagents.find(
+                      (child) =>
+                        child.id === selectedStreamId ||
+                        child.stream === selectedStreamId ||
+                        (child.resourceId ?? child.id) === sessionId,
+                    ) ?? selected
+                  }
+                  parent={selected}
+                  operator={operatorProfile}
+                  draft={draft}
+                  setDraft={setDraft}
+                  attached={attached}
+                  onAttach={attachImage}
+                  onRemoveAttachment={removeAttachment}
+                  isNewSession={isNewSession}
+                  turns={turns}
+                  isLoading={isLoadingConversation}
+                  error={chatError}
+                  isSending={Boolean(displayedRun)}
+                  steeringReady={Boolean(
+                    displayedRun &&
+                      runtimeRun?.runId === displayedRun.runId &&
+                      runtimeRun.steeringReady,
+                  )}
+                  activeRunId={displayedRun?.runId ?? ''}
+                  activeToolActivity={
+                    activeRunForSelection
+                      ? toolActivityForRun(activeRunForSelection.runId)
+                      : runtimeRun?.toolActivity
+                  }
+                  runtimeChildActivities={runtimeChildActivities}
+                  liveProgress={activeRunForSelection ? liveProgress : (runtimeRun?.progress ?? [])}
+                  liveStage={activeRunForSelection ? liveStage : runtimeRun?.stage}
+                  liveAnswer={activeRunForSelection ? liveAnswer : (runtimeRun?.answerText ?? '')}
+                  a2aActivities={a2aActivities}
+                  runtimeUserMessageMetadata={
+                    runtimeRun && !activeRunForSelection
+                      ? runtimeRun.userMessageMetadata
+                      : undefined
+                  }
+                  runtimeUserMessage={
+                    runtimeRun && !activeRunForSelection ? runtimeRun.latestUserMessage : ''
+                  }
+                  onSend={sendMessage}
+                  onCancel={cancelDisplayedRun}
+                  selectedAgentId={selectedAgentId}
+                  resourceAgentId={selected?.resourceId ?? selectedAgentId}
+                  sessionId={sessionId}
+                />
+              )}
+            </>
+          )}
+        </Suspense>
+      </section>
+      {page === 'chat' && !activeMod && (
+        <RightRail
+          collapsed={rightCollapsed}
+          topPanel={rightTopPanel}
+          bottomPanel={rightBottomPanel}
+          layout={rightRailLayout}
+          singlePanel={rightSinglePanel}
+          renderPanel={renderRailPanel}
+          onExpand={() => setRightCollapsed(false)}
+          onCollapse={() => setRightCollapsed(true)}
+          split={rightSplit}
+          onSplitChange={setRightSplit}
+          onResizeSplit={(event) => resizeVertical('right', event)}
+        />
+      )}
+      <ChatComposerDialogs
+        agents={availableAgents}
+        session={composers.session}
+        group={composers.group}
+      />
+      <AppStatusBar runtimeVersion={runtimeVersion} registryStale={registryStale} />
+    </main>
+  );
 }
 
-export function App() { return <UnsavedChangesProvider><AppContent /></UnsavedChangesProvider>; }
-
+export function App() {
+  return (
+    <UnsavedChangesProvider>
+      <AppContent />
+    </UnsavedChangesProvider>
+  );
+}

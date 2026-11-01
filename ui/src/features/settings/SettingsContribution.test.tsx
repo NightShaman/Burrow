@@ -6,21 +6,35 @@ import { validateSettingsContribution } from './SettingsContribution';
 
 describe('settings contribution list-detail items', () => {
   const assignments = {
-    sections: [{
-      id: 'assignments',
-      label: 'Agent assignments',
-      description: 'Choose where each agent executes future turns.',
-      layout: 'form-inventory',
-      items: [{
-        id: 'smatchet',
-        label: 'Smatchet',
-        description: 'Controller-owned assignment.',
-        meta: 'Local controller · /workspace',
-        detail: 'Assignments apply to future turns only.',
-        fields: [{ id: 'assignment-kind:smatchet', label: 'Runs on', control: 'select', value: 'local', options: [{ value: 'local', label: 'Local controller' }] }],
-        actions: [{ id: 'save-assignment:smatchet', label: 'Save assignment', tone: 'primary' }],
-      }],
-    }],
+    sections: [
+      {
+        id: 'assignments',
+        label: 'Agent assignments',
+        description: 'Choose where each agent executes future turns.',
+        layout: 'form-inventory',
+        items: [
+          {
+            id: 'smatchet',
+            label: 'Smatchet',
+            description: 'Controller-owned assignment.',
+            meta: 'Local controller · /workspace',
+            detail: 'Assignments apply to future turns only.',
+            fields: [
+              {
+                id: 'assignment-kind:smatchet',
+                label: 'Runs on',
+                control: 'select',
+                value: 'local',
+                options: [{ value: 'local', label: 'Local controller' }],
+              },
+            ],
+            actions: [
+              { id: 'save-assignment:smatchet', label: 'Save assignment', tone: 'primary' },
+            ],
+          },
+        ],
+      },
+    ],
   };
 
   it('preserves Agent Assignments items and nested fields/actions through validation', () => {
@@ -32,7 +46,14 @@ describe('settings contribution list-detail items', () => {
     const contribution = validateSettingsContribution(assignments);
     expect(contribution).not.toBeNull();
     const overflow = document.createElement('div');
-    render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
+    render(
+      <DeclarativeSection
+        contribution={contribution!}
+        section={contribution!.sections[0]}
+        module={{}}
+        overflowTarget={overflow}
+      />,
+    );
 
     expect(within(overflow).getByRole('button', { name: /Smatchet/, pressed: true })).toBeTruthy();
     expect(within(document.body).getByLabelText('Runs on').tagName).toBe('SELECT');
@@ -43,22 +64,49 @@ describe('settings contribution list-detail items', () => {
 
   it('passes displayed item defaults when saving after selecting an item', async () => {
     const contribution = validateSettingsContribution({
-      sections: [{
-        id: 'assignments', label: 'Agent assignments', layout: 'form-inventory', items: [
-          { id: 'local', label: 'Local', fields: [{ id: 'gateway:local', label: 'Gateway', value: 'local' }], actions: [{ id: 'save:local', label: 'Save' }] },
-          { id: 'Hatchet', label: 'Hatchet', fields: [{ id: 'gateway:Hatchet', label: 'Gateway', value: 'Hatchet' }], actions: [{ id: 'save:Hatchet', label: 'Save' }] },
-        ],
-      }],
+      sections: [
+        {
+          id: 'assignments',
+          label: 'Agent assignments',
+          layout: 'form-inventory',
+          items: [
+            {
+              id: 'local',
+              label: 'Local',
+              fields: [{ id: 'gateway:local', label: 'Gateway', value: 'local' }],
+              actions: [{ id: 'save:local', label: 'Save' }],
+            },
+            {
+              id: 'Hatchet',
+              label: 'Hatchet',
+              fields: [{ id: 'gateway:Hatchet', label: 'Gateway', value: 'Hatchet' }],
+              actions: [{ id: 'save:Hatchet', label: 'Save' }],
+            },
+          ],
+        },
+      ],
     });
     const handleSettingsAction = vi.fn().mockResolvedValue(undefined);
     const overflow = document.createElement('div');
-    render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
+    render(
+      <DeclarativeSection
+        contribution={contribution!}
+        section={contribution!.sections[0]}
+        module={{ handleSettingsAction }}
+        overflowTarget={overflow}
+      />,
+    );
 
     fireEvent.click(within(overflow).getByRole('button', { name: /Hatchet/ }));
     expect(within(overflow).getByRole('button', { name: /Hatchet/, pressed: true })).toBeTruthy();
     expect(within(overflow).getByRole('button', { name: 'Local', pressed: false })).toBeTruthy();
     fireEvent.click(within(document.body).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('save:Hatchet', { 'gateway:local': 'local', 'gateway:Hatchet': 'Hatchet' }));
+    await waitFor(() =>
+      expect(handleSettingsAction).toHaveBeenCalledWith('save:Hatchet', {
+        'gateway:local': 'local',
+        'gateway:Hatchet': 'Hatchet',
+      }),
+    );
   });
 });
 
@@ -68,12 +116,23 @@ describe('settings contribution item IDs', () => {
   });
 
   it('preserves case-sensitive opaque item IDs and their actions', () => {
-    const result = validateSettingsContribution(contribution([{ id: 'Hatchet', label: 'Hatchet', actions: [
-      { id: 'approve-pairing:Hatchet', label: 'Approve', tone: 'primary' },
-      { id: 'reject-pairing:Hatchet', label: 'Reject', tone: 'danger' },
-    ] }]));
+    const result = validateSettingsContribution(
+      contribution([
+        {
+          id: 'Hatchet',
+          label: 'Hatchet',
+          actions: [
+            { id: 'approve-pairing:Hatchet', label: 'Approve', tone: 'primary' },
+            { id: 'reject-pairing:Hatchet', label: 'Reject', tone: 'danger' },
+          ],
+        },
+      ]),
+    );
     expect(result?.sections[0].items?.[0].id).toBe('Hatchet');
-    expect(result?.sections[0].items?.[0].actions?.map((action) => action.id)).toEqual(['approve-pairing:Hatchet', 'reject-pairing:Hatchet']);
+    expect(result?.sections[0].items?.[0].actions?.map((action) => action.id)).toEqual([
+      'approve-pairing:Hatchet',
+      'reject-pairing:Hatchet',
+    ]);
   });
 
   it.each([
@@ -87,52 +146,160 @@ describe('settings contribution item IDs', () => {
 });
 
 it('keeps the gateway form in primary and only saved cards with revoke in overflow', async () => {
-  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], actions: [{ id: 'enroll', label: 'Enroll or rotate gateway' }], items: ['Hatchet', 'Curator'].map(id => ({ id, label: id, metadata: [{ label: 'Version', value: '1.0' }], actions: [{ id: `revoke:${id}`, label: 'Revoke', tone: 'danger' }] })) }] });
+  const contribution = validateSettingsContribution({
+    sections: [
+      {
+        id: 'gateways',
+        label: 'Gateways',
+        layout: 'form-inventory',
+        fields: [{ id: 'new-id', label: 'Gateway ID' }],
+        actions: [{ id: 'enroll', label: 'Enroll or rotate gateway' }],
+        items: ['Hatchet', 'Curator'].map((id) => ({
+          id,
+          label: id,
+          metadata: [{ label: 'Version', value: '1.0' }],
+          actions: [{ id: `revoke:${id}`, label: 'Revoke', tone: 'danger' }],
+        })),
+      },
+    ],
+  });
   const overflow = document.createElement('div');
   const handleSettingsAction = vi.fn().mockResolvedValue(undefined);
-  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{ handleSettingsAction }} overflowTarget={overflow} />);
+  const view = render(
+    <DeclarativeSection
+      contribution={contribution!}
+      section={contribution!.sections[0]}
+      module={{ handleSettingsAction }}
+      overflowTarget={overflow}
+    />,
+  );
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   expect(within(view.container).getByText('Enroll or rotate gateway')).toBeTruthy();
   expect(within(view.container).queryByText('Hatchet')).toBeNull();
   expect(within(overflow).getByText('Hatchet')).toBeTruthy();
   expect(within(overflow).getByText('Curator')).toBeTruthy();
   expect(within(overflow).queryByRole('textbox')).toBeNull();
-  expect(within(overflow).getAllByRole('button').map(button => button.textContent)).toEqual(['Revoke', 'Revoke']);
+  expect(
+    within(overflow)
+      .getAllByRole('button')
+      .map((button) => button.textContent),
+  ).toEqual(['Revoke', 'Revoke']);
   fireEvent.click(within(overflow).getAllByText('Revoke')[0]);
-  await waitFor(() => expect(handleSettingsAction).toHaveBeenCalledWith('revoke:Hatchet', expect.anything()));
+  await waitFor(() =>
+    expect(handleSettingsAction).toHaveBeenCalledWith('revoke:Hatchet', expect.anything()),
+  );
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
 });
 
 it('retains the form and inline inventory without an overflow target, including empty inventories', () => {
-  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'gateway', label: 'Gateway ID' }], items: [] }] });
-  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={null} />);
+  const contribution = validateSettingsContribution({
+    sections: [
+      {
+        id: 'gateways',
+        label: 'Gateways',
+        layout: 'form-inventory',
+        fields: [{ id: 'gateway', label: 'Gateway ID' }],
+        items: [],
+      },
+    ],
+  });
+  const view = render(
+    <DeclarativeSection
+      contribution={contribution!}
+      section={contribution!.sections[0]}
+      module={{}}
+      overflowTarget={null}
+    />,
+  );
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   expect(within(view.container).getByText('No saved items yet.')).toBeTruthy();
 });
 
 it('selects credential forms without conflating selection and revoke, and clears secrets on cancel', () => {
-  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], items: [{ id: 'Hatchet', label: 'Hatchet', fields: [{ id: 'secret:Hatchet', label: 'New secret', control: 'password' }], actions: [{ id: 'rotate:Hatchet', label: 'Save new secret' }, { id: 'revoke:Hatchet', label: 'Revoke', tone: 'danger', confirm: 'Revoke Hatchet?' }] }] }] });
+  const contribution = validateSettingsContribution({
+    sections: [
+      {
+        id: 'gateways',
+        label: 'Gateways',
+        layout: 'form-inventory',
+        fields: [{ id: 'new-id', label: 'Gateway ID' }],
+        items: [
+          {
+            id: 'Hatchet',
+            label: 'Hatchet',
+            fields: [{ id: 'secret:Hatchet', label: 'New secret', control: 'password' }],
+            actions: [
+              { id: 'rotate:Hatchet', label: 'Save new secret' },
+              { id: 'revoke:Hatchet', label: 'Revoke', tone: 'danger', confirm: 'Revoke Hatchet?' },
+            ],
+          },
+        ],
+      },
+    ],
+  });
   const overflow = document.createElement('div');
-  const view = render(<DeclarativeSection contribution={contribution!} section={contribution!.sections[0]} module={{}} overflowTarget={overflow} />);
+  const view = render(
+    <DeclarativeSection
+      contribution={contribution!}
+      section={contribution!.sections[0]}
+      module={{}}
+      overflowTarget={overflow}
+    />,
+  );
   fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   fireEvent.click(within(document.body).getByRole('button', { name: 'Cancel' }));
   fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
   expect(within(overflow).getByRole('button', { name: 'Hatchet', pressed: true })).toBeTruthy();
-  fireEvent.change(within(view.container).getByLabelText('New secret'), { target: { value: 'fixture-secret' } });
+  fireEvent.change(within(view.container).getByLabelText('New secret'), {
+    target: { value: 'fixture-secret' },
+  });
   fireEvent.click(within(view.container).getByRole('button', { name: 'Cancel' }));
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
   expect((within(view.container).getByLabelText('New secret') as HTMLInputElement).value).toBe('');
 });
 
-function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }
+function render(ui: Parameters<typeof baseRender>[0]) {
+  return baseRender(ui, { wrapper: ConfirmProvider });
+}
 
 it('uses shared confirmation for overflow actions and cancels without invoking the mod', async () => {
-  const contribution = validateSettingsContribution({ sections: [{ id: 'gateways', label: 'Gateways', layout: 'form-inventory', fields: [{ id: 'new-id', label: 'Gateway ID' }], items: [{ id: 'safe', label: 'Fixture gateway', actions: [{ id: 'revoke:safe', label: 'Revoke', tone: 'danger', confirm: 'Revoke the fixture gateway?' }] }] }] })!;
-  const overflow = document.createElement('div'); document.body.append(overflow);
+  const contribution = validateSettingsContribution({
+    sections: [
+      {
+        id: 'gateways',
+        label: 'Gateways',
+        layout: 'form-inventory',
+        fields: [{ id: 'new-id', label: 'Gateway ID' }],
+        items: [
+          {
+            id: 'safe',
+            label: 'Fixture gateway',
+            actions: [
+              {
+                id: 'revoke:safe',
+                label: 'Revoke',
+                tone: 'danger',
+                confirm: 'Revoke the fixture gateway?',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })!;
+  const overflow = document.createElement('div');
+  document.body.append(overflow);
   const handler = vi.fn().mockResolvedValue(undefined);
-  const view = render(<DeclarativeSection contribution={contribution} section={contribution.sections[0]} module={{ handleSettingsAction: handler }} overflowTarget={overflow} />);
+  const view = render(
+    <DeclarativeSection
+      contribution={contribution}
+      section={contribution.sections[0]}
+      module={{ handleSettingsAction: handler }}
+      overflowTarget={overflow}
+    />,
+  );
   fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
   const dialog = screen.getByRole('alertdialog', { name: 'Revoke' });
   expect(dialog.className).toBe('confirm-dialog');
@@ -142,5 +309,6 @@ it('uses shared confirmation for overflow actions and cancels without invoking t
   fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
   fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
   await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
-  view.unmount(); overflow.remove();
+  view.unmount();
+  overflow.remove();
 });

@@ -27,5 +27,4 @@ describe('single local runtime selection', () => {
     act(() => result.current.selectParentStream('alpha'));
     expect(result.current.selectedStreamId).toBe('alpha');
   });
-
 });

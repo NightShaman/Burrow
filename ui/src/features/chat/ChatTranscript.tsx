@@ -1,12 +1,33 @@
-import { chatInputLabel, pendingChatInput, type ChatInput, type ChatInputMetadata } from './chatInputs';
+import {
+  chatInputLabel,
+  pendingChatInput,
+  type ChatInput,
+  type ChatInputMetadata,
+} from './chatInputs';
 import { chatToolIdentity } from './chatToolIdentity';
+import {
+  chatTerminalDiagnostic,
+  chatTerminalMetadata,
+  type ChatTerminalMetadata,
+} from './chatTerminal';
 import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
 import { isValidElement, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownTable, MarkdownImage } from '../../app/markdownTables';
-import { fetchApi, generatedArtifactPath, textFromChatValue, type GeneratedArtifact, type ProgressEntry, type RunProgress, type SessionAttachment, type SessionTurn, type ToolActivity, type ToolActivityItem } from '../../app/api';
+import {
+  fetchApi,
+  generatedArtifactPath,
+  textFromChatValue,
+  type GeneratedArtifact,
+  type ProgressEntry,
+  type RunProgress,
+  type SessionAttachment,
+  type SessionTurn,
+  type ToolActivity,
+  type ToolActivityItem,
+} from '../../app/api';
 import type { Agent, Subagent } from '../../app/types';
 import { toolDisplayName } from '../../app/toolDisplayName';
 
@@ -42,79 +63,317 @@ type ChatTranscriptProps = {
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, parentSessionName, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId, chatInputs = [], onPromote, onInputAction, inputActionPending }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({
+  selected,
+  parent,
+  parentSessionName,
+  operator,
+  isNewSession,
+  turns,
+  isLoading,
+  error,
+  isSending,
+  activeRunId,
+  activeToolActivity,
+  liveProgress,
+  liveAnswer,
+  liveStage,
+  a2aActivities = [],
+  runtimeUserMessage = '',
+  runtimeUserMessageMetadata,
+  runtimeChildActivities = [],
+  attachmentAgentId,
+  chatInputs = [],
+  onPromote,
+  onInputAction,
+  inputActionPending,
+}: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
-  const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && (turn.metadata?.visibility === 'chat' || turn.metadata?.chatInput))) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && !turn.metadata?.chatInput && isChatCommand(textFromChatValue(turn.content)) && !/^\/compact$/i.test(textFromChatValue(turn.content).trim())));
+  const messages = turns.filter(
+    (turn) =>
+      (turn.type === 'message' ||
+        (turn.type === 'event' &&
+          turn.role === 'user' &&
+          (turn.metadata?.visibility === 'chat' || turn.metadata?.chatInput))) &&
+      turn.metadata?.visibility !== 'debug' &&
+      turn.metadata?.kind !== 'subagent-runtime-context' &&
+      turn.metadata?.kind !== 'subagent-task' &&
+      (turn.content ||
+        (turn.role === 'assistant' &&
+          chatTerminalMetadata(turn.metadata)?.terminalStatus !== undefined &&
+          chatTerminalMetadata(turn.metadata)?.terminalStatus !== 'completed') ||
+        turn.metadata?.attachments?.length ||
+        turn.metadata?.outputArtifacts?.length) &&
+      (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') &&
+      !(
+        turn.role === 'user' &&
+        !turn.metadata?.chatInput &&
+        isChatCommand(textFromChatValue(turn.content)) &&
+        !/^\/compact$/i.test(textFromChatValue(turn.content).trim())
+      ),
+  );
   // Provider role=user is not speaker identity. Workflow and delegation
   // provenance (including legacy saved markers) identify non-operator input.
   const userIdentity = (metadata?: SessionTurn['metadata']) => {
-    if (metadata?.source === 'workflow-event') return { name: `GitHub · ${metadata.completionEvent?.workflow?.trim() || 'workflow event'}`, avatar: 'G' };
-    const delegated = metadata?.kind === 'subagent-delegated-task' || Boolean(metadata?.parentAgentId) || (isSubagent && Boolean(metadata?.workerProfile || metadata?.subagentId));
-    if (!delegated) return { name: operator.name, avatar: operator.avatar || operator.name.slice(0, 1).toUpperCase() };
+    if (metadata?.source === 'workflow-event')
+      return {
+        name: `GitHub · ${metadata.completionEvent?.workflow?.trim() || 'workflow event'}`,
+        avatar: 'G',
+      };
+    const delegated =
+      metadata?.kind === 'subagent-delegated-task' ||
+      Boolean(metadata?.parentAgentId) ||
+      (isSubagent && Boolean(metadata?.workerProfile || metadata?.subagentId));
+    if (!delegated)
+      return {
+        name: operator.name,
+        avatar: operator.avatar || operator.name.slice(0, 1).toUpperCase(),
+      };
     const parentId = metadata?.parentAgentId;
     const knownParent = Boolean(parentId && [parent.id, parent.resourceId].includes(parentId));
     const name = knownParent ? parent.name : parentId || 'Parent agent';
     return { name, avatar: (knownParent && parent.avatar) || name.slice(0, 1).toUpperCase() };
   };
   const runtimeIdentity = userIdentity(runtimeUserMessageMetadata);
-  const inputById = new Map(chatInputs.map(input => [input.id, input]));
+  const inputById = new Map(chatInputs.map((input) => [input.id, input]));
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
-    if (activity && (turn.runId || activity.runId)) activityByRun.set(turn.runId || activity.runId || '', activity);
+    if (activity && (turn.runId || activity.runId))
+      activityByRun.set(turn.runId || activity.runId || '', activity);
   }
-  const activeActivity = activeRunId ? activeToolActivity ?? activityByRun.get(activeRunId) : undefined;
-  const visibleRuntimeChildActivities = runtimeChildActivities.filter((activity) => activity.runId !== activeActivity?.runId);
+  const activeActivity = activeRunId
+    ? (activeToolActivity ?? activityByRun.get(activeRunId))
+    : undefined;
+  const visibleRuntimeChildActivities = runtimeChildActivities.filter(
+    (activity) => activity.runId !== activeActivity?.runId,
+  );
   // An externally started task run can reach this destination session before
   // its first durable turn. Keep the live run visible instead of replacing it
   // with the empty-session watermark.
-  const isEmptySession = !isLoading && !isSending && !runtimeUserMessage && !a2aActivities.length && !visibleRuntimeChildActivities.length && (isNewSession || !messages.length);
+  const isEmptySession =
+    !isLoading &&
+    !isSending &&
+    !runtimeUserMessage &&
+    !a2aActivities.length &&
+    !visibleRuntimeChildActivities.length &&
+    (isNewSession || !messages.length);
   const messagesRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const updateScrollIntent = () => {
     const container = messagesRef.current;
     if (!container) return;
-    stickToBottomRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+    stickToBottomRef.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 48;
   };
   useLayoutEffect(() => {
     const container = messagesRef.current;
-    if (container && !isLoading && stickToBottomRef.current) container.scrollTop = container.scrollHeight;
-  }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity, chatInputs]);
-  return <div className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`} ref={messagesRef} onScroll={updateScrollIntent} aria-busy={isLoading || isSending}>
-    {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
-      {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}{parentSessionName && <> · {parentSessionName}</>}</small></div>}
-      {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
-      {runtimeUserMessage && !messages.some((turn) => turn.role === 'user' && (!activeRunId || turn.runId === activeRunId) && textFromChatValue(turn.content) === runtimeUserMessage) && <ChatMessage side="operator" name={runtimeIdentity.name} avatar={runtimeIdentity.avatar} time="Now" text={runtimeUserMessage} />}
-      {messages.map((turn, index) => {
-        const { name: userName, avatar: userAvatar } = userIdentity(turn.metadata);
-        const isAgentMessage = turn.role === 'agent';
-        const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
-        const senderName = turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
-        const recipientName = turn.metadata?.toAgentId ?? selected.name;
-        const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
-        const persistedActivity = turn.metadata?.toolActivity;
-        const isPersistedTerminalTurn = turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || persistedActivity || turn.content);
-        return <ChatMessage chatInput={turn.metadata?.chatInput} input={turn.metadata?.chatInput ? inputById.get(turn.metadata.chatInput.id) : undefined} onPromote={onPromote} onInputAction={onInputAction} inputActionPending={inputActionPending} key={`${turn.runId ?? 'turn'}-${index}`} side={turn.role === 'user' || (isAgentMessage && !fromCurrentAgent) ? 'operator' : 'agent'} name={turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name} avatar={turn.role === 'user' ? userAvatar : isAgentMessage && !fromCurrentAgent ? senderName.slice(0, 1).toUpperCase() : selected.avatar} time={turn.metadata?.steering ? `${formatTime(turn.ts)} · ${turn.metadata.steering.status === 'pending' ? 'Pending — next model boundary' : turn.metadata.steering.status === 'delivered' ? 'Delivered to run' : 'Not delivered — retained as follow-up'}` : formatTime(turn.ts)} text={textFromChatValue(turn.content)} activity={turn.role === 'assistant' ? (persistedActivity ?? (turn.runId === activeRunId ? activeActivity : activityByRun.get(turn.runId ?? ''))) : undefined} progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined} streamedAnswer={turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined} activityLive={turn.role === 'assistant' && turn.runId === activeRunId && !isPersistedTerminalTurn} attachments={turn.metadata?.attachments} outputArtifacts={turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined} attachmentAgentId={attachmentAgentId ?? parent.id} />;
-      })}
-      {a2aActivities.length > 0 && <section className="a2a-activity-list" aria-label="Agent-to-agent activity">{a2aActivities.map((activity) => <A2AActivityCard key={activity.id} activity={activity} selectedName={selected.name} />)}</section>}
-      {visibleRuntimeChildActivities.length > 0 && <section className="a2a-activity-list" aria-label="Minion activity">{visibleRuntimeChildActivities.map((activity) => <ToolActivityCard key={activity.runId} activity={activity} live={activity.status === 'running'} />)}</section>}
-      {isSending && !messages.some((turn) => turn.role === 'assistant' && turn.runId === activeRunId && Boolean(turn.metadata?.progress || turn.metadata?.toolActivity || turn.content)) && <LiveAssistantTurn name={selected.name} avatar={selected.avatar} progress={liveProgress} activity={activeActivity} answer={liveAnswer} stage={liveStage} />}
-    </>}
-      {error && <p className="chat-error" role="alert">{error}</p>}
-  </div>;
+    if (container && !isLoading && stickToBottomRef.current)
+      container.scrollTop = container.scrollHeight;
+  }, [
+    isLoading,
+    isNewSession,
+    messages.length,
+    isSending,
+    liveProgress,
+    liveAnswer,
+    activeActivity,
+    chatInputs,
+  ]);
+  return (
+    <div
+      className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`}
+      ref={messagesRef}
+      onScroll={updateScrollIntent}
+      aria-busy={isLoading || isSending}
+    >
+      {isEmptySession ? (
+        <div className="new-session-empty">
+          <img src="/burrow-logo.png" alt="Burrow" />
+        </div>
+      ) : (
+        <>
+          {isSubagent && (
+            <div className="stream-banner">
+              <span>Minion stream</span>
+              <strong>{selected.name}</strong>
+              <small>
+                Workspace remains attached to {parent.name}
+                {parentSessionName && <> · {parentSessionName}</>}
+              </small>
+            </div>
+          )}
+          {isLoading && (
+            <p className="chat-state">
+              {messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}
+            </p>
+          )}
+          {runtimeUserMessage &&
+            !messages.some(
+              (turn) =>
+                turn.role === 'user' &&
+                (!activeRunId || turn.runId === activeRunId) &&
+                textFromChatValue(turn.content) === runtimeUserMessage,
+            ) && (
+              <ChatMessage
+                side="operator"
+                name={runtimeIdentity.name}
+                avatar={runtimeIdentity.avatar}
+                time="Now"
+                text={runtimeUserMessage}
+              />
+            )}
+          {messages.map((turn, index) => {
+            const { name: userName, avatar: userAvatar } = userIdentity(turn.metadata);
+            const isAgentMessage = turn.role === 'agent';
+            const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
+            const senderName =
+              turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
+            const recipientName = turn.metadata?.toAgentId ?? selected.name;
+            const messageName = isAgentMessage ? `${senderName} → ${recipientName}` : selected.name;
+            const persistedActivity = turn.metadata?.toolActivity;
+            const isPersistedTerminalTurn =
+              turn.role === 'assistant' &&
+              turn.runId === activeRunId &&
+              Boolean(
+                turn.metadata?.progress ||
+                  persistedActivity ||
+                  turn.content ||
+                  chatTerminalMetadata(turn.metadata),
+              );
+            return (
+              <ChatMessage
+                chatInput={turn.metadata?.chatInput}
+                input={
+                  turn.metadata?.chatInput ? inputById.get(turn.metadata.chatInput.id) : undefined
+                }
+                onPromote={onPromote}
+                onInputAction={onInputAction}
+                inputActionPending={inputActionPending}
+                key={`${turn.runId ?? 'turn'}-${index}`}
+                side={
+                  turn.role === 'user' || (isAgentMessage && !fromCurrentAgent)
+                    ? 'operator'
+                    : 'agent'
+                }
+                name={
+                  turn.role === 'user' ? userName : isAgentMessage ? messageName : selected.name
+                }
+                avatar={
+                  turn.role === 'user'
+                    ? userAvatar
+                    : isAgentMessage && !fromCurrentAgent
+                      ? senderName.slice(0, 1).toUpperCase()
+                      : selected.avatar
+                }
+                time={
+                  turn.metadata?.steering
+                    ? `${formatTime(turn.ts)} · ${turn.metadata.steering.status === 'pending' ? 'Pending — next model boundary' : turn.metadata.steering.status === 'delivered' ? 'Delivered to run' : 'Not delivered — retained as follow-up'}`
+                    : formatTime(turn.ts)
+                }
+                text={textFromChatValue(turn.content)}
+                activity={
+                  turn.role === 'assistant'
+                    ? (persistedActivity ??
+                      (turn.runId === activeRunId
+                        ? activeActivity
+                        : activityByRun.get(turn.runId ?? '')))
+                    : undefined
+                }
+                progress={turn.role === 'assistant' ? turn.metadata?.progress : undefined}
+                terminal={
+                  turn.role === 'assistant' ? chatTerminalMetadata(turn.metadata) : undefined
+                }
+                streamedAnswer={
+                  turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined
+                }
+                activityLive={
+                  turn.role === 'assistant' &&
+                  turn.runId === activeRunId &&
+                  !isPersistedTerminalTurn
+                }
+                attachments={turn.metadata?.attachments}
+                outputArtifacts={
+                  turn.role === 'assistant' ? turn.metadata?.outputArtifacts : undefined
+                }
+                attachmentAgentId={attachmentAgentId ?? parent.id}
+              />
+            );
+          })}
+          {a2aActivities.length > 0 && (
+            <section className="a2a-activity-list" aria-label="Agent-to-agent activity">
+              {a2aActivities.map((activity) => (
+                <A2AActivityCard
+                  key={activity.id}
+                  activity={activity}
+                  selectedName={selected.name}
+                />
+              ))}
+            </section>
+          )}
+          {visibleRuntimeChildActivities.length > 0 && (
+            <section className="a2a-activity-list" aria-label="Minion activity">
+              {visibleRuntimeChildActivities.map((activity) => (
+                <ToolActivityCard
+                  key={activity.runId}
+                  activity={activity}
+                  live={activity.status === 'running'}
+                />
+              ))}
+            </section>
+          )}
+          {isSending &&
+            !messages.some(
+              (turn) =>
+                turn.role === 'assistant' &&
+                turn.runId === activeRunId &&
+                Boolean(
+                  turn.metadata?.progress ||
+                    turn.metadata?.toolActivity ||
+                    turn.content ||
+                    chatTerminalMetadata(turn.metadata),
+                ),
+            ) && (
+              <LiveAssistantTurn
+                name={selected.name}
+                avatar={selected.avatar}
+                progress={liveProgress}
+                activity={activeActivity}
+                answer={liveAnswer}
+                stage={liveStage}
+              />
+            )}
+        </>
+      )}
+      {error && (
+        <p className="chat-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 });
 
 export function formatTime(value?: string, now = new Date()) {
   if (!value) return 'Now';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'Now';
-  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
-  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(
+    date,
+  );
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
   if (sameDay(date, now)) return time;
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (sameDay(date, yesterday)) return `Yesterday · ${time}`;
-  const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}) }).format(date);
+  const day = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+  }).format(date);
   return `${day} · ${time}`;
 }
 
@@ -155,41 +414,162 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
     setCopyState(didCopy ? 'copied' : 'failed');
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
-  const label = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy code';
-  return <div className="code-block"><button type="button" className="copy-code" onClick={copy} aria-label="Copy code block" title={label}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{label}</span></button><pre {...props}>{children}</pre></div>;
+  const label =
+    copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy code';
+  return (
+    <div className="code-block">
+      <button
+        type="button"
+        className="copy-code"
+        onClick={copy}
+        aria-label="Copy code block"
+        title={label}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+        </svg>
+        <span aria-live="polite">{label}</span>
+      </button>
+      <pre {...props}>{children}</pre>
+    </div>
+  );
 }
 
 const markdownComponents = { pre: CodeBlock, table: MarkdownTable, img: MarkdownImage };
 
 function Markdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>{children}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
+      {children}
+    </ReactMarkdown>
+  );
 }
 
 function markdownText(value: unknown) {
   if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map((item) => {
-    if (typeof item === 'string') return item;
-    if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') return item.text;
-    return '';
-  }).filter(Boolean).join('\n\n');
-  if (value && typeof value === 'object' && 'text' in value && typeof value.text === 'string') return value.text;
+  if (Array.isArray(value))
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string')
+          return item.text;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  if (value && typeof value === 'object' && 'text' in value && typeof value.text === 'string')
+    return value.text;
   return '';
 }
 
-function ProgressCard({ items, live = false, status }: { items: ProgressEntry[]; live?: boolean; status?: RunProgress['status'] }) {
+function ProgressCard({
+  items,
+  live = false,
+  status,
+}: {
+  items: ProgressEntry[];
+  live?: boolean;
+  status?: RunProgress['status'];
+}) {
   const terminalLabel = status && status !== 'complete' ? ` · ${status}` : '';
-  return <details className={`run-progress${live ? ' live' : ''}`} open={live || status !== undefined}><summary><span aria-hidden="true">✦</span><span>{live ? 'Progress' : 'Progress recorded'} · {items.length}{terminalLabel}</span><span className="run-progress-chevron" aria-hidden="true">⌄</span></summary><ol className="run-progress-body run-progress-timeline">{items.map((item) => <li key={item.id}><small>{item.modelCall === undefined ? 'Reasoning' : `Model call ${item.modelCall}`}</small><Markdown>{markdownText(item.text)}</Markdown></li>)}</ol></details>;
+  return (
+    <details className={`run-progress${live ? ' live' : ''}`} open={live || status !== undefined}>
+      <summary>
+        <span aria-hidden="true">✦</span>
+        <span>
+          {live ? 'Progress' : 'Progress recorded'} · {items.length}
+          {terminalLabel}
+        </span>
+        <span className="run-progress-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <ol className="run-progress-body run-progress-timeline">
+        {items.map((item) => (
+          <li key={item.id}>
+            <small>
+              {item.modelCall === undefined ? 'Reasoning' : `Model call ${item.modelCall}`}
+            </small>
+            <Markdown>{markdownText(item.text)}</Markdown>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
 }
 
 function StreamedAnswerCard({ text }: { text: string }) {
-  return <details className="streamed-answer"><summary><span aria-hidden="true">≈</span><span>Streamed response</span><span className="streamed-answer-chevron" aria-hidden="true">⌄</span></summary><div className="streamed-answer-body"><Markdown>{text}</Markdown></div></details>;
+  return (
+    <details className="streamed-answer">
+      <summary>
+        <span aria-hidden="true">≈</span>
+        <span>Streamed response</span>
+        <span className="streamed-answer-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <div className="streamed-answer-body">
+        <Markdown>{text}</Markdown>
+      </div>
+    </details>
+  );
 }
 
-function avatarSource(value: string) { return /^(?:data:image\/[\w+.-]+;base64,|https?:\/\/|blob:|\/)/.test(value.trim()) ? value.trim() : null; }
+function avatarSource(value: string) {
+  return /^(?:data:image\/[\w+.-]+;base64,|https?:\/\/|blob:|\/)/.test(value.trim())
+    ? value.trim()
+    : null;
+}
 
-function LiveAssistantTurn({ name, avatar, progress, activity, answer, stage }: { name: string; avatar: string; progress: ProgressEntry[]; activity?: ToolActivity; answer: string; stage?: ChatLiveStage }) { const image = avatarSource(avatar); return <article className="message agent live-assistant-turn"><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · NOW</small>{activity && <ToolActivityCard activity={activity} live />}{progress.length > 0 && <ProgressCard items={progress} live />}{stage?.startsWith('compact') && <div className="live-waiting" role="status">{chatLiveStageLabel(stage)}</div>}{answer ? <div className="message-bubble final-answer live-answer"><Markdown>{answer}</Markdown><span className="stream-caret" aria-hidden="true" /></div> : !stage?.startsWith('compact') && !progress.length && !activity && <div className="live-waiting" role="status">{chatLiveStageLabel(stage)}</div>}</div></article>; }
-
-type ModelErrorDetails = { overloaded: boolean; message: string };
+function LiveAssistantTurn({
+  name,
+  avatar,
+  progress,
+  activity,
+  answer,
+  stage,
+}: {
+  name: string;
+  avatar: string;
+  progress: ProgressEntry[];
+  activity?: ToolActivity;
+  answer: string;
+  stage?: ChatLiveStage;
+}) {
+  const image = avatarSource(avatar);
+  return (
+    <article className="message agent live-assistant-turn">
+      <div className="message-avatar" aria-label={`${name} avatar`}>
+        {image ? <img src={image} alt="" /> : avatar}
+      </div>
+      <div className="message-content">
+        <small>{name.toUpperCase()} · NOW</small>
+        {activity && <ToolActivityCard activity={activity} live />}
+        {progress.length > 0 && <ProgressCard items={progress} live />}
+        {stage?.startsWith('compact') && (
+          <div className="live-waiting" role="status">
+            {chatLiveStageLabel(stage)}
+          </div>
+        )}
+        {answer ? (
+          <div className="message-bubble final-answer live-answer">
+            <Markdown>{answer}</Markdown>
+            <span className="stream-caret" aria-hidden="true" />
+          </div>
+        ) : (
+          !stage?.startsWith('compact') &&
+          !progress.length &&
+          !activity && (
+            <div className="live-waiting" role="status">
+              {chatLiveStageLabel(stage)}
+            </div>
+          )
+        )}
+      </div>
+    </article>
+  );
+}
 
 const MODEL_ERROR_TITLES = [
   'The model tripped over its own cloak',
@@ -208,20 +588,56 @@ function randomModelErrorTitle() {
   return MODEL_ERROR_TITLES[Math.floor(Math.random() * MODEL_ERROR_TITLES.length)];
 }
 
-function parseModelError(text: string): ModelErrorDetails | null {
-  const match = text.trim().match(/^\[model_error:\s*([\s\S]*?)\]$/);
-  if (!match) return null;
-  const message = match[1].trim() || 'The model provider got theatrical and refused to answer.';
-  return { overloaded: /overloaded|try again later|rate limit|temporar/i.test(message), message };
+export function TerminalErrorCard({ terminal }: { terminal: ChatTerminalMetadata }) {
+  const [title] = useState(randomModelErrorTitle);
+  if (terminal.terminalStatus === 'completed') return null;
+  const diagnostic = chatTerminalDiagnostic(terminal);
+  return (
+    <div className="message-bubble model-error-card" role="alert">
+      <div className="model-error-sigil" aria-hidden="true">
+        ⚠
+      </div>
+      <div>
+        <strong>
+          {terminal.terminalStatus === 'cancelled'
+            ? 'Run cancelled'
+            : terminal.terminalStatus === 'superseded'
+              ? 'Run superseded'
+              : diagnostic.overloaded
+                ? 'The model servers are throwing goblets'
+                : diagnostic.upstream
+                  ? title
+                  : terminal.modelFailure?.origin === 'burrow'
+                    ? 'The runtime could not finish this run'
+                    : 'Run failed'}
+        </strong>
+        <p>{diagnostic.message}</p>
+        {terminal.terminalStatus === 'superseded' ? (
+          <span>The newer run owns this conversation.</span>
+        ) : terminal.terminalStatus === 'failed' && diagnostic.upstream ? (
+          <span>The upstream model is being stupid.</span>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
-function MessageAttachment({ attachment, agentId }: { attachment: SessionAttachment; agentId?: string }) {
+function MessageAttachment({
+  attachment,
+  agentId,
+}: {
+  attachment: SessionAttachment;
+  agentId?: string;
+}) {
   const isImage = /^image\/(?:png|jpeg|gif|webp)$/i.test(attachment.type);
   const path = attachment.artifactPath;
   const [source, setSource] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'failed'>('idle');
-  const url = path && agentId ? `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}` : null;
+  const url =
+    path && agentId
+      ? `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}`
+      : null;
   const download = async () => {
     if (!url || downloadState === 'downloading') return;
     setDownloadState('downloading');
@@ -230,33 +646,86 @@ function MessageAttachment({ attachment, agentId }: { attachment: SessionAttachm
       if (!response.ok) throw new Error('Attachment unavailable');
       const objectUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
-      link.href = objectUrl; link.download = attachment.name;
-      document.body.append(link); link.click(); link.remove();
+      link.href = objectUrl;
+      link.download = attachment.name;
+      document.body.append(link);
+      link.click();
+      link.remove();
       URL.revokeObjectURL(objectUrl);
       setDownloadState('idle');
-    } catch { setDownloadState('failed'); }
+    } catch {
+      setDownloadState('failed');
+    }
   };
   useEffect(() => {
-    if (!isImage || !path || !agentId) { setSource(null); setFailed(false); return; }
+    if (!isImage || !path || !agentId) {
+      setSource(null);
+      setFailed(false);
+      return;
+    }
     const controller = new AbortController();
     let objectUrl: string | undefined;
-    setSource(null); setFailed(false);
+    setSource(null);
+    setFailed(false);
     const url = `/api/attachments/${encodeURIComponent(agentId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
-    void fetchApi(url, { signal: controller.signal, headers: { accept: 'image/*' } }).then(async (response) => {
-      if (!response.ok) throw new Error('Attachment unavailable');
-      const blob = await response.blob();
-      if (!blob.type.startsWith('image/')) throw new Error('Not an image');
-      if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setSource(objectUrl); }
-    }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    void fetchApi(url, { signal: controller.signal, headers: { accept: 'image/*' } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Attachment unavailable');
+        const blob = await response.blob();
+        if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+        if (!controller.signal.aborted) {
+          objectUrl = URL.createObjectURL(blob);
+          setSource(objectUrl);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [agentId, isImage, path]);
-  const imageSource = isImage && !failed ? source ?? attachment.preview ?? null : null;
-  return <div className={`message-attachment-card${imageSource ? ' image' : ''}`}>{imageSource
-    ? <figure className="message-attachment-image"><ImagePreview src={imageSource} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} /><figcaption>{attachment.name}</figcaption></figure>
-    : <span className="message-attachment" title={attachment.type}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" /></svg><span>{attachment.name}</span></span>}
-    {url && <button type="button" onClick={download} disabled={downloadState === 'downloading'} aria-label={`Download ${attachment.name}`}>{downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download'}</button>}
-    {downloadState === 'failed' && <span role="status">Download failed</span>}
-  </div>;
+  const imageSource = isImage && !failed ? (source ?? attachment.preview ?? null) : null;
+  return (
+    <div className={`message-attachment-card${imageSource ? ' image' : ''}`}>
+      {imageSource ? (
+        <figure className="message-attachment-image">
+          <ImagePreview
+            src={imageSource}
+            alt={attachment.name}
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+          <figcaption>{attachment.name}</figcaption>
+        </figure>
+      ) : (
+        <span className="message-attachment" title={attachment.type}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="9" r="1.5" />
+            <path d="m4 18 5.5-5.5 3.5 3.5 2.5-2.5 4.5 4.5" />
+          </svg>
+          <span>{attachment.name}</span>
+        </span>
+      )}
+      {url && (
+        <button
+          type="button"
+          onClick={download}
+          disabled={downloadState === 'downloading'}
+          aria-label={`Download ${attachment.name}`}
+        >
+          {downloadState === 'downloading'
+            ? 'Downloading…'
+            : downloadState === 'failed'
+              ? 'Retry download'
+              : 'Download'}
+        </button>
+      )}
+      {downloadState === 'failed' && <span role="status">Download failed</span>}
+    </div>
+  );
 }
 
 function formatArtifactSize(value?: number) {
@@ -265,11 +734,20 @@ function formatArtifactSize(value?: number) {
   const units = ['KB', 'MB', 'GB', 'TB'];
   let size = value / 1024;
   let unit = units[0];
-  for (let index = 1; index < units.length && size >= 1024; index += 1) { size /= 1024; unit = units[index]; }
+  for (let index = 1; index < units.length && size >= 1024; index += 1) {
+    size /= 1024;
+    unit = units[index];
+  }
   return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
 }
 
-function GeneratedArtifactCard({ artifact, agentId }: { artifact: GeneratedArtifact; agentId?: string }) {
+function GeneratedArtifactCard({
+  artifact,
+  agentId,
+}: {
+  artifact: GeneratedArtifact;
+  agentId?: string;
+}) {
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'failed'>('idle');
   const reference = artifact.storageReference?.trim();
   const canDownload = Boolean(reference && agentId);
@@ -280,19 +758,38 @@ function GeneratedArtifactCard({ artifact, agentId }: { artifact: GeneratedArtif
     let cancelled = false;
     let url = '';
     setPreviewUrl('');
-    void fetchApi(generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'image/*' } })
-      .then(response => { if (!response.ok) throw new Error('Preview unavailable'); return response.blob(); })
-      .then(blob => { if (!cancelled) { url = URL.createObjectURL(blob); setPreviewUrl(url); } })
+    void fetchApi(generatedArtifactPath(agentId, reference), {
+      headers: { accept: artifact.mimeType || 'image/*' },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Preview unavailable');
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!cancelled) {
+          url = URL.createObjectURL(blob);
+          setPreviewUrl(url);
+        }
+      })
       .catch(() => {});
-    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
   }, [reference, agentId, artifact.kind, artifact.mimeType]);
-  const details = [artifact.kind, artifact.mimeType, formatArtifactSize(artifact.sizeBytes)].filter(Boolean).join(' · ');
-  const provenance = [artifact.provenance?.provider, artifact.provenance?.model].filter(Boolean).join(' · ');
+  const details = [artifact.kind, artifact.mimeType, formatArtifactSize(artifact.sizeBytes)]
+    .filter(Boolean)
+    .join(' · ');
+  const provenance = [artifact.provenance?.provider, artifact.provenance?.model]
+    .filter(Boolean)
+    .join(' · ');
   const download = async () => {
     if (!reference || !agentId || downloadState === 'downloading') return;
     setDownloadState('downloading');
     try {
-      const response = await fetchApi(generatedArtifactPath(agentId, reference), { headers: { accept: artifact.mimeType || 'application/octet-stream' } });
+      const response = await fetchApi(generatedArtifactPath(agentId, reference), {
+        headers: { accept: artifact.mimeType || 'application/octet-stream' },
+      });
       if (!response.ok) throw new Error('Generated artifact unavailable');
       const objectUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
@@ -308,60 +805,296 @@ function GeneratedArtifactCard({ artifact, agentId }: { artifact: GeneratedArtif
       setDownloadState('failed');
     }
   };
-  const actionLabel = !canDownload ? 'Download unavailable' : downloadState === 'downloading' ? 'Downloading…' : downloadState === 'failed' ? 'Retry download' : 'Download';
-  return <article className="generated-artifact">
-    <div className="generated-artifact-icon">{previewUrl ? <ImagePreview src={previewUrl} alt={displayName} /> : <span aria-hidden="true">↓</span>}</div>
-    <div className="generated-artifact-info"><strong>{displayName}</strong><span>{details || 'Generated artifact'}</span>{provenance && <span>Created by {provenance}</span>}{downloadState === 'failed' && <span className="generated-artifact-error" role="status">Download failed</span>}</div>
-    <button type="button" onClick={download} disabled={!canDownload || downloadState === 'downloading'}>{actionLabel}</button>
-  </article>;
+  const actionLabel = !canDownload
+    ? 'Download unavailable'
+    : downloadState === 'downloading'
+      ? 'Downloading…'
+      : downloadState === 'failed'
+        ? 'Retry download'
+        : 'Download';
+  return (
+    <article className="generated-artifact">
+      <div className="generated-artifact-icon">
+        {previewUrl ? (
+          <ImagePreview src={previewUrl} alt={displayName} />
+        ) : (
+          <span aria-hidden="true">↓</span>
+        )}
+      </div>
+      <div className="generated-artifact-info">
+        <strong>{displayName}</strong>
+        <span>{details || 'Generated artifact'}</span>
+        {provenance && <span>Created by {provenance}</span>}
+        {downloadState === 'failed' && (
+          <span className="generated-artifact-error" role="status">
+            Download failed
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={download}
+        disabled={!canDownload || downloadState === 'downloading'}
+      >
+        {actionLabel}
+      </button>
+    </article>
+  );
 }
 
-export function ChatMessage({ side, name, avatar, time, text, activity, progress, streamedAnswer, activityLive, attachments = [], outputArtifacts = [], attachmentAgentId, chatInput, input, onPromote, onInputAction, inputActionPending }: { chatInput?: ChatInputMetadata; input?: ChatInput; onPromote?: (id: string, text: string) => void; onInputAction?: (id: string, action: 'cancel' | 'resume') => void; inputActionPending?: string; side: 'agent' | 'operator'; name: string; avatar: string; time: string; text: string; activity?: ToolActivity; progress?: RunProgress; streamedAnswer?: string; activityLive?: boolean; attachments?: SessionAttachment[]; outputArtifacts?: GeneratedArtifact[]; attachmentAgentId?: string }) {
+export function ChatMessage({
+  side,
+  name,
+  avatar,
+  time,
+  text,
+  activity,
+  progress,
+  streamedAnswer,
+  terminal,
+  activityLive,
+  attachments = [],
+  outputArtifacts = [],
+  attachmentAgentId,
+  chatInput,
+  input,
+  onPromote,
+  onInputAction,
+  inputActionPending,
+}: {
+  chatInput?: ChatInputMetadata;
+  input?: ChatInput;
+  onPromote?: (id: string, text: string) => void;
+  onInputAction?: (id: string, action: 'cancel' | 'resume') => void;
+  inputActionPending?: string;
+  side: 'agent' | 'operator';
+  name: string;
+  avatar: string;
+  time: string;
+  text: string;
+  activity?: ToolActivity;
+  progress?: RunProgress;
+  streamedAnswer?: string;
+  terminal?: ChatTerminalMetadata;
+  activityLive?: boolean;
+  attachments?: SessionAttachment[];
+  outputArtifacts?: GeneratedArtifact[];
+  attachmentAgentId?: string;
+}) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const image = avatarSource(avatar);
-  const modelError = side === 'agent' ? parseModelError(text) : null;
-  const [modelErrorTitle] = useState(randomModelErrorTitle);
+  const hasTerminalError =
+    side === 'agent' &&
+    terminal?.terminalStatus !== undefined &&
+    terminal.terminalStatus !== 'completed';
   const copy = async () => {
     const didCopy = await copyMarkdown(text);
     setCopyState(didCopy ? 'copied' : 'failed');
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const copyLabel = copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : '';
-  return <article className={`message ${side}${modelError ? ' model-error-message' : ''}`}><div className="message-avatar" aria-label={`${name} avatar`}>{image ? <img src={image} alt="" /> : avatar}</div><div className="message-content"><small>{name.toUpperCase()} · {time.toUpperCase()}</small>{chatInput && <span className="chat-input-label">{chatInputLabel(chatInput)}</span>}{attachments.length ? <div className="message-attachments" aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}>{attachments.map((attachment, index) => <MessageAttachment key={`${attachment.index ?? index}-${attachment.name}`} attachment={attachment} agentId={attachmentAgentId} />)}</div> : null}{outputArtifacts.length ? <section className="generated-artifacts" aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}>{outputArtifacts.map((artifact, index) => <GeneratedArtifactCard key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`} artifact={artifact} agentId={attachmentAgentId} />)}</section> : null}{streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}{activity && <ToolActivityCard activity={activity} live={activityLive} />}{progress?.items?.length ? <ProgressCard items={progress.items} status={progress.status} /> : null}{modelError ? <div className="message-bubble model-error-card" role="alert"><div className="model-error-sigil" aria-hidden="true">⚠</div><div><strong>{modelError.overloaded ? 'The model servers are throwing goblets' : modelErrorTitle}</strong><p>{modelError.message}</p><span>The chat is fine. The upstream model is being stupid.</span></div></div> : text && <div className="message-bubble final-answer"><Markdown>{text}</Markdown></div>}{chatInput && side === 'operator' && <div className="chat-input-actions">
-    {input && pendingChatInput(input) && onInputAction && <button disabled={Boolean(inputActionPending)} onClick={() => onInputAction(input.id, 'cancel')}>{input.status === 'running' ? 'Cancel this input' : 'Cancel input'}</button>}
-    {input?.status === 'held' && onInputAction && <button disabled={Boolean(inputActionPending)} onClick={() => onInputAction(input.id, 'resume')}>Resume queue</button>}
-    {input?.error && <p className="error" role="alert">{input.error}</p>}
-    {chatInput.snapshot && <details><summary>Snapshot details</summary><span>Run {chatInput.snapshot.originRunId ?? 'unknown'} · {chatInput.snapshot.phase ?? 'unknown phase'} · {chatInput.snapshot.entryCount ?? 'unknown'} entries</span></details>}
-  </div>}
-  {chatInput?.intent === 'side_question' && side === 'agent' && text && (input?.status ?? chatInput.status) === 'succeeded' && onPromote && <button className="chat-promote" onClick={() => onPromote(chatInput.id, text)}>Use in main conversation</button>}
-  {text && <button className="copy-message" onClick={copy} aria-label={`Copy ${name} message as Markdown`} title={copyState === 'copied' ? 'Copied Markdown' : copyState === 'failed' ? 'Copy failed' : 'Copy Markdown'}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></svg><span aria-live="polite">{copyLabel}</span></button>}</div></article>;
+  return (
+    <article className={`message ${side}${hasTerminalError ? ' model-error-message' : ''}`}>
+      <div className="message-avatar" aria-label={`${name} avatar`}>
+        {image ? <img src={image} alt="" /> : avatar}
+      </div>
+      <div className="message-content">
+        <small>
+          {name.toUpperCase()} · {time.toUpperCase()}
+        </small>
+        {chatInput && <span className="chat-input-label">{chatInputLabel(chatInput)}</span>}
+        {attachments.length ? (
+          <div
+            className="message-attachments"
+            aria-label={`${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`}
+          >
+            {attachments.map((attachment, index) => (
+              <MessageAttachment
+                key={`${attachment.index ?? index}-${attachment.name}`}
+                attachment={attachment}
+                agentId={attachmentAgentId}
+              />
+            ))}
+          </div>
+        ) : null}
+        {outputArtifacts.length ? (
+          <section
+            className="generated-artifacts"
+            aria-label={`${outputArtifacts.length} generated artifact${outputArtifacts.length === 1 ? '' : 's'}`}
+          >
+            {outputArtifacts.map((artifact, index) => (
+              <GeneratedArtifactCard
+                key={`${artifact.storageReference ?? artifact.name ?? artifact.kind}-${index}`}
+                artifact={artifact}
+                agentId={attachmentAgentId}
+              />
+            ))}
+          </section>
+        ) : null}
+        {streamedAnswer ? <StreamedAnswerCard text={streamedAnswer} /> : null}
+        {activity && <ToolActivityCard activity={activity} live={activityLive} />}
+        {progress?.items?.length ? (
+          <ProgressCard items={progress.items} status={progress.status} />
+        ) : null}
+        {hasTerminalError && terminal ? <TerminalErrorCard terminal={terminal} /> : null}
+        {text && (
+          <div className="message-bubble final-answer">
+            <Markdown>{text}</Markdown>
+          </div>
+        )}
+        {chatInput && side === 'operator' && (
+          <div className="chat-input-actions">
+            {input && pendingChatInput(input) && onInputAction && (
+              <button
+                disabled={Boolean(inputActionPending)}
+                onClick={() => onInputAction(input.id, 'cancel')}
+              >
+                {input.status === 'running' ? 'Cancel this input' : 'Cancel input'}
+              </button>
+            )}
+            {input?.status === 'held' && onInputAction && (
+              <button
+                disabled={Boolean(inputActionPending)}
+                onClick={() => onInputAction(input.id, 'resume')}
+              >
+                Resume queue
+              </button>
+            )}
+            {input?.error && (
+              <p className="error" role="alert">
+                {input.error}
+              </p>
+            )}
+            {chatInput.snapshot && (
+              <details>
+                <summary>Snapshot details</summary>
+                <span>
+                  Run {chatInput.snapshot.originRunId ?? 'unknown'} ·{' '}
+                  {chatInput.snapshot.phase ?? 'unknown phase'} ·{' '}
+                  {chatInput.snapshot.entryCount ?? 'unknown'} entries
+                </span>
+              </details>
+            )}
+          </div>
+        )}
+        {chatInput?.intent === 'side_question' &&
+          side === 'agent' &&
+          text &&
+          (input?.status ?? chatInput.status) === 'succeeded' &&
+          onPromote && (
+            <button className="chat-promote" onClick={() => onPromote(chatInput.id, text)}>
+              Use in main conversation
+            </button>
+          )}
+        {text && (
+          <button
+            className="copy-message"
+            onClick={copy}
+            aria-label={`Copy ${name} message as Markdown`}
+            title={
+              copyState === 'copied'
+                ? 'Copied Markdown'
+                : copyState === 'failed'
+                  ? 'Copy failed'
+                  : 'Copy Markdown'
+            }
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+            </svg>
+            <span aria-live="polite">{copyLabel}</span>
+          </button>
+        )}
+      </div>
+    </article>
+  );
 }
 
 function agentDisplayName(value: string) {
-  return value.split(/[:/_-]+/).filter(Boolean).map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(' ');
+  return value
+    .split(/[:/_-]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
-function A2AActivityCard({ activity, selectedName }: { activity: import('../../app/api').ActiveA2AActivity; selectedName: string }) {
+function A2AActivityCard({
+  activity,
+  selectedName,
+}: {
+  activity: import('../../app/api').ActiveA2AActivity;
+  selectedName: string;
+}) {
   const recipient = agentDisplayName(activity.recipient?.agentId ?? selectedName);
   const sender = agentDisplayName(activity.parentAgentId ?? selectedName);
   const label = `Agent message · ${sender} → ${recipient}`;
   const items: ToolActivityItem[] = (activity.progress ?? []).flatMap((event, index) => {
     const type = event.type ?? 'activity';
     const data = event.data ?? {};
-    const tool = typeof data.tool === 'string' ? data.tool : type.replace(/^tool\./, '').replace('.', ' ');
-    return [{ id: `${activity.id}:${index}`, label: chatToolIdentity(data)?.label ?? toolDisplayName(tool), status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending' }];
+    const tool =
+      typeof data.tool === 'string' ? data.tool : type.replace(/^tool\./, '').replace('.', ' ');
+    return [
+      {
+        id: `${activity.id}:${index}`,
+        label: chatToolIdentity(data)?.label ?? toolDisplayName(tool),
+        status: type.endsWith('completed') ? (data.ok === false ? 'error' : 'ok') : 'pending',
+      },
+    ];
   });
   // A2A activity is supplemental operational context. The actual request and
   // reply are persisted as attributed `agent` chat turns above; never open this
   // tool-style card automatically, including while the delegated run is live.
-  return <details className={`tool-activity a2a-activity ${activity.status === 'running' || activity.status === 'streaming' ? 'live' : ''}`}><summary><span className={activity.status === 'running' || activity.status === 'streaming' ? 'tool-activity-spinner' : 'tool-activity-check'} aria-hidden="true">{activity.status === 'running' || activity.status === 'streaming' ? '' : '✓'}</span><strong>{label}</strong><span className="tool-activity-chevron" aria-hidden="true">⌄</span></summary><div className="tool-activity-list">{items.length ? items.map((item) => <div className="tool-activity-item" key={item.id}><span className={`tool-dot ${item.status}`} aria-hidden="true">{item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}</span><strong>{item.label}</strong></div>) : <div className="tool-activity-empty">{activity.status === 'replied' ? 'Agent replied' : 'Waiting for agent activity…'}</div>}</div></details>;
+  return (
+    <details
+      className={`tool-activity a2a-activity ${activity.status === 'running' || activity.status === 'streaming' ? 'live' : ''}`}
+    >
+      <summary>
+        <span
+          className={
+            activity.status === 'running' || activity.status === 'streaming'
+              ? 'tool-activity-spinner'
+              : 'tool-activity-check'
+          }
+          aria-hidden="true"
+        >
+          {activity.status === 'running' || activity.status === 'streaming' ? '' : '✓'}
+        </span>
+        <strong>{label}</strong>
+        <span className="tool-activity-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <div className="tool-activity-list">
+        {items.length ? (
+          items.map((item) => (
+            <div className="tool-activity-item" key={item.id}>
+              <span className={`tool-dot ${item.status}`} aria-hidden="true">
+                {item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}
+              </span>
+              <strong>{item.label}</strong>
+            </div>
+          ))
+        ) : (
+          <div className="tool-activity-empty">
+            {activity.status === 'replied' ? 'Agent replied' : 'Waiting for agent activity…'}
+          </div>
+        )}
+      </div>
+    </details>
+  );
 }
 
 function ToolActivityCard({ activity, live }: { activity: ToolActivity; live?: boolean }) {
   // Render a friendly label only; activity items remain the raw stored receipt.
-  const items = (activity.items ?? []).map((item) => ({ ...item, label: toolDisplayName(item.label) }));
+  const items = (activity.items ?? []).map((item) => ({
+    ...item,
+    label: toolDisplayName(item.label),
+  }));
   const activeItem = [...items].reverse().find((item) => item.status === 'pending') ?? items.at(-1);
-  const label = live ? activeItem?.label ?? 'Working through it' : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
+  const label = live
+    ? (activeItem?.label ?? 'Working through it')
+    : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
   const keepExpandedCardInView = (event: SyntheticEvent<HTMLDetailsElement>) => {
     const card = event.currentTarget;
     if (!card.open) return;
@@ -372,10 +1105,60 @@ function ToolActivityCard({ activity, live }: { activity: ToolActivity; live?: b
       if (overflow > 0) chat.scrollBy({ top: overflow, behavior: 'smooth' });
     });
   };
-  if (live) return <details className="tool-activity live" onToggle={keepExpandedCardInView}><summary><span className="tool-activity-spinner" aria-hidden="true" /><strong>{label}</strong><span className="tool-activity-chevron" aria-hidden="true">⌄</span></summary><div className="tool-activity-list">{items.length ? items.map((item, index) => <div className="tool-activity-item" key={item.id || `${item.label}-${index}`}><span className={`tool-dot ${item.status ?? 'pending'}`} aria-hidden="true">{item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}</span><strong>{item.label}</strong></div>) : <div className="tool-activity-empty">{label}</div>}</div></details>;
-  return <details className="tool-activity" onToggle={keepExpandedCardInView}>
-    <summary><span className="tool-activity-check" aria-hidden="true">✓</span><strong>{label}</strong><span className="tool-activity-chevron" aria-hidden="true">⌄</span></summary>
-    <div className="tool-activity-list">{items.length ? items.map((item, index) => <div className="tool-activity-item" key={item.id || `${item.label}-${index}`}><span className={`tool-dot ${item.status ?? 'pending'}`} aria-hidden="true">{item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}</span><div><strong>{item.label}</strong>{item.detail && <small title={item.detail}>{item.detail}</small>}</div></div>) : <div className="tool-activity-empty">Waiting for the first tool call…</div>}</div>
-  </details>;
+  if (live)
+    return (
+      <details className="tool-activity live" onToggle={keepExpandedCardInView}>
+        <summary>
+          <span className="tool-activity-spinner" aria-hidden="true" />
+          <strong>{label}</strong>
+          <span className="tool-activity-chevron" aria-hidden="true">
+            ⌄
+          </span>
+        </summary>
+        <div className="tool-activity-list">
+          {items.length ? (
+            items.map((item, index) => (
+              <div className="tool-activity-item" key={item.id || `${item.label}-${index}`}>
+                <span className={`tool-dot ${item.status ?? 'pending'}`} aria-hidden="true">
+                  {item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}
+                </span>
+                <strong>{item.label}</strong>
+              </div>
+            ))
+          ) : (
+            <div className="tool-activity-empty">{label}</div>
+          )}
+        </div>
+      </details>
+    );
+  return (
+    <details className="tool-activity" onToggle={keepExpandedCardInView}>
+      <summary>
+        <span className="tool-activity-check" aria-hidden="true">
+          ✓
+        </span>
+        <strong>{label}</strong>
+        <span className="tool-activity-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <div className="tool-activity-list">
+        {items.length ? (
+          items.map((item, index) => (
+            <div className="tool-activity-item" key={item.id || `${item.label}-${index}`}>
+              <span className={`tool-dot ${item.status ?? 'pending'}`} aria-hidden="true">
+                {item.status === 'error' ? '!' : item.status === 'pending' ? '·' : '✓'}
+              </span>
+              <div>
+                <strong>{item.label}</strong>
+                {item.detail && <small title={item.detail}>{item.detail}</small>}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="tool-activity-empty">Waiting for the first tool call…</div>
+        )}
+      </div>
+    </details>
+  );
 }
-

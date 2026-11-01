@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { usePersistedAgentSelection, usePersistedLayout, usePersistedTheme } from './usePersistedLayout';
+import {
+  usePersistedAgentSelection,
+  usePersistedLayout,
+  usePersistedTheme,
+} from './usePersistedLayout';
 
 beforeEach(() => localStorage.clear());
 
@@ -13,19 +17,33 @@ describe('persisted layout state', () => {
 
     expect(theme.result.current[0]).toBe('midnight');
     expect(agent.result.current[0]).toBe('node-1::smatchet');
-    await waitFor(() => expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({ version: 1, value: 'midnight' }));
-    expect(JSON.parse(localStorage.getItem('hc.selectedAgentId') ?? '{}')).toEqual({ version: 1, value: 'node-1::smatchet' });
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({
+        version: 1,
+        value: 'midnight',
+      }),
+    );
+    expect(JSON.parse(localStorage.getItem('hc.selectedAgentId') ?? '{}')).toEqual({
+      version: 1,
+      value: 'node-1::smatchet',
+    });
   });
 
-  it.each(['midnight', 'halloween'] as const)('roundtrips %s independently through reload', (selected) => {
-    const theme = renderHook(() => usePersistedTheme());
-    act(() => theme.result.current[1](selected));
-    expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({ version: 1, value: selected });
-    theme.unmount();
-    const reloaded = renderHook(() => usePersistedTheme());
-    expect(reloaded.result.current[0]).toBe(selected);
-    reloaded.unmount();
-  });
+  it.each(['midnight', 'halloween'] as const)(
+    'roundtrips %s independently through reload',
+    (selected) => {
+      const theme = renderHook(() => usePersistedTheme());
+      act(() => theme.result.current[1](selected));
+      expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({
+        version: 1,
+        value: selected,
+      });
+      theme.unmount();
+      const reloaded = renderHook(() => usePersistedTheme());
+      expect(reloaded.result.current[0]).toBe(selected);
+      reloaded.unmount();
+    },
+  );
 
   it('rejects invalid themes', () => {
     localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: 'ultraviolet-chaos' }));
@@ -54,63 +72,81 @@ describe('persisted layout state', () => {
     expect(result.current.leftBottomPanel).toBe('workspace');
 
     act(() => result.current.setLeftRailLayout('bottom'));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem('hc.leftRailLayout') ?? '{}')).toEqual({ version: 1, value: 'bottom' }));
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem('hc.leftRailLayout') ?? '{}')).toEqual({
+        version: 1,
+        value: 'bottom',
+      }),
+    );
     expect(result.current.leftTopPanel).toBe('agents');
     expect(result.current.leftBottomPanel).toBe('workspace');
   });
-
 });
 
 it('keeps single selection separate from remembered divided selections and split across reload', () => {
- const hook = renderHook(() => usePersistedLayout());
- act(() => { hook.result.current.setLeftSplit(45); hook.result.current.setLeftRailLayout('single'); hook.result.current.setLeftSinglePanel('system'); });
- hook.unmount();
- const { result } = renderHook(() => usePersistedLayout());
- expect(result.current.leftSinglePanel).toBe('system');
- act(() => result.current.setLeftRailLayout('divided'));
- expect(result.current.leftTopPanel).toBe('agents');
- expect(result.current.leftBottomPanel).toBe('workspace');
- expect(result.current.leftSplit).toBe(45);
+  const hook = renderHook(() => usePersistedLayout());
+  act(() => {
+    hook.result.current.setLeftSplit(45);
+    hook.result.current.setLeftRailLayout('single');
+    hook.result.current.setLeftSinglePanel('system');
+  });
+  hook.unmount();
+  const { result } = renderHook(() => usePersistedLayout());
+  expect(result.current.leftSinglePanel).toBe('system');
+  act(() => result.current.setLeftRailLayout('divided'));
+  expect(result.current.leftTopPanel).toBe('agents');
+  expect(result.current.leftBottomPanel).toBe('workspace');
+  expect(result.current.leftSplit).toBe(45);
 });
 
 it.each([61, 70, 75])('roundtrips archived left-rail trigger %s through reload', (split) => {
- const hook = renderHook(() => usePersistedLayout());
- act(() => hook.result.current.setLeftSplit(split));
- hook.unmount();
- const reload = renderHook(() => usePersistedLayout());
- expect(reload.result.current.leftSplit).toBe(split);
- reload.unmount();
+  const hook = renderHook(() => usePersistedLayout());
+  act(() => hook.result.current.setLeftSplit(split));
+  hook.unmount();
+  const reload = renderHook(() => usePersistedLayout());
+  expect(reload.result.current.leftSplit).toBe(split);
+  reload.unmount();
 });
 it.each([24, 76, 99])('rejects out-of-range persisted split %s on both rails', (split) => {
- localStorage.setItem('hc.leftSplit', JSON.stringify({version: 1, value: split}));
- localStorage.setItem('hc.rightSplit', JSON.stringify({version: 1, value: split}));
- const hook = renderHook(() => usePersistedLayout());
- expect(hook.result.current.leftSplit).toBe(40);
- expect(hook.result.current.rightSplit).toBe(50);
- hook.unmount();
+  localStorage.setItem('hc.leftSplit', JSON.stringify({ version: 1, value: split }));
+  localStorage.setItem('hc.rightSplit', JSON.stringify({ version: 1, value: split }));
+  const hook = renderHook(() => usePersistedLayout());
+  expect(hook.result.current.leftSplit).toBe(40);
+  expect(hook.result.current.rightSplit).toBe(50);
+  hook.unmount();
 });
 
-it.each(['codex', JSON.stringify({ version: 1, value: 'codex' })])('falls back for removed panel ID payload %s without losing native Accounts', (payload) => {
- localStorage.setItem('hc.rightPanelDefaultsVersion', '3');
- for (const slot of ['leftTopPanel', 'leftBottomPanel', 'leftSinglePanel', 'rightTopPanel', 'rightBottomPanel', 'rightSinglePanel']) {
-  localStorage.setItem(`hc.${slot}`, payload);
- }
- const hook = renderHook(() => usePersistedLayout());
- expect(hook.result.current.leftTopPanel).toBe('agents');
- expect(hook.result.current.leftBottomPanel).toBe('workspace');
- expect(hook.result.current.leftSinglePanel).toBe('agents');
- expect(hook.result.current.rightTopPanel).toBe('none');
- expect(hook.result.current.rightBottomPanel).toBe('none');
- expect(hook.result.current.rightSinglePanel).toBe('none');
- act(() => hook.result.current.setRightTopPanel('accounts'));
- hook.unmount();
- const reload = renderHook(() => usePersistedLayout());
- expect(reload.result.current.rightTopPanel).toBe('accounts');
- reload.unmount();
-});
+it.each(['codex', JSON.stringify({ version: 1, value: 'codex' })])(
+  'falls back for removed panel ID payload %s without losing native Accounts',
+  (payload) => {
+    localStorage.setItem('hc.rightPanelDefaultsVersion', '3');
+    for (const slot of [
+      'leftTopPanel',
+      'leftBottomPanel',
+      'leftSinglePanel',
+      'rightTopPanel',
+      'rightBottomPanel',
+      'rightSinglePanel',
+    ]) {
+      localStorage.setItem(`hc.${slot}`, payload);
+    }
+    const hook = renderHook(() => usePersistedLayout());
+    expect(hook.result.current.leftTopPanel).toBe('agents');
+    expect(hook.result.current.leftBottomPanel).toBe('workspace');
+    expect(hook.result.current.leftSinglePanel).toBe('agents');
+    expect(hook.result.current.rightTopPanel).toBe('none');
+    expect(hook.result.current.rightBottomPanel).toBe('none');
+    expect(hook.result.current.rightSinglePanel).toBe('none');
+    act(() => hook.result.current.setRightTopPanel('accounts'));
+    hook.unmount();
+    const reload = renderHook(() => usePersistedLayout());
+    expect(reload.result.current.rightTopPanel).toBe('accounts');
+    reload.unmount();
+  },
+);
 
- it.each(['paper', 'high-contrast'])('falls back when the removed %s theme was saved', (removed) => {
-    localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: removed }));
-    const theme = renderHook(() => usePersistedTheme());
-    expect(theme.result.current[0]).toBe('smatchet');
-  });
+it.each(['paper', 'high-contrast'])('falls back when the removed %s theme was saved', (removed) => {
+  localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: removed }));
+  const theme = renderHook(() => usePersistedTheme());
+  expect(theme.result.current[0]).toBe('smatchet');
+});

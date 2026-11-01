@@ -39,10 +39,15 @@ it('binds factory accessApi to the encoded current-mod access route without acce
 
 it('retains apiLocal authentication and structured errors for accessApi', async () => {
   setBasicCredentials('goblin', 'secret');
-  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: 'access denied', details: { reason: 'policy' } } }), {
-    status: 403,
-    headers: { 'content-type': 'application/json' },
-  }));
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({ error: { message: 'access denied', details: { reason: 'policy' } } }),
+      {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      },
+    ),
+  );
   vi.stubGlobal('fetch', fetch);
   render(<ModSettingsHost {...props} modId="fixture" />);
   await waitFor(() => expect(getObservedContext()).not.toBeNull());

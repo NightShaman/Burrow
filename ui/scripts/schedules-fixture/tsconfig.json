@@ -17,9 +17,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": [
-    "fixture.tsx",
-    "fixture-contract.test.ts",
-    "../../src"
-  ]
+  "include": ["fixture.tsx", "fixture-contract.test.ts", "../../src"]
 }

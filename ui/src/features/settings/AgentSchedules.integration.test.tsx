@@ -6,7 +6,7 @@ import { UnsavedChangesProvider } from '../../app/UnsavedChanges';
 import type { ScheduleProject, ScheduledJob, ScheduleTask } from './schedules';
 import { AgentSchedules } from './AgentSchedules';
 
-vi.mock('../../app/api', async importOriginal => ({
+vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
 }));
@@ -14,7 +14,8 @@ vi.mock('../../app/api', async importOriginal => ({
 const apiMock = vi.mocked(api);
 const AGENT_A = 'agent-a';
 const AGENT_B = 'agent-b';
-const schedulePath = (agentId = AGENT_A) => `/api/scheduled-jobs?agentId=${encodeURIComponent(agentId)}`;
+const schedulePath = (agentId = AGENT_A) =>
+  `/api/scheduled-jobs?agentId=${encodeURIComponent(agentId)}`;
 
 function job(changes: Partial<ScheduledJob> = {}): ScheduledJob {
   return {
@@ -53,12 +54,24 @@ function project(changes: Partial<ScheduleProject> = {}): ScheduleProject {
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject; });
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
   return { promise, resolve, reject };
 }
 
-function mountSchedules({ agentId = AGENT_A, onOpenChat }: { agentId?: string; onOpenChat?: (sessionId: string, agentId: string) => void } = {}) {
-  return render(<ConfirmProvider><UnsavedChangesProvider><AgentSchedules agentId={agentId} savedProviders={[]} onOpenChat={onOpenChat} /></UnsavedChangesProvider></ConfirmProvider>);
+function mountSchedules({
+  agentId = AGENT_A,
+  onOpenChat,
+}: { agentId?: string; onOpenChat?: (sessionId: string, agentId: string) => void } = {}) {
+  return render(
+    <ConfirmProvider>
+      <UnsavedChangesProvider>
+        <AgentSchedules agentId={agentId} savedProviders={[]} onOpenChat={onOpenChat} />
+      </UnsavedChangesProvider>
+    </ConfirmProvider>,
+  );
 }
 
 function mutationCalls(method: 'POST' | 'PATCH') {
@@ -88,7 +101,10 @@ describe('AgentSchedules integration', () => {
       task({ id: 'in-progress', title: 'In-progress task', status: 'in_progress' }),
       task({ id: 'archived', title: 'Archived task', archived: true }),
     ];
-    const projects = [project({ id: 'release', name: 'Release operations' }), project({ id: 'quality', name: 'Quality' })];
+    const projects = [
+      project({ id: 'release', name: 'Release operations' }),
+      project({ id: 'quality', name: 'Quality' }),
+    ];
     apiMock.mockImplementation(async (path, init) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
       if (path === schedulePath()) return { jobs: [] };
@@ -104,9 +120,14 @@ describe('AgentSchedules integration', () => {
     await screen.findByRole('option', { name: 'Prepare release notes' });
 
     const picker = screen.getByLabelText('Task') as HTMLSelectElement;
-    expect(Array.from(picker.querySelectorAll('optgroup')).map(group => group.label)).toEqual(['Release operations', 'Quality']);
-    expect(taskOptions().map(option => option.textContent)).toEqual([
-      'Choose a ToDo task', 'Prepare release notes', 'Audit keyboard support',
+    expect(Array.from(picker.querySelectorAll('optgroup')).map((group) => group.label)).toEqual([
+      'Release operations',
+      'Quality',
+    ]);
+    expect(taskOptions().map((option) => option.textContent)).toEqual([
+      'Choose a ToDo task',
+      'Prepare release notes',
+      'Audit keyboard support',
     ]);
     expect(screen.queryByRole('option', { name: 'Other agent task' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Unassigned task' })).toBeNull();
@@ -116,11 +137,19 @@ describe('AgentSchedules integration', () => {
     fireEvent.change(picker, { target: { value: 'todo-release' } });
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Prepare release notes');
     fireEvent.change(picker, { target: { value: 'todo-quality' } });
-    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Audit keyboard support');
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Custom review schedule' } });
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
+      'Audit keyboard support',
+    );
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Custom review schedule' },
+    });
     fireEvent.change(picker, { target: { value: 'todo-release' } });
-    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Custom review schedule');
-    expect((screen.getByLabelText('Extra instructions (optional)') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(
+      'Custom review schedule',
+    );
+    expect(
+      (screen.getByLabelText('Extra instructions (optional)') as HTMLTextAreaElement).value,
+    ).toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
     await waitFor(() => expect(mutationCalls('POST')).toHaveLength(1));
@@ -158,13 +187,17 @@ describe('AgentSchedules integration', () => {
     mountSchedules();
     await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Run'), { target: { value: 'task' } });
-    const picker = await screen.findByLabelText('Task') as HTMLSelectElement;
+    const picker = (await screen.findByLabelText('Task')) as HTMLSelectElement;
     await waitFor(() => expect(picker.disabled).toBe(false));
     fireEvent.change(picker, { target: { value: 'todo-1' } });
-    fireEvent.change(screen.getByLabelText('Extra instructions (optional)'), { target: { value: 'Do not retain this task-only text.' } });
+    fireEvent.change(screen.getByLabelText('Extra instructions (optional)'), {
+      target: { value: 'Do not retain this task-only text.' },
+    });
     fireEvent.change(screen.getByLabelText('Run'), { target: { value: 'prompt' } });
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Prompt once' } });
-    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Use only this prompt.' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), {
+      target: { value: 'Use only this prompt.' },
+    });
     fireEvent.change(screen.getByLabelText('Schedule'), { target: { value: 'once' } });
     fireEvent.change(screen.getByLabelText('Run at'), { target: { value: '2026-08-04T09:15' } });
 
@@ -195,7 +228,9 @@ describe('AgentSchedules integration', () => {
     mountSchedules();
     await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Recurring prompt' } });
-    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Only recurring state should remain.' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), {
+      target: { value: 'Only recurring state should remain.' },
+    });
     fireEvent.change(screen.getByLabelText('Schedule'), { target: { value: 'once' } });
     fireEvent.change(screen.getByLabelText('Run at'), { target: { value: '2026-08-04T09:15' } });
     fireEvent.change(screen.getByLabelText('Schedule'), { target: { value: 'cron' } });
@@ -231,7 +266,12 @@ describe('AgentSchedules integration', () => {
 
     mountSchedules();
     const expectedDisplay = new Intl.DateTimeFormat(undefined, {
-      timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
     }).format(new Date(runAt));
     const selector = await screen.findByRole('button', { name: /DST-safe one-time job/ });
     expect(selector.textContent).toContain(`Once · ${expectedDisplay} · America/New_York`);
@@ -241,7 +281,11 @@ describe('AgentSchedules integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
     await waitFor(() => expect(mutationCalls('PATCH')).toHaveLength(1));
-    expect(bodyOf(mutationCalls('PATCH')[0])).toMatchObject({ scheduleKind: 'once', cron: null, runAt });
+    expect(bodyOf(mutationCalls('PATCH')[0])).toMatchObject({
+      scheduleKind: 'once',
+      cron: null,
+      runAt,
+    });
 
     fireEvent.click(await screen.findByRole('button', { name: /DST-safe one-time job/ }));
     fireEvent.change(screen.getByLabelText('Run at'), { target: { value: '2026-07-15T09:45' } });
@@ -269,7 +313,8 @@ describe('AgentSchedules integration', () => {
     apiMock.mockImplementation(async (path, init) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
       if (path === schedulePath()) return { jobs: [legacy] };
-      if (path === '/api/scheduled-jobs/legacy-job' && init?.method === 'PATCH') return { ok: true };
+      if (path === '/api/scheduled-jobs/legacy-job' && init?.method === 'PATCH')
+        return { ok: true };
       throw new Error(`Unexpected offline API request: ${path}`);
     });
 
@@ -299,48 +344,67 @@ describe('AgentSchedules integration', () => {
   it.each([
     ['changed status', task({ id: 'changed-task', status: 'in_progress' }), 'In Progress'],
     ['missing task', null, 'Task no longer exists'],
-    ['reassigned task', task({ id: 'reassigned-task', assignedAgentId: AGENT_B }), 'Assigned to another agent'],
+    [
+      'reassigned task',
+      task({ id: 'reassigned-task', assignedAgentId: AGENT_B }),
+      'Assigned to another agent',
+    ],
     ['archived task', task({ id: 'archived-task', archived: true }), 'Archived'],
-  ] as const)('retains a %s selection as a disabled saved ID and permits PATCH pause', async (_label, changedTask, problem) => {
-    const taskId = changedTask?.id ?? 'missing-task';
-    const retained = job({
-      id: `retained-${taskId}`,
-      name: `Retained ${taskId}`,
-      jobKind: 'task',
-      prompt: '',
-      taskId,
-      extraInstructions: '',
-      scheduleKind: 'cron',
-      cron: '0 9 * * *',
-      enabled: true,
-    });
-    apiMock.mockImplementation(async (path, init) => {
-      if (path === '/api/settings/timezone') return { timezone: 'UTC' };
-      if (path === schedulePath()) return { jobs: [retained] };
-      if (path === '/api/task-board/tasks') return { tasks: changedTask ? [changedTask, task({ id: 'eligible-replacement', title: 'Eligible replacement' })] : [task({ id: 'eligible-replacement', title: 'Eligible replacement' })] };
-      if (path === '/api/task-board/projects') return { projects: [project()] };
-      if (path === `/api/scheduled-jobs/${retained.id}` && init?.method === 'PATCH') return { ok: true };
-      throw new Error(`Unexpected offline API request: ${path}`);
-    });
+  ] as const)(
+    'retains a %s selection as a disabled saved ID and permits PATCH pause',
+    async (_label, changedTask, problem) => {
+      const taskId = changedTask?.id ?? 'missing-task';
+      const retained = job({
+        id: `retained-${taskId}`,
+        name: `Retained ${taskId}`,
+        jobKind: 'task',
+        prompt: '',
+        taskId,
+        extraInstructions: '',
+        scheduleKind: 'cron',
+        cron: '0 9 * * *',
+        enabled: true,
+      });
+      apiMock.mockImplementation(async (path, init) => {
+        if (path === '/api/settings/timezone') return { timezone: 'UTC' };
+        if (path === schedulePath()) return { jobs: [retained] };
+        if (path === '/api/task-board/tasks')
+          return {
+            tasks: changedTask
+              ? [changedTask, task({ id: 'eligible-replacement', title: 'Eligible replacement' })]
+              : [task({ id: 'eligible-replacement', title: 'Eligible replacement' })],
+          };
+        if (path === '/api/task-board/projects') return { projects: [project()] };
+        if (path === `/api/scheduled-jobs/${retained.id}` && init?.method === 'PATCH')
+          return { ok: true };
+        throw new Error(`Unexpected offline API request: ${path}`);
+      });
 
-    mountSchedules();
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(retained.name) }));
-    const picker = await screen.findByLabelText('Task') as HTMLSelectElement;
-    await waitFor(() => expect(picker.disabled).toBe(false));
-    expect(picker.value).toBe(taskId);
-    const retainedOptions = Array.from(picker.options).filter(option => option.value === taskId);
-    expect(retainedOptions).toHaveLength(1);
-    expect(retainedOptions[0].disabled).toBe(true);
-    expect(screen.getByRole('status').textContent).toContain(problem);
-    expect(screen.getByRole('option', { name: 'Eligible replacement' })).toBeTruthy();
+      mountSchedules();
+      fireEvent.click(await screen.findByRole('button', { name: new RegExp(retained.name) }));
+      const picker = (await screen.findByLabelText('Task')) as HTMLSelectElement;
+      await waitFor(() => expect(picker.disabled).toBe(false));
+      expect(picker.value).toBe(taskId);
+      const retainedOptions = Array.from(picker.options).filter(
+        (option) => option.value === taskId,
+      );
+      expect(retainedOptions).toHaveLength(1);
+      expect(retainedOptions[0].disabled).toBe(true);
+      expect(screen.getByRole('status').textContent).toContain(problem);
+      expect(screen.getByRole('option', { name: 'Eligible replacement' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
-    await waitFor(() => expect(mutationCalls('PATCH')).toHaveLength(1));
-    expect(bodyOf(mutationCalls('PATCH')[0])).toMatchObject({
-      jobKind: 'task', taskId, enabled: false, sessionId: 'default', contextMode: 'continue',
-    });
-  });
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
+      await waitFor(() => expect(mutationCalls('PATCH')).toHaveLength(1));
+      expect(bodyOf(mutationCalls('PATCH')[0])).toMatchObject({
+        jobKind: 'task',
+        taskId,
+        enabled: false,
+        sessionId: 'default',
+        contextMode: 'continue',
+      });
+    },
+  );
 
   it('reports an explicit skipped trigger without claiming it started and refreshes the list afterward', async () => {
     const initial = job({ id: 'skip-job', name: 'Eligibility guard', enabled: false });
@@ -349,7 +413,8 @@ describe('AgentSchedules integration', () => {
     apiMock.mockImplementation(async (path, init) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
       if (path === schedulePath()) return { jobs: ++reads === 1 ? [initial] : [refreshed] };
-      if (path === '/api/scheduled-jobs/skip-job/trigger' && init?.method === 'POST') return { ok: true, skipped: true, reason: 'The saved task is archived.' };
+      if (path === '/api/scheduled-jobs/skip-job/trigger' && init?.method === 'POST')
+        return { ok: true, skipped: true, reason: 'The saved task is archived.' };
       throw new Error(`Unexpected offline API request: ${path}`);
     });
 
@@ -362,57 +427,90 @@ describe('AgentSchedules integration', () => {
     expect(apiMock.mock.calls.filter(([path]) => path === schedulePath())).toHaveLength(2);
   });
 
-  it.each(['Stay', 'Discard', 'Save'] as const)('uses the shared unsaved guard before chat navigation: %s', async choice => {
-    const chat = vi.fn();
-    const chatJob = job({
-      id: 'chat-guard-job',
-      name: 'Chat guard job',
-      lastRun: { status: 'completed', sessionId: 'session-guard', agentId: 'agent-from-receipt', runId: 'run-guard' },
-    });
-    apiMock.mockImplementation(async (path, init) => {
-      if (path === '/api/settings/timezone') return { timezone: 'UTC' };
-      if (path === schedulePath()) return { jobs: [chatJob] };
-      if (path === '/api/scheduled-jobs/chat-guard-job' && init?.method === 'PATCH') return { ok: true };
-      throw new Error(`Unexpected offline API request: ${path}`);
-    });
+  it.each(['Stay', 'Discard', 'Save'] as const)(
+    'uses the shared unsaved guard before chat navigation: %s',
+    async (choice) => {
+      const chat = vi.fn();
+      const chatJob = job({
+        id: 'chat-guard-job',
+        name: 'Chat guard job',
+        lastRun: {
+          status: 'completed',
+          sessionId: 'session-guard',
+          agentId: 'agent-from-receipt',
+          runId: 'run-guard',
+        },
+      });
+      apiMock.mockImplementation(async (path, init) => {
+        if (path === '/api/settings/timezone') return { timezone: 'UTC' };
+        if (path === schedulePath()) return { jobs: [chatJob] };
+        if (path === '/api/scheduled-jobs/chat-guard-job' && init?.method === 'PATCH')
+          return { ok: true };
+        throw new Error(`Unexpected offline API request: ${path}`);
+      });
 
-    mountSchedules({ onOpenChat: chat });
-    fireEvent.click(await screen.findByRole('button', { name: /Chat guard job/, pressed: false }));
-    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Unsaved schedule prompt.' } });
-    fireEvent.click(screen.getByRole('button', { name: /^Open chat/ }));
-    const dialog = await screen.findByRole('alertdialog', { name: 'Unsaved changes' });
-    expect(chat).not.toHaveBeenCalled();
-
-    fireEvent.click(dialog.querySelector(`button${choice === 'Save' ? '.primary' : choice === 'Discard' ? '.danger' : '.secondary'}`) as HTMLButtonElement);
-    if (choice === 'Stay') {
+      mountSchedules({ onOpenChat: chat });
+      fireEvent.click(
+        await screen.findByRole('button', { name: /Chat guard job/, pressed: false }),
+      );
+      fireEvent.change(screen.getByLabelText('Prompt'), {
+        target: { value: 'Unsaved schedule prompt.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^Open chat/ }));
+      const dialog = await screen.findByRole('alertdialog', { name: 'Unsaved changes' });
       expect(chat).not.toHaveBeenCalled();
-      expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('Unsaved schedule prompt.');
-      expect(mutationCalls('PATCH')).toHaveLength(0);
-    } else {
-      await waitFor(() => expect(chat).toHaveBeenCalledWith('session-guard', 'agent-from-receipt'));
-      if (choice === 'Discard') {
-        expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe('Prepare the briefing.');
+
+      fireEvent.click(
+        dialog.querySelector(
+          `button${choice === 'Save' ? '.primary' : choice === 'Discard' ? '.danger' : '.secondary'}`,
+        ) as HTMLButtonElement,
+      );
+      if (choice === 'Stay') {
+        expect(chat).not.toHaveBeenCalled();
+        expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe(
+          'Unsaved schedule prompt.',
+        );
         expect(mutationCalls('PATCH')).toHaveLength(0);
       } else {
-        expect(mutationCalls('PATCH')).toHaveLength(1);
-        expect(bodyOf(mutationCalls('PATCH')[0]).prompt).toBe('Unsaved schedule prompt.');
+        await waitFor(() =>
+          expect(chat).toHaveBeenCalledWith('session-guard', 'agent-from-receipt'),
+        );
+        if (choice === 'Discard') {
+          expect((screen.getByLabelText('Prompt') as HTMLTextAreaElement).value).toBe(
+            'Prepare the briefing.',
+          );
+          expect(mutationCalls('PATCH')).toHaveLength(0);
+        } else {
+          expect(mutationCalls('PATCH')).toHaveLength(1);
+          expect(bodyOf(mutationCalls('PATCH')[0]).prompt).toBe('Unsaved schedule prompt.');
+        }
       }
-    }
-  });
+    },
+  );
 
   it('opens chat with the exact result session and receipt agent, and does not offer a link for skipped results', async () => {
     const openChat = vi.fn();
     const completed = job({
       id: 'completed-job',
       name: 'Completed receipt',
-      lastRun: { status: 'completed', sessionId: 'session-exact', agentId: 'agent-exact', runId: 'run-exact' },
+      lastRun: {
+        status: 'completed',
+        sessionId: 'session-exact',
+        agentId: 'agent-exact',
+        runId: 'run-exact',
+      },
     });
     const skipped = job({
       id: 'skipped-job',
       name: 'Skipped receipt',
-      lastRun: { status: 'skipped', sessionId: 'session-do-not-open', agentId: 'agent-do-not-open', runId: 'run-skipped' },
+      lastRun: {
+        status: 'skipped',
+        sessionId: 'session-do-not-open',
+        agentId: 'agent-do-not-open',
+        runId: 'run-skipped',
+      },
     });
-    apiMock.mockImplementation(async path => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
       if (path === schedulePath()) return { jobs: [completed, skipped] };
       throw new Error(`Unexpected offline API request: ${path}`);
@@ -428,24 +526,54 @@ describe('AgentSchedules integration', () => {
     const oldTasks = deferred<{ tasks: ScheduleTask[] }>();
     const oldProjects = deferred<{ projects: ScheduleProject[] }>();
     let servingAgentB = false;
-    const aJob = job({ id: 'a-task-job', agentId: AGENT_A, name: 'A task schedule', jobKind: 'task', prompt: '', taskId: 'a-task' });
-    const bJob = job({ id: 'b-task-job', agentId: AGENT_B, name: 'B task schedule', jobKind: 'task', prompt: '', taskId: 'b-task' });
+    const aJob = job({
+      id: 'a-task-job',
+      agentId: AGENT_A,
+      name: 'A task schedule',
+      jobKind: 'task',
+      prompt: '',
+      taskId: 'a-task',
+    });
+    const bJob = job({
+      id: 'b-task-job',
+      agentId: AGENT_B,
+      name: 'B task schedule',
+      jobKind: 'task',
+      prompt: '',
+      taskId: 'b-task',
+    });
     apiMock.mockImplementation((path) => {
       if (path === '/api/settings/timezone') return Promise.resolve({ timezone: 'UTC' });
       if (path === schedulePath(AGENT_A)) return Promise.resolve({ jobs: [aJob] });
       if (path === schedulePath(AGENT_B)) return Promise.resolve({ jobs: [bJob] });
-      if (path === '/api/task-board/tasks') return servingAgentB ? Promise.resolve({ tasks: [task({ id: 'b-task', title: 'B board task', assignedAgentId: AGENT_B })] }) : oldTasks.promise;
-      if (path === '/api/task-board/projects') return servingAgentB ? Promise.resolve({ projects: [project({ name: 'B project' })] }) : oldProjects.promise;
+      if (path === '/api/task-board/tasks')
+        return servingAgentB
+          ? Promise.resolve({
+              tasks: [task({ id: 'b-task', title: 'B board task', assignedAgentId: AGENT_B })],
+            })
+          : oldTasks.promise;
+      if (path === '/api/task-board/projects')
+        return servingAgentB
+          ? Promise.resolve({ projects: [project({ name: 'B project' })] })
+          : oldProjects.promise;
       throw new Error(`Unexpected offline API request: ${path}`);
     });
 
     const view = mountSchedules();
     await screen.findByRole('button', { name: /A task schedule/ });
-    await waitFor(() => expect(apiMock.mock.calls.some(([path]) => path === '/api/task-board/tasks')).toBe(true));
+    await waitFor(() =>
+      expect(apiMock.mock.calls.some(([path]) => path === '/api/task-board/tasks')).toBe(true),
+    );
     servingAgentB = true;
-    view.rerender(<ConfirmProvider><UnsavedChangesProvider><AgentSchedules agentId={AGENT_B} savedProviders={[]} /></UnsavedChangesProvider></ConfirmProvider>);
+    view.rerender(
+      <ConfirmProvider>
+        <UnsavedChangesProvider>
+          <AgentSchedules agentId={AGENT_B} savedProviders={[]} />
+        </UnsavedChangesProvider>
+      </ConfirmProvider>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: /B task schedule/ }));
-    const picker = await screen.findByLabelText('Task') as HTMLSelectElement;
+    const picker = (await screen.findByLabelText('Task')) as HTMLSelectElement;
     await waitFor(() => expect(picker.value).toBe('b-task'));
     await act(async () => {
       oldTasks.resolve({ tasks: [task({ id: 'a-task', title: 'A stale board task' })] });
@@ -464,24 +592,44 @@ describe('AgentSchedules integration', () => {
       if (path === '/api/settings/timezone') return Promise.resolve({ timezone: 'UTC' });
       if (path === schedulePath(AGENT_A)) return Promise.resolve({ jobs: [aJob] });
       if (path === schedulePath(AGENT_B)) return Promise.resolve({ jobs: [bJob] });
-      if (path === '/api/scheduled-jobs/a-trigger-job/trigger' && init?.method === 'POST') return trigger.promise;
+      if (path === '/api/scheduled-jobs/a-trigger-job/trigger' && init?.method === 'POST')
+        return trigger.promise;
       throw new Error(`Unexpected offline API request: ${path}`);
     });
 
     const view = mountSchedules();
     fireEvent.click(await screen.findByRole('button', { name: 'Run now' }));
-    await waitFor(() => expect(apiMock.mock.calls.some(([path]) => path === '/api/scheduled-jobs/a-trigger-job/trigger')).toBe(true));
-    view.rerender(<ConfirmProvider><UnsavedChangesProvider><AgentSchedules agentId={AGENT_B} savedProviders={[]} /></UnsavedChangesProvider></ConfirmProvider>);
+    await waitFor(() =>
+      expect(
+        apiMock.mock.calls.some(([path]) => path === '/api/scheduled-jobs/a-trigger-job/trigger'),
+      ).toBe(true),
+    );
+    view.rerender(
+      <ConfirmProvider>
+        <UnsavedChangesProvider>
+          <AgentSchedules agentId={AGENT_B} savedProviders={[]} />
+        </UnsavedChangesProvider>
+      </ConfirmProvider>,
+    );
     await screen.findByRole('button', { name: /B trigger job/ });
-    await act(async () => { trigger.resolve({ ok: true }); await trigger.promise; });
-    expect(screen.queryByText('A trigger job started. The run continues in the background.')).toBeNull();
+    await act(async () => {
+      trigger.resolve({ ok: true });
+      await trigger.promise;
+    });
+    expect(
+      screen.queryByText('A trigger job started. The run continues in the background.'),
+    ).toBeNull();
     expect(screen.getByRole('button', { name: /B trigger job/ })).toBeTruthy();
-    expect(apiMock.mock.calls.filter(([path]) => path === schedulePath(AGENT_A) || path === schedulePath(AGENT_B))).toHaveLength(2);
+    expect(
+      apiMock.mock.calls.filter(
+        ([path]) => path === schedulePath(AGENT_A) || path === schedulePath(AGENT_B),
+      ),
+    ).toHaveLength(2);
   });
 
   it('shows a task-board read failure and makes Retry tasks populate the picker', async () => {
     let boardAvailable = false;
-    apiMock.mockImplementation(async path => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
       if (path === schedulePath()) return { jobs: [] };
       if (path === '/api/task-board/tasks') {
@@ -495,7 +643,7 @@ describe('AgentSchedules integration', () => {
     mountSchedules();
     await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Run'), { target: { value: 'task' } });
-    const picker = await screen.findByLabelText('Task') as HTMLSelectElement;
+    const picker = (await screen.findByLabelText('Task')) as HTMLSelectElement;
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Could not load task board: board offline');
     expect(picker.disabled).toBe(true);
@@ -523,36 +671,55 @@ describe('AgentSchedules integration', () => {
     await screen.findByText('No scheduled jobs for this agent.');
     fireEvent.change(screen.getByLabelText('Schedule'), { target: { value: 'once' } });
     const runAt = screen.getByLabelText('Run at') as HTMLInputElement;
-    expect((await screen.findByRole('alert')).textContent).toContain('Could not load operator timezone.');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not load operator timezone.',
+    );
     expect(runAt.disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Add job' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Add job' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry timezone' }));
     await waitFor(() => expect(runAt.disabled).toBe(false));
     expect(screen.getByText('Operator timezone · UTC')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Recovered one-time job' } });
-    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Run after zone recovery.' } });
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Recovered one-time job' },
+    });
+    fireEvent.change(screen.getByLabelText('Prompt'), {
+      target: { value: 'Run after zone recovery.' },
+    });
     fireEvent.change(runAt, { target: { value: '2026-08-04T09:15' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
     await waitFor(() => expect(mutationCalls('POST')).toHaveLength(1));
-    expect(bodyOf(mutationCalls('POST')[0])).toMatchObject({ scheduleKind: 'once', cron: null, runAt: '2026-08-04T09:15' });
+    expect(bodyOf(mutationCalls('POST')[0])).toMatchObject({
+      scheduleKind: 'once',
+      cron: null,
+      runAt: '2026-08-04T09:15',
+    });
   });
 
   it('keeps the newest same-agent board refresh when an earlier read completes late', async () => {
     const older = deferred<{ tasks: ScheduleTask[] }>();
     let taskReads = 0;
-    apiMock.mockImplementation(async path => {
+    apiMock.mockImplementation(async (path) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
-      if (path === schedulePath()) return { jobs: [job({ jobKind: 'task', taskId: 'task-1', prompt: '' })] };
+      if (path === schedulePath())
+        return { jobs: [job({ jobKind: 'task', taskId: 'task-1', prompt: '' })] };
       if (path === '/api/task-board/projects') return { projects: [project()] };
-      if (path === '/api/task-board/tasks') return ++taskReads === 1 ? older.promise : { tasks: [task({ title: 'Latest saved task' })] };
+      if (path === '/api/task-board/tasks')
+        return ++taskReads === 1
+          ? older.promise
+          : { tasks: [task({ title: 'Latest saved task' })] };
       throw new Error(`Unexpected offline API request: ${path}`);
     });
     mountSchedules();
     fireEvent.click(await screen.findByRole('button', { name: /Morning briefing/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh jobs' }));
     await screen.findByRole('option', { name: 'Latest saved task' });
-    await act(async () => { older.resolve({ tasks: [task({ title: 'Stale saved task' })] }); await older.promise; });
+    await act(async () => {
+      older.resolve({ tasks: [task({ title: 'Stale saved task' })] });
+      await older.promise;
+    });
     expect(screen.getByRole('option', { name: 'Latest saved task' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: 'Stale saved task' })).toBeNull();
   });
@@ -566,7 +733,10 @@ describe('AgentSchedules integration', () => {
         if (created && !refreshAvailable) throw new Error('read unavailable');
         return { jobs: created ? [job()] : [] };
       }
-      if (path === '/api/scheduled-jobs' && init?.method === 'POST') { created = true; return { ok: true }; }
+      if (path === '/api/scheduled-jobs' && init?.method === 'POST') {
+        created = true;
+        return { ok: true };
+      }
       throw new Error(`Unexpected offline API request: ${path}`);
     });
     mountSchedules();
@@ -574,7 +744,9 @@ describe('AgentSchedules integration', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Morning briefing' } });
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Saved once.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add job' }));
-    await screen.findByText('Schedule saved, but refreshing jobs failed. Reload jobs before another save.');
+    await screen.findByText(
+      'Schedule saved, but refreshing jobs failed. Reload jobs before another save.',
+    );
     const save = screen.getByRole('button', { name: 'Add job' }) as HTMLButtonElement;
     expect(save.closest('fieldset')?.disabled).toBe(true);
     fireEvent.click(save);
@@ -586,7 +758,6 @@ describe('AgentSchedules integration', () => {
     expect(mutationCalls('POST')).toHaveLength(1);
   });
 
-
   it('ignores an earlier inventory refresh completed during a save and keeps controls busy until committed', async () => {
     const stale = deferred<{ jobs: ScheduledJob[] }>();
     const patch = deferred<{ ok: boolean }>();
@@ -594,7 +765,10 @@ describe('AgentSchedules integration', () => {
     const initial = job();
     apiMock.mockImplementation(async (path, init) => {
       if (path === '/api/settings/timezone') return { timezone: 'UTC' };
-      if (path === schedulePath()) return ++reads === 2 ? stale.promise : { jobs: [reads > 2 ? { ...initial, name: 'Updated job' } : initial] };
+      if (path === schedulePath())
+        return ++reads === 2
+          ? stale.promise
+          : { jobs: [reads > 2 ? { ...initial, name: 'Updated job' } : initial] };
       if (init?.method === 'PATCH') return patch.promise;
       throw new Error(`Unexpected offline API request: ${path}`);
     });
@@ -603,12 +777,19 @@ describe('AgentSchedules integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh jobs' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Updated job' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save job' }));
-    await act(async () => { stale.resolve({ jobs: [initial] }); await stale.promise; });
-    expect((screen.getByLabelText('Name') as HTMLInputElement).closest('fieldset')?.disabled).toBe(true);
-    await act(async () => { patch.resolve({ ok: true }); await patch.promise; });
+    await act(async () => {
+      stale.resolve({ jobs: [initial] });
+      await stale.promise;
+    });
+    expect((screen.getByLabelText('Name') as HTMLInputElement).closest('fieldset')?.disabled).toBe(
+      true,
+    );
+    await act(async () => {
+      patch.resolve({ ok: true });
+      await patch.promise;
+    });
     await screen.findByRole('button', { name: /Updated job/ });
     expect(screen.queryByRole('button', { name: /Morning briefing/ })).toBeNull();
     expect(mutationCalls('PATCH')).toHaveLength(1);
   });
-
 });

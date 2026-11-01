@@ -20,8 +20,12 @@ export function minionTree(minions: Subagent[]): MinionNode[] {
   }
   const parents = new Map<MinionNode, MinionNode>();
   for (const group of origins.values()) {
-    const bySession = new Map(group.map(node => [node.minion.resourceId ?? node.minion.id, node]));
-    const byRun = new Map(group.filter(node => node.minion.runId).map(node => [node.minion.runId, node]));
+    const bySession = new Map(
+      group.map((node) => [node.minion.resourceId ?? node.minion.id, node]),
+    );
+    const byRun = new Map(
+      group.filter((node) => node.minion.runId).map((node) => [node.minion.runId, node]),
+    );
     const bySessionAndRun = new Map<string, Map<string, MinionNode>>();
     for (const node of group) {
       if (!node.minion.runId) continue;

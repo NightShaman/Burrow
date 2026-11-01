@@ -16,6 +16,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (!this.state.error) return this.props.children;
-    return <main className="app-error" role="alert"><h1>Burrow hit a snag</h1><p>{this.state.error.message || 'The interface could not render.'}</p><button onClick={() => window.location.reload()}>Reload cockpit</button></main>;
+    return (
+      <main className="app-error" role="alert">
+        <h1>Burrow hit a snag</h1>
+        <p>{this.state.error.message || 'The interface could not render.'}</p>
+        <button onClick={() => window.location.reload()}>Reload cockpit</button>
+      </main>
+    );
   }
 }

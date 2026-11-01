@@ -97,12 +97,14 @@ describe('schedulePayload', () => {
   });
 
   it('switches to the default continuing task context without copying task prose', () => {
-    const payload = schedulePayload(draft({
-      jobKind: 'task',
-      prompt: 'Copied task title and description must never become schedule prose.',
-      taskId: 'task-42',
-      extraInstructions: '   ',
-    }));
+    const payload = schedulePayload(
+      draft({
+        jobKind: 'task',
+        prompt: 'Copied task title and description must never become schedule prose.',
+        taskId: 'task-42',
+        extraInstructions: '   ',
+      }),
+    );
 
     expect(payload).toEqual({
       name: 'Daily briefing',
@@ -161,10 +163,18 @@ describe('schedulePayload', () => {
 describe('taskEligibility', () => {
   it.each<[string, Partial<ScheduleTask>, string]>([
     ['an assigned ToDo task', {}, ''],
-    ['a task assigned to another agent', { assignedAgentId: 'agent-2' }, 'Assigned to another agent'],
+    [
+      'a task assigned to another agent',
+      { assignedAgentId: 'agent-2' },
+      'Assigned to another agent',
+    ],
     ['an unassigned task', { assignedAgentId: null }, 'Unassigned'],
     ['a non-ToDo task assigned to this agent', { status: 'in_progress' }, 'In Progress'],
-    ['an archived task before its assignee or status', { archived: true, assignedAgentId: 'agent-2', status: 'done' }, 'Archived'],
+    [
+      'an archived task before its assignee or status',
+      { archived: true, assignedAgentId: 'agent-2', status: 'done' },
+      'Archived',
+    ],
   ])('reports %s', (_label, changes, expected) => {
     expect(taskEligibility(task(changes), 'agent-1')).toBe(expected);
   });
@@ -175,7 +185,9 @@ describe('operator time formatting', () => {
     const summerInstant = '2026-07-15T12:05:06Z';
     expect(operatorDateTimeInput(summerInstant, 'UTC')).toBe('2026-07-15T12:05:06');
     expect(operatorDateTimeInput(summerInstant, 'America/New_York')).toBe('2026-07-15T08:05:06');
-    expect(operatorDateTimeInput('2026-01-15T12:05:06Z', 'America/New_York')).toBe('2026-01-15T07:05:06');
+    expect(operatorDateTimeInput('2026-01-15T12:05:06Z', 'America/New_York')).toBe(
+      '2026-01-15T07:05:06',
+    );
   });
 
   it('renders display timestamps in the supplied operator timezone', () => {
@@ -188,8 +200,12 @@ describe('operator time formatting', () => {
       hour: 'numeric',
       minute: '2-digit',
     };
-    expect(scheduleTime(value, 'America/New_York')).toBe(new Intl.DateTimeFormat(undefined, options).format(new Date(value)));
-    expect(scheduleTime(value, 'UTC')).toBe(new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }).format(new Date(value)));
+    expect(scheduleTime(value, 'America/New_York')).toBe(
+      new Intl.DateTimeFormat(undefined, options).format(new Date(value)),
+    );
+    expect(scheduleTime(value, 'UTC')).toBe(
+      new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }).format(new Date(value)),
+    );
   });
 });
 

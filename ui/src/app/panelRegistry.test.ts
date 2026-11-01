@@ -4,7 +4,13 @@ import { getPanelTitle, panelIds, panelRegistry } from './panelRegistry';
 describe('panelRegistry', () => {
   it('exposes exactly the supported panel ids', () => {
     expect(panelIds).toEqual(['none', 'agents', 'workspace', 'accounts', 'system']);
-    expect(panelRegistry.map(({ label }) => label)).toEqual(['None', 'Agents', 'Workspace', 'Accounts', 'System']);
+    expect(panelRegistry.map(({ label }) => label)).toEqual([
+      'None',
+      'Agents',
+      'Workspace',
+      'Accounts',
+      'System',
+    ]);
   });
 
   it('uses panel titles and safely falls back for unsupported persisted ids', () => {

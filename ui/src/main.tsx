@@ -22,17 +22,31 @@ function Root() {
         // its normal runtime error state rather than inventing an auth prompt.
         if (!cancelled) setAuthState('open');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (authState === 'checking') return <div className="app-loading" aria-label="Loading">Loading…</div>;
+  if (authState === 'checking')
+    return (
+      <div className="app-loading" aria-label="Loading">
+        Loading…
+      </div>
+    );
   if (authState === 'login') return <LoginPage onAuthenticated={() => setAuthState('open')} />;
-  return <ReauthGate><App /></ReauthGate>;
+  return (
+    <ReauthGate>
+      <App />
+    </ReauthGate>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ErrorBoundary><ConfirmProvider><Root /></ConfirmProvider></ErrorBoundary>
+    <ErrorBoundary>
+      <ConfirmProvider>
+        <Root />
+      </ConfirmProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );
-

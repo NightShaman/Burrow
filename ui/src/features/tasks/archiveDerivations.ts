@@ -1,5 +1,12 @@
 import { textFromChatValue } from '../../app/api';
-import type { ArchiveKind, ArchiveSession, CalendarDay, DateBucket, DreamEntry, DreamGroup } from './archiveTypes';
+import type {
+  ArchiveKind,
+  ArchiveSession,
+  CalendarDay,
+  DateBucket,
+  DreamEntry,
+  DreamGroup,
+} from './archiveTypes';
 
 export function archiveDate(value: string | null): Date | null {
   if (!value) return null;
@@ -9,7 +16,9 @@ export function archiveDate(value: string | null): Date | null {
 
 export function formatDayKey(value: string | null): string | null {
   const date = archiveDate(value);
-  return date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : null;
+  return date
+    ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    : null;
 }
 
 export function monthKey(date: Date): string {
@@ -42,20 +51,34 @@ export function dreamPhaseRank(phase: string): number {
   return rank === -1 ? dreamPhaseOrder.length : rank;
 }
 
-export function filterArchiveSessions(sessions: ArchiveSession[], selectedAgent: string, selectedDate: string): ArchiveSession[] {
-  return sessions.filter((session) => (
-    (!selectedAgent || session.agentId === selectedAgent)
-    && (!selectedDate || session.matchedDate === selectedDate || formatDayKey(archiveSessionDate(session)) === selectedDate)
-  ));
+export function filterArchiveSessions(
+  sessions: ArchiveSession[],
+  selectedAgent: string,
+  selectedDate: string,
+): ArchiveSession[] {
+  return sessions.filter(
+    (session) =>
+      (!selectedAgent || session.agentId === selectedAgent) &&
+      (!selectedDate ||
+        session.matchedDate === selectedDate ||
+        formatDayKey(archiveSessionDate(session)) === selectedDate),
+  );
 }
 
-export function filterDreamEntries(dreams: DreamEntry[], selectedAgent: string, search: string, selectedDate = ''): DreamEntry[] {
+export function filterDreamEntries(
+  dreams: DreamEntry[],
+  selectedAgent: string,
+  search: string,
+  selectedDate = '',
+): DreamEntry[] {
   const query = search.trim().toLowerCase();
-  return dreams.filter((entry) => (
-    (!selectedAgent || entry.agentId === selectedAgent)
-    && (!query || `${entry.agentName} ${entry.phase} ${dreamText(entry)}`.toLowerCase().includes(query))
-    && (!selectedDate || formatDayKey(dreamDate(entry)) === selectedDate)
-  ));
+  return dreams.filter(
+    (entry) =>
+      (!selectedAgent || entry.agentId === selectedAgent) &&
+      (!query ||
+        `${entry.agentName} ${entry.phase} ${dreamText(entry)}`.toLowerCase().includes(query)) &&
+      (!selectedDate || formatDayKey(dreamDate(entry)) === selectedDate),
+  );
 }
 
 export function groupDreamEntries(entries: DreamEntry[]): DreamGroup[] {
@@ -66,14 +89,28 @@ export function groupDreamEntries(entries: DreamEntry[]): DreamGroup[] {
     const key = `${entry.agentId}:${day}`;
     const existing = groups.get(key);
     if (existing) existing.entries.push(entry);
-    else groups.set(key, { key, agentId: entry.agentId, agentName: entry.agentName, day, entries: [entry] });
+    else
+      groups.set(key, {
+        key,
+        agentId: entry.agentId,
+        agentName: entry.agentName,
+        day,
+        entries: [entry],
+      });
   });
   return [...groups.values()]
-    .map((group) => ({ ...group, entries: [...group.entries].sort((a, b) => dreamPhaseRank(a.phase) - dreamPhaseRank(b.phase)) }))
+    .map((group) => ({
+      ...group,
+      entries: [...group.entries].sort((a, b) => dreamPhaseRank(a.phase) - dreamPhaseRank(b.phase)),
+    }))
     .sort((a, b) => b.day.localeCompare(a.day) || a.agentName.localeCompare(b.agentName));
 }
 
-export function buildDateBuckets(kind: ArchiveKind, sessions: ArchiveSession[], dreams: DreamEntry[]): DateBucket[] {
+export function buildDateBuckets(
+  kind: ArchiveKind,
+  sessions: ArchiveSession[],
+  dreams: DreamEntry[],
+): DateBucket[] {
   const buckets = new Map<string, DateBucket>();
   const dates = kind === 'chat' ? sessions.map(archiveSessionDate) : dreams.map(dreamDate);
   dates.forEach((value) => {
@@ -90,14 +127,21 @@ export function buildDateBuckets(kind: ArchiveKind, sessions: ArchiveSession[], 
       year: String(date.getFullYear()),
       month: new Intl.DateTimeFormat(undefined, { month: 'long' }).format(date),
       day: new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(date),
-      label: new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(date),
+      label: new Intl.DateTimeFormat(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      }).format(date),
       count: 1,
     });
   });
   return [...buckets.values()].sort((a, b) => b.key.localeCompare(a.key));
 }
 
-export function buildCalendarDays(calendarMonth: string, dateBuckets: DateBucket[]): Array<CalendarDay | null> {
+export function buildCalendarDays(
+  calendarMonth: string,
+  dateBuckets: DateBucket[],
+): Array<CalendarDay | null> {
   const month = dateFromMonthKey(calendarMonth);
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();

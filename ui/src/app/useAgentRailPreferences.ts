@@ -6,12 +6,16 @@ export const agentRailPreferencesKey = 'hc.agentRailPreferences';
 export type AgentRailView = 'regular' | 'compact';
 export type AgentRailPreferences = { view: AgentRailView; order: string[] };
 
-const isAgentRailPreferences: StoredValueValidator<AgentRailPreferences> = (value): value is AgentRailPreferences => {
+const isAgentRailPreferences: StoredValueValidator<AgentRailPreferences> = (
+  value,
+): value is AgentRailPreferences => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as AgentRailPreferences;
-  return (candidate.view === 'regular' || candidate.view === 'compact')
-    && Array.isArray(candidate.order)
-    && candidate.order.every((id) => typeof id === 'string');
+  return (
+    (candidate.view === 'regular' || candidate.view === 'compact') &&
+    Array.isArray(candidate.order) &&
+    candidate.order.every((id) => typeof id === 'string')
+  );
 };
 
 export function orderAgents(agents: Agent[], order: string[]) {
@@ -21,7 +25,8 @@ export function orderAgents(agents: Agent[], order: string[]) {
     .sort((left, right) => {
       const leftRank = rank.get(left.agent.id);
       const rightRank = rank.get(right.agent.id);
-      if (leftRank === undefined && rightRank === undefined) return left.sourceIndex - right.sourceIndex;
+      if (leftRank === undefined && rightRank === undefined)
+        return left.sourceIndex - right.sourceIndex;
       if (leftRank === undefined) return 1;
       if (rightRank === undefined) return -1;
       return leftRank - rightRank;
@@ -35,12 +40,14 @@ export function completeAgentOrder(agents: Agent[], order: string[]) {
 }
 
 export function useAgentRailPreferences() {
-  const [preferences, setPreferences] = useState<AgentRailPreferences>(() => readStoredValue({
-    key: agentRailPreferencesKey,
-    version: 1,
-    fallback: { view: 'regular', order: [] },
-    validate: isAgentRailPreferences,
-  }));
+  const [preferences, setPreferences] = useState<AgentRailPreferences>(() =>
+    readStoredValue({
+      key: agentRailPreferencesKey,
+      version: 1,
+      fallback: { view: 'regular', order: [] },
+      validate: isAgentRailPreferences,
+    }),
+  );
   useEffect(() => writeStoredValue(agentRailPreferencesKey, 1, preferences), [preferences]);
   return [preferences, setPreferences] as const;
 }
@@ -48,6 +55,6 @@ export function useAgentRailPreferences() {
 export function mergeVisibleOrder(current: string[], visible: string[]) {
   const visibleIds = new Set(visible);
   let index = 0;
-  const merged = current.map((id) => visibleIds.has(id) ? visible[index++] : id);
+  const merged = current.map((id) => (visibleIds.has(id) ? visible[index++] : id));
   return [...merged, ...visible.slice(index)];
 }

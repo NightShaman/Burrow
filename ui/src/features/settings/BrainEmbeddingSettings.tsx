@@ -7,10 +7,30 @@ import { usePolling } from '../../app/usePolling';
 import type { SavedProvider } from '../../app/types';
 import { Field, SettingSection } from './SettingsPrimitives';
 
-type Status = { enabled: boolean; connectionId: string | null; model: string | null; generation: string; total: string; indexed: string; pending: string; failed: string; storage: string; lastError: string | null };
-type Discovery = { connectionId: string; provider: string; models: { id: string; name: string }[]; capabilityDisclosure: string };
+type Status = {
+  enabled: boolean;
+  connectionId: string | null;
+  model: string | null;
+  generation: string;
+  total: string;
+  indexed: string;
+  pending: string;
+  failed: string;
+  storage: string;
+  lastError: string | null;
+};
+type Discovery = {
+  connectionId: string;
+  provider: string;
+  models: { id: string; name: string }[];
+  capabilityDisclosure: string;
+};
 const root = '/api/settings/brain-embeddings';
-const json = (method: string, body?: unknown) => ({ method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+const json = (method: string, body?: unknown) => ({
+  method,
+  headers: { 'content-type': 'application/json' },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
 
 export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: SavedProvider[] }) {
   const [baseline, setBaseline] = useState({ enabled: false, connectionId: '', model: '' });
@@ -27,63 +47,296 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
   const owner = useRef<object | null>(null);
   const epoch = useRef(0);
   const generation = useRef<string | null>(null);
-  const ticket = () => ({ owner: owner.current, epoch: epoch.current, generation: generation.current });
-  const current = (t: ReturnType<typeof ticket>) => t.owner !== null && t.owner === owner.current && t.epoch === epoch.current && t.generation === generation.current;
-  const accept = (s: Status) => { generation.current = s.generation; setStatus(s); };
-  const edit = () => { epoch.current++; setTested(''); setError(''); setBusy(''); };
+  const ticket = () => ({
+    owner: owner.current,
+    epoch: epoch.current,
+    generation: generation.current,
+  });
+  const current = (t: ReturnType<typeof ticket>) =>
+    t.owner !== null &&
+    t.owner === owner.current &&
+    t.epoch === epoch.current &&
+    t.generation === generation.current;
+  const accept = (s: Status) => {
+    generation.current = s.generation;
+    setStatus(s);
+  };
+  const edit = () => {
+    epoch.current++;
+    setTested('');
+    setError('');
+    setBusy('');
+  };
   useEffect(() => {
-    owner.current = {}; const t = ticket();
-    api<Status>(root).then(s => { if (!current(t)) return; accept(s); setEnabled(s.enabled); setConnectionId(s.connectionId ?? ''); setModel(s.model ?? ''); setBaseline({ enabled: s.enabled, connectionId: s.connectionId ?? '', model: s.model ?? '' }); setBusy(''); }).catch(() => { if (current(t)) { setError('Could not load embedding settings. Reopen this section to retry. Brains CRUD remains available.'); setBusy(''); } });
-    return () => { owner.current = null; epoch.current++; };
+    owner.current = {};
+    const t = ticket();
+    api<Status>(root)
+      .then((s) => {
+        if (!current(t)) return;
+        accept(s);
+        setEnabled(s.enabled);
+        setConnectionId(s.connectionId ?? '');
+        setModel(s.model ?? '');
+        setBaseline({
+          enabled: s.enabled,
+          connectionId: s.connectionId ?? '',
+          model: s.model ?? '',
+        });
+        setBusy('');
+      })
+      .catch(() => {
+        if (current(t)) {
+          setError(
+            'Could not load embedding settings. Reopen this section to retry. Brains CRUD remains available.',
+          );
+          setBusy('');
+        }
+      });
+    return () => {
+      owner.current = null;
+      epoch.current++;
+    };
   }, []);
   useEffect(() => {
-    setDiscovery(null); setDiscoveryError('');
+    setDiscovery(null);
+    setDiscoveryError('');
     if (!connectionId) return;
-    const t = ticket(); let cancelled = false;
-    api<Discovery>(`${root}/models?connectionId=${encodeURIComponent(connectionId)}`).then(s => { if (!cancelled && current(t) && s.connectionId === connectionId) setDiscovery(s); }).catch(() => { if (!cancelled && current(t)) setDiscoveryError('Embedding discovery unavailable. Check the connection and provider capabilities, or enter a model ID and test it.'); });
-    return () => { cancelled = true; };
-  }, [connectionId]);
-  usePolling(async (cancelled, signal) => {
     const t = ticket();
-    try { const s = await api<Status>(root, { signal }); if (!cancelled() && current(t)) { accept(s); } }
-    catch { if (!cancelled() && current(t)) setError('Could not refresh indexing status. Polling will retry; Brains CRUD remains available.'); }
-  }, 3000, !!status && !busy, `${busy}:${status?.generation ?? ''}`);
+    let cancelled = false;
+    api<Discovery>(`${root}/models?connectionId=${encodeURIComponent(connectionId)}`)
+      .then((s) => {
+        if (!cancelled && current(t) && s.connectionId === connectionId) setDiscovery(s);
+      })
+      .catch(() => {
+        if (!cancelled && current(t))
+          setDiscoveryError(
+            'Embedding discovery unavailable. Check the connection and provider capabilities, or enter a model ID and test it.',
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId]);
+  usePolling(
+    async (cancelled, signal) => {
+      const t = ticket();
+      try {
+        const s = await api<Status>(root, { signal });
+        if (!cancelled() && current(t)) {
+          accept(s);
+        }
+      } catch {
+        if (!cancelled() && current(t))
+          setError(
+            'Could not refresh indexing status. Polling will retry; Brains CRUD remains available.',
+          );
+      }
+    },
+    3000,
+    !!status && !busy,
+    `${busy}:${status?.generation ?? ''}`,
+  );
   const request = async (action: 'save' | 'test' | 'reindex'): Promise<boolean> => {
     if (busy || !status) return false;
-    epoch.current++; const t = ticket(); setBusy(action); setError('');
+    epoch.current++;
+    const t = ticket();
+    setBusy(action);
+    setError('');
     const selection = { connectionId: connectionId || null, model: model.trim() || null };
     try {
       if (action === 'test') {
-        const result = await api<{ ok: true; dimensions: number }>(`${root}/test`, json('POST', selection));
+        const result = await api<{ ok: true; dimensions: number }>(
+          `${root}/test`,
+          json('POST', selection),
+        );
         if (current(t)) setTested(`Test successful · ${result.dimensions} dimensions`);
       } else {
-        const s = await api<Status>(action === 'save' ? root : `${root}/reindex`, json(action === 'save' ? 'PUT' : 'POST', action === 'save' ? { enabled, ...(enabled || (selection.connectionId && selection.model) ? selection : { connectionId: null, model: null }) } : undefined));
-        if (current(t)) { accept(s); if (action === 'save') { const accepted = { enabled: s.enabled, connectionId: s.connectionId ?? '', model: s.model ?? '' }; setBaseline(accepted); setEnabled(accepted.enabled); setConnectionId(accepted.connectionId); setModel(accepted.model); } }
+        const s = await api<Status>(
+          action === 'save' ? root : `${root}/reindex`,
+          json(
+            action === 'save' ? 'PUT' : 'POST',
+            action === 'save'
+              ? {
+                  enabled,
+                  ...(enabled || (selection.connectionId && selection.model)
+                    ? selection
+                    : { connectionId: null, model: null }),
+                }
+              : undefined,
+          ),
+        );
+        if (current(t)) {
+          accept(s);
+          if (action === 'save') {
+            const accepted = {
+              enabled: s.enabled,
+              connectionId: s.connectionId ?? '',
+              model: s.model ?? '',
+            };
+            setBaseline(accepted);
+            setEnabled(accepted.enabled);
+            setConnectionId(accepted.connectionId);
+            setModel(accepted.model);
+          }
+        }
         if (!current(t)) return false;
       }
       return true;
-    } catch { if (current(t)) setError(`Could not ${action} embeddings. Check the saved connection, supported embedding model and provider availability, then retry. Saved memories are unchanged.`); return false; }
-    finally { if (t.owner === owner.current && t.epoch === epoch.current) setBusy(''); }
+    } catch {
+      if (current(t))
+        setError(
+          `Could not ${action} embeddings. Check the saved connection, supported embedding model and provider availability, then retry. Saved memories are unchanged.`,
+        );
+      return false;
+    } finally {
+      if (t.owner === owner.current && t.epoch === epoch.current) setBusy('');
+    }
   };
-  useUnsavedChanges({ dirty: !!status && (enabled !== baseline.enabled || connectionId !== baseline.connectionId || model !== baseline.model), busy: !!busy, save: () => request('save'), discard: () => { setEnabled(baseline.enabled); setConnectionId(baseline.connectionId); setModel(baseline.model); setTested(''); setError(''); } });
+  useUnsavedChanges({
+    dirty:
+      !!status &&
+      (enabled !== baseline.enabled ||
+        connectionId !== baseline.connectionId ||
+        model !== baseline.model),
+    busy: !!busy,
+    save: () => request('save'),
+    discard: () => {
+      setEnabled(baseline.enabled);
+      setConnectionId(baseline.connectionId);
+      setModel(baseline.model);
+      setTested('');
+      setError('');
+    },
+  });
   const selected = !!connectionId && !!model.trim();
-  const manual = !discovery?.models.some(m => m.id === model.trim());
+  const manual = !discovery?.models.some((m) => m.id === model.trim());
   const locked = !!busy;
-  return <SettingSection title="Continuity"><DreamPromotionSettings /><div className="curator-card">
-    <label><input type="checkbox" checked={enabled} disabled={locked || !status} onChange={e => { edit(); setEnabled(e.target.checked); }} /> Enable Brains embeddings globally</label>
-    <div className="field-pair provider-model-fields"><Field label="Provider"><select value={connectionId} disabled={locked || !status} onChange={e => { edit(); setConnectionId(e.target.value); setModel(''); }}><option value="">Choose a connection</option>{connectionId && !savedProviders.some(p => p.id === connectionId) && <option value={connectionId}>Configured connection (unavailable)</option>}{savedProviders.map(p => <option key={p.id} value={p.id}>{providerOptionLabel(savedProviders, p)}</option>)}</select></Field>
-    <Field label="Model"><select value={discovery?.models.some(m => m.id === model) ? model : ''} disabled={locked || !discovery} onChange={e => { edit(); setModel(e.target.value); }}><option value="">Choose an embedding model or enter ID below</option>{discovery?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field></div>
-    {discovery && <p className="hint">{discovery.capabilityDisclosure}{!discovery.models.length && ' No embedding models advertised. Use a manual ID and test.'}</p>}
-    {discoveryError && <p role="alert" className="settings-request-error">{discoveryError}</p>}
-    <Field label="Embedding model ID (manual fallback)"><input value={model} disabled={locked || !status} onChange={e => { edit(); setModel(e.target.value); }} /></Field>
-    <button type="button" disabled={locked || !selected} onClick={() => void request('test')}>Test embedding model</button>
-    {tested && <p role="status">{tested}</p>}
-    <button type="button" className="primary" disabled={locked || !status || (enabled && (!selected || (manual && !tested)))} onClick={() => void request('save')}>Save embedding settings</button>
-    <button type="button" disabled={locked || !status?.enabled} onClick={() => void request('reindex')}>Reindex all memories asynchronously</button>
-    {busy && <p role="status">{busy === 'load' ? 'Loading settings…' : `${busy} request in progress…`}</p>}
-    {status && <p role="status">{status.enabled ? 'Enabled' : 'Disabled'} · Generation {status.generation} · Indexed {status.indexed} / {status.total} · Pending {status.pending} · Failed {status.failed} · Storage {status.storage}. Partial coverage remains searchable lexically. Indexing runs asynchronously; status refreshes every 3 seconds.</p>}
-    {status?.lastError && <p role="alert">Indexing error: {status.lastError}. Check provider availability and model support; failed jobs retry automatically.</p>}
-    {error && <p role="alert" className="settings-request-error">{error}</p>}
-    <p className="settings-help">Manage saved memories independently in the Brains workspace. Saved memory is not verification of current runtime truth.</p>
-  </div></SettingSection>;
+  return (
+    <SettingSection title="Continuity">
+      <DreamPromotionSettings />
+      <div className="curator-card">
+        <label>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={locked || !status}
+            onChange={(e) => {
+              edit();
+              setEnabled(e.target.checked);
+            }}
+          />{' '}
+          Enable Brains embeddings globally
+        </label>
+        <div className="field-pair provider-model-fields">
+          <Field label="Provider">
+            <select
+              value={connectionId}
+              disabled={locked || !status}
+              onChange={(e) => {
+                edit();
+                setConnectionId(e.target.value);
+                setModel('');
+              }}
+            >
+              <option value="">Choose a connection</option>
+              {connectionId && !savedProviders.some((p) => p.id === connectionId) && (
+                <option value={connectionId}>Configured connection (unavailable)</option>
+              )}
+              {savedProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {providerOptionLabel(savedProviders, p)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Model">
+            <select
+              value={discovery?.models.some((m) => m.id === model) ? model : ''}
+              disabled={locked || !discovery}
+              onChange={(e) => {
+                edit();
+                setModel(e.target.value);
+              }}
+            >
+              <option value="">Choose an embedding model or enter ID below</option>
+              {discovery?.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        {discovery && (
+          <p className="hint">
+            {discovery.capabilityDisclosure}
+            {!discovery.models.length &&
+              ' No embedding models advertised. Use a manual ID and test.'}
+          </p>
+        )}
+        {discoveryError && (
+          <p role="alert" className="settings-request-error">
+            {discoveryError}
+          </p>
+        )}
+        <Field label="Embedding model ID (manual fallback)">
+          <input
+            value={model}
+            disabled={locked || !status}
+            onChange={(e) => {
+              edit();
+              setModel(e.target.value);
+            }}
+          />
+        </Field>
+        <button type="button" disabled={locked || !selected} onClick={() => void request('test')}>
+          Test embedding model
+        </button>
+        {tested && <p role="status">{tested}</p>}
+        <button
+          type="button"
+          className="primary"
+          disabled={locked || !status || (enabled && (!selected || (manual && !tested)))}
+          onClick={() => void request('save')}
+        >
+          Save embedding settings
+        </button>
+        <button
+          type="button"
+          disabled={locked || !status?.enabled}
+          onClick={() => void request('reindex')}
+        >
+          Reindex all memories asynchronously
+        </button>
+        {busy && (
+          <p role="status">
+            {busy === 'load' ? 'Loading settings…' : `${busy} request in progress…`}
+          </p>
+        )}
+        {status && (
+          <p role="status">
+            {status.enabled ? 'Enabled' : 'Disabled'} · Generation {status.generation} · Indexed{' '}
+            {status.indexed} / {status.total} · Pending {status.pending} · Failed {status.failed} ·
+            Storage {status.storage}. Partial coverage remains searchable lexically. Indexing runs
+            asynchronously; status refreshes every 3 seconds.
+          </p>
+        )}
+        {status?.lastError && (
+          <p role="alert">
+            Indexing error: {status.lastError}. Check provider availability and model support;
+            failed jobs retry automatically.
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="settings-request-error">
+            {error}
+          </p>
+        )}
+        <p className="settings-help">
+          Manage saved memories independently in the Brains workspace. Saved memory is not
+          verification of current runtime truth.
+        </p>
+      </div>
+    </SettingSection>
+  );
 }

@@ -1,4 +1,5 @@
-import { answerFromChatResult, fetchApi } from '../../app/api';
+import { fetchApi } from '../../app/api';
+import { chatTerminalResult } from './chatTerminal';
 
 export type ChatStreamResult = {
   terminalType: string;
@@ -12,7 +13,12 @@ type ChatStreamOptions = {
   onAccepted?: () => void;
 };
 
-export async function streamChat({ requestBody, signal, onEvent, onAccepted }: ChatStreamOptions): Promise<ChatStreamResult> {
+export async function streamChat({
+  requestBody,
+  signal,
+  onEvent,
+  onAccepted,
+}: ChatStreamOptions): Promise<ChatStreamResult> {
   const response = await fetchApi('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
@@ -21,14 +27,16 @@ export async function streamChat({ requestBody, signal, onEvent, onAccepted }: C
   });
 
   if (!response.ok) {
-    const result = await response.json().catch(() => null);
-    throw new Error(result ? answerFromChatResult(result) : `HTTP ${response.status}`);
+    // Rejected submissions have no assistant turn and no provider diagnostic to render.
+    throw new Error(`HTTP ${response.status}`);
   }
 
   onAccepted?.();
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/x-ndjson') || !response.body) {
-    return { terminalType: 'run.completed', finalResult: await response.json() };
+    const finalResult: unknown = await response.json();
+    const status = chatTerminalResult(finalResult, '').terminalStatus;
+    return { terminalType: `run.${status === 'completed' ? 'completed' : status}`, finalResult };
   }
 
   const reader = response.body.getReader();
@@ -38,12 +46,20 @@ export async function streamChat({ requestBody, signal, onEvent, onAccepted }: C
   let finalResult: unknown = null;
   const handleLine = (line: string) => {
     let event: unknown;
-    try { event = JSON.parse(line); }
-    catch { throw new Error('The streaming response was malformed.'); }
+    try {
+      event = JSON.parse(line);
+    } catch {
+      throw new Error('The streaming response was malformed.');
+    }
     onEvent(event);
     if (!event || typeof event !== 'object') return;
     const envelope = event as { type?: unknown; data?: { response?: unknown } };
-    if (envelope.type === 'run.completed' || envelope.type === 'run.failed' || envelope.type === 'run.cancelled' || envelope.type === 'run.superseded') {
+    if (
+      envelope.type === 'run.completed' ||
+      envelope.type === 'run.failed' ||
+      envelope.type === 'run.cancelled' ||
+      envelope.type === 'run.superseded'
+    ) {
       terminalType = envelope.type;
       finalResult = envelope.data?.response ?? null;
     }

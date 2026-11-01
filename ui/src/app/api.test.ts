@@ -8,7 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, fetchApi, generatedArtifactPath, jsonMutation } from './api';
 // Execute the backend's real policy in both supported repository layouts:
 // standalone Burrow-UI + Burrow-Backend siblings, and assembled ui + backend siblings.
-type BrowserRequestPolicy = (input: { method?: string; headers?: Record<string, string> }, url: URL) => unknown;
+type BrowserRequestPolicy = (
+  input: { method?: string; headers?: Record<string, string> },
+  url: URL,
+) => unknown;
 const policyCandidates = [
   resolve(process.cwd(), '../Burrow-Backend/src/browser-origin-policy.mjs'),
   resolve(process.cwd(), '../backend/src/browser-origin-policy.mjs'),
@@ -17,7 +20,9 @@ let browserRequestPolicy: BrowserRequestPolicy | undefined;
 for (const candidate of policyCandidates) {
   try {
     const source = await readFile(candidate, 'utf8');
-    const module = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    const module = await import(
+      `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+    );
     if (typeof module.browserRequestPolicy === 'function') {
       browserRequestPolicy = module.browserRequestPolicy as BrowserRequestPolicy;
       break;
@@ -26,7 +31,8 @@ for (const candidate of policyCandidates) {
     // Try the other supported repository layout.
   }
 }
-if (!browserRequestPolicy) throw new Error(`backend_browser_policy_not_found:${policyCandidates.join(',')}`);
+if (!browserRequestPolicy)
+  throw new Error(`backend_browser_policy_not_found:${policyCandidates.join(',')}`);
 const applyBrowserRequestPolicy = browserRequestPolicy;
 import { clearBasicCredentials, setBasicCredentials } from './auth';
 
@@ -38,7 +44,11 @@ describe('API requests', () => {
 
   it('adds Basic authentication to ordinary API requests', async () => {
     setBasicCredentials('goblin', 'secret');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await api('/api/agents');
@@ -50,13 +60,19 @@ describe('API requests', () => {
 
   it('encodes Unicode Basic credentials as UTF-8 bytes', async () => {
     setBasicCredentials('用户', 'päss🔐');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await api('/api/agents');
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(new Headers(init.headers).get('authorization')).toBe(`Basic ${btoa(String.fromCharCode(...new TextEncoder().encode('用户:päss🔐')))}`);
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      `Basic ${btoa(String.fromCharCode(...new TextEncoder().encode('用户:päss🔐')))}`,
+    );
   });
 
   it('adds the same authentication to streaming requests without replacing their accept header', async () => {
@@ -64,7 +80,9 @@ describe('API requests', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response());
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchApi('/api/chat', { headers: { accept: 'application/x-ndjson', 'content-type': 'application/json' } });
+    await fetchApi('/api/chat', {
+      headers: { accept: 'application/x-ndjson', 'content-type': 'application/json' },
+    });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).get('authorization')).toBe('Basic Z29ibGluOnNlY3JldA==');
@@ -74,10 +92,13 @@ describe('API requests', () => {
 
   it('builds every JSON mutation method to satisfy the backend browser policy, including bodyless actions and bodyful DELETE', async () => {
     const requests: Array<[string, RequestInit]> = [];
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((path: string, init: RequestInit) => {
-      requests.push([path, init]);
-      return Promise.resolve(new Response(null, { status: 204 }));
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((path: string, init: RequestInit) => {
+        requests.push([path, init]);
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }),
+    );
 
     await api('/api/task-board/tasks/t/execute', jsonMutation('POST'));
     await api('/api/scheduled-jobs/j/trigger', jsonMutation('POST'));
@@ -89,7 +110,12 @@ describe('API requests', () => {
     for (const [path, init] of requests) {
       const headers = Object.fromEntries(new Headers(init.headers).entries());
       if (init.body !== undefined) headers['content-length'] = String(String(init.body).length);
-      expect(applyBrowserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+      expect(
+        applyBrowserRequestPolicy(
+          { method: init.method, headers },
+          new URL(path, 'https://burrow.example'),
+        ),
+      ).toMatchObject({ status: null });
       expect(headers['content-type']).toBe('application/json');
     }
   });
@@ -100,24 +126,41 @@ describe('API requests', () => {
     await api('/api/action', { method: 'POST' });
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = Object.fromEntries(new Headers(init.headers).entries());
-    expect(applyBrowserRequestPolicy({ method: init.method, headers }, new URL(path, 'https://burrow.example'))).toMatchObject({ status: null });
+    expect(
+      applyBrowserRequestPolicy(
+        { method: init.method, headers },
+        new URL(path, 'https://burrow.example'),
+      ),
+    ).toMatchObject({ status: null });
     expect(headers['content-type']).toBe('application/json');
   });
 
   it('encodes generated artifact route parameters without exposing reference path segments', () => {
-    expect(generatedArtifactPath('agent / one', 'generated/audio take #1.wav')).toBe('/api/generated-artifacts/agent%20%2F%20one/generated%2Faudio%20take%20%231.wav');
+    expect(generatedArtifactPath('agent / one', 'generated/audio take #1.wav')).toBe(
+      '/api/generated-artifacts/agent%20%2F%20one/generated%2Faudio%20take%20%231.wav',
+    );
   });
-
-
 
   it('aborts a request whose response body hangs until the deadline', async () => {
     vi.useFakeTimers();
     const abortSpy = vi.fn();
-    const response = { status: 200, ok: true, headers: new Headers({ 'content-type': 'application/json' }), text: () => new Promise<string>((_resolve, reject) => abortSpy.mockImplementation(() => reject(new DOMException('Aborted', 'AbortError')))) } as unknown as Response;
-    const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => { init.signal?.addEventListener('abort', () => abortSpy()); return Promise.resolve(response); });
+    const response = {
+      status: 200,
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      text: () =>
+        new Promise<string>((_resolve, reject) =>
+          abortSpy.mockImplementation(() => reject(new DOMException('Aborted', 'AbortError'))),
+        ),
+    } as unknown as Response;
+    const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => {
+      init.signal?.addEventListener('abort', () => abortSpy());
+      return Promise.resolve(response);
+    });
     vi.stubGlobal('fetch', fetchMock);
     const pending = api('/api/slow');
-    await Promise.resolve(); await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     const expectation = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     await vi.advanceTimersByTimeAsync(30_000);
     await expectation;
@@ -128,9 +171,22 @@ describe('API requests', () => {
   it('combines caller cancellation with the deadline and does not retry requests', async () => {
     vi.useFakeTimers();
     const caller = new AbortController();
-    const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))));
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(
+        (_path, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            ),
+          ),
+      );
     vi.stubGlobal('fetch', fetchMock);
-    const pending = api('/api/slow', { method: 'POST', body: '{"once":true}', signal: caller.signal });
+    const pending = api('/api/slow', {
+      method: 'POST',
+      body: '{"once":true}',
+      signal: caller.signal,
+    });
     const expectation = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     caller.abort();
     await expectation;
@@ -141,7 +197,16 @@ describe('API requests', () => {
 
   it('applies the same deadline to apiLocal and exempts chat streams', async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))));
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(
+        (_path, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            ),
+          ),
+      );
     vi.stubGlobal('fetch', fetchMock);
     const pending = (await import('./api')).apiLocal('/api/local-slow');
     await Promise.resolve();
@@ -165,7 +230,10 @@ describe('API requests', () => {
   it('does not request reauthentication for a 401 when no Basic session exists', async () => {
     const event = vi.fn();
     window.addEventListener('burrow:auth-required', event);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('unauthorized', { status: 401 })),
+    );
     await expect(api('/api/agents')).rejects.toMatchObject({ status: 401 });
     expect(event).not.toHaveBeenCalled();
     window.removeEventListener('burrow:auth-required', event);
@@ -175,14 +243,28 @@ describe('API requests', () => {
     const event = vi.fn();
     setBasicCredentials('goblin', 'secret');
     window.addEventListener('burrow:auth-required', event);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{broken', { status: 401, headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('{broken', { status: 401, headers: { 'content-type': 'application/json' } }),
+        ),
+    );
     await expect(api('/api/agents')).rejects.toMatchObject({ status: 401 });
     expect(event).toHaveBeenCalledOnce();
     window.removeEventListener('burrow:auth-required', event);
   });
 
   it('reports malformed JSON only when JSON was promised', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{broken', { headers: { 'content-type': 'application/json' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('{broken', { headers: { 'content-type': 'application/json' } }),
+        ),
+    );
 
     await expect(api('/api/agents')).rejects.toMatchObject({
       message: 'invalid_json_response',
@@ -193,10 +275,15 @@ describe('API requests', () => {
 
   it('preserves a short excerpt for non-JSON error responses', async () => {
     const responseBody = '<html>upstream failure</html>';
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(responseBody, {
-      status: 502,
-      headers: { 'content-type': 'text/html' },
-    })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(responseBody, {
+          status: 502,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
 
     await expect(api('/api/agents')).rejects.toMatchObject({
       message: responseBody,
@@ -206,20 +293,37 @@ describe('API requests', () => {
   });
 
   it('preserves a non-JSON successful response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('ready', { headers: { 'content-type': 'text/plain' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response('ready', { headers: { 'content-type': 'text/plain' } })),
+    );
 
     await expect(api<string>('/api/health')).resolves.toBe('ready');
   });
 });
 
-it.each(['/api/chat/runs/active?agentId=a', '/api/chat/run-id/cancel'])('bounds hanging nonstream chat request %s without replay', async (path) => {
-  vi.useFakeTimers();
-  const fetchMock = vi.fn().mockImplementation((_path, init: RequestInit) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))));
-  vi.stubGlobal('fetch', fetchMock);
-  const request = api(path, path.endsWith('/cancel') ? jsonMutation('POST', {}) : undefined);
-  const rejected = expect(request).rejects.toThrow();
-  await vi.advanceTimersByTimeAsync(30_000);
-  await rejected;
-  expect(fetchMock).toHaveBeenCalledOnce();
-  vi.useRealTimers();
-});
+it.each(['/api/chat/runs/active?agentId=a', '/api/chat/run-id/cancel'])(
+  'bounds hanging nonstream chat request %s without replay',
+  async (path) => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(
+        (_path, init: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            ),
+          ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const request = api(path, path.endsWith('/cancel') ? jsonMutation('POST', {}) : undefined);
+    const rejected = expect(request).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(fetchMock).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  },
+);

@@ -4,38 +4,72 @@ import { App } from './App';
 import { ConfirmProvider } from './app/ConfirmDialog';
 
 const mocks = vi.hoisted(() => ({
-  resetSession: vi.fn(), refreshSessions: vi.fn(), reportError: vi.fn(),
-  clearError: vi.fn(), setDraft: vi.fn(), clearAttachment: vi.fn(),
+  resetSession: vi.fn(),
+  refreshSessions: vi.fn(),
+  reportError: vi.fn(),
+  clearError: vi.fn(),
+  setDraft: vi.fn(),
+  clearAttachment: vi.fn(),
   isAttachmentScopeCurrent: vi.fn(),
   onReset: null as null | (() => void),
   activeRunId: '',
 }));
 
 vi.mock('./app/api', async (original) => ({
-  ...await original<typeof import('./app/api')>(),
+  ...(await original<typeof import('./app/api')>()),
   api: vi.fn(async () => ({})),
 }));
 vi.mock('./app/modPanels', async (original) => ({
-  ...await original<typeof import('./app/modPanels')>(),
+  ...(await original<typeof import('./app/modPanels')>()),
   loadModPanels: vi.fn(async () => []),
 }));
-vi.mock('./app/useRuntimeSelection', () => ({ useRuntimeSelection: () => ({ selectedAgentId: 'smatchet' }) }));
+vi.mock('./app/useRuntimeSelection', () => ({
+  useRuntimeSelection: () => ({ selectedAgentId: 'smatchet' }),
+}));
 vi.mock('./app/useRuntimeAgents', () => ({
   formatAgentActivity: vi.fn(),
-  useRuntimeAgents: () => ({ agents: [{ id: 'smatchet', name: 'Smatchet', avatar: 'S', provider: '', model: '', effort: '', temperature: 0.2, files: [], subagents: [] }] }),
+  useRuntimeAgents: () => ({
+    agents: [
+      {
+        id: 'smatchet',
+        name: 'Smatchet',
+        avatar: 'S',
+        provider: '',
+        model: '',
+        effort: '',
+        temperature: 0.2,
+        files: [],
+        subagents: [],
+      },
+    ],
+  }),
 }));
 vi.mock('./app/useRuntimeDashboard', () => ({
-  useRuntimeDashboard: () => ({ savedProviders: [], operatorProfile: { name: 'Rob', avatar: 'R' } }),
+  useRuntimeDashboard: () => ({
+    savedProviders: [],
+    operatorProfile: { name: 'Rob', avatar: 'R' },
+  }),
 }));
-vi.mock('./features/workspace/useWorkspaceFiles', () => ({ useWorkspaceFiles: () => ({ workspaceFiles: [] }) }));
+vi.mock('./features/workspace/useWorkspaceFiles', () => ({
+  useWorkspaceFiles: () => ({ workspaceFiles: [] }),
+}));
 vi.mock('./features/workspace/WorkspaceRail', () => ({ WorkspaceRail: () => null }));
 vi.mock('./features/panels/RightRail', () => ({ RightRail: () => null }));
 vi.mock('./features/chat/useChatRun', () => ({
-  useChatRun: () => ({ activeRunId: mocks.activeRunId, activeRunForSelection: mocks.activeRunId ? { runId: mocks.activeRunId } : null }),
+  useChatRun: () => ({
+    activeRunId: mocks.activeRunId,
+    activeRunForSelection: mocks.activeRunId ? { runId: mocks.activeRunId } : null,
+  }),
 }));
 vi.mock('./features/chat/useChatSession', () => ({
   useChatSession: () => ({
-    ...mocks, toolActivityForRun: vi.fn(), sessionId: 'default', sessions: [{ id: 'default' }], attached: [], turns: [], draft: 'Keep my draft',
+    ...mocks,
+    toolActivityForRun: vi.fn(),
+    sessionId: 'default',
+    sessions: [{ id: 'default' }],
+    attached: [],
+    turns: [],
+    draft: 'Keep my draft',
   }),
 }));
 vi.mock('./features/chat/ChatPage', async (original) => {
@@ -53,7 +87,10 @@ vi.mock('./features/chat/ChatPage', async (original) => {
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 
@@ -67,7 +104,11 @@ beforeEach(() => {
 afterEach(cleanup);
 
 function renderApp() {
-  return render(<ConfirmProvider><App /></ConfirmProvider>);
+  return render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
 }
 
 function resetButton(label = 'Reset Session') {
@@ -89,11 +130,17 @@ describe('Reset Session pending feedback', () => {
     expect(mocks.setDraft).not.toHaveBeenCalled();
     expect(mocks.clearAttachment).not.toHaveBeenCalled();
 
-    await act(async () => { reset.resolve(true); await reset.promise; });
+    await act(async () => {
+      reset.resolve(true);
+      await reset.promise;
+    });
     expect(mocks.setDraft).toHaveBeenCalledWith('');
     expect(mocks.clearAttachment).toHaveBeenCalledTimes(1);
     expect(resetButton('Resetting…').disabled).toBe(true);
-    await act(async () => { refresh.resolve(); await refresh.promise; });
+    await act(async () => {
+      refresh.resolve();
+      await refresh.promise;
+    });
     expect(resetButton().disabled).toBe(false);
   });
 
@@ -102,9 +149,15 @@ describe('Reset Session pending feedback', () => {
     mocks.resetSession.mockReturnValue(reset.promise);
     renderApp();
     const attempt = mocks.onReset!;
-    act(() => { attempt(); attempt(); });
+    act(() => {
+      attempt();
+      attempt();
+    });
     expect(mocks.resetSession).toHaveBeenCalledTimes(1);
-    await act(async () => { reset.resolve(true); await reset.promise; });
+    await act(async () => {
+      reset.resolve(true);
+      await reset.promise;
+    });
     expect(resetButton().disabled).toBe(false);
   });
 
@@ -113,12 +166,18 @@ describe('Reset Session pending feedback', () => {
     mocks.resetSession.mockReturnValueOnce(reset.promise).mockResolvedValueOnce(true);
     renderApp();
     fireEvent.click(resetButton());
-    await act(async () => { reset.reject(new Error('Reset unavailable')); });
+    await act(async () => {
+      reset.reject(new Error('Reset unavailable'));
+    });
     expect(resetButton().disabled).toBe(false);
-    expect(mocks.reportError).toHaveBeenCalledWith('Could not start a new session: Reset unavailable');
+    expect(mocks.reportError).toHaveBeenCalledWith(
+      'Could not start a new session: Reset unavailable',
+    );
     expect(mocks.setDraft).not.toHaveBeenCalled();
     expect(mocks.clearAttachment).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(resetButton()); });
+    await act(async () => {
+      fireEvent.click(resetButton());
+    });
     expect(mocks.resetSession).toHaveBeenCalledTimes(2);
     expect(resetButton().disabled).toBe(false);
   });
@@ -129,7 +188,10 @@ describe('Reset Session pending feedback', () => {
     renderApp();
     fireEvent.click(resetButton());
     mocks.isAttachmentScopeCurrent.mockReturnValue(false);
-    await act(async () => { reset.resolve(false); await reset.promise; });
+    await act(async () => {
+      reset.resolve(false);
+      await reset.promise;
+    });
     expect(resetButton().disabled).toBe(false);
     expect(mocks.setDraft).not.toHaveBeenCalled();
     expect(mocks.clearAttachment).not.toHaveBeenCalled();
@@ -141,7 +203,9 @@ describe('Reset Session pending feedback', () => {
     renderApp();
     expect(resetButton().disabled).toBe(true);
     fireEvent.click(resetButton());
-    act(() => { mocks.onReset!(); });
+    act(() => {
+      mocks.onReset!();
+    });
     expect(mocks.resetSession).not.toHaveBeenCalled();
   });
 });

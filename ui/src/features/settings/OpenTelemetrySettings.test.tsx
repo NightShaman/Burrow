@@ -4,11 +4,14 @@ import { api } from '../../app/api';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
 
 vi.mock('../../app/api', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../app/api')>(),
+  ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
 }));
 
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
 
 const route = '/api/settings/opentelemetry';
 type Destination = {
@@ -29,7 +32,10 @@ type Destination = {
   credentialsConfigured: boolean;
   credentialFields: string[];
 };
-type DestinationInput = Omit<Destination, 'headersConfigured' | 'credentialsConfigured' | 'credentialFields'> & {
+type DestinationInput = Omit<
+  Destination,
+  'headersConfigured' | 'credentialsConfigured' | 'credentialFields'
+> & {
   headers?: string;
   clearHeaders?: boolean;
   credentials?: Record<string, string>;
@@ -51,7 +57,7 @@ const providers = [
   { id: 'new-relic', label: 'New Relic', traces: true, metrics: true },
   { id: 'honeycomb', label: 'Honeycomb', traces: true, metrics: true },
   { id: 'splunk', label: 'Splunk', traces: true, metrics: true },
-].map(provider => ({
+].map((provider) => ({
   ...provider,
   description: `${provider.label} OTLP/HTTP preset`,
   protocols: ['http/json', 'http/protobuf'],
@@ -62,31 +68,55 @@ const providers = [
 
 function destination(overrides: Partial<Destination> = {}): Destination {
   return {
-    id: 'archive', name: 'Archive collector', provider: 'custom', enabled: true,
-    endpoint: 'https://archive.example.test:4318', tracesEndpoint: '', metricsEndpoint: '',
-    protocol: 'http/json', tracesEnabled: true, metricsEnabled: true,
-    metricsTemporality: 'cumulative', connection: {}, tls: { verify: true },
-    headersConfigured: true, credentialsConfigured: false, credentialFields: [],
+    id: 'archive',
+    name: 'Archive collector',
+    provider: 'custom',
+    enabled: true,
+    endpoint: 'https://archive.example.test:4318',
+    tracesEndpoint: '',
+    metricsEndpoint: '',
+    protocol: 'http/json',
+    tracesEnabled: true,
+    metricsEnabled: true,
+    metricsTemporality: 'cumulative',
+    connection: {},
+    tls: { verify: true },
+    headersConfigured: true,
+    credentialsConfigured: false,
+    credentialFields: [],
     ...overrides,
   };
 }
 const archive = destination();
 const tempo = destination({
-  id: 'tempo', name: 'Production traces', provider: 'grafana-tempo',
-  endpoint: 'https://tempo.example.test', metricsEnabled: false,
-  connection: { tenantId: 'tenant-a' }, headersConfigured: false,
-  credentialsConfigured: true, credentialFields: ['token'],
+  id: 'tempo',
+  name: 'Production traces',
+  provider: 'grafana-tempo',
+  endpoint: 'https://tempo.example.test',
+  metricsEnabled: false,
+  connection: { tenantId: 'tenant-a' },
+  headersConfigured: false,
+  credentialsConfigured: true,
+  credentialFields: ['token'],
 });
 
 function response(destinations: Destination[] = [archive, tempo], enabled = false) {
   return {
     ok: true,
     providers,
-    settings: { enabled, destinations, endpoint: destinations[0]?.endpoint ?? '', headersConfigured: destinations[0]?.headersConfigured ?? false },
-    effective: {
-      enabled, destinations, endpoint: destinations[0]?.endpoint ?? '',
+    settings: {
+      enabled,
+      destinations,
+      endpoint: destinations[0]?.endpoint ?? '',
       headersConfigured: destinations[0]?.headersConfigured ?? false,
-      source: 'database' as Source, endpointSource: 'database' as Source,
+    },
+    effective: {
+      enabled,
+      destinations,
+      endpoint: destinations[0]?.endpoint ?? '',
+      headersConfigured: destinations[0]?.headersConfigured ?? false,
+      source: 'database' as Source,
+      endpointSource: 'database' as Source,
       headersSource: 'database' as Source,
       restartRequired: false as const,
     },
@@ -98,18 +128,25 @@ type Fixture = ReturnType<typeof response>;
 // Model only the public API round trip: write-only fields never come back from GET/PUT.
 // Preserved values belong to the same ID AND provider, not merely the same list position.
 function acceptUpdate(saved: Fixture, update: Update): Fixture {
-  return response(update.destinations.map(input => {
-    const previous = saved.settings.destinations.find(item => item.id === input.id && item.provider === input.provider);
-    const { headers, clearHeaders, credentials, clearCredentials, ...publicFields } = input;
-    const fields = Object.keys(credentials ?? {}).filter(key => Boolean(credentials?.[key]));
-    const credentialFields = clearCredentials ? [] : [...new Set([...(previous?.credentialFields ?? []), ...fields])];
-    return {
-      ...publicFields,
-      headersConfigured: clearHeaders ? false : Boolean(headers || previous?.headersConfigured),
-      credentialsConfigured: credentialFields.length > 0,
-      credentialFields,
-    };
-  }), update.enabled);
+  return response(
+    update.destinations.map((input) => {
+      const previous = saved.settings.destinations.find(
+        (item) => item.id === input.id && item.provider === input.provider,
+      );
+      const { headers, clearHeaders, credentials, clearCredentials, ...publicFields } = input;
+      const fields = Object.keys(credentials ?? {}).filter((key) => Boolean(credentials?.[key]));
+      const credentialFields = clearCredentials
+        ? []
+        : [...new Set([...(previous?.credentialFields ?? []), ...fields])];
+      return {
+        ...publicFields,
+        headersConfigured: clearHeaders ? false : Boolean(headers || previous?.headersConfigured),
+        credentialsConfigured: credentialFields.length > 0,
+        credentialFields,
+      };
+    }),
+    update.enabled,
+  );
 }
 
 async function mount(initial = response()) {
@@ -118,19 +155,35 @@ async function mount(initial = response()) {
     if (init?.method === 'PUT') {
       saved = acceptUpdate(saved, JSON.parse(init.body as string) as Update);
       // An active environment transport remains separate from the saved list.
-      if (initial.effective.endpointSource === 'environment' || initial.effective.headersSource === 'environment') saved.effective = initial.effective;
+      if (
+        initial.effective.endpointSource === 'environment' ||
+        initial.effective.headersSource === 'environment'
+      )
+        saved.effective = initial.effective;
     }
     return saved;
   });
   render(<OpenTelemetrySettings />);
   await screen.findByLabelText('Name');
 }
-function input(label: string) { return screen.getByLabelText(label) as HTMLInputElement; }
-function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
-function selectDestination(name: string) { fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') })); }
-function selectProvider(provider: string) { change('Provider', provider); }
-function putCalls() { return vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT'); }
-function lastUpdate(): Update { return JSON.parse(putCalls().at(-1)![1]!.body as string) as Update; }
+function input(label: string) {
+  return screen.getByLabelText(label) as HTMLInputElement;
+}
+function change(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+function selectDestination(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(name, 'i') }));
+}
+function selectProvider(provider: string) {
+  change('Provider', provider);
+}
+function putCalls() {
+  return vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT');
+}
+function lastUpdate(): Update {
+  return JSON.parse(putCalls().at(-1)![1]!.body as string) as Update;
+}
 async function save() {
   const count = putCalls().length;
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -145,7 +198,10 @@ function expectNoSecretMutation(item: DestinationInput) {
 
 it('loads multiple saved destinations and edits one without dropping or re-keying its peer', async () => {
   await mount();
-  expect(api).toHaveBeenCalledWith(route, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(api).toHaveBeenCalledWith(
+    route,
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
   expect(input('Name').value).toBe(archive.name);
   expect(input('Authentication headers').value).toBe('');
   selectDestination(tempo.name);
@@ -157,9 +213,18 @@ it('loads multiple saved destinations and edits one without dropping or re-keyin
   const update = lastUpdate();
   expect(update.enabled).toBe(false);
   expect(update.destinations).toHaveLength(2);
-  expect(update.destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
-  expect(update.destinations[0]).toMatchObject({ name: archive.name, endpoint: archive.endpoint, provider: 'custom' });
-  expect(update.destinations[1]).toMatchObject({ name: 'Renamed traces', provider: 'grafana-tempo', metricsEnabled: false, connection: { tenantId: 'tenant-a' } });
+  expect(update.destinations.map((item) => item.id)).toEqual(['archive', 'tempo']);
+  expect(update.destinations[0]).toMatchObject({
+    name: archive.name,
+    endpoint: archive.endpoint,
+    provider: 'custom',
+  });
+  expect(update.destinations[1]).toMatchObject({
+    name: 'Renamed traces',
+    provider: 'grafana-tempo',
+    metricsEnabled: false,
+    connection: { tenantId: 'tenant-a' },
+  });
   update.destinations.forEach(expectNoSecretMutation);
   // New-format PUT must not accidentally trigger the legacy scalar replacement path.
   expect(Object.keys(update).sort()).toEqual(['destinations', 'enabled']);
@@ -172,11 +237,15 @@ it('adds, reloads, and removes a destination using a stable unique caller-create
   selectProvider('custom');
   change('OTLP endpoint', 'http://localhost:4318');
   await save();
-  const added = lastUpdate().destinations.find(item => item.name === 'Local collector')!;
+  const added = lastUpdate().destinations.find((item) => item.name === 'Local collector')!;
   expect(added).toBeDefined();
   expect(added.id).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
-  expect(new Set(lastUpdate().destinations.map(item => item.id)).size).toBe(3);
-  expect(added).toMatchObject({ provider: 'custom', endpoint: 'http://localhost:4318', tls: { verify: true } });
+  expect(new Set(lastUpdate().destinations.map((item) => item.id)).size).toBe(3);
+  expect(added).toMatchObject({
+    provider: 'custom',
+    endpoint: 'http://localhost:4318',
+    tls: { verify: true },
+  });
 
   cleanup();
   render(<OpenTelemetrySettings />);
@@ -185,11 +254,13 @@ it('adds, reloads, and removes a destination using a stable unique caller-create
   expect(input('OTLP endpoint').value).toBe('http://localhost:4318');
   change('Name', 'Local renamed');
   await save();
-  expect(lastUpdate().destinations.find(item => item.name === 'Local renamed')?.id).toBe(added.id);
+  expect(lastUpdate().destinations.find((item) => item.name === 'Local renamed')?.id).toBe(
+    added.id,
+  );
   selectDestination('Local renamed');
   fireEvent.click(screen.getByRole('button', { name: /Remove destination/i }));
   await save();
-  expect(lastUpdate().destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
+  expect(lastUpdate().destinations.map((item) => item.id)).toEqual(['archive', 'tempo']);
   expect(screen.queryByRole('button', { name: /Local renamed/i })).toBeNull();
 });
 
@@ -207,7 +278,11 @@ it('preserves saved credentials and headers by omission on an ordinary edit', as
   change('OTLP endpoint', 'https://replacement-tempo.example.test');
   await save();
   const item = lastUpdate().destinations[0];
-  expect(item).toMatchObject({ id: 'tempo', provider: 'grafana-tempo', endpoint: 'https://replacement-tempo.example.test' });
+  expect(item).toMatchObject({
+    id: 'tempo',
+    provider: 'grafana-tempo',
+    endpoint: 'https://replacement-tempo.example.test',
+  });
   expectNoSecretMutation(item);
   expect(input('Bearer token').value).toBe('');
   expect(input('Authentication headers').value).toBe('');
@@ -222,7 +297,8 @@ it('replaces write-only token and headers only for their destination and blanks 
   const update = lastUpdate();
   expectNoSecretMutation(update.destinations[0]);
   expect(update.destinations[1]).toMatchObject({
-    id: 'tempo', credentials: { token: 'replacement-token-for-test' },
+    id: 'tempo',
+    credentials: { token: 'replacement-token-for-test' },
     headers: 'x-test-key=replacement-header-for-test',
   });
   expect(update.destinations[1].clearCredentials).toBeUndefined();
@@ -240,20 +316,23 @@ it('replaces write-only token and headers only for their destination and blanks 
 it.each([
   ['Remove saved credentials on save', 'clearCredentials', 'credentials'],
   ['Remove saved headers on save', 'clearHeaders', 'headers'],
-] as const)('clears only the explicitly selected secret category: %s', async (label, clearKey, replacementKey) => {
-  await mount(response([archive, destination({ ...tempo, headersConfigured: true })]));
-  selectDestination(tempo.name);
-  fireEvent.click(screen.getByLabelText(label));
-  await save();
-  const [untouched, cleared] = lastUpdate().destinations;
-  expectNoSecretMutation(untouched);
-  expect(cleared[clearKey]).toBe(true);
-  expect(Object.hasOwn(cleared, replacementKey)).toBe(false);
-  const otherClear = clearKey === 'clearCredentials' ? 'clearHeaders' : 'clearCredentials';
-  const otherReplacement = replacementKey === 'credentials' ? 'headers' : 'credentials';
-  expect(Object.hasOwn(cleared, otherClear)).toBe(false);
-  expect(Object.hasOwn(cleared, otherReplacement)).toBe(false);
-});
+] as const)(
+  'clears only the explicitly selected secret category: %s',
+  async (label, clearKey, replacementKey) => {
+    await mount(response([archive, destination({ ...tempo, headersConfigured: true })]));
+    selectDestination(tempo.name);
+    fireEvent.click(screen.getByLabelText(label));
+    await save();
+    const [untouched, cleared] = lastUpdate().destinations;
+    expectNoSecretMutation(untouched);
+    expect(cleared[clearKey]).toBe(true);
+    expect(Object.hasOwn(cleared, replacementKey)).toBe(false);
+    const otherClear = clearKey === 'clearCredentials' ? 'clearHeaders' : 'clearCredentials';
+    const otherReplacement = replacementKey === 'credentials' ? 'headers' : 'credentials';
+    expect(Object.hasOwn(cleared, otherClear)).toBe(false);
+    expect(Object.hasOwn(cleared, otherReplacement)).toBe(false);
+  },
+);
 
 it('discards draft secrets on every provider switch, including switching back before save', async () => {
   await mount(response([destination({ ...tempo, headersConfigured: true })]));
@@ -312,10 +391,12 @@ it('validates endpoint and header syntax before sending an atomic destination up
 });
 
 it('retries a failed read without displaying the backend error or inventing saved settings', async () => {
-  vi.mocked(api).mockRejectedValueOnce(Error('Authorization=load-secret')).mockResolvedValueOnce(response());
+  vi.mocked(api)
+    .mockRejectedValueOnce(Error('Authorization=load-secret'))
+    .mockResolvedValueOnce(response());
   render(<OpenTelemetrySettings />);
   const retry = await screen.findByRole('button', { name: 'Retry OpenTelemetry settings' });
-  expect((screen.getByRole('alert')).textContent).toMatch(/Could not load/);
+  expect(screen.getByRole('alert').textContent).toMatch(/Could not load/);
   expect(document.body.textContent).not.toContain('load-secret');
   expect(putCalls()).toHaveLength(0);
   fireEvent.click(retry);
@@ -344,12 +425,19 @@ it('retains all drafts after a sanitized save failure and retries the same updat
 it('shows saved destinations under environment overrides and never saves the environment transport', async () => {
   const initial = response();
   const environment = destination({
-    id: 'environment', name: 'Environment collector', endpoint: 'https://environment.example.test',
+    id: 'environment',
+    name: 'Environment collector',
+    endpoint: 'https://environment.example.test',
     headersConfigured: true,
   });
   initial.effective = {
-    ...initial.effective, enabled: true, destinations: [environment], endpoint: environment.endpoint,
-    source: 'environment', endpointSource: 'environment', headersSource: 'environment',
+    ...initial.effective,
+    enabled: true,
+    destinations: [environment],
+    endpoint: environment.endpoint,
+    source: 'environment',
+    endpointSource: 'environment',
+    headersSource: 'environment',
   };
   initial.runtime = { enabled: true, sdkStarted: true };
   await mount(initial);
@@ -358,7 +446,7 @@ it('shows saved destinations under environment overrides and never saves the env
   expect(screen.queryByText(/Restart Core/i)).toBeNull();
   change('Name', 'Saved under override');
   await save();
-  expect(lastUpdate().destinations.map(item => item.id)).toEqual(['archive', 'tempo']);
+  expect(lastUpdate().destinations.map((item) => item.id)).toEqual(['archive', 'tempo']);
   expect(JSON.stringify(lastUpdate())).not.toContain(environment.endpoint);
   expect(screen.getByText(/Active environment overrides remain in effect/)).toBeTruthy();
   expect(input('Name').value).toBe('Saved under override');
@@ -370,7 +458,12 @@ it('allows a metrics-only destination with an exact metrics URL and no base endp
   change('OTLP endpoint', '');
   change('Exact metrics URL', 'https://metrics.example.test/v1/metrics');
   await save();
-  expect(lastUpdate().destinations[0]).toMatchObject({ endpoint: '', tracesEnabled: false, metricsEnabled: true, metricsEndpoint: 'https://metrics.example.test/v1/metrics' });
+  expect(lastUpdate().destinations[0]).toMatchObject({
+    endpoint: '',
+    tracesEnabled: false,
+    metricsEnabled: true,
+    metricsEndpoint: 'https://metrics.example.test/v1/metrics',
+  });
 });
 
 it('restores saved secret presence when switching back to the original provider without restoring draft secrets', async () => {
@@ -383,11 +476,12 @@ it('restores saved secret presence when switching back to the original provider 
   expect(screen.getByLabelText('Remove saved headers on save')).toBeTruthy();
 });
 
-
 it('renders metadata guidance, accurate direct endpoint instructions and credential names', async () => {
   const initial = response([archive, destination({ ...tempo, enabled: false })]);
-  initial.providers.find(p => p.id === 'datadog')!.description = 'Datadog preset';
-  Object.assign(initial.providers.find(p => p.id === 'datadog')!, { guidance: 'Metadata guidance from API' });
+  initial.providers.find((p) => p.id === 'datadog')!.description = 'Datadog preset';
+  Object.assign(initial.providers.find((p) => p.id === 'datadog')!, {
+    guidance: 'Metadata guidance from API',
+  });
   await mount(initial);
   expect(screen.getByText(/1 effective destination/)).toBeTruthy();
   selectProvider('datadog');
@@ -410,35 +504,54 @@ it('renders metadata guidance, accurate direct endpoint instructions and credent
   expect(screen.getByLabelText('Authorization')).toBeTruthy();
 });
 
-it.each(['datadog', 'splunk'])('requires exact enabled signal URLs for direct %s and selects the invalid destination', async provider => {
-  const direct = destination({ id: 'direct', name: 'Direct destination', provider, connection: { mode: 'direct' }, metricsEnabled: provider === 'datadog' });
-  await mount(response([archive, direct]));
-  change('Name', 'Changed collector');
-  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-  expect(putCalls()).toHaveLength(0);
-  expect(input('Name').value).toBe('Direct destination');
-  expect(screen.getByRole('alert').textContent).toMatch(/requires an exact traces/);
-  change('Exact traces URL', 'https://traces.example.test/v2/trace/otlp');
-  if (provider === 'datadog') {
+it.each(['datadog', 'splunk'])(
+  'requires exact enabled signal URLs for direct %s and selects the invalid destination',
+  async (provider) => {
+    const direct = destination({
+      id: 'direct',
+      name: 'Direct destination',
+      provider,
+      connection: { mode: 'direct' },
+      metricsEnabled: provider === 'datadog',
+    });
+    await mount(response([archive, direct]));
+    change('Name', 'Changed collector');
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(putCalls()).toHaveLength(0);
-    expect(screen.getByRole('alert').textContent).toMatch(/exact metrics URL/);
-    change('Exact metrics URL', 'https://metrics.example.test/v1/metrics');
-  }
-  await save();
-});
+    expect(input('Name').value).toBe('Direct destination');
+    expect(screen.getByRole('alert').textContent).toMatch(/requires an exact traces/);
+    change('Exact traces URL', 'https://traces.example.test/v2/trace/otlp');
+    if (provider === 'datadog') {
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+      expect(putCalls()).toHaveLength(0);
+      expect(screen.getByRole('alert').textContent).toMatch(/exact metrics URL/);
+      change('Exact metrics URL', 'https://metrics.example.test/v1/metrics');
+    }
+    await save();
+  },
+);
 
-it.each(['datadog', 'splunk'])('allows %s collector base endpoints and disabled direct drafts', async provider => {
-  const collector = destination({ id: 'collector', provider, connection: { mode: 'collector' } });
-  const disabled = destination({ id: 'disabled', name: 'Disabled direct', provider, enabled: false, connection: { mode: 'direct' } });
-  await mount(response([collector, disabled]));
-  change('Name', 'Collector updated');
-  await save();
-  expect(lastUpdate().destinations).toHaveLength(2);
-});
+it.each(['datadog', 'splunk'])(
+  'allows %s collector base endpoints and disabled direct drafts',
+  async (provider) => {
+    const collector = destination({ id: 'collector', provider, connection: { mode: 'collector' } });
+    const disabled = destination({
+      id: 'disabled',
+      name: 'Disabled direct',
+      provider,
+      enabled: false,
+      connection: { mode: 'direct' },
+    });
+    await mount(response([collector, disabled]));
+    change('Name', 'Collector updated');
+    await save();
+    expect(lastUpdate().destinations).toHaveLength(2);
+  },
+);
 
 it('renders destination inventory in the overflow column and selects its editor without writing secrets', async () => {
-  const target = document.createElement('aside'); document.body.appendChild(target);
+  const target = document.createElement('aside');
+  document.body.appendChild(target);
   vi.mocked(api).mockResolvedValue(response());
   const view = render(<OpenTelemetrySettings overflowTarget={target} />);
   await screen.findByLabelText('Name');
@@ -448,10 +561,13 @@ it('renders destination inventory in the overflow column and selects its editor 
   expect(target.textContent).toContain('Saved authentication');
   fireEvent.click(screen.getByRole('button', { name: /Production traces.*Grafana Tempo/ }));
   expect(input('Name').value).toBe('Production traces');
-  expect(screen.getByLabelText('Bearer token').getAttribute('placeholder')).toBe('Leave blank to keep saved value');
+  expect(screen.getByLabelText('Bearer token').getAttribute('placeholder')).toBe(
+    'Leave blank to keep saved value',
+  );
   expect(screen.getByText('Advanced transport').closest('details')?.open).toBe(false);
   expect(putCalls()).toHaveLength(0);
-  view.unmount(); target.remove();
+  view.unmount();
+  target.remove();
 });
 
 it('restores legacy attribution and saved auth after switching away and back', async () => {
@@ -459,29 +575,43 @@ it('restores legacy attribution and saved auth after switching away and back', a
   await mount(response([legacy]));
   selectProvider('grafana-tempo');
   selectProvider('custom');
-  expect(screen.getByRole('button', { name: /Existing single-endpoint connection.*Custom OTLP.*Saved authentication/ })).toBeTruthy();
+  expect(
+    screen.getByRole('button', {
+      name: /Existing single-endpoint connection.*Custom OTLP.*Saved authentication/,
+    }),
+  ).toBeTruthy();
   expect(screen.getByLabelText('Remove saved headers on save')).toBeTruthy();
 });
 
 it('distinguishes master-only environment control from transport override', async () => {
-  const initial = response([archive]); initial.effective.source = 'environment';
+  const initial = response([archive]);
+  initial.effective.source = 'environment';
   await mount(initial);
-  expect(screen.getByText(/Environment overrides currently control the master switch/)).toBeTruthy();
+  expect(
+    screen.getByText(/Environment overrides currently control the master switch/),
+  ).toBeTruthy();
   expect(screen.queryByText('Effective environment destinations')).toBeNull();
 });
 
 it('retains destination drafts when portal target relocates and selections change', async () => {
-  const first = document.createElement('aside'); const second = document.createElement('aside');
-  document.body.append(first, second); vi.mocked(api).mockResolvedValue(response());
+  const first = document.createElement('aside');
+  const second = document.createElement('aside');
+  document.body.append(first, second);
+  vi.mocked(api).mockResolvedValue(response());
   const view = render(<OpenTelemetrySettings overflowTarget={first} />);
-  await screen.findByLabelText('Name'); change('Name', 'Unsaved archive');
+  await screen.findByLabelText('Name');
+  change('Name', 'Unsaved archive');
   view.rerender(<OpenTelemetrySettings overflowTarget={second} />);
-  expect(first.textContent).toBe(''); expect(second.textContent).toContain('Unsaved archive');
+  expect(first.textContent).toBe('');
+  expect(second.textContent).toContain('Unsaved archive');
   fireEvent.click(screen.getByRole('button', { name: /Production traces.*Grafana Tempo/ }));
   change('Name', 'Unsaved tempo');
   fireEvent.click(screen.getByRole('button', { name: /Unsaved archive.*Custom OTLP/ }));
   expect(input('Name').value).toBe('Unsaved archive');
   fireEvent.click(screen.getByRole('button', { name: /Unsaved tempo.*Grafana Tempo/ }));
-  expect(input('Name').value).toBe('Unsaved tempo'); expect(putCalls()).toHaveLength(0);
-  view.unmount(); first.remove(); second.remove();
+  expect(input('Name').value).toBe('Unsaved tempo');
+  expect(putCalls()).toHaveLength(0);
+  view.unmount();
+  first.remove();
+  second.remove();
 });

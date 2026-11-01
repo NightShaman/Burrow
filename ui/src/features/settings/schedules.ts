@@ -55,17 +55,25 @@ export type ScheduleDraft = {
 
 export function scheduleDraft(job?: ScheduledJob): ScheduleDraft {
   return {
-    name: job?.name ?? '', jobKind: job?.jobKind ?? 'prompt', prompt: job?.prompt ?? '',
-    taskId: job?.taskId ?? '', extraInstructions: job?.extraInstructions ?? '',
-    scheduleKind: job?.scheduleKind ?? 'cron', cron: job?.cron ?? '0 9 * * *', runAt: job?.runAt ?? '',
-    enabled: job?.enabled ?? true, modelConnectionId: job?.modelConnectionId ?? null, model: job?.model ?? null,
+    name: job?.name ?? '',
+    jobKind: job?.jobKind ?? 'prompt',
+    prompt: job?.prompt ?? '',
+    taskId: job?.taskId ?? '',
+    extraInstructions: job?.extraInstructions ?? '',
+    scheduleKind: job?.scheduleKind ?? 'cron',
+    cron: job?.cron ?? '0 9 * * *',
+    runAt: job?.runAt ?? '',
+    enabled: job?.enabled ?? true,
+    modelConnectionId: job?.modelConnectionId ?? null,
+    model: job?.model ?? null,
   };
 }
 
 /** Never snapshot task prose, inherit a browser timezone, or dispatch from a save. */
 export function schedulePayload(draft: ScheduleDraft) {
   return {
-    name: draft.name.trim(), jobKind: draft.jobKind,
+    name: draft.name.trim(),
+    jobKind: draft.jobKind,
     prompt: draft.jobKind === 'prompt' ? draft.prompt.trim() : '',
     taskId: draft.jobKind === 'task' ? draft.taskId : null,
     extraInstructions: draft.jobKind === 'task' ? draft.extraInstructions.trim() : '',
@@ -75,14 +83,19 @@ export function schedulePayload(draft: ScheduleDraft) {
     // An untouched saved ISO instant stays intact, including its DST offset.
     // Edited datetime-local values are interpreted by the server in operator time.
     runAt: draft.scheduleKind === 'once' ? draft.runAt : null,
-    enabled: draft.enabled, modelConnectionId: draft.modelConnectionId, model: draft.model,
+    enabled: draft.enabled,
+    modelConnectionId: draft.modelConnectionId,
+    model: draft.model,
   };
 }
 
 export function taskEligibility(task: ScheduleTask, agentId: string): string {
   if (task.archived) return 'Archived';
-  if (task.assignedAgentId !== agentId) return task.assignedAgentId ? 'Assigned to another agent' : 'Unassigned';
-  return task.status === 'todo' ? '' : task.status.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+  if (task.assignedAgentId !== agentId)
+    return task.assignedAgentId ? 'Assigned to another agent' : 'Unassigned';
+  return task.status === 'todo'
+    ? ''
+    : task.status.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 const hasOffset = (value: string) => /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
@@ -91,22 +104,53 @@ export function operatorDateTimeInput(value: string, timezone: string): string {
   if (!timezone) return '';
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', numberingSystem: 'latn',
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+      numberingSystem: 'latn',
     }).formatToParts(new Date(value));
-    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value;
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((item) => item.type === type)?.value;
     return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}`;
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
 
 export function scheduleTime(value: string | null | undefined, timezone: string): string {
   if (!value) return '—';
   if (!timezone) return 'Timezone unavailable';
   try {
-    return new Intl.DateTimeFormat(undefined, { timeZone: timezone, year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
-  } catch { return 'Invalid date'; }
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(value));
+  } catch {
+    return 'Invalid date';
+  }
 }
 
 export function scheduleRunLabel(status: string) {
-  return ({ running: 'Running', completed: 'Completed', succeeded: 'Completed', failed: 'Failed', cancelled: 'Cancelled', missed: 'Missed', skipped: 'Skipped' } as Record<string, string>)[status] ?? status;
+  return (
+    (
+      {
+        running: 'Running',
+        completed: 'Completed',
+        succeeded: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+        missed: 'Missed',
+        skipped: 'Skipped',
+      } as Record<string, string>
+    )[status] ?? status
+  );
 }

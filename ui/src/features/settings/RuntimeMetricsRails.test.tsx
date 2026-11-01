@@ -15,13 +15,25 @@ it('renders both system rails when metrics omit the retired settings database fo
   const metrics = {
     ok: true,
     filesystem: { totalBytes: 1000, usedBytes: 500, availableBytes: 500, error: null },
-    process: { rssBytes: 1024, heapUsedBytes: 512, heapTotalBytes: 1024, externalBytes: 0, uptimeSeconds: 60, cpu: { percent: 2 } },
+    process: {
+      rssBytes: 1024,
+      heapUsedBytes: 512,
+      heapTotalBytes: 1024,
+      externalBytes: 0,
+      uptimeSeconds: 60,
+      cpu: { percent: 2 },
+    },
     load: { oneMinute: 0, fiveMinutes: 0, fifteenMinutes: 0 },
   };
   const health = { ok: true, version: 'dev', traces: { logicalBytes: 0, count: 0 } };
-  vi.mocked(api).mockImplementation(async (path) => path === '/api/metrics' ? metrics : health);
+  vi.mocked(api).mockImplementation(async (path) => (path === '/api/metrics' ? metrics : health));
 
-  render(<><SystemPanel provider="Test" providerConnectionStatus="connected" /><SystemStatsRail active /></>);
+  render(
+    <>
+      <SystemPanel provider="Test" providerConnectionStatus="connected" />
+      <SystemStatsRail active />
+    </>,
+  );
   expect(await screen.findByText('Healthy')).toBeTruthy();
   // Trace storage remains in the workspace rail, not the consolidated stats rail.
   expect(screen.getAllByText('Trace storage')).toHaveLength(1);

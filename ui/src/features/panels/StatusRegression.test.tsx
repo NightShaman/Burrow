@@ -7,34 +7,68 @@ import { api } from '../../app/api';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(cleanup);
 it('does not call pending account checks connected; distinguishes success and failure', async () => {
- vi.mocked(api).mockImplementation(() => new Promise(() => {}));
- const providers = [{id:'a',provider:'OpenAI',apiType:'openai-responses',oauthConfigured:true,models:[],apiKey:'',url:''}];
- const view = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- expect(screen.queryByText('Connected')).toBeNull();
- expect(screen.getByText('Checking')).toBeTruthy();
- view.unmount();
- vi.mocked(api).mockResolvedValue({usage:null});
- const ready = render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>);
- await screen.findByText('Unknown'); ready.unmount();
- vi.mocked(api).mockRejectedValue(new Error('offline'));
- render(<ConfirmProvider><AccountStatus providers={providers}/></ConfirmProvider>); await screen.findByText('Usage unavailable');
+  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+  const providers = [
+    {
+      id: 'a',
+      provider: 'OpenAI',
+      apiType: 'openai-responses',
+      oauthConfigured: true,
+      models: [],
+      apiKey: '',
+      url: '',
+    },
+  ];
+  const view = render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  expect(screen.queryByText('Connected')).toBeNull();
+  expect(screen.getByText('Checking')).toBeTruthy();
+  view.unmount();
+  vi.mocked(api).mockResolvedValue({ usage: null });
+  const ready = render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  await screen.findByText('Unknown');
+  ready.unmount();
+  vi.mocked(api).mockRejectedValue(new Error('offline'));
+  render(
+    <ConfirmProvider>
+      <AccountStatus providers={providers} />
+    </ConfirmProvider>,
+  );
+  await screen.findByText('Usage unavailable');
 });
 it('runtime dot is not green while pending or failed and is green only on success', async () => {
   vi.mocked(api).mockImplementation(() => new Promise(() => {}));
- const view = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
- expect(view.container.querySelector('.system-status.checking')).toBeTruthy(); view.unmount();
- vi.mocked(api).mockResolvedValue({ok:true});
- const ready = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
- await waitFor(() => expect(ready.container.querySelector('.system-status.connected')).toBeTruthy()); ready.unmount();
- vi.mocked(api).mockRejectedValue(new Error('offline'));
- const failed = render(<SystemPanel provider="p" providerConnectionStatus="connected"/>);
- await waitFor(() => expect(failed.container.querySelector('.system-status.disconnected')).toBeTruthy());
+  const view = render(<SystemPanel provider="p" providerConnectionStatus="connected" />);
+  expect(view.container.querySelector('.system-status.checking')).toBeTruthy();
+  view.unmount();
+  vi.mocked(api).mockResolvedValue({ ok: true });
+  const ready = render(<SystemPanel provider="p" providerConnectionStatus="connected" />);
+  await waitFor(() =>
+    expect(ready.container.querySelector('.system-status.connected')).toBeTruthy(),
+  );
+  ready.unmount();
+  vi.mocked(api).mockRejectedValue(new Error('offline'));
+  const failed = render(<SystemPanel provider="p" providerConnectionStatus="connected" />);
+  await waitFor(() =>
+    expect(failed.container.querySelector('.system-status.disconnected')).toBeTruthy(),
+  );
 });
 it('renders unverified provider status neutrally without implying a check or outage', () => {
- vi.mocked(api).mockImplementation(() => new Promise(() => {}));
- const view = render(<SystemPanel provider="Personal" providerConnectionStatus="unknown" />);
- const status = screen.getByTitle('Personal connection unverified');
- expect(status.className).toBe('system-provider-status unknown');
- expect(status.textContent?.trim()).toBe('Personal');
- expect(view.container.querySelector('.system-provider-status.connected, .system-provider-status.disconnected, .system-provider-status.checking')).toBeNull();
+  vi.mocked(api).mockImplementation(() => new Promise(() => {}));
+  const view = render(<SystemPanel provider="Personal" providerConnectionStatus="unknown" />);
+  const status = screen.getByTitle('Personal connection unverified');
+  expect(status.className).toBe('system-provider-status unknown');
+  expect(status.textContent?.trim()).toBe('Personal');
+  expect(
+    view.container.querySelector(
+      '.system-provider-status.connected, .system-provider-status.disconnected, .system-provider-status.checking',
+    ),
+  ).toBeNull();
 });

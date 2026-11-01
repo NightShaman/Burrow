@@ -10,7 +10,10 @@ describe('accountOrderStorage', () => {
   });
 
   it('writes a validated versioned order with a bounded size', () => {
-    writeAccountOrder('order', [...Array.from({ length: 105 }, (_, index) => `account-${index}`), 'account-1']);
+    writeAccountOrder('order', [
+      ...Array.from({ length: 105 }, (_, index) => `account-${index}`),
+      'account-1',
+    ]);
     const stored = JSON.parse(localStorage.getItem('order') ?? '{}');
     expect(stored.version).toBe(1);
     expect(stored.value).toHaveLength(100);

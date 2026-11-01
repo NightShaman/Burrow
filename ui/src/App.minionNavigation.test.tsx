@@ -8,13 +8,18 @@ import { ConfirmProvider } from './app/ConfirmDialog';
 // selector and transcript real. Only unrelated dashboard/workspace I/O is stubbed;
 // the API fixture below is the boundary for navigation and polling evidence.
 vi.mock('./app/api', async (original) => ({
-  ...await original<typeof import('./app/api')>(), api: vi.fn(),
+  ...(await original<typeof import('./app/api')>()),
+  api: vi.fn(),
 }));
 vi.mock('./app/modPanels', async (original) => ({
-  ...await original<typeof import('./app/modPanels')>(), loadModPanels: vi.fn(async () => []),
+  ...(await original<typeof import('./app/modPanels')>()),
+  loadModPanels: vi.fn(async () => []),
 }));
 vi.mock('./app/useRuntimeDashboard', () => ({
-  useRuntimeDashboard: () => ({ savedProviders: [], operatorProfile: { name: 'Operator', avatar: 'O' } }),
+  useRuntimeDashboard: () => ({
+    savedProviders: [],
+    operatorProfile: { name: 'Operator', avatar: 'O' },
+  }),
 }));
 vi.mock('./features/workspace/useWorkspaceFiles', () => ({
   useWorkspaceFiles: () => ({ workspaceFiles: [] }),
@@ -26,14 +31,62 @@ const runtimeAgents = [
 ] satisfies RuntimeAgent[];
 const descendants: Record<string, AgentStatus[]> = {
   hatchet: [
-    { sessionId: 'default-child', subagentId: 'default-worker', label: 'Default child', status: 'complete', depth: 1, parentSessionId: 'default', rootSessionId: 'default' },
-    { sessionId: 'named-child', subagentId: 'worker', label: 'Named child', status: 'complete', depth: 1, parentSessionId: 'named-root', rootSessionId: 'named-root' },
-    { sessionId: 'nested-child', subagentId: 'nested-worker', label: 'Nested child', status: 'complete', depth: 2, parentSessionId: 'named-child', rootSessionId: 'named-root' },
-    { sessionId: 'shared-child', subagentId: 'hatchet-shared-worker', label: 'Hatchet shared child', status: 'complete', depth: 1, parentSessionId: 'named-root', rootSessionId: 'named-root' },
+    {
+      sessionId: 'default-child',
+      subagentId: 'default-worker',
+      label: 'Default child',
+      status: 'complete',
+      depth: 1,
+      parentSessionId: 'default',
+      rootSessionId: 'default',
+    },
+    {
+      sessionId: 'named-child',
+      subagentId: 'worker',
+      label: 'Named child',
+      status: 'complete',
+      depth: 1,
+      parentSessionId: 'named-root',
+      rootSessionId: 'named-root',
+    },
+    {
+      sessionId: 'nested-child',
+      subagentId: 'nested-worker',
+      label: 'Nested child',
+      status: 'complete',
+      depth: 2,
+      parentSessionId: 'named-child',
+      rootSessionId: 'named-root',
+    },
+    {
+      sessionId: 'shared-child',
+      subagentId: 'hatchet-shared-worker',
+      label: 'Hatchet shared child',
+      status: 'complete',
+      depth: 1,
+      parentSessionId: 'named-root',
+      rootSessionId: 'named-root',
+    },
   ],
   other: [
-    { sessionId: 'other-child', subagentId: 'other-worker', label: 'Other child', status: 'complete', depth: 1, parentSessionId: 'other-root', rootSessionId: 'other-root' },
-    { sessionId: 'shared-child', subagentId: 'other-shared-worker', label: 'Other shared child', status: 'complete', depth: 1, parentSessionId: 'other-root', rootSessionId: 'other-root' },
+    {
+      sessionId: 'other-child',
+      subagentId: 'other-worker',
+      label: 'Other child',
+      status: 'complete',
+      depth: 1,
+      parentSessionId: 'other-root',
+      rootSessionId: 'other-root',
+    },
+    {
+      sessionId: 'shared-child',
+      subagentId: 'other-shared-worker',
+      label: 'Other shared child',
+      status: 'complete',
+      depth: 1,
+      parentSessionId: 'other-root',
+      rootSessionId: 'other-root',
+    },
   ],
 };
 let missingSelectedChild = false;
@@ -55,23 +108,48 @@ beforeEach(() => {
     if (path === '/api/setup/status') return { wizardStep: 'ready', configured: true };
     if (path === '/api/agents') return { agents: runtimeAgents };
     if (path === '/api/agents/overview') {
-      const { sessions } = JSON.parse(String(options?.body)) as { sessions: Record<string, string> };
-      return { agents: runtimeAgents.map(agent => ({
-        agent, sessionId: sessions[agent.id], selection: null, contexts: {},
-        status: { minionScope: 'agent', agents: [
-          { sessionId: sessions[agent.id], status: 'idle' },
-          ...descendants[agent.id].filter(child => !missingSelectedChild || child.sessionId !== 'nested-child'),
-        ] },
-      })) };
+      const { sessions } = JSON.parse(String(options?.body)) as {
+        sessions: Record<string, string>;
+      };
+      return {
+        agents: runtimeAgents.map((agent) => ({
+          agent,
+          sessionId: sessions[agent.id],
+          selection: null,
+          contexts: {},
+          status: {
+            minionScope: 'agent',
+            agents: [
+              { sessionId: sessions[agent.id], status: 'idle' },
+              ...descendants[agent.id].filter(
+                (child) => !missingSelectedChild || child.sessionId !== 'nested-child',
+              ),
+            ],
+          },
+        })),
+      };
     }
     if (url.pathname === '/api/sessions') {
       // Children deliberately do not appear here. Navigation must use the
       // owning agent and remember the child's root, not the first list entry.
-      return { sessions: [{ id: 'default' }, { id: agentId === 'other' ? 'other-root' : 'named-root' }, { id: 'another-chat' }] };
+      return {
+        sessions: [
+          { id: 'default' },
+          { id: agentId === 'other' ? 'other-root' : 'named-root' },
+          { id: 'another-chat' },
+        ],
+      };
     }
     if (url.pathname.startsWith('/api/sessions/')) {
       const sessionId = decodeURIComponent(url.pathname.slice('/api/sessions/'.length));
-      return { session: { id: sessionId, turns: [{ type: 'message', role: 'assistant', content: `${agentId}/${sessionId} transcript` }] } };
+      return {
+        session: {
+          id: sessionId,
+          turns: [
+            { type: 'message', role: 'assistant', content: `${agentId}/${sessionId} transcript` },
+          ],
+        },
+      };
     }
     if (url.pathname === '/api/chat/runs/active') return { runs: [], subagents: [] };
     if (url.pathname === '/api/chat/inputs') return { generation: 1, inputs: [] };
@@ -89,11 +167,19 @@ afterEach(() => {
 });
 
 async function renderApp() {
-  await act(async () => { render(<ConfirmProvider><App /></ConfirmProvider>); });
+  await act(async () => {
+    render(
+      <ConfirmProvider>
+        <App />
+      </ConfirmProvider>,
+    );
+  });
   expectTranscript('hatchet', 'default');
 }
 async function click(name: string) {
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name })); });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name }));
+  });
 }
 function sessionSelector() {
   return screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
@@ -104,12 +190,20 @@ function expectTranscript(agentId: string, sessionId: string) {
   expect(screen.queryByRole('alert')).toBeNull();
 }
 function expectSelected(name: string, selected: boolean) {
-  expect(screen.getByRole('button', { name: `Select ${name}` }).getAttribute('aria-pressed')).toBe(String(selected));
+  expect(screen.getByRole('button', { name: `Select ${name}` }).getAttribute('aria-pressed')).toBe(
+    String(selected),
+  );
 }
 async function pollOverview() {
-  const count = vi.mocked(api).mock.calls.filter(([path]) => path === '/api/agents/overview').length;
-  await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-  expect(vi.mocked(api).mock.calls.filter(([path]) => path === '/api/agents/overview')).toHaveLength(count + 1);
+  const count = vi
+    .mocked(api)
+    .mock.calls.filter(([path]) => path === '/api/agents/overview').length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  expect(
+    vi.mocked(api).mock.calls.filter(([path]) => path === '/api/agents/overview'),
+  ).toHaveLength(count + 1);
 }
 function latestOverviewSessions() {
   const calls = vi.mocked(api).mock.calls.filter(([path]) => path === '/api/agents/overview');
@@ -168,7 +262,11 @@ describe('App minion navigation integration', () => {
     expectSelected('Other child', true);
     expectSelected('Hatchet', false);
     expect(vi.mocked(api)).toHaveBeenCalledWith('/api/sessions/other-child?agentId=other');
-    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/api/sessions/other-child?agentId=hatchet')).toBe(false);
+    expect(
+      vi
+        .mocked(api)
+        .mock.calls.some(([path]) => path === '/api/sessions/other-child?agentId=hatchet'),
+    ).toBe(false);
     await pollOverview();
     expect(latestOverviewSessions().other).toBe('other-root');
     expectTranscript('other', 'other-child');
@@ -196,7 +294,9 @@ describe('App minion navigation integration', () => {
     expectSelected('Hatchet shared child', false);
     expectSelected('Other shared child', true);
     expect(vi.mocked(api)).toHaveBeenCalledWith('/api/sessions/shared-child?agentId=other');
-    expect(vi.mocked(api).mock.calls.some(([path]) => path.includes(encodeURIComponent('["child"')))).toBe(false);
+    expect(
+      vi.mocked(api).mock.calls.some(([path]) => path.includes(encodeURIComponent('["child"'))),
+    ).toBe(false);
   });
 
   it('keeps an explicitly selected named chat when its parent row is clicked, including after a child visit', async () => {
@@ -204,7 +304,9 @@ describe('App minion navigation integration', () => {
     await click('Expand Hatchet');
     await click('Select Named child');
     expectTranscript('hatchet', 'named-child');
-    await act(async () => { fireEvent.change(sessionSelector(), { target: { value: 'another-chat' } }); });
+    await act(async () => {
+      fireEvent.change(sessionSelector(), { target: { value: 'another-chat' } });
+    });
     expectTranscript('hatchet', 'another-chat');
     expectSelected('Hatchet', true);
     expectSelected('Named child', false);
@@ -225,7 +327,9 @@ describe('App minion navigation integration', () => {
     expectTranscript('hatchet', 'nested-child');
     expectSelected('Nested child', true);
     expectSelected('Hatchet', false);
-    expect(within(screen.getByRole('button', { name: 'Select Nested child' })).getByText(/Last seen/)).toBeTruthy();
+    expect(
+      within(screen.getByRole('button', { name: 'Select Nested child' })).getByText(/Last seen/),
+    ).toBeTruthy();
     expect(latestOverviewSessions().hatchet).toBe('named-root');
     // Repeated missing snapshots must retain, not progressively lose, the row.
     await pollOverview();

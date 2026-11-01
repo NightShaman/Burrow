@@ -6,7 +6,10 @@ import { ExportSettings } from './ExportSettings';
 import catalog from '../../../scripts/export-settings-fixture/catalog.json';
 
 vi.mock('../../app/api', () => ({ api: vi.fn(), importExport: vi.fn(), downloadExport: vi.fn() }));
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
 
 const choose = async () => {
   const file = new File(['data'], 'sample.gz');
@@ -17,7 +20,11 @@ const choose = async () => {
 
 it('invalidates preview when policy changes and applies only after successful repeat preview', async () => {
   vi.mocked(api).mockResolvedValue({ categories: [], passwordMinLength: 12 });
-  vi.mocked(importExport).mockResolvedValueOnce({ supported: ['settings'] }).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ supported: ['settings'] }).mockResolvedValue({});
+  vi.mocked(importExport)
+    .mockResolvedValueOnce({ supported: ['settings'] })
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({ supported: ['settings'] })
+    .mockResolvedValue({});
   render(<ExportSettings />);
   await choose();
   fireEvent.change(screen.getByLabelText('Conflict handling'), { target: { value: 'replace' } });
@@ -32,7 +39,9 @@ it('invalidates preview when policy changes and applies only after successful re
 
 it('does not allow apply for password challenge or a changed password', async () => {
   vi.mocked(api).mockResolvedValue({ categories: [], passwordMinLength: 12 });
-  vi.mocked(importExport).mockRejectedValueOnce(new Error('import_password_required')).mockResolvedValue({ supported: ['settings'] });
+  vi.mocked(importExport)
+    .mockRejectedValueOnce(new Error('import_password_required'))
+    .mockResolvedValue({ supported: ['settings'] });
   render(<ExportSettings />);
   const file = new File(['data'], 'protected.gz');
   Object.defineProperty(file, 'arrayBuffer', { value: async () => new Uint8Array([1]).buffer });
@@ -46,7 +55,9 @@ it('does not allow apply for password challenge or a changed password', async ()
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Import export' })).toBeNull());
 });
 
-function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }
+function render(ui: Parameters<typeof baseRender>[0]) {
+  return baseRender(ui, { wrapper: ConfirmProvider });
+}
 
 it('uses shared confirmation, cancels without applying, and applies once after approval', async () => {
   vi.mocked(api).mockResolvedValue({ categories: [], passwordMinLength: 12 });
@@ -58,11 +69,16 @@ it('uses shared confirmation, cancels without applying, and applies once after a
   expect(screen.getByLabelText('Conflict handling')).toHaveProperty('disabled', true);
   expect(vi.mocked(importExport).mock.calls).toHaveLength(1);
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-  await waitFor(() => expect(screen.getByLabelText('Conflict handling')).toHaveProperty('disabled', false));
+  await waitFor(() =>
+    expect(screen.getByLabelText('Conflict handling')).toHaveProperty('disabled', false),
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Import export' }));
   fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger')!);
   await waitFor(() => expect(vi.mocked(importExport).mock.calls).toHaveLength(2));
-  expect(vi.mocked(importExport).mock.calls[1][0]).toMatchObject({ confirm: true, conflictPolicy: 'error' });
+  expect(vi.mocked(importExport).mock.calls[1][0]).toMatchObject({
+    confirm: true,
+    conflictPolicy: 'error',
+  });
 });
 
 it('renders the expanded catalog unchanged and exports only explicitly selected categories', async () => {
@@ -72,22 +88,33 @@ it('renders the expanded catalog unchanged and exports only explicitly selected 
   await screen.findByRole('checkbox', { name: /Scheduled jobs/ });
   expect(screen.getAllByRole('checkbox')).toHaveLength(8);
   for (const category of catalog.categories) {
-    expect((screen.getByRole('checkbox', { name: new RegExp(category.label) }) as HTMLInputElement).checked).toBe(category.id === 'settings');
+    expect(
+      (screen.getByRole('checkbox', { name: new RegExp(category.label) }) as HTMLInputElement)
+        .checked,
+    ).toBe(category.id === 'settings');
   }
   fireEvent.click(screen.getByRole('checkbox', { name: /^Settings/ }));
   fireEvent.click(screen.getByRole('checkbox', { name: /Scheduled jobs/ }));
   fireEvent.click(screen.getByRole('checkbox', { name: /Operator text skills/ }));
   expect(screen.queryByLabelText('Export password (12+ characters)')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Download export' }));
-  await waitFor(() => expect(downloadExport).toHaveBeenCalledWith(['scheduled-jobs', 'skills'], undefined));
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'fixture download blocked');
+  await waitFor(() =>
+    expect(downloadExport).toHaveBeenCalledWith(['scheduled-jobs', 'skills'], undefined),
+  );
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'fixture download blocked',
+  );
   expect(screen.getByText(/Dependencies are not selected automatically/)).toBeTruthy();
   expect(screen.getByText(/text is not automatically redacted/)).toBeTruthy();
 });
 
 it('keeps secret-category password gating and clears the transient password after download', async () => {
   vi.mocked(api).mockResolvedValue(catalog);
-  vi.mocked(downloadExport).mockResolvedValue({ blob: new Blob(['fixture']), filename: 'fixture.bin' });
+  vi.mocked(downloadExport).mockResolvedValue({
+    blob: new Blob(['fixture']),
+    filename: 'fixture.bin',
+  });
   const createUrl = vi.fn(() => 'blob:fixture');
   const revokeUrl = vi.fn();
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
@@ -103,16 +130,26 @@ it('keeps secret-category password gating and clears the transient password afte
     expect(button).toHaveProperty('disabled', true);
     fireEvent.change(password, { target: { value: 'fixture-only-password' } });
     fireEvent.click(button);
-    await waitFor(() => expect(downloadExport).toHaveBeenCalledWith(['settings', 'model-connections'], 'fixture-only-password'));
+    await waitFor(() =>
+      expect(downloadExport).toHaveBeenCalledWith(
+        ['settings', 'model-connections'],
+        'fixture-only-password',
+      ),
+    );
     await waitFor(() => expect(password).toHaveProperty('value', ''));
     expect(click).toHaveBeenCalledOnce();
     expect(revokeUrl).toHaveBeenCalledWith('blob:fixture');
-  } finally { click.mockRestore(); }
+  } finally {
+    click.mockRestore();
+  }
 });
 
 it('previews and confirms expanded categories with portable-limit and enabled-job warnings', async () => {
   vi.mocked(api).mockResolvedValue(catalog);
-  vi.mocked(importExport).mockResolvedValue({ supported: ['agents', 'settings', 'skills', 'scheduled-jobs'], unsupported: [] });
+  vi.mocked(importExport).mockResolvedValue({
+    supported: ['agents', 'settings', 'skills', 'scheduled-jobs'],
+    unsupported: [],
+  });
   render(<ExportSettings />);
   await choose();
   expect(screen.getByText('Supported: 4 items')).toBeTruthy();
@@ -120,16 +157,25 @@ it('previews and confirms expanded categories with portable-limit and enabled-jo
   expect(screen.getByText(/Enabled jobs may run/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Import export' }));
   fireEvent.click(screen.getByRole('alertdialog').querySelector('button.danger')!);
-  await waitFor(() => expect(importExport).toHaveBeenCalledWith({ payload: 'AQI=', confirm: true, conflictPolicy: 'error' }));
+  await waitFor(() =>
+    expect(importExport).toHaveBeenCalledWith({
+      payload: 'AQI=',
+      confirm: true,
+      conflictPolicy: 'error',
+    }),
+  );
 });
 
- it('places import in the provided third column', async () => {
+it('places import in the provided third column', async () => {
   vi.mocked(api).mockResolvedValue(catalog);
-  const column = document.createElement('div'); document.body.appendChild(column);
+  const column = document.createElement('div');
+  document.body.appendChild(column);
   try {
     const { container } = render(<ExportSettings overflowTarget={column} />);
     await screen.findByRole('checkbox', { name: /Scheduled jobs/ });
     expect(container.querySelector('h2')?.textContent).toBe('Export');
     expect(column.querySelector('h2')?.textContent).toBe('Import');
-  } finally { column.remove(); }
+  } finally {
+    column.remove();
+  }
 });

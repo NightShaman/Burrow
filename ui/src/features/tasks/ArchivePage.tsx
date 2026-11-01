@@ -8,7 +8,11 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
 import { archiveQueryCacheKey } from './archiveCache';
-import { createArchiveRepository, type ArchiveRepository, type ArchiveCalendarKind } from './archiveRepository';
+import {
+  createArchiveRepository,
+  type ArchiveRepository,
+  type ArchiveCalendarKind,
+} from './archiveRepository';
 import { buildCalendarDays, dateFromMonthKey, monthKey } from './archiveDerivations';
 import type { ArchiveKind } from './archiveTypes';
 import { ChatArchiveShelf } from './ChatArchiveShelf';
@@ -22,35 +26,70 @@ const archiveKinds: { id: ArchiveKind; label: string; detail: string }[] = [
   { id: 'tiddle', label: 'Tiddle', detail: 'Warm continuity cards and their history.' },
   { id: 'tasks', label: 'Tasks', detail: 'Completed tasks.' },
   { id: 'forge', label: 'Forge', detail: 'Retained generation execution evidence.' },
-  { id: 'workflow-events', label: 'Workflow Events', detail: 'Retained GitHub workflow deliveries and agent handling.' },
+  {
+    id: 'workflow-events',
+    label: 'Workflow Events',
+    detail: 'Retained GitHub workflow deliveries and agent handling.',
+  },
   { id: 'proof', label: 'Proof', detail: 'Operator-readable run outcomes and evidence.' },
 ];
 
-export function Archive({ agents, operatorName = 'Operator', repository }: { agents: Agent[]; operatorName?: string; repository?: ArchiveRepository }) {
+export function Archive({
+  agents,
+  operatorName = 'Operator',
+  repository,
+}: {
+  agents: Agent[];
+  operatorName?: string;
+  repository?: ArchiveRepository;
+}) {
   const archiveRepository = useMemo(() => {
     const base = repository ?? createArchiveRepository();
     return base;
   }, [repository]);
   const cacheOwner = 'local';
-  const agentNameKey = JSON.stringify(agents.map(agent => [agent.id, agent.name]));
-  const agentNames = useMemo(() => new Map<string, string>(JSON.parse(agentNameKey)), [agentNameKey]);
+  const agentNameKey = JSON.stringify(agents.map((agent) => [agent.id, agent.name]));
+  const agentNames = useMemo(
+    () => new Map<string, string>(JSON.parse(agentNameKey)),
+    [agentNameKey],
+  );
   const [modArchives, setModArchives] = useState<ModArchive[]>([]);
   const [modId, setModId] = useState('');
   const activeMod = modArchives.find((mod) => mod.modId === modId);
   useEffect(() => {
     let live = true;
-    const refresh = () => { void loadModArchives().then((mods) => { if (live) setModArchives(mods); }).catch(() => { if (live) setModArchives([]); }); };
-    refresh(); window.addEventListener(modsChangedEvent, refresh);
-    return () => { live = false; window.removeEventListener(modsChangedEvent, refresh); };
+    const refresh = () => {
+      void loadModArchives()
+        .then((mods) => {
+          if (live) setModArchives(mods);
+        })
+        .catch(() => {
+          if (live) setModArchives([]);
+        });
+    };
+    refresh();
+    window.addEventListener(modsChangedEvent, refresh);
+    return () => {
+      live = false;
+      window.removeEventListener(modsChangedEvent, refresh);
+    };
   }, []);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
   useEffect(() => {
-    if (selectedAgent && !enabledAgents(agents).some(agent => agent.id === selectedAgent)) setSelectedAgent('');
+    if (selectedAgent && !enabledAgents(agents).some((agent) => agent.id === selectedAgent))
+      setSelectedAgent('');
   }, [agents, selectedAgent]);
   const [selectedDate, setSelectedDate] = useState('');
   const [search, setSearch] = useState('');
-  const queryKey = archiveQueryCacheKey({ target: cacheOwner, agent: selectedAgent, query: search, date: selectedDate, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, kind });
+  const queryKey = archiveQueryCacheKey({
+    target: cacheOwner,
+    agent: selectedAgent,
+    query: search,
+    date: selectedDate,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    kind,
+  });
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [forgeDates, setForgeDates] = useState<string[]>([]);
   const [taskDates, setTaskDates] = useState<string[]>([]);
@@ -59,7 +98,9 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
   const [tiddleCount, setTiddleCount] = useState<number | null>(null);
   // Fetch only when the underlying remote scope changes. Local badge filters
   // must not refetch unrelated shelves on every keystroke or agent poll.
-  const [badgeCards, setBadgeCards] = useState<Awaited<ReturnType<ArchiveRepository['listContinuityCards']>>['items']>([]);
+  const [badgeCards, setBadgeCards] = useState<
+    Awaited<ReturnType<ArchiveRepository['listContinuityCards']>>['items']
+  >([]);
   const [cardsReady, setCardsReady] = useState(false);
   const [tasksReady, setTasksReady] = useState(false);
   const [badgeTasks, setBadgeTasks] = useState<BoardTask[]>([]);
@@ -68,92 +109,394 @@ export function Archive({ agents, operatorName = 'Operator', repository }: { age
     const abort = new AbortController();
     setDreamCount(null);
     const timer = window.setTimeout(() => {
-      void archiveRepository.listDreams(abort.signal, null, selectedDate || undefined, selectedAgent || undefined, search)
-        .then(page => { if (!abort.signal.aborted) setDreamCount(page.items.length); }).catch(() => {});
+      void archiveRepository
+        .listDreams(
+          abort.signal,
+          null,
+          selectedDate || undefined,
+          selectedAgent || undefined,
+          search,
+        )
+        .then((page) => {
+          if (!abort.signal.aborted) setDreamCount(page.items.length);
+        })
+        .catch(() => {});
     }, 180);
-    return () => { abort.abort(); window.clearTimeout(timer); };
+    return () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    };
   }, [archiveRepository, selectedAgent, selectedDate, search]);
   useEffect(() => {
     const abort = new AbortController();
-    setTiddleCount(null); setCardsReady(false); setBadgeCards([]);
-    void archiveRepository.listContinuityCards(selectedAgent, abort.signal)
-      .then(page => { if (!abort.signal.aborted) { setBadgeCards(page.items); setCardsReady(true); } }).catch(() => {});
+    setTiddleCount(null);
+    setCardsReady(false);
+    setBadgeCards([]);
+    void archiveRepository
+      .listContinuityCards(selectedAgent, abort.signal)
+      .then((page) => {
+        if (!abort.signal.aborted) {
+          setBadgeCards(page.items);
+          setCardsReady(true);
+        }
+      })
+      .catch(() => {});
     return () => abort.abort();
   }, [archiveRepository, selectedAgent]);
   useEffect(() => {
     const query = search.trim().toLowerCase();
-    setTiddleCount(cardsReady ? badgeCards.filter(card => !query || `${card.title} ${card.summary}`.toLowerCase().includes(query)).length : null);
+    setTiddleCount(
+      cardsReady
+        ? badgeCards.filter(
+            (card) => !query || `${card.title} ${card.summary}`.toLowerCase().includes(query),
+          ).length
+        : null,
+    );
   }, [badgeCards, search, cardsReady]);
   useEffect(() => {
     const abort = new AbortController();
-    setTaskCount(null); setTasksReady(false);
+    setTaskCount(null);
+    setTasksReady(false);
     void Promise.all([
       api<{ tasks: BoardTask[] }>('/api/task-board/tasks', { signal: abort.signal }),
       api<{ projects: Project[] }>('/api/task-board/projects', { signal: abort.signal }),
-    ]).then(([{ tasks }, { projects }]) => {
-      if (!abort.signal.aborted) { setBadgeTasks(tasks); setBadgeProjects(projects); setTasksReady(true); }
-    }).catch(() => {});
+    ])
+      .then(([{ tasks }, { projects }]) => {
+        if (!abort.signal.aborted) {
+          setBadgeTasks(tasks);
+          setBadgeProjects(projects);
+          setTasksReady(true);
+        }
+      })
+      .catch(() => {});
     return () => abort.abort();
   }, [archiveRepository]);
   useEffect(() => {
-    const agentId = agents.find(agent => agent.id === selectedAgent)?.resourceId ?? selectedAgent;
+    const agentId = agents.find((agent) => agent.id === selectedAgent)?.resourceId ?? selectedAgent;
     const query = search.trim().toLowerCase();
-    const projects = new Map(badgeProjects.map(project => [project.id, project.name]));
-    const names = new Map(agents.map(agent => [agent.resourceId ?? agent.id, agent.name]));
-    setTaskCount(tasksReady ? badgeTasks.filter(task => task.archived && (!agentId || task.assignedAgentId === agentId) &&
-      (!selectedDate || taskArchiveDate(task.archivedAt) === selectedDate) &&
-      (!query || [task.title, task.description, projects.get(task.projectId) ?? 'Unknown project', names.get(task.assignedAgentId ?? '') ?? task.assignedAgentId ?? 'Unassigned', task.priority].join(' ').toLowerCase().includes(query))).length : null);
+    const projects = new Map(badgeProjects.map((project) => [project.id, project.name]));
+    const names = new Map(agents.map((agent) => [agent.resourceId ?? agent.id, agent.name]));
+    setTaskCount(
+      tasksReady
+        ? badgeTasks.filter(
+            (task) =>
+              task.archived &&
+              (!agentId || task.assignedAgentId === agentId) &&
+              (!selectedDate || taskArchiveDate(task.archivedAt) === selectedDate) &&
+              (!query ||
+                [
+                  task.title,
+                  task.description,
+                  projects.get(task.projectId) ?? 'Unknown project',
+                  names.get(task.assignedAgentId ?? '') ?? task.assignedAgentId ?? 'Unassigned',
+                  task.priority,
+                ]
+                  .join(' ')
+                  .toLowerCase()
+                  .includes(query)),
+          ).length
+        : null,
+    );
   }, [badgeTasks, badgeProjects, agents, selectedAgent, selectedDate, search, tasksReady]);
   const [calendarMonth, setCalendarMonth] = useState(() => monthKey(new Date()));
   const [calendarDates, setCalendarDates] = useState<string[]>([]);
-  const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const calendarKind: ArchiveCalendarKind | null = activeMod ? null : kind === 'chat' ? 'sessions' : kind === 'dreams' ? 'dreams' : kind === 'workflow-events' ? 'workflow-events' : null;
+  const [calendarAvailabilityState, setCalendarAvailabilityState] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading');
+  const calendarKind: ArchiveCalendarKind | null = activeMod
+    ? null
+    : kind === 'chat'
+      ? 'sessions'
+      : kind === 'dreams'
+        ? 'dreams'
+        : kind === 'workflow-events'
+          ? 'workflow-events'
+          : null;
   useEffect(() => {
-    if (!calendarKind) { setCalendarDates([]); setCalendarAvailabilityState('ready'); return; }
+    if (!calendarKind) {
+      setCalendarDates([]);
+      setCalendarAvailabilityState('ready');
+      return;
+    }
     const abort = new AbortController();
     setCalendarDates([]);
     setCalendarAvailabilityState('loading');
-    archiveRepository.listCalendarAvailability(calendarKind, calendarMonth, selectedAgent || undefined, abort.signal)
+    archiveRepository
+      .listCalendarAvailability(
+        calendarKind,
+        calendarMonth,
+        selectedAgent || undefined,
+        abort.signal,
+      )
       .then((response) => {
-        if (!abort.signal.aborted && response.kind === calendarKind && response.month === calendarMonth) {
+        if (
+          !abort.signal.aborted &&
+          response.kind === calendarKind &&
+          response.month === calendarMonth
+        ) {
           setCalendarDates(response.dates);
           setCalendarAvailabilityState('ready');
         }
       })
-      .catch(() => { if (!abort.signal.aborted) { setCalendarDates([]); setCalendarAvailabilityState('error'); } });
+      .catch(() => {
+        if (!abort.signal.aborted) {
+          setCalendarDates([]);
+          setCalendarAvailabilityState('error');
+        }
+      });
     return () => abort.abort();
   }, [calendarKind, calendarMonth, selectedAgent, archiveRepository]);
-  const shownDates = kind === 'tasks' && !activeMod ? taskDates.filter(date => date.startsWith(calendarMonth)) : kind === 'forge' && !activeMod ? forgeDates.filter(date => date.startsWith(calendarMonth)) : calendarDates;
-  const dateBuckets = useMemo(() => shownDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })), [shownDates]);
-  const calendarDays = useMemo(() => buildCalendarDays(calendarMonth, dateBuckets), [calendarMonth, dateBuckets]);
+  const shownDates =
+    kind === 'tasks' && !activeMod
+      ? taskDates.filter((date) => date.startsWith(calendarMonth))
+      : kind === 'forge' && !activeMod
+        ? forgeDates.filter((date) => date.startsWith(calendarMonth))
+        : calendarDates;
+  const dateBuckets = useMemo(
+    () => shownDates.map((key) => ({ key, count: 1, year: '', month: '', day: '', label: '' })),
+    [shownDates],
+  );
+  const calendarDays = useMemo(
+    () => buildCalendarDays(calendarMonth, dateBuckets),
+    [calendarMonth, dateBuckets],
+  );
   const availableDates = useMemo(() => new Set(shownDates), [shownDates]);
-  const calendarLabel = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(dateFromMonthKey(calendarMonth));
+  const calendarLabel = new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+  }).format(dateFromMonthKey(calendarMonth));
   return (
     <div className="page-view archive-page">
       <header className="archive-heading">
-        <div><h1>Archive</h1><p>Conversations and small remembered things, organized for later.</p></div>
-        <div className="archive-heading-tools" hidden={Boolean(activeMod)}><label className="archive-search"><span className="sr-only">Search archive</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={kind === 'chat' ? 'Search conversations' : kind === 'tasks' ? 'Search tasks' : kind === 'forge' ? 'Search Forge runs' : kind === 'proof' ? 'Search proof runs' : kind === 'workflow-events' ? 'Search workflow events' : 'Search dreams'} /></label><label className="archive-agent-filter"><span className="sr-only">Filter by agent</span><select value={selectedAgent} onChange={(event) => { setSelectedAgent(event.target.value); setSelectedDate(''); }}><option value="">All agents</option>{enabledAgents(agents).map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label></div>
+        <div>
+          <h1>Archive</h1>
+          <p>Conversations and small remembered things, organized for later.</p>
+        </div>
+        <div className="archive-heading-tools" hidden={Boolean(activeMod)}>
+          <label className="archive-search">
+            <span className="sr-only">Search archive</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                kind === 'chat'
+                  ? 'Search conversations'
+                  : kind === 'tasks'
+                    ? 'Search tasks'
+                    : kind === 'forge'
+                      ? 'Search Forge runs'
+                      : kind === 'proof'
+                        ? 'Search proof runs'
+                        : kind === 'workflow-events'
+                          ? 'Search workflow events'
+                          : 'Search dreams'
+              }
+            />
+          </label>
+          <label className="archive-agent-filter">
+            <span className="sr-only">Filter by agent</span>
+            <select
+              value={selectedAgent}
+              onChange={(event) => {
+                setSelectedAgent(event.target.value);
+                setSelectedDate('');
+              }}
+            >
+              <option value="">All agents</option>
+              {enabledAgents(agents).map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
-          <section><span className="archive-sidebar-label">Browse</span>{archiveKinds.map((item) => <button key={item.id} type="button" className={!activeMod && kind === item.id ? 'active' : ''} onClick={() => { setModId(''); setKind(item.id); }}><span>{item.label}</span><span className="archive-count">{item.id === 'tasks' ? taskCount ?? '—' : item.id === 'dreams' ? dreamCount ?? '—' : item.id === 'tiddle' ? tiddleCount ?? '—' : item.id === 'proof' || item.id === 'forge' ? 'Runs' : item.id === 'workflow-events' ? 'Events' : chatCount ?? '—'}</span></button>)}</section>
-          <section><span className="archive-sidebar-label">MODS</span>{modArchives.map((mod) => <button key={mod.modId} type="button" className={activeMod?.modId === mod.modId ? 'active' : ''} onClick={() => setModId(mod.modId)}>{mod.name}</button>)}</section>
+          <section>
+            <span className="archive-sidebar-label">Browse</span>
+            {archiveKinds.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={!activeMod && kind === item.id ? 'active' : ''}
+                onClick={() => {
+                  setModId('');
+                  setKind(item.id);
+                }}
+              >
+                <span>{item.label}</span>
+                <span className="archive-count">
+                  {item.id === 'tasks'
+                    ? (taskCount ?? '—')
+                    : item.id === 'dreams'
+                      ? (dreamCount ?? '—')
+                      : item.id === 'tiddle'
+                        ? (tiddleCount ?? '—')
+                        : item.id === 'proof' || item.id === 'forge'
+                          ? 'Runs'
+                          : item.id === 'workflow-events'
+                            ? 'Events'
+                            : (chatCount ?? '—')}
+                </span>
+              </button>
+            ))}
+          </section>
+          <section>
+            <span className="archive-sidebar-label">MODS</span>
+            {modArchives.map((mod) => (
+              <button
+                key={mod.modId}
+                type="button"
+                className={activeMod?.modId === mod.modId ? 'active' : ''}
+                onClick={() => setModId(mod.modId)}
+              >
+                {mod.name}
+              </button>
+            ))}
+          </section>
           <section className="archive-calendar" aria-label="Archive calendar">
-            <div className="archive-calendar-heading"><span className="archive-sidebar-label">When <small>Local time</small></span><button type="button" className="archive-all-dates" onClick={() => setSelectedDate('')}>All dates</button></div>
-            <div className="sr-only" role="status" aria-live="polite">{calendarAvailabilityState === 'loading' ? 'Loading dates with archived records.' : calendarAvailabilityState === 'error' ? 'Could not load archive date availability; all dates remain selectable.' : `${shownDates.length} dates with archived records in ${calendarMonth}.`}</div>
-            <div className="archive-calendar-nav"><button type="button" aria-label="Previous month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(month.getFullYear(), month.getMonth() - 1, 1))); }}>‹</button><strong>{calendarLabel}</strong><button type="button" aria-label="Next month" onClick={() => { const month = dateFromMonthKey(calendarMonth); setCalendarMonth(monthKey(new Date(month.getFullYear(), month.getMonth() + 1, 1))); }}>›</button></div>
-            <div className="archive-calendar-weekdays" aria-hidden="true">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-            <div className="archive-calendar-grid">{calendarDays.map((day, index) => day ? <button key={day.key} type="button" className={`${availableDates.has(day.key) ? 'has-data ' : ''}${selectedDate === day.key ? 'active ' : ''}date-selectable`} onClick={() => setSelectedDate(day.key)} aria-label={`Select ${day.key}${availableDates.has(day.key) ? ', has archived records' : ''}`} aria-pressed={selectedDate === day.key} aria-busy={calendarAvailabilityState === 'loading'}>{day.day}</button> : <span key={`blank-${index}`} aria-hidden="true" />)}</div>
+            <div className="archive-calendar-heading">
+              <span className="archive-sidebar-label">
+                When <small>Local time</small>
+              </span>
+              <button
+                type="button"
+                className="archive-all-dates"
+                onClick={() => setSelectedDate('')}
+              >
+                All dates
+              </button>
+            </div>
+            <div className="sr-only" role="status" aria-live="polite">
+              {calendarAvailabilityState === 'loading'
+                ? 'Loading dates with archived records.'
+                : calendarAvailabilityState === 'error'
+                  ? 'Could not load archive date availability; all dates remain selectable.'
+                  : `${shownDates.length} dates with archived records in ${calendarMonth}.`}
+            </div>
+            <div className="archive-calendar-nav">
+              <button
+                type="button"
+                aria-label="Previous month"
+                onClick={() => {
+                  const month = dateFromMonthKey(calendarMonth);
+                  setCalendarMonth(
+                    monthKey(new Date(month.getFullYear(), month.getMonth() - 1, 1)),
+                  );
+                }}
+              >
+                ‹
+              </button>
+              <strong>{calendarLabel}</strong>
+              <button
+                type="button"
+                aria-label="Next month"
+                onClick={() => {
+                  const month = dateFromMonthKey(calendarMonth);
+                  setCalendarMonth(
+                    monthKey(new Date(month.getFullYear(), month.getMonth() + 1, 1)),
+                  );
+                }}
+              >
+                ›
+              </button>
+            </div>
+            <div className="archive-calendar-weekdays" aria-hidden="true">
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                <span key={`${day}-${index}`}>{day}</span>
+              ))}
+            </div>
+            <div className="archive-calendar-grid">
+              {calendarDays.map((day, index) =>
+                day ? (
+                  <button
+                    key={day.key}
+                    type="button"
+                    className={`${availableDates.has(day.key) ? 'has-data ' : ''}${selectedDate === day.key ? 'active ' : ''}date-selectable`}
+                    onClick={() => setSelectedDate(day.key)}
+                    aria-label={`Select ${day.key}${availableDates.has(day.key) ? ', has archived records' : ''}`}
+                    aria-pressed={selectedDate === day.key}
+                    aria-busy={calendarAvailabilityState === 'loading'}
+                  >
+                    {day.day}
+                  </button>
+                ) : (
+                  <span key={`blank-${index}`} aria-hidden="true" />
+                ),
+              )}
+            </div>
           </section>
         </aside>
         <main className="archive-content">
-          {activeMod ? <ModArchiveHost panel={activeMod} date={selectedDate} /> : kind === 'chat' ? (
-            <ChatArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setChatCount} agentNames={agentNames} operatorName={operatorName} />
+          {activeMod ? (
+            <ModArchiveHost panel={activeMod} date={selectedDate} />
+          ) : kind === 'chat' ? (
+            <ChatArchiveShelf
+              key={queryKey}
+              archiveRepository={archiveRepository}
+              selectedAgent={selectedAgent}
+              selectedDate={selectedDate}
+              search={search}
+              queryKey={queryKey}
+              onCount={setChatCount}
+              agentNames={agentNames}
+              operatorName={operatorName}
+            />
           ) : kind === 'dreams' ? (
-            <DreamArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} onCount={setDreamCount} />
+            <DreamArchiveShelf
+              key={queryKey}
+              archiveRepository={archiveRepository}
+              selectedAgent={selectedAgent}
+              selectedDate={selectedDate}
+              search={search}
+              queryKey={queryKey}
+              onCount={setDreamCount}
+            />
           ) : kind === 'tiddle' ? (
-            <TiddleArchiveShelf key={queryKey} archiveRepository={archiveRepository} selectedAgent={selectedAgent} search={search} queryKey={queryKey} onCount={setTiddleCount} />
-          ) : kind === 'workflow-events' ? <WorkflowEventsArchiveShelf archiveRepository={archiveRepository} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} queryKey={queryKey} agentNames={agentNames} /> : kind === 'forge' ? <ForgeArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onDates={setForgeDates} /> : kind === 'tasks' ? <TaskArchiveShelf agents={agents} selectedAgent={selectedAgent} selectedDate={selectedDate} search={search} onCount={setTaskCount} onDates={setTaskDates} /> : <ArchiveRunsProof repository={archiveRepository} selectedAgent={selectedAgent} search={search} />}
+            <TiddleArchiveShelf
+              key={queryKey}
+              archiveRepository={archiveRepository}
+              selectedAgent={selectedAgent}
+              search={search}
+              queryKey={queryKey}
+              onCount={setTiddleCount}
+            />
+          ) : kind === 'workflow-events' ? (
+            <WorkflowEventsArchiveShelf
+              archiveRepository={archiveRepository}
+              selectedAgent={selectedAgent}
+              selectedDate={selectedDate}
+              search={search}
+              queryKey={queryKey}
+              agentNames={agentNames}
+            />
+          ) : kind === 'forge' ? (
+            <ForgeArchiveShelf
+              agents={agents}
+              selectedAgent={selectedAgent}
+              selectedDate={selectedDate}
+              search={search}
+              onDates={setForgeDates}
+            />
+          ) : kind === 'tasks' ? (
+            <TaskArchiveShelf
+              agents={agents}
+              selectedAgent={selectedAgent}
+              selectedDate={selectedDate}
+              search={search}
+              onCount={setTaskCount}
+              onDates={setTaskDates}
+            />
+          ) : (
+            <ArchiveRunsProof
+              repository={archiveRepository}
+              selectedAgent={selectedAgent}
+              search={search}
+            />
+          )}
         </main>
       </div>
     </div>

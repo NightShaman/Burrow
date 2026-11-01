@@ -15,24 +15,34 @@ function exactComparableText(value: string) {
   return value.trim().replace(/\s+/g, ' ');
 }
 
-export function appendThoughtDelta(entries: ProgressEntry[], event: ThoughtEvent, runId: string): ProgressEntry[] {
+export function appendThoughtDelta(
+  entries: ProgressEntry[],
+  event: ThoughtEvent,
+  runId: string,
+): ProgressEntry[] {
   if (event.type !== 'assistant.thought' || typeof event.data?.delta !== 'string') return entries;
   const modelCall = thoughtModelCall(event.data.modelCall);
   const previous = entries.at(-1);
   if (previous && previous.modelCall === modelCall) {
     return [...entries.slice(0, -1), { ...previous, text: `${previous.text}${event.data.delta}` }];
   }
-  return [...entries, {
-    id: `${runId}:thought:${entries.length + 1}`,
-    text: event.data.delta,
-    ts: typeof event.ts === 'string' ? event.ts : new Date().toISOString(),
-    ...(modelCall === undefined ? {} : { modelCall }),
-    status: 'streaming',
-  }];
+  return [
+    ...entries,
+    {
+      id: `${runId}:thought:${entries.length + 1}`,
+      text: event.data.delta,
+      ts: typeof event.ts === 'string' ? event.ts : new Date().toISOString(),
+      ...(modelCall === undefined ? {} : { modelCall }),
+      status: 'streaming',
+    },
+  ];
 }
 
 export function thoughtProgressFromEvents(events: ThoughtEvent[], runId: string): ProgressEntry[] {
-  return events.reduce<ProgressEntry[]>((entries, event) => appendThoughtDelta(entries, event, runId), []);
+  return events.reduce<ProgressEntry[]>(
+    (entries, event) => appendThoughtDelta(entries, event, runId),
+    [],
+  );
 }
 
 /**
@@ -46,10 +56,15 @@ export function finalizeThoughtProgress(
   finalAnswer: string,
 ): RunProgress | undefined {
   const answer = exactComparableText(finalAnswer);
-  const retained = entries.filter((entry) => !answer || exactComparableText(String(entry.text ?? '')) !== answer);
+  const retained = entries.filter(
+    (entry) => !answer || exactComparableText(String(entry.text ?? '')) !== answer,
+  );
   if (!retained.length) return undefined;
   return {
     status,
-    items: retained.map((entry) => ({ ...entry, status: status === 'complete' ? 'complete' : 'streaming' })),
+    items: retained.map((entry) => ({
+      ...entry,
+      status: status === 'complete' ? 'complete' : 'streaming',
+    })),
   };
 }

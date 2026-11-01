@@ -16,7 +16,9 @@ const conversationPath = `/api/sessions/${sessionId}?agentId=${agentId}`;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
   return { promise, resolve };
 }
 
@@ -32,14 +34,25 @@ beforeEach(() => {
 
 describe('useChatSession', () => {
   it('discards late reset after agent navigation', async () => {
-    const { result, rerender } = renderHook(({ selected }) => useChatSession(selected), { initialProps: { selected: agentId } });
+    const { result, rerender } = renderHook(({ selected }) => useChatSession(selected), {
+      initialProps: { selected: agentId },
+    });
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
     const delayed = deferred<unknown>();
-    apiMock.mockImplementation((_path, init) => init?.method === 'POST' ? delayed.promise : Promise.resolve({ sessions: [{ id: sessionId }], session: { id: sessionId, turns: [] } }));
+    apiMock.mockImplementation((_path, init) =>
+      init?.method === 'POST'
+        ? delayed.promise
+        : Promise.resolve({ sessions: [{ id: sessionId }], session: { id: sessionId, turns: [] } }),
+    );
     let pending!: Promise<unknown>;
-    act(() => { pending = result.current.resetSession(); });
+    act(() => {
+      pending = result.current.resetSession();
+    });
     rerender({ selected: 'other' });
-    await act(async () => { delayed.resolve({}); await pending; });
+    await act(async () => {
+      delayed.resolve({});
+      await pending;
+    });
     expect(result.current.isNewSession).toBe(false);
   });
 
@@ -49,54 +62,81 @@ describe('useChatSession', () => {
     const delayed = deferred<unknown>();
     apiMock.mockReturnValueOnce(delayed.promise);
     let pending!: Promise<unknown>;
-    act(() => { pending = result.current.resetSession(); });
+    act(() => {
+      pending = result.current.resetSession();
+    });
     act(() => result.current.selectSession('other'));
     act(() => result.current.selectSession(sessionId));
     act(() => result.current.appendTurn(agentId, sessionId, { role: 'user', content: 'newer' }));
-    await act(async () => { delayed.resolve({}); await pending; });
+    await act(async () => {
+      delayed.resolve({});
+      await pending;
+    });
     expect(result.current.turns).toContainEqual({ role: 'user', content: 'newer' });
   });
 
-  it.each(['session-1', 'child-session', 'default'])('keeps reset destination %s and leaves unrelated default cache intact', async (destination) => {
-    apiMock.mockImplementation(async (path) => {
-      if (path === sessionListPath) return { sessions: [{ id: destination }] };
-      if (path.endsWith('/reset?agentId=luna')) return { ok: true };
-      if (path.startsWith('/api/sessions/')) return { session: { id: destination, turns: [{ role: 'assistant', content: 'Old context' }] } };
-      throw new Error(`Unexpected path: ${path}`);
-    });
-    const { result } = renderHook(() => useChatSession(agentId));
-    await waitFor(() => expect(result.current.turns).toHaveLength(1));
-    act(() => result.current.appendTurn(agentId, 'default', { role: 'assistant', content: 'Unrelated default' }));
-    await act(async () => { await result.current.resetSession(); });
-    expect(result.current.sessionId).toBe(destination);
-    expect(result.current.turns).toEqual([]);
-    expect(apiMock).toHaveBeenCalledWith(`/api/sessions/${destination}/reset?agentId=luna`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-    act(() => {
-      result.current.leaveNewSessionForMessage();
-      result.current.appendTurn(agentId, result.current.sessionId, { role: 'user', content: 'Next message' });
-    });
-    expect(result.current.turns).toEqual([{ role: 'user', content: 'Next message' }]);
-    if (destination !== 'default') {
-      act(() => result.current.selectSession('default'));
-      expect(result.current.turns).toContainEqual({ role: 'assistant', content: 'Unrelated default' });
-    }
-  });
+  it.each(['session-1', 'child-session', 'default'])(
+    'keeps reset destination %s and leaves unrelated default cache intact',
+    async (destination) => {
+      apiMock.mockImplementation(async (path) => {
+        if (path === sessionListPath) return { sessions: [{ id: destination }] };
+        if (path.endsWith('/reset?agentId=luna')) return { ok: true };
+        if (path.startsWith('/api/sessions/'))
+          return {
+            session: { id: destination, turns: [{ role: 'assistant', content: 'Old context' }] },
+          };
+        throw new Error(`Unexpected path: ${path}`);
+      });
+      const { result } = renderHook(() => useChatSession(agentId));
+      await waitFor(() => expect(result.current.turns).toHaveLength(1));
+      act(() =>
+        result.current.appendTurn(agentId, 'default', {
+          role: 'assistant',
+          content: 'Unrelated default',
+        }),
+      );
+      await act(async () => {
+        await result.current.resetSession();
+      });
+      expect(result.current.sessionId).toBe(destination);
+      expect(result.current.turns).toEqual([]);
+      expect(apiMock).toHaveBeenCalledWith(`/api/sessions/${destination}/reset?agentId=luna`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      act(() => {
+        result.current.leaveNewSessionForMessage();
+        result.current.appendTurn(agentId, result.current.sessionId, {
+          role: 'user',
+          content: 'Next message',
+        });
+      });
+      expect(result.current.turns).toEqual([{ role: 'user', content: 'Next message' }]);
+      if (destination !== 'default') {
+        act(() => result.current.selectSession('default'));
+        expect(result.current.turns).toContainEqual({
+          role: 'assistant',
+          content: 'Unrelated default',
+        });
+      }
+    },
+  );
 
   it('loads the first session and its conversation for the selected agent', async () => {
     apiMock.mockImplementation(async (path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: 'older' }] };
-      if (path === conversationPath) return { session: { id: sessionId, turns: [{ role: 'assistant', content: 'Hello' }] } };
+      if (path === conversationPath)
+        return { session: { id: sessionId, turns: [{ role: 'assistant', content: 'Hello' }] } };
       throw new Error(`Unexpected path: ${path}`);
     });
 
     const { result } = renderHook(() => useChatSession(agentId));
 
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
-    await waitFor(() => expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Hello' }]));
+    await waitFor(() =>
+      expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Hello' }]),
+    );
     expect(result.current.sessions).toHaveLength(2);
   });
 
@@ -106,7 +146,10 @@ describe('useChatSession', () => {
     apiMock.mockImplementation(async (path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
       if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-      if (path === childConversationPath) return { session: { id: childSessionId, turns: [{ role: 'assistant', content: 'Child answer' }] } };
+      if (path === childConversationPath)
+        return {
+          session: { id: childSessionId, turns: [{ role: 'assistant', content: 'Child answer' }] },
+        };
       throw new Error(`Unexpected path: ${path}`);
     });
     const { result } = renderHook(() => useChatSession(agentId));
@@ -114,7 +157,9 @@ describe('useChatSession', () => {
 
     act(() => result.current.selectChildSession(agentId, childSessionId));
 
-    await waitFor(() => expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Child answer' }]));
+    await waitFor(() =>
+      expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Child answer' }]),
+    );
     expect(apiMock).toHaveBeenCalledWith(childConversationPath);
   });
 
@@ -124,11 +169,17 @@ describe('useChatSession', () => {
 
     act(() => result.current.setDraft('Finish the tests'));
 
-    await waitFor(() => expect(localStorage.getItem('hc.chatDrafts')).toContain('Finish the tests'));
+    await waitFor(() =>
+      expect(localStorage.getItem('hc.chatDrafts')).toContain('Finish the tests'),
+    );
     expect(result.current.draft).toBe('Finish the tests');
     expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}')).toEqual({
       version: 1,
-      value: { [conversationCacheKey(agentId, sessionId)]: expect.objectContaining({ value: 'Finish the tests' }) },
+      value: {
+        [conversationCacheKey(agentId, sessionId)]: expect.objectContaining({
+          value: 'Finish the tests',
+        }),
+      },
     });
   });
 
@@ -136,31 +187,50 @@ describe('useChatSession', () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
-    act(() => result.current.appendTransientTurn(agentId, sessionId, { role: 'assistant', content: 'Temporary context report' }));
-    expect(result.current.turns).toContainEqual({ role: 'assistant', content: 'Temporary context report' });
-    expect(localStorage.getItem('hc.chatConversations') ?? '').not.toContain('Temporary context report');
+    act(() =>
+      result.current.appendTransientTurn(agentId, sessionId, {
+        role: 'assistant',
+        content: 'Temporary context report',
+      }),
+    );
+    expect(result.current.turns).toContainEqual({
+      role: 'assistant',
+      content: 'Temporary context report',
+    });
+    expect(localStorage.getItem('hc.chatConversations') ?? '').not.toContain(
+      'Temporary context report',
+    );
 
     act(() => result.current.selectSession('other'));
     act(() => result.current.selectSession(sessionId));
 
-    expect(result.current.turns).not.toContainEqual({ role: 'assistant', content: 'Temporary context report' });
+    expect(result.current.turns).not.toContainEqual({
+      role: 'assistant',
+      content: 'Temporary context report',
+    });
   });
 
   it('does not let an in-flight refresh erase a direct message appended after it started', async () => {
-    const staleRefresh = deferred<{ session: { id: string; turns: { role: string; content: string }[] } }>();
+    const staleRefresh = deferred<{
+      session: { id: string; turns: { role: string; content: string }[] };
+    }>();
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
     await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
 
     apiMock.mockReturnValueOnce(staleRefresh.promise);
     let refreshPromise!: Promise<void>;
-    act(() => { refreshPromise = result.current.refreshConversation(); });
+    act(() => {
+      refreshPromise = result.current.refreshConversation();
+    });
     const optimisticTurn = { role: 'user' as const, content: 'Direct message after A2A' };
     act(() => result.current.appendTurn(agentId, sessionId, optimisticTurn));
     expect(result.current.turns).toEqual([optimisticTurn]);
 
     await act(async () => {
-      staleRefresh.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Earlier A2A reply' }] } });
+      staleRefresh.resolve({
+        session: { id: sessionId, turns: [{ role: 'assistant', content: 'Earlier A2A reply' }] },
+      });
       await refreshPromise;
     });
 
@@ -168,7 +238,9 @@ describe('useChatSession', () => {
   });
 
   it('does not let an older conversation request overwrite a refreshed conversation', async () => {
-    const initialConversation = deferred<{ session: { id: string; turns: [{ role: string; content: string }] } }>();
+    const initialConversation = deferred<{
+      session: { id: string; turns: [{ role: string; content: string }] };
+    }>();
     apiMock.mockImplementation((path) => {
       if (path === sessionListPath) return Promise.resolve({ sessions: [{ id: sessionId }] });
       if (path === conversationPath) return initialConversation.promise;
@@ -177,27 +249,40 @@ describe('useChatSession', () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
-    apiMock.mockResolvedValueOnce({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Fresh answer' }] } });
-    await act(async () => { await result.current.refreshConversation(); });
+    apiMock.mockResolvedValueOnce({
+      session: { id: sessionId, turns: [{ role: 'assistant', content: 'Fresh answer' }] },
+    });
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
     expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Fresh answer' }]);
 
-    await act(async () => { initialConversation.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Stale answer' }] } }); });
+    await act(async () => {
+      initialConversation.resolve({
+        session: { id: sessionId, turns: [{ role: 'assistant', content: 'Stale answer' }] },
+      });
+    });
     await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
     expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Fresh answer' }]);
   });
 
   it('restores only non-empty, unexpired drafts from local storage', async () => {
-    localStorage.setItem('hc.chatDrafts', JSON.stringify({
-      [conversationCacheKey(agentId, sessionId)]: { value: 'Saved draft', updatedAt: Date.now() },
-      stale: { value: 'Old draft', updatedAt: Date.now() - 2 * 24 * 60 * 60 * 1_000 },
-      empty: { value: '', updatedAt: Date.now() },
-    }));
+    localStorage.setItem(
+      'hc.chatDrafts',
+      JSON.stringify({
+        [conversationCacheKey(agentId, sessionId)]: { value: 'Saved draft', updatedAt: Date.now() },
+        stale: { value: 'Old draft', updatedAt: Date.now() - 2 * 24 * 60 * 60 * 1_000 },
+        empty: { value: '', updatedAt: Date.now() },
+      }),
+    );
 
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
     expect(result.current.draft).toBe('Saved draft');
-    expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}').value).not.toHaveProperty('stale');
+    expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}').value).not.toHaveProperty(
+      'stale',
+    );
   });
 
   it('keeps the first optimistic turn when a reset session starts sending', async () => {
@@ -223,33 +308,84 @@ describe('useChatSession', () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
-    const userTurn = { role: 'user' as const, content: 'Follow-up after A2A', runId: 'run-follow-up', ts: '2026-08-23T00:00:00.000Z' };
-    const localAssistantTurn = { role: 'assistant' as const, content: 'Local reply', runId: 'run-follow-up', ts: '2026-08-23T00:00:01.000Z' };
+    const userTurn = {
+      role: 'user' as const,
+      content: 'Follow-up after A2A',
+      runId: 'run-follow-up',
+      ts: '2026-08-23T00:00:00.000Z',
+    };
+    const localAssistantTurn = {
+      role: 'assistant' as const,
+      content: 'Local reply',
+      runId: 'run-follow-up',
+      ts: '2026-08-23T00:00:01.000Z',
+    };
     act(() => {
       result.current.appendTurn(agentId, sessionId, userTurn);
       result.current.appendTurn(agentId, sessionId, localAssistantTurn);
     });
 
-    apiMock.mockResolvedValueOnce({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Persisted reply', runId: 'run-follow-up', ts: '2026-08-23T00:00:01.000Z' }] } });
-    await act(async () => { await result.current.refreshConversation(); });
+    apiMock.mockResolvedValueOnce({
+      session: {
+        id: sessionId,
+        turns: [
+          {
+            role: 'assistant',
+            content: 'Persisted reply',
+            runId: 'run-follow-up',
+            ts: '2026-08-23T00:00:01.000Z',
+          },
+        ],
+      },
+    });
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
 
-    expect(result.current.turns).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: 'user', content: 'Follow-up after A2A', runId: 'run-follow-up' }),
-      expect.objectContaining({ role: 'assistant', content: 'Persisted reply', runId: 'run-follow-up' }),
-    ]));
+    expect(result.current.turns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'user',
+          content: 'Follow-up after A2A',
+          runId: 'run-follow-up',
+        }),
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'Persisted reply',
+          runId: 'run-follow-up',
+        }),
+      ]),
+    );
   });
 
   it('does not resurrect cached turns from before a server-side reset', async () => {
     const resetAt = '2026-08-26T10:00:00.000Z';
-    localStorage.setItem('hc.chatConversations.v1', JSON.stringify({
-      [conversationCacheKey(agentId, sessionId)]: {
-        savedAt: Date.now(),
-        turns: [{ role: 'assistant', content: 'Yesterday afternoon', runId: 'old-run', ts: '2026-08-25T15:00:00.000Z' }],
-      },
-    }));
+    localStorage.setItem(
+      'hc.chatConversations.v1',
+      JSON.stringify({
+        [conversationCacheKey(agentId, sessionId)]: {
+          savedAt: Date.now(),
+          turns: [
+            {
+              role: 'assistant',
+              content: 'Yesterday afternoon',
+              runId: 'old-run',
+              ts: '2026-08-25T15:00:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
     apiMock.mockImplementation(async (path) => {
       if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
-      if (path === conversationPath) return { session: { id: sessionId, metadata: { resetAt, transcriptGeneration: 'new-generation' }, turns: [] } };
+      if (path === conversationPath)
+        return {
+          session: {
+            id: sessionId,
+            metadata: { resetAt, transcriptGeneration: 'new-generation' },
+            turns: [],
+          },
+        };
       throw new Error(`Unexpected path: ${path}`);
     });
 
@@ -257,21 +393,39 @@ describe('useChatSession', () => {
 
     await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
     expect(result.current.turns).toEqual([]);
-    expect(JSON.parse(localStorage.getItem('hc.chatConversations.v1') ?? '{}').value[conversationCacheKey(agentId, sessionId)].turns).toEqual([]);
+    expect(
+      JSON.parse(localStorage.getItem('hc.chatConversations.v1') ?? '{}').value[
+        conversationCacheKey(agentId, sessionId)
+      ].turns,
+    ).toEqual([]);
   });
 
   it('merges stored tool activity into refreshed assistant turns', async () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
-    act(() => result.current.storeToolActivity({ runId: 'run-1', items: [{ id: 'tool-1', label: 'Read file', status: 'ok' }] }));
-    apiMock.mockResolvedValueOnce({ session: { id: sessionId, turns: [{ role: 'assistant', runId: 'run-1', content: 'Answer' }] } });
+    act(() =>
+      result.current.storeToolActivity({
+        runId: 'run-1',
+        items: [{ id: 'tool-1', label: 'Read file', status: 'ok' }],
+      }),
+    );
+    apiMock.mockResolvedValueOnce({
+      session: { id: sessionId, turns: [{ role: 'assistant', runId: 'run-1', content: 'Answer' }] },
+    });
 
-    await act(async () => { await result.current.refreshConversation(); });
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
 
     expect(result.current.turns[0]).toMatchObject({
       content: 'Answer',
-      metadata: { toolActivity: { runId: 'run-1', items: [{ id: 'tool-1', label: 'Read file', status: 'ok' }] } },
+      metadata: {
+        toolActivity: {
+          runId: 'run-1',
+          items: [{ id: 'tool-1', label: 'Read file', status: 'ok' }],
+        },
+      },
     });
   });
 
@@ -283,13 +437,22 @@ describe('useChatSession', () => {
     const nextSessions = deferred<{ sessions: { id: string }[] }>();
     apiMock.mockImplementation((path) => {
       if (path === sessionListPath) return Promise.resolve({ sessions: [{ id: sessionId }] });
-      if (path === conversationPath) return Promise.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'Previous conversation' }] } });
+      if (path === conversationPath)
+        return Promise.resolve({
+          session: {
+            id: sessionId,
+            turns: [{ role: 'assistant', content: 'Previous conversation' }],
+          },
+        });
       if (path === nextSessionListPath) return nextSessions.promise;
-      if (path === nextConversationPath) return Promise.resolve({ session: { id: nextSessionId, turns: [] } });
+      if (path === nextConversationPath)
+        return Promise.resolve({ session: { id: nextSessionId, turns: [] } });
       return Promise.reject(new Error(`Unexpected path: ${path}`));
     });
 
-    const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), { initialProps: { agent: agentId } });
+    const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), {
+      initialProps: { agent: agentId },
+    });
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
     rerender({ agent: nextAgentId });
@@ -298,7 +461,9 @@ describe('useChatSession', () => {
     expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Previous conversation' }]);
     expect(result.current.isLoadingConversation).toBe(true);
 
-    await act(async () => { nextSessions.resolve({ sessions: [{ id: nextSessionId }] }); });
+    await act(async () => {
+      nextSessions.resolve({ sessions: [{ id: nextSessionId }] });
+    });
     await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
   });
 
@@ -322,7 +487,8 @@ it('polls selected worker child activity and late terminal turns with no active 
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { turns: [] } };
     if (path.startsWith('/api/chat/runs/active?')) return { runs: [] };
-    if (path === `/api/sessions/child?agentId=${agentId}`) return { session: { turns: childTurns } };
+    if (path === `/api/sessions/child?agentId=${agentId}`)
+      return { session: { turns: childTurns } };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
@@ -342,10 +508,14 @@ it('discards an in-flight child poll after selecting the parent, including its c
   let requested = false;
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
-    if (path === conversationPath) return { session: { turns: [{ role: 'assistant', content: 'Parent' }] } };
+    if (path === conversationPath)
+      return { session: { turns: [{ role: 'assistant', content: 'Parent' }] } };
     if (path.startsWith('/api/chat/runs/active?')) return { runs: [] };
     if (path === `/api/sessions/child?agentId=${agentId}`) {
-      if (hold) { requested = true; return pending.promise; }
+      if (hold) {
+        requested = true;
+        return pending.promise;
+      }
       return { session: { turns: [{ role: 'assistant', content: 'Child' }] } };
     }
     throw new Error(path);
@@ -358,7 +528,9 @@ it('discards an in-flight child poll after selecting the parent, including its c
   await waitFor(() => expect(requested).toBe(true), { timeout: 2500 });
   act(() => result.current.selectSession(sessionId));
   await waitFor(() => expect(result.current.turns[0]?.content).toBe('Parent'));
-  await act(async () => pending.resolve({ session: { turns: [{ role: 'assistant', content: 'Stale child' }] } }));
+  await act(async () =>
+    pending.resolve({ session: { turns: [{ role: 'assistant', content: 'Stale child' }] } }),
+  );
   expect(result.current.turns[0]?.content).toBe('Parent');
   expect(JSON.stringify(localStorage)).not.toContain('Stale child');
   unmount();
@@ -368,31 +540,59 @@ it('exposes a destination session task run with live tools, thoughts, and A2A ac
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return {
-      runs: [{
-        runId: 'task-run', agentId, sessionId, status: 'running', phase: 'streaming', source: 'task',
-        progress: [
-          { type: 'assistant.thought', ts: '2026-09-15T12:00:00.000Z', data: { delta: 'Checking', modelCall: 2 } },
-          { type: 'assistant.thought', data: { delta: ' the runtime.', modelCall: 2 } },
-          { type: 'assistant.thought', data: { delta: '\nSecond call.', modelCall: 3 } },
-          { type: 'tool.started', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' } },
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [
+          {
+            runId: 'task-run',
+            agentId,
+            sessionId,
+            status: 'running',
+            phase: 'streaming',
+            source: 'task',
+            progress: [
+              {
+                type: 'assistant.thought',
+                ts: '2026-09-15T12:00:00.000Z',
+                data: { delta: 'Checking', modelCall: 2 },
+              },
+              { type: 'assistant.thought', data: { delta: ' the runtime.', modelCall: 2 } },
+              { type: 'assistant.thought', data: { delta: '\nSecond call.', modelCall: 3 } },
+              {
+                type: 'tool.started',
+                data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' },
+              },
+            ],
+            a2aActivities: [
+              {
+                id: 'a2a-1',
+                status: 'running',
+                parentAgentId: agentId,
+                recipient: { agentId: 'minion', sessionId: 'child' },
+                progress: [],
+              },
+            ],
+          },
         ],
-        a2aActivities: [{ id: 'a2a-1', status: 'running', parentAgentId: agentId, recipient: { agentId: 'minion', sessionId: 'child' }, progress: [] }],
-      }],
-    };
+      };
     throw new Error(path);
   });
 
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
-  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({
-    runId: 'task-run',
-    progress: [
-      expect.objectContaining({ text: 'Checking the runtime.', modelCall: 2 }),
-      expect.objectContaining({ text: '\nSecond call.', modelCall: 3 }),
-    ],
-    toolActivity: { runId: 'task-run', items: [expect.objectContaining({ label: 'Inspect status', status: 'pending' })] },
-  }));
+  await waitFor(() =>
+    expect(result.current.runtimeRun).toMatchObject({
+      runId: 'task-run',
+      progress: [
+        expect.objectContaining({ text: 'Checking the runtime.', modelCall: 2 }),
+        expect.objectContaining({ text: '\nSecond call.', modelCall: 3 }),
+      ],
+      toolActivity: {
+        runId: 'task-run',
+        items: [expect.objectContaining({ label: 'Inspect status', status: 'pending' })],
+      },
+    }),
+  );
   expect(result.current.a2aActivities).toEqual([expect.objectContaining({ id: 'a2a-1' })]);
   unmount();
 });
@@ -403,20 +603,54 @@ it('exposes active subagent activity when no chat run is registered', async () =
   const lastActualActivityAt = new Date(now - 420_000).toISOString();
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
-    if (path === conversationPath || path === `/api/sessions/child-session?agentId=${agentId}`) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
-      id: 'child-1', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId, status: 'running', phase: 'tool', final: false,
-      label: 'Repo check', purpose: 'Inspect UI activity', lastActualActivityAt,
-      activity: { kind: 'tool', status: 'running', phase: 'tool', label: 'shell_exec', tool: 'shell_exec', sequence: 3, startedAt, lastActualActivityAt },
-      trace: { runId: 'child-run', childSessionId: 'child-session' },
-    }] };
+    if (path === conversationPath || path === `/api/sessions/child-session?agentId=${agentId}`)
+      return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [],
+        subagents: [
+          {
+            id: 'child-1',
+            agentId,
+            runId: 'child-run',
+            sessionId: 'child-session',
+            parentSessionId: sessionId,
+            status: 'running',
+            phase: 'tool',
+            final: false,
+            label: 'Repo check',
+            purpose: 'Inspect UI activity',
+            lastActualActivityAt,
+            activity: {
+              kind: 'tool',
+              status: 'running',
+              phase: 'tool',
+              label: 'shell_exec',
+              tool: 'shell_exec',
+              sequence: 3,
+              startedAt,
+              lastActualActivityAt,
+            },
+            trace: { runId: 'child-run', childSessionId: 'child-session' },
+          },
+        ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
   act(() => result.current.selectChildSession(agentId, 'child-session'));
-  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({ runId: 'child-run', latestUserMessage: 'Inspect UI activity' }));
-  expect(result.current.runtimeRun?.toolActivity?.items?.[0]).toMatchObject({ label: 'shell_exec', status: 'pending', detail: expect.stringContaining('last actual event 7m ago') });
+  await waitFor(() =>
+    expect(result.current.runtimeRun).toMatchObject({
+      runId: 'child-run',
+      latestUserMessage: 'Inspect UI activity',
+    }),
+  );
+  expect(result.current.runtimeRun?.toolActivity?.items?.[0]).toMatchObject({
+    label: 'shell_exec',
+    status: 'pending',
+    detail: expect.stringContaining('last actual event 7m ago'),
+  });
   expect(result.current.runtimeRun?.toolActivity?.items?.[0].detail).toContain('elapsed 2m');
   unmount();
 });
@@ -425,19 +659,84 @@ it('keeps parent runtime identity while surfacing all matching child activity', 
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'parent-run', agentId, sessionId, status: 'running', latestUserMessage: 'Parent prompt', progress: [] }], subagents: [
-      { id: 'child-1', agentId, runId: 'child-run-1', parentRunId: 'parent-run', sessionId: 'child-a', parentSessionId: sessionId, final: false, activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' } },
-      { id: 'child-2', agentId, runId: 'child-run-2', parentRunId: 'parent-run', sessionId: 'child-b', parentSessionId: sessionId, final: false, activity: { label: 'files_read', tool: 'files_read', status: 'running' } },
-      { id: 'child-other-session', agentId, runId: 'child-run-3', parentRunId: 'parent-run', sessionId: 'child-c', parentSessionId: 'other-session', final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
-      { id: 'child-other-agent', agentId: 'smatchet', runId: 'child-run-4', parentRunId: 'parent-run', sessionId: 'child-d', parentSessionId: sessionId, final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
-      { id: 'child-other-run', agentId, runId: 'child-run-5', parentRunId: 'other-run', sessionId: 'child-e', parentSessionId: sessionId, final: false, activity: { label: 'ignored', tool: 'ignored', status: 'running' } },
-    ] };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [
+          {
+            runId: 'parent-run',
+            agentId,
+            sessionId,
+            status: 'running',
+            latestUserMessage: 'Parent prompt',
+            progress: [],
+          },
+        ],
+        subagents: [
+          {
+            id: 'child-1',
+            agentId,
+            runId: 'child-run-1',
+            parentRunId: 'parent-run',
+            sessionId: 'child-a',
+            parentSessionId: sessionId,
+            final: false,
+            activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' },
+          },
+          {
+            id: 'child-2',
+            agentId,
+            runId: 'child-run-2',
+            parentRunId: 'parent-run',
+            sessionId: 'child-b',
+            parentSessionId: sessionId,
+            final: false,
+            activity: { label: 'files_read', tool: 'files_read', status: 'running' },
+          },
+          {
+            id: 'child-other-session',
+            agentId,
+            runId: 'child-run-3',
+            parentRunId: 'parent-run',
+            sessionId: 'child-c',
+            parentSessionId: 'other-session',
+            final: false,
+            activity: { label: 'ignored', tool: 'ignored', status: 'running' },
+          },
+          {
+            id: 'child-other-agent',
+            agentId: 'smatchet',
+            runId: 'child-run-4',
+            parentRunId: 'parent-run',
+            sessionId: 'child-d',
+            parentSessionId: sessionId,
+            final: false,
+            activity: { label: 'ignored', tool: 'ignored', status: 'running' },
+          },
+          {
+            id: 'child-other-run',
+            agentId,
+            runId: 'child-run-5',
+            parentRunId: 'other-run',
+            sessionId: 'child-e',
+            parentSessionId: sessionId,
+            final: false,
+            activity: { label: 'ignored', tool: 'ignored', status: 'running' },
+          },
+        ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('parent-run'));
-  expect(result.current.runtimeRun).toMatchObject({ agentId, sessionId, latestUserMessage: 'Parent prompt' });
-  expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual(['child-run-1', 'child-run-2']);
+  expect(result.current.runtimeRun).toMatchObject({
+    agentId,
+    sessionId,
+    latestUserMessage: 'Parent prompt',
+  });
+  expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual([
+    'child-run-1',
+    'child-run-2',
+  ]);
   unmount();
 });
 
@@ -445,14 +744,30 @@ it('uses child-only runtime activity only for selected child sessions, without a
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
-      id: 'child-1', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId, final: false,
-      purpose: 'Child work', activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' },
-    }] };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [],
+        subagents: [
+          {
+            id: 'child-1',
+            agentId,
+            runId: 'child-run',
+            sessionId: 'child-session',
+            parentSessionId: sessionId,
+            final: false,
+            purpose: 'Child work',
+            activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' },
+          },
+        ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
-  await waitFor(() => expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual(['child-run']));
+  await waitFor(() =>
+    expect(result.current.runtimeChildActivities.map((activity) => activity.runId)).toEqual([
+      'child-run',
+    ]),
+  );
   expect(result.current.runtimeRun).toBeNull();
   unmount();
 });
@@ -462,13 +777,32 @@ it('cleans up child activity when children become terminal', async () => {
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'parent-run', agentId, sessionId, status: 'running', progress: [] }], subagents: final ? [] : [{ id: 'child-1', agentId, runId: 'child-run', parentRunId: 'parent-run', sessionId: 'child-session', parentSessionId: sessionId, final: false, activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' } }] };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [{ runId: 'parent-run', agentId, sessionId, status: 'running', progress: [] }],
+        subagents: final
+          ? []
+          : [
+              {
+                id: 'child-1',
+                agentId,
+                runId: 'child-run',
+                parentRunId: 'parent-run',
+                sessionId: 'child-session',
+                parentSessionId: sessionId,
+                final: false,
+                activity: { label: 'shell_exec', tool: 'shell_exec', status: 'running' },
+              },
+            ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(1));
   final = true;
-  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(0), { timeout: 2500 });
+  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(0), {
+    timeout: 2500,
+  });
   unmount();
 });
 
@@ -476,18 +810,48 @@ it('reduces task tool completion onto its started activity and exposes the task 
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{
-      runId: 'task-run', agentId, sessionId, status: 'running', phase: 'tool', source: 'task', latestUserMessage: 'Inspect the destination session.',
-      progress: [
-        { type: 'tool.started', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' } },
-        { type: 'tool.completed', data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status', ok: true, status: 'completed' } },
-      ],
-    }] };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [
+          {
+            runId: 'task-run',
+            agentId,
+            sessionId,
+            status: 'running',
+            phase: 'tool',
+            source: 'task',
+            latestUserMessage: 'Inspect the destination session.',
+            progress: [
+              {
+                type: 'tool.started',
+                data: { activityId: 'tool-1', tool: 'shell_exec', label: 'Inspect status' },
+              },
+              {
+                type: 'tool.completed',
+                data: {
+                  activityId: 'tool-1',
+                  tool: 'shell_exec',
+                  label: 'Inspect status',
+                  ok: true,
+                  status: 'completed',
+                },
+              },
+            ],
+          },
+        ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
-  await waitFor(() => expect(result.current.runtimeRun).toMatchObject({ runId: 'task-run', latestUserMessage: 'Inspect the destination session.' }));
-  expect(result.current.runtimeRun?.toolActivity?.items).toEqual([{ id: 'tool-1', label: 'Inspect status', status: 'ok' }]);
+  await waitFor(() =>
+    expect(result.current.runtimeRun).toMatchObject({
+      runId: 'task-run',
+      latestUserMessage: 'Inspect the destination session.',
+    }),
+  );
+  expect(result.current.runtimeRun?.toolActivity?.items).toEqual([
+    { id: 'tool-1', label: 'Inspect status', status: 'ok' },
+  ]);
   unmount();
 });
 
@@ -495,14 +859,37 @@ it('cancels the selected external task run with its resource owner', async () =>
   apiMock.mockImplementation(async (path, init) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
     if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'task-run', agentId, sessionId, status: 'running', latestUserMessage: 'Stop me', progress: [] }] };
-    if (path === '/api/chat/task-run/cancel') { expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ agentId, reason: 'Stopped by operator' }) }); return { ok: true }; }
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [
+          {
+            runId: 'task-run',
+            agentId,
+            sessionId,
+            status: 'running',
+            latestUserMessage: 'Stop me',
+            progress: [],
+          },
+        ],
+      };
+    if (path === '/api/chat/task-run/cancel') {
+      expect(init).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({ agentId, reason: 'Stopped by operator' }),
+      });
+      return { ok: true };
+    }
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('task-run'));
-  await act(async () => { await result.current.cancelRuntimeRun(result.current.runtimeRun!); });
-  expect(apiMock).toHaveBeenCalledWith('/api/chat/task-run/cancel', expect.objectContaining({ method: 'POST' }));
+  await act(async () => {
+    await result.current.cancelRuntimeRun(result.current.runtimeRun!);
+  });
+  expect(apiMock).toHaveBeenCalledWith(
+    '/api/chat/task-run/cancel',
+    expect.objectContaining({ method: 'POST' }),
+  );
   unmount();
 });
 
@@ -510,8 +897,21 @@ it('clears a task run immediately when selecting another session', async () => {
   const otherSessionId = 'session-2';
   apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: otherSessionId }] };
-    if (path === conversationPath || path === `/api/sessions/${otherSessionId}?agentId=${agentId}`) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'task-run', agentId, sessionId, status: 'running', latestUserMessage: 'Old session task', progress: [] }] };
+    if (path === conversationPath || path === `/api/sessions/${otherSessionId}?agentId=${agentId}`)
+      return { session: { id: sessionId, turns: [] } };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: [
+          {
+            runId: 'task-run',
+            agentId,
+            sessionId,
+            status: 'running',
+            latestUserMessage: 'Old session task',
+            progress: [],
+          },
+        ],
+      };
     throw new Error(path);
   });
   const { result, unmount } = renderHook(() => useChatSession(agentId));
@@ -521,32 +921,57 @@ it('clears a task run immediately when selecting another session', async () => {
   unmount();
 });
 
- it('discards pending attachments on agent navigation and rejects delayed completion', async () => {
- const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), { initialProps: { agent: agentId } });
- await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
- const oldSetter = result.current.setAttachment;
- const file = { name: 'secret.txt', type: 'text/plain', size: 6, encoding: 'data-url' as const, content: 'secret' };
- act(() => result.current.setAttachment([file]));
- expect(result.current.attached).toHaveLength(1);
- rerender({ agent: 'other' });
- expect(result.current.attached).toEqual([]);
- act(() => oldSetter([file]));
- expect(result.current.attached).toEqual([]);
- });
+it('discards pending attachments on agent navigation and rejects delayed completion', async () => {
+  const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), {
+    initialProps: { agent: agentId },
+  });
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  const oldSetter = result.current.setAttachment;
+  const file = {
+    name: 'secret.txt',
+    type: 'text/plain',
+    size: 6,
+    encoding: 'data-url' as const,
+    content: 'secret',
+  };
+  act(() => result.current.setAttachment([file]));
+  expect(result.current.attached).toHaveLength(1);
+  rerender({ agent: 'other' });
+  expect(result.current.attached).toEqual([]);
+  act(() => oldSetter([file]));
+  expect(result.current.attached).toEqual([]);
+});
 
 it('purge clears mounted memory and fences a delayed refresh from repersisting it', async () => {
   const { clearConversationCache, readConversationCache } = await import('./chatConversationCache');
   const { result, unmount } = renderHook(() => useChatSession(agentId));
   await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
   await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
-  act(() => result.current.appendTurn(agentId, sessionId, { role: 'assistant', content: 'secret', runId: 'old' }));
+  act(() =>
+    result.current.appendTurn(agentId, sessionId, {
+      role: 'assistant',
+      content: 'secret',
+      runId: 'old',
+    }),
+  );
   const delayed = deferred<unknown>();
-  apiMock.mockImplementation((path) => path === conversationPath ? delayed.promise : Promise.resolve({ runs: [], sessions: [{ id: sessionId }] }));
+  apiMock.mockImplementation((path) =>
+    path === conversationPath
+      ? delayed.promise
+      : Promise.resolve({ runs: [], sessions: [{ id: sessionId }] }),
+  );
   let refresh!: Promise<void>;
-  act(() => { refresh = result.current.refreshConversation(); });
+  act(() => {
+    refresh = result.current.refreshConversation();
+  });
   act(() => clearConversationCache());
   expect(result.current.turns).toEqual([]);
-  await act(async () => { delayed.resolve({ session: { id: sessionId, turns: [{ role: 'assistant', content: 'secret', runId: 'old' }] } }); await refresh; });
+  await act(async () => {
+    delayed.resolve({
+      session: { id: sessionId, turns: [{ role: 'assistant', content: 'secret', runId: 'old' }] },
+    });
+    await refresh;
+  });
   expect(result.current.turns).toEqual([]);
   expect(readConversationCache()).toEqual({});
   unmount();
@@ -554,7 +979,13 @@ it('purge clears mounted memory and fences a delayed refresh from repersisting i
 
 it('admits attachment batches cumulatively including concurrent read completions', () => {
   const { result } = renderHook(() => useChatSession(agentId));
-  const file = { name: 'a.txt', type: 'text/plain', size: 1, content: 'x', encoding: 'data-url' as const };
+  const file = {
+    name: 'a.txt',
+    type: 'text/plain',
+    size: 1,
+    content: 'x',
+    encoding: 'data-url' as const,
+  };
   act(() => result.current.setAttachment(Array(9).fill(file)));
   expect(result.current.attached).toHaveLength(8);
   act(() => result.current.setAttachment([file]));
@@ -562,35 +993,76 @@ it('admits attachment batches cumulatively including concurrent read completions
 });
 
 it('keeps submitted user visible through empty polling snapshots without duplicate persisted turns or draft loss', async () => {
- const {result} = renderHook(() => useChatSession(agentId));
- await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
- const submitted = {role:'user' as const,content:'submitted now',runId:'pending-run',ts:new Date().toISOString()};
- act(() => { result.current.appendTurn(agentId,sessionId,submitted); result.current.setDraft('next draft'); });
- expect(result.current.turns).toContainEqual(submitted);
- await act(async () => { await result.current.refreshConversation(); });
- expect(result.current.turns).toContainEqual(submitted);
- expect(result.current.draft).toBe('next draft');
- apiMock.mockImplementation(async path => path === conversationPath ? {session:{id:sessionId,turns:[submitted]}} : {sessions:[{id:sessionId}]});
- await act(async () => { await result.current.refreshConversation(); });
- expect(result.current.turns.filter(turn => turn.runId === 'pending-run')).toHaveLength(1);
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  const submitted = {
+    role: 'user' as const,
+    content: 'submitted now',
+    runId: 'pending-run',
+    ts: new Date().toISOString(),
+  };
+  act(() => {
+    result.current.appendTurn(agentId, sessionId, submitted);
+    result.current.setDraft('next draft');
+  });
+  expect(result.current.turns).toContainEqual(submitted);
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns).toContainEqual(submitted);
+  expect(result.current.draft).toBe('next draft');
+  apiMock.mockImplementation(async (path) =>
+    path === conversationPath
+      ? { session: { id: sessionId, turns: [submitted] } }
+      : { sessions: [{ id: sessionId }] },
+  );
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns.filter((turn) => turn.runId === 'pending-run')).toHaveLength(1);
 });
 
-it('audit: preserves interrupted pending turn before reset but filters it after backend resetAt',async()=>{
- let reset=false;
- apiMock.mockImplementation(async(path,init)=>{
-  if(path===sessionListPath)return {sessions:[{id:sessionId}]};
-  if(init?.method==='POST' && path.includes('/reset')){reset=true;return {ok:true,metadata:{resetAt:'2026-10-07T12:01:00.000Z'}};}
-  if(path===conversationPath)return {session:{id:sessionId,turns:[],...(reset?{metadata:{resetAt:'2026-10-07T12:01:00.000Z'}}:{})}};
-  return {runs:[],subagents:[]};
- });
- const {result}=renderHook(()=>useChatSession(agentId));
- await waitFor(()=>expect(result.current.sessionId).toBe(sessionId));
- act(()=>result.current.appendTurn(agentId,sessionId,{role:'user',runId:'interrupted-run',content:'Interrupted submitted message',ts:'2026-10-07T12:00:00.000Z'}));
- await act(async()=>{await result.current.refreshConversation();});
- expect(result.current.turns).toEqual([expect.objectContaining({content:'Interrupted submitted message'})]);
- await act(async()=>{await result.current.resetSession();});
- await act(async()=>{await result.current.refreshConversation();});
- expect(result.current.turns).toEqual([]);
+it('audit: preserves interrupted pending turn before reset but filters it after backend resetAt', async () => {
+  let reset = false;
+  apiMock.mockImplementation(async (path, init) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (init?.method === 'POST' && path.includes('/reset')) {
+      reset = true;
+      return { ok: true, metadata: { resetAt: '2026-10-07T12:01:00.000Z' } };
+    }
+    if (path === conversationPath)
+      return {
+        session: {
+          id: sessionId,
+          turns: [],
+          ...(reset ? { metadata: { resetAt: '2026-10-07T12:01:00.000Z' } } : {}),
+        },
+      };
+    return { runs: [], subagents: [] };
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  act(() =>
+    result.current.appendTurn(agentId, sessionId, {
+      role: 'user',
+      runId: 'interrupted-run',
+      content: 'Interrupted submitted message',
+      ts: '2026-10-07T12:00:00.000Z',
+    }),
+  );
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns).toEqual([
+    expect.objectContaining({ content: 'Interrupted submitted message' }),
+  ]);
+  await act(async () => {
+    await result.current.resetSession();
+  });
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns).toEqual([]);
 });
 
 it.each([
@@ -598,73 +1070,148 @@ it.each([
   [[{ type: 'run.started' }, { type: 'route.decided' }], 'preparing'],
   [[{ type: 'model.started' }], 'request-intent'],
   [[{ type: 'model.dispatched', data: { modelCall: 1 } }], 'dispatched'],
-  [[{ type: 'model.started', data: { modelCall: 2 } }, { type: 'model.dispatched', data: { modelCall: 1 } }], 'request-intent'],
-  [[{ type: 'model.started' }, { type: 'model.dispatched', runId: 'wrong', data: { modelCall: 1 } }], 'request-intent'],
+  [
+    [
+      { type: 'model.started', data: { modelCall: 2 } },
+      { type: 'model.dispatched', data: { modelCall: 1 } },
+    ],
+    'request-intent',
+  ],
+  [
+    [
+      { type: 'model.started' },
+      { type: 'model.dispatched', runId: 'wrong', data: { modelCall: 1 } },
+    ],
+    'request-intent',
+  ],
   [[{ type: 'model.started' }, { type: 'model.completed' }], 'model-completed'],
-] as const)('recovers live stage from polling events, never the streaming phase: %j', async (events, stage) => {
-  apiMock.mockImplementation(async (path) => {
-    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
-    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [{ runId: 'recovered', agentId, sessionId, status: 'running', phase: 'streaming', progress: events }] };
-    throw new Error(path);
-  });
-  const { result, unmount } = renderHook(() => useChatSession(agentId));
-  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('recovered'));
-  expect(result.current.runtimeRun?.stage).toBe(stage);
-  expect(result.current.runtimeRun?.progress).toEqual([]);
-  act(() => result.current.selectSession('other-session'));
-  expect(result.current.runtimeRun).toBeNull();
-  unmount();
-});
+] as const)(
+  'recovers live stage from polling events, never the streaming phase: %j',
+  async (events, stage) => {
+    apiMock.mockImplementation(async (path) => {
+      if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+      if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+      if (path.startsWith('/api/chat/runs/active?'))
+        return {
+          runs: [
+            {
+              runId: 'recovered',
+              agentId,
+              sessionId,
+              status: 'running',
+              phase: 'streaming',
+              progress: events,
+            },
+          ],
+        };
+      throw new Error(path);
+    });
+    const { result, unmount } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('recovered'));
+    expect(result.current.runtimeRun?.stage).toBe(stage);
+    expect(result.current.runtimeRun?.progress).toEqual([]);
+    act(() => result.current.selectSession('other-session'));
+    expect(result.current.runtimeRun).toBeNull();
+    unmount();
+  },
+);
 
 it.each([
-  [{ blockers: 1, blockerReasons: ['needs_review'], outcome: 'incomplete' }, undefined, 'Incomplete'],
+  [
+    { blockers: 1, blockerReasons: ['needs_review'], outcome: 'incomplete' },
+    undefined,
+    'Incomplete',
+  ],
   [{ blockers: ['subagent_incomplete'] }, undefined, 'Incomplete'],
-  [{ blockerReasons: ['subagent_incomplete', 'subagent_model_failed:offline'], outcome: 'incomplete' }, undefined, 'Error'],
+  [
+    {
+      blockerReasons: ['subagent_incomplete', 'subagent_model_failed:offline'],
+      outcome: 'incomplete',
+    },
+    undefined,
+    'Error',
+  ],
   [{ blockerReasons: ['needs_review'], outcome: 'incomplete' }, 'dispatch failed', 'Error'],
-])('shows terminal incomplete as warning and execution failures as Error', async (childResult, error, label) => {
-  apiMock.mockImplementation(async (path) => {
-    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
-    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
-    if (path.startsWith('/api/chat/runs/active?')) return { runs: [], subagents: [{
-      id: 'child-warning', agentId, runId: 'child-run', sessionId: 'child-session', parentSessionId: sessionId,
-      status: 'failed', final: false, result: childResult, activity: { status: 'failed', error },
-    }] };
-    throw new Error(path);
-  });
-  const { result, unmount } = renderHook(() => useChatSession(agentId));
-  await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(1));
-  expect(result.current.runtimeChildActivities[0]).toMatchObject({ status: 'warn', items: [{ label, status: 'error' }] });
-  unmount();
-});
+])(
+  'shows terminal incomplete as warning and execution failures as Error',
+  async (childResult, error, label) => {
+    apiMock.mockImplementation(async (path) => {
+      if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+      if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+      if (path.startsWith('/api/chat/runs/active?'))
+        return {
+          runs: [],
+          subagents: [
+            {
+              id: 'child-warning',
+              agentId,
+              runId: 'child-run',
+              sessionId: 'child-session',
+              parentSessionId: sessionId,
+              status: 'failed',
+              final: false,
+              result: childResult,
+              activity: { status: 'failed', error },
+            },
+          ],
+        };
+      throw new Error(path);
+    });
+    const { result, unmount } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.runtimeChildActivities).toHaveLength(1));
+    expect(result.current.runtimeChildActivities[0]).toMatchObject({
+      status: 'warn',
+      items: [{ label, status: 'error' }],
+    });
+    unmount();
+  },
+);
 
 it('recovers externally dispatched work on assigned agent and after navigation away/return', async () => {
- const target = 'assigned'; const dispatched = 'task-session';
- apiMock.mockImplementation(async path => {
-  if (path.startsWith('/api/sessions?')) return { sessions: [{ id: 'default' }] };
-  if (path.startsWith('/api/sessions/')) return { session: { turns: [{ role: 'user', content: 'External task', ts: '2026-01-01' }] } };
-  if (path.startsWith('/api/chat/runs/active?')) {
-   const query = new URLSearchParams(path.split('?')[1]);
-   return { runs: query.get('agentId') === target && query.get('sessionId') === dispatched ? [{ runId: 'external-run', agentId: target, sessionId: dispatched, status: 'running', answerText: 'Partial answer\nwith whitespace ', progress: [{ type: 'model.dispatched', data: { modelCall: 1 } }] }] : [] };
-  }
-  throw new Error(path);
- });
- const { result, rerender, unmount } = renderHook(({ selected }) => useChatSession(selected), { initialProps: { selected: agentId } });
- await waitFor(() => expect(result.current.sessionId).toBe('default'));
- act(() => result.current.selectSession(dispatched, target));
- rerender({ selected: target });
- await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
- expect(result.current.sessionId).toBe(dispatched);
- expect(result.current.runtimeRun?.stage).toBe('dispatched');
- expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
- await waitFor(() => expect(result.current.turns[0]?.content).toBe('External task'));
- rerender({ selected: agentId });
- await waitFor(() => expect(result.current.runtimeRun).toBeNull());
- rerender({ selected: target });
- await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
- expect(result.current.sessionId).toBe(dispatched);
- expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
- unmount();
+  const target = 'assigned';
+  const dispatched = 'task-session';
+  apiMock.mockImplementation(async (path) => {
+    if (path.startsWith('/api/sessions?')) return { sessions: [{ id: 'default' }] };
+    if (path.startsWith('/api/sessions/'))
+      return { session: { turns: [{ role: 'user', content: 'External task', ts: '2026-01-01' }] } };
+    if (path.startsWith('/api/chat/runs/active?')) {
+      const query = new URLSearchParams(path.split('?')[1]);
+      return {
+        runs:
+          query.get('agentId') === target && query.get('sessionId') === dispatched
+            ? [
+                {
+                  runId: 'external-run',
+                  agentId: target,
+                  sessionId: dispatched,
+                  status: 'running',
+                  answerText: 'Partial answer\nwith whitespace ',
+                  progress: [{ type: 'model.dispatched', data: { modelCall: 1 } }],
+                },
+              ]
+            : [],
+      };
+    }
+    throw new Error(path);
+  });
+  const { result, rerender, unmount } = renderHook(({ selected }) => useChatSession(selected), {
+    initialProps: { selected: agentId },
+  });
+  await waitFor(() => expect(result.current.sessionId).toBe('default'));
+  act(() => result.current.selectSession(dispatched, target));
+  rerender({ selected: target });
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
+  expect(result.current.sessionId).toBe(dispatched);
+  expect(result.current.runtimeRun?.stage).toBe('dispatched');
+  expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
+  await waitFor(() => expect(result.current.turns[0]?.content).toBe('External task'));
+  rerender({ selected: agentId });
+  await waitFor(() => expect(result.current.runtimeRun).toBeNull());
+  rerender({ selected: target });
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('external-run'));
+  expect(result.current.sessionId).toBe(dispatched);
+  expect(result.current.runtimeRun?.answerText).toBe('Partial answer\nwith whitespace ');
+  unmount();
 });
 
 it('clears superseded assistant/action state while retaining its submitted user turn', async () => {
@@ -672,11 +1219,19 @@ it('clears superseded assistant/action state while retaining its submitted user 
   await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
   await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
   const user = { role: 'user' as const, content: 'Keep this request', runId: 'superseded-run' };
-  const assistant = { role: 'assistant' as const, content: '[model_error: superseded]', runId: 'superseded-run' };
+  const assistant = {
+    role: 'assistant' as const,
+    content: '[model_error: superseded]',
+    runId: 'superseded-run',
+  };
   act(() => {
     result.current.appendTurn(agentId, sessionId, user);
     result.current.appendTurn(agentId, sessionId, assistant);
-    result.current.storeToolActivity({ runId: 'superseded-run', items: [{ id: 'old-action', label: 'Old action', status: 'pending' }], status: 'running' });
+    result.current.storeToolActivity({
+      runId: 'superseded-run',
+      items: [{ id: 'old-action', label: 'Old action', status: 'pending' }],
+      status: 'running',
+    });
   });
 
   act(() => result.current.clearRunState(agentId, sessionId, 'superseded-run'));
@@ -693,29 +1248,65 @@ it('hydrates the conversation cache only once, not on each draft/tool-activity r
   await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
   const reads = () => get.mock.calls.filter(([key]) => key === conversationCacheStorageKey).length;
   const afterLoad = reads();
-  act(() => { result.current.setDraft('typing one'); });
-  act(() => { result.current.setDraft('typing two'); });
-  act(() => { result.current.storeToolActivity({ runId: 'r', items: [], status: 'running' }); });
+  act(() => {
+    result.current.setDraft('typing one');
+  });
+  act(() => {
+    result.current.setDraft('typing two');
+  });
+  act(() => {
+    result.current.storeToolActivity({ runId: 'r', items: [], status: 'running' });
+  });
   rerender();
   expect(reads()).toBe(afterLoad);
   expect(result.current.draft).toBe('typing two');
-  unmount(); get.mockRestore();
+  unmount();
+  get.mockRestore();
 });
 
-it.each(['Context compacted.', 'Nothing to compact.', 'Compaction failed.'])('hydrates durable compact receipt on refresh and remount: %s', async (answer) => {
- const saved = [{ type: 'message', role: 'user', content: '/compact', runId: 'compact-run', metadata: { command: 'compact' } }, { type: 'message', role: 'assistant', content: answer, runId: 'compact-run', metadata: { command: 'compact', commandReceipt: { compressed: answer === 'Context compacted.' } } }];
- apiMock.mockImplementation(async (path) => path === sessionListPath ? { sessions: [{ id: sessionId }] } : { session: { id: sessionId, turns: saved } });
- const first = renderHook(() => useChatSession(agentId));
- await waitFor(() => expect(first.result.current.turns).toHaveLength(2));
- await act(async () => { await first.result.current.refreshConversation(); });
- expect(first.result.current.turns.map(turn => turn.content)).toEqual(['/compact', answer]);
- first.unmount();
- const second = renderHook(() => useChatSession(agentId));
- await waitFor(() => expect(second.result.current.turns.map(turn => turn.content)).toEqual(['/compact', answer]));
-});
+it.each(['Context compacted.', 'Nothing to compact.', 'Compaction failed.'])(
+  'hydrates durable compact receipt on refresh and remount: %s',
+  async (answer) => {
+    const saved = [
+      {
+        type: 'message',
+        role: 'user',
+        content: '/compact',
+        runId: 'compact-run',
+        metadata: { command: 'compact' },
+      },
+      {
+        type: 'message',
+        role: 'assistant',
+        content: answer,
+        runId: 'compact-run',
+        metadata: {
+          command: 'compact',
+          commandReceipt: { compressed: answer === 'Context compacted.' },
+        },
+      },
+    ];
+    apiMock.mockImplementation(async (path) =>
+      path === sessionListPath
+        ? { sessions: [{ id: sessionId }] }
+        : { session: { id: sessionId, turns: saved } },
+    );
+    const first = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(first.result.current.turns).toHaveLength(2));
+    await act(async () => {
+      await first.result.current.refreshConversation();
+    });
+    expect(first.result.current.turns.map((turn) => turn.content)).toEqual(['/compact', answer]);
+    first.unmount();
+    const second = renderHook(() => useChatSession(agentId));
+    await waitFor(() =>
+      expect(second.result.current.turns.map((turn) => turn.content)).toEqual(['/compact', answer]),
+    );
+  },
+);
 
 it('remembers explicitly selected parent sessions and returns from nested children to their root', async () => {
-  apiMock.mockImplementation(async path => {
+  apiMock.mockImplementation(async (path) => {
     if (path === sessionListPath) return { sessions: [{ id: 'default' }, { id: 'named' }] };
     if (path.startsWith('/api/sessions/')) return { session: { turns: [] } };
     return {};
@@ -732,4 +1323,88 @@ it('remembers explicitly selected parent sessions and returns from nested childr
   act(() => result.current.selectChildSession(agentId, 'unknown'));
   act(() => result.current.prepareAgentSelection(agentId));
   expect(result.current.sessionId).toBe('another-root');
+});
+
+it('hydrates empty structured terminal and literal marker successes across reload and cache refresh', async () => {
+  const failure = {
+    type: 'message',
+    role: 'assistant',
+    content: '',
+    runId: 'failed-run',
+    metadata: {
+      chatResultVersion: 2,
+      terminalStatus: 'failed',
+      modelFailure: { origin: 'upstream', code: 'provider_http_429', retryable: true, status: 429 },
+      modelRecovery: { version: 1, retryCount: 1, requests: [{ state: 'exhausted' }] },
+    },
+  };
+  const success = {
+    type: 'message',
+    role: 'assistant',
+    content: '[model_error: literal]',
+    runId: 'ok-run',
+    metadata: { chatResultVersion: 2, terminalStatus: 'completed' },
+  };
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [failure, success] } };
+    if (path.startsWith('/api/chat/runs/active?')) return { runs: [] };
+    throw new Error(path);
+  });
+  const first = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(first.result.current.turns).toHaveLength(2));
+  expect(first.result.current.turns[0].metadata).toEqual(failure.metadata);
+  first.unmount();
+  const second = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(second.result.current.turns).toHaveLength(2));
+  expect(second.result.current.turns[0]).toMatchObject(failure);
+  expect(second.result.current.turns[1]).toMatchObject(success);
+  second.unmount();
+});
+
+it('finalizes recovered thoughts by explicit status for an empty terminal row, not its content', async () => {
+  let active = true;
+  const terminal = {
+    type: 'message',
+    role: 'assistant',
+    content: '',
+    runId: 'recovering-run',
+    metadata: { chatResultVersion: 2, terminalStatus: 'cancelled' },
+  };
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath)
+      return { session: { id: sessionId, turns: active ? [] : [terminal] } };
+    if (path.startsWith('/api/chat/runs/active?'))
+      return {
+        runs: active
+          ? [
+              {
+                runId: 'recovering-run',
+                agentId,
+                sessionId,
+                status: 'running',
+                progress: [
+                  {
+                    type: 'assistant.thought',
+                    ts: new Date().toISOString(),
+                    data: { delta: 'One thought', modelCall: 1 },
+                  },
+                ],
+              },
+            ]
+          : [],
+      };
+    throw new Error(path);
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.runtimeRun?.runId).toBe('recovering-run'));
+  active = false;
+  await waitFor(
+    () => expect(result.current.turns[0]?.metadata?.progress?.status).toBe('cancelled'),
+    { timeout: 3000 },
+  );
+  expect(result.current.turns[0]?.content).toBe('');
+  expect(result.current.turns[0]?.metadata?.terminalStatus).toBe('cancelled');
+  unmount();
 });

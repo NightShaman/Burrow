@@ -42,7 +42,10 @@ describe('useChatComposers', () => {
     });
     await act(() => result.current.session.create());
 
-    expect(apiMock).toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST', body: expect.stringContaining('"operationId"') }));
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/sessions',
+      expect.objectContaining({ method: 'POST', body: expect.stringContaining('"operationId"') }),
+    );
     expect(apiMock).toHaveBeenCalledTimes(1);
     expect(options.refreshSessions).toHaveBeenCalledWith('smatchet');
     expect(options.selectSession).toHaveBeenCalledWith('planning');
@@ -51,31 +54,51 @@ describe('useChatComposers', () => {
 
   it.each(['agent', 'session'])('discards late create after %s navigation', async (navigation) => {
     let resolve!: (value: unknown) => void;
-    apiMock.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    apiMock.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
     const { result, options, rerender } = renderComposers();
     act(() => result.current.session.setName('planning'));
     let pending!: Promise<void>;
-    act(() => { pending = result.current.session.create(); });
+    act(() => {
+      pending = result.current.session.create();
+    });
     if (navigation === 'agent') options.selectedAgentId = 'other';
 
     if (navigation === 'session') options.sessionId = 'other';
     rerender();
-    await act(async () => { resolve({}); await pending; });
+    await act(async () => {
+      resolve({});
+      await pending;
+    });
     expect(options.selectSession).not.toHaveBeenCalled();
     expect(options.reportError).not.toHaveBeenCalled();
   });
 
   it('discards a late create failure after session navigation away and back', async () => {
     let reject!: (reason: Error) => void;
-    apiMock.mockReturnValueOnce(new Promise((_done, fail) => { reject = fail; }));
+    apiMock.mockReturnValueOnce(
+      new Promise((_done, fail) => {
+        reject = fail;
+      }),
+    );
     const { result, options, rerender } = renderComposers();
     act(() => result.current.session.setName('planning'));
     let pending!: Promise<void>;
-    act(() => { pending = result.current.session.create(); });
+    act(() => {
+      pending = result.current.session.create();
+    });
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
-    options.sessionId = 'other'; rerender();
-    options.sessionId = ''; rerender();
-    await act(async () => { reject(new Error('offline')); await pending; });
+    options.sessionId = 'other';
+    rerender();
+    options.sessionId = '';
+    rerender();
+    await act(async () => {
+      reject(new Error('offline'));
+      await pending;
+    });
     expect(options.reportError).not.toHaveBeenCalled();
     expect(options.selectSession).not.toHaveBeenCalled();
     expect(result.current.session.error).toBe('');
@@ -108,10 +131,17 @@ describe('useChatComposers', () => {
     expect(apiMock).not.toHaveBeenCalled();
   });
 
-
   it('discovers server rooms, reopens a restored tab without duplication, and reloads after closing', async () => {
-    apiMock.mockResolvedValue({ ok: true, channels: [{ id: 'design', name: 'Design', participantAgentIds: ['smatchet', 'hatchet'] }] });
-    const existing = { id: 'group:local:design', label: 'Design', kind: 'group' as const, channelId: 'design' };
+    apiMock.mockResolvedValue({
+      ok: true,
+      channels: [{ id: 'design', name: 'Design', participantAgentIds: ['smatchet', 'hatchet'] }],
+    });
+    const existing = {
+      id: 'group:local:design',
+      label: 'Design',
+      kind: 'group' as const,
+      channelId: 'design',
+    };
     const { result, options, rerender } = renderComposers({ tabs: [existing] });
     act(() => result.current.group.open());
     await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
@@ -126,13 +156,20 @@ describe('useChatComposers', () => {
   });
 
   it('opens a server room in a fresh browser without saved tabs', async () => {
-    apiMock.mockResolvedValue({ ok: true, channels: [{ id: 'from-server', name: 'Saved room', participantAgentIds: [] }] });
+    apiMock.mockResolvedValue({
+      ok: true,
+      channels: [{ id: 'from-server', name: 'Saved room', participantAgentIds: [] }],
+    });
     const { result, options } = renderComposers();
     act(() => result.current.group.open());
     await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
     act(() => result.current.group.openExisting(result.current.group.rooms[0]));
-    const updater = vi.mocked(options.setTabs).mock.calls[0][0] as (tabs: never[]) => Array<{ id: string; channelId?: string; targetId?: string }>;
-    expect(updater([])).toEqual([expect.objectContaining({ id: 'group:from-server', channelId: 'from-server' })]);
+    const updater = vi.mocked(options.setTabs).mock.calls[0][0] as (
+      tabs: never[],
+    ) => Array<{ id: string; channelId?: string; targetId?: string }>;
+    expect(updater([])).toEqual([
+      expect.objectContaining({ id: 'group:from-server', channelId: 'from-server' }),
+    ]);
     expect(options.setActiveTabId).toHaveBeenCalledWith('group:from-server');
   });
 
@@ -148,14 +185,25 @@ describe('useChatComposers', () => {
 
 it('never resets a session whose create succeeds after navigation', async () => {
   let resolveFork!: (value: unknown) => void;
-  apiMock.mockReturnValueOnce(new Promise((resolve) => { resolveFork = resolve; })).mockResolvedValueOnce({});
+  apiMock
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFork = resolve;
+      }),
+    )
+    .mockResolvedValueOnce({});
   const { result, options, rerender } = renderComposers();
   act(() => result.current.session.setName('planning'));
   let pending!: Promise<void>;
-  act(() => { pending = result.current.session.create(); });
+  act(() => {
+    pending = result.current.session.create();
+  });
   options.sessionId = 'other';
   rerender();
-  await act(async () => { resolveFork({}); await pending; });
+  await act(async () => {
+    resolveFork({});
+    await pending;
+  });
   expect(apiMock).toHaveBeenCalledTimes(1);
   expect(options.selectSession).not.toHaveBeenCalled();
 });

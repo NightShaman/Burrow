@@ -1,15 +1,28 @@
 import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
-import { useImperativeUnsavedChanges, useUnsavedNavigation, type UnsavedDraft } from '../../app/UnsavedChanges';
+import {
+  useImperativeUnsavedChanges,
+  useUnsavedNavigation,
+  type UnsavedDraft,
+} from '../../app/UnsavedChanges';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
 import { apiLocal, fetchApi } from '../../app/api';
-import { validateSettingsContribution, type SettingsContribution, type SettingsField, type SettingsAction, type SettingsContributionFactory } from './SettingsContribution';
+import {
+  validateSettingsContribution,
+  type SettingsContribution,
+  type SettingsField,
+  type SettingsAction,
+  type SettingsContributionFactory,
+} from './SettingsContribution';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 export type ModSettingsSection = { id: string; label: string };
-type MountResult = void | (() => void) | { update?: (context: ModSettingsContext) => void; unmount?: () => void };
+type MountResult =
+  | void
+  | (() => void)
+  | { update?: (context: ModSettingsContext) => void; unmount?: () => void };
 export type SettingsSurface = {
   replace: (content: Node | Node[]) => void;
   replaceChildren: (...content: Node[]) => void;
@@ -29,102 +42,493 @@ type ModSettingsContext = {
   fetchContent: (path: string, init?: RequestInit) => Promise<Response>;
   accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   refreshAgents: () => Promise<void>;
-  saveAgentExecutionEnvironment: (agentId: string, executionEnvironment: Agent['executionEnvironment']) => Promise<void>;
+  saveAgentExecutionEnvironment: (
+    agentId: string,
+    executionEnvironment: Agent['executionEnvironment'],
+  ) => Promise<void>;
 };
 type ModSettingsModule = {
   settingsSections?: ModSettingsSection[];
   mountSettings?: (context: ModSettingsContext) => MountResult | Promise<MountResult>;
   settingsContribution?: unknown;
   createSettingsContribution?: SettingsContributionFactory;
-  handleSettingsAction?: (actionId: string, values: Record<string, string | boolean>) => void | Promise<void>;
+  handleSettingsAction?: (
+    actionId: string,
+    values: Record<string, string | boolean>,
+  ) => void | Promise<void>;
 };
 
-function defaultFieldValues(definition: SettingsContribution['sections'][number]): Record<string, string | boolean> {
-  return Object.fromEntries([
-    ...(definition.fields ?? []),
-    ...(definition.items?.flatMap((item) => item.fields ?? []) ?? []),
-  ].map((field) => [field.id, field.control === 'boolean' ? field.value === 'true' : field.value ?? '']));
+function defaultFieldValues(
+  definition: SettingsContribution['sections'][number],
+): Record<string, string | boolean> {
+  return Object.fromEntries(
+    [
+      ...(definition.fields ?? []),
+      ...(definition.items?.flatMap((item) => item.fields ?? []) ?? []),
+    ].map((field) => [
+      field.id,
+      field.control === 'boolean' ? field.value === 'true' : (field.value ?? ''),
+    ]),
+  );
 }
 
-export function DeclarativeSection({ contribution, section, module, overflowTarget }: { contribution: SettingsContribution; section: ModSettingsSection; module: ModSettingsModule; overflowTarget: HTMLElement | null }) {
+export function DeclarativeSection({
+  contribution,
+  section,
+  module,
+  overflowTarget,
+}: {
+  contribution: SettingsContribution;
+  section: ModSettingsSection;
+  module: ModSettingsModule;
+  overflowTarget: HTMLElement | null;
+}) {
   const definition = contribution.sections.find((item) => item.id === section.id);
-  const [values, setValues] = useState<Record<string, string | boolean>>(() => definition ? defaultFieldValues(definition) : {});
-  const previousDefaults = useRef({ sectionId: section.id, values: definition ? defaultFieldValues(definition) : {} });
-  const [actionState, setActionState] = useState<{ id: string; status: 'saving' | 'success' | 'error'; message: string } | null>(null);
+  const [values, setValues] = useState<Record<string, string | boolean>>(() =>
+    definition ? defaultFieldValues(definition) : {},
+  );
+  const previousDefaults = useRef({
+    sectionId: section.id,
+    values: definition ? defaultFieldValues(definition) : {},
+  });
+  const [actionState, setActionState] = useState<{
+    id: string;
+    status: 'saving' | 'success' | 'error';
+    message: string;
+  } | null>(null);
   const confirm = useConfirm();
   const actionPending = useRef(false);
   const actionOwner = useRef<object | null>(null);
-  useEffect(() => { const owner = {}; actionOwner.current = owner; return () => { actionOwner.current = null; }; }, [section.id, definition]);
+  useEffect(() => {
+    const owner = {};
+    actionOwner.current = owner;
+    return () => {
+      actionOwner.current = null;
+    };
+  }, [section.id, definition]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(definition?.items?.[0]?.id ?? '');
   useEffect(() => {
     if (!definition) return;
     const defaults = defaultFieldValues(definition);
     const previous = previousDefaults.current;
-    setValues(current => Object.fromEntries(Object.entries(defaults).map(([id, value]) => [id,
-      previous.sectionId === section.id && Object.hasOwn(previous.values, id) && current[id] !== previous.values[id] ? current[id] : value,
-    ])));
+    setValues((current) =>
+      Object.fromEntries(
+        Object.entries(defaults).map(([id, value]) => [
+          id,
+          previous.sectionId === section.id &&
+          Object.hasOwn(previous.values, id) &&
+          current[id] !== previous.values[id]
+            ? current[id]
+            : value,
+        ]),
+      ),
+    );
     previousDefaults.current = { sectionId: section.id, values: defaults };
-    setActionState(null); setEditingId(null);
-    setSelectedId((current) => definition.items?.some((item) => item.id === current) ? current : definition.items?.[0]?.id ?? '');
+    setActionState(null);
+    setEditingId(null);
+    setSelectedId((current) =>
+      definition.items?.some((item) => item.id === current)
+        ? current
+        : (definition.items?.[0]?.id ?? ''),
+    );
   }, [definition, section.id]);
   if (!definition) return null;
-  const update = (id: string, value: string | boolean) => setValues((current) => ({ ...current, [id]: value }));
+  const update = (id: string, value: string | boolean) =>
+    setValues((current) => ({ ...current, [id]: value }));
   const runAction = async (actionId: string) => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
     const actionValues = { ...defaultFieldValues(definition), ...values };
-    try { if (typeof module.handleSettingsAction !== 'function') throw new Error('The mod does not provide an action handler.'); await module.handleSettingsAction(actionId, actionValues); setActionState({ id: actionId, status: 'success', message: 'Saved.' }); setValues(current => Object.fromEntries(Object.entries(current).map(([id, value]) => [id, [...(definition.fields ?? []), ...(definition.items?.flatMap(item => item.fields ?? []) ?? [])].some(field => field.id === id && field.control === 'password') ? '' : value]))); if (definition.fields?.length) setEditingId(null); }
-    catch (cause) { setActionState({ id: actionId, status: 'error', message: cause instanceof Error ? cause.message : 'The action could not be completed.' }); }
+    try {
+      if (typeof module.handleSettingsAction !== 'function')
+        throw new Error('The mod does not provide an action handler.');
+      await module.handleSettingsAction(actionId, actionValues);
+      setActionState({ id: actionId, status: 'success', message: 'Saved.' });
+      setValues((current) =>
+        Object.fromEntries(
+          Object.entries(current).map(([id, value]) => [
+            id,
+            [
+              ...(definition.fields ?? []),
+              ...(definition.items?.flatMap((item) => item.fields ?? []) ?? []),
+            ].some((field) => field.id === id && field.control === 'password')
+              ? ''
+              : value,
+          ]),
+        ),
+      );
+      if (definition.fields?.length) setEditingId(null);
+    } catch (cause) {
+      setActionState({
+        id: actionId,
+        status: 'error',
+        message: cause instanceof Error ? cause.message : 'The action could not be completed.',
+      });
+    }
   };
   const requestAction = async (action: SettingsAction) => {
     if (actionPending.current) return;
     actionPending.current = true;
     const owner = actionOwner.current;
     try {
-      if (action.confirm && !await confirm({ title: action.label, message: action.confirm, confirmLabel: action.label, tone: action.tone === 'danger' ? 'danger' : 'default' })) return;
+      if (
+        action.confirm &&
+        !(await confirm({
+          title: action.label,
+          message: action.confirm,
+          confirmLabel: action.label,
+          tone: action.tone === 'danger' ? 'danger' : 'default',
+        }))
+      )
+        return;
       if (!owner || actionOwner.current !== owner) return;
       await runAction(action.id);
-    } finally { actionPending.current = false; }
+    } finally {
+      actionPending.current = false;
+    }
   };
-  const actions = (items: SettingsAction[] | undefined) => items?.length ? <div className="card-actions">{items.map((action) => { const saving = actionState?.id === action.id && actionState?.status === 'saving'; return <button type="button" className={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''} disabled={actionState?.status === 'saving'} key={action.id} onClick={() => void requestAction(action)}>{saving ? 'Saving…' : action.label}</button>; })}</div> : null;
-  const feedback = actionState && <p className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'} role={actionState.status === 'error' ? 'alert' : 'status'}>{actionState.message}</p>;
+  const actions = (items: SettingsAction[] | undefined) =>
+    items?.length ? (
+      <div className="card-actions">
+        {items.map((action) => {
+          const saving = actionState?.id === action.id && actionState?.status === 'saving';
+          return (
+            <button
+              type="button"
+              className={
+                action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''
+              }
+              disabled={actionState?.status === 'saving'}
+              key={action.id}
+              onClick={() => void requestAction(action)}
+            >
+              {saving ? 'Saving…' : action.label}
+            </button>
+          );
+        })}
+      </div>
+    ) : null;
+  const feedback = actionState && (
+    <p
+      className={actionState.status === 'error' ? 'settings-request-error' : 'settings-help'}
+      role={actionState.status === 'error' ? 'alert' : 'status'}
+    >
+      {actionState.message}
+    </p>
+  );
   if (definition.layout === 'form-inventory') {
-    const editing = definition.items?.find(item => item.id === editingId) ?? (!definition.fields?.length ? definition.items?.[0] : undefined);
+    const editing =
+      definition.items?.find((item) => item.id === editingId) ??
+      (!definition.fields?.length ? definition.items?.[0] : undefined);
     const busy = actionState?.status === 'saving';
-    const reset = () => { setEditingId(null); setValues(defaultFieldValues(definition)); setActionState(null); };
-    const inventoryContents = definition.items?.length ? <div className="memory-connection-list">{definition.items.map(item => <article className={`memory-connection settings-inventory-card${editing?.id === item.id ? ' active' : ''}`} key={item.id}>
-      {item.fields?.length ? <button type="button" className="settings-inventory-select" aria-pressed={editing?.id === item.id} disabled={busy} onClick={() => { setValues(defaultFieldValues(definition)); setEditingId(item.id); setActionState(null); }}><strong>{item.label}</strong>{item.meta && <small>{item.meta}</small>}</button> : <div><strong>{item.label}</strong>{item.meta && <small>{item.meta}</small>}</div>}
-      {actions(item.actions?.filter(action => !item.fields?.length || action.tone === 'danger'))}
-    </article>)}</div> : <p className="settings-empty">No saved items yet.</p>;
-    const inventory = <div className="settings-overflow-content memory-saved">{inventoryContents}</div>;
-    return <><SettingSection title={editing ? `${editing.editLabel ?? 'Edit'}: ${editing.label}` : definition.label}>
-      {definition.description && <p className="settings-description">{definition.description}</p>}
-      {!editing && !definition.fields?.length && <p className="settings-empty">No items available to configure.</p>}
-      {(editing?.fields ?? definition.fields)?.map(field => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)}>{field.options?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : field.control === 'boolean' ? <input type="checkbox" disabled={busy} checked={values[field.id] === true} onChange={event => update(field.id, event.currentTarget.checked)} /> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} disabled={busy} value={String(values[field.id] ?? '')} onChange={event => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}
-      {editing?.metadata?.length && <details><summary>Details</summary><dl>{editing.metadata.map(entry => <div key={entry.label}><dt>{entry.label}</dt><dd>{entry.value}</dd></div>)}</dl></details>}
-      {actions(editing ? editing.actions?.filter(action => action.tone !== 'danger') : definition.actions)}
-      {editing && Boolean(definition.fields?.length) && <button type="button" disabled={busy} onClick={reset}>Cancel</button>}{feedback}
-      {!overflowTarget && <details className="memory-saved saved-accordion"><summary>Saved {definition.label.toLowerCase()}</summary>{inventoryContents}</details>}
-    </SettingSection>{overflowTarget && createPortal(inventory, overflowTarget)}</>;
+    const reset = () => {
+      setEditingId(null);
+      setValues(defaultFieldValues(definition));
+      setActionState(null);
+    };
+    const inventoryContents = definition.items?.length ? (
+      <div className="memory-connection-list">
+        {definition.items.map((item) => (
+          <article
+            className={`memory-connection settings-inventory-card${editing?.id === item.id ? ' active' : ''}`}
+            key={item.id}
+          >
+            {item.fields?.length ? (
+              <button
+                type="button"
+                className="settings-inventory-select"
+                aria-pressed={editing?.id === item.id}
+                disabled={busy}
+                onClick={() => {
+                  setValues(defaultFieldValues(definition));
+                  setEditingId(item.id);
+                  setActionState(null);
+                }}
+              >
+                <strong>{item.label}</strong>
+                {item.meta && <small>{item.meta}</small>}
+              </button>
+            ) : (
+              <div>
+                <strong>{item.label}</strong>
+                {item.meta && <small>{item.meta}</small>}
+              </div>
+            )}
+            {actions(
+              item.actions?.filter((action) => !item.fields?.length || action.tone === 'danger'),
+            )}
+          </article>
+        ))}
+      </div>
+    ) : (
+      <p className="settings-empty">No saved items yet.</p>
+    );
+    const inventory = (
+      <div className="settings-overflow-content memory-saved">{inventoryContents}</div>
+    );
+    return (
+      <>
+        <SettingSection
+          title={editing ? `${editing.editLabel ?? 'Edit'}: ${editing.label}` : definition.label}
+        >
+          {definition.description && (
+            <p className="settings-description">{definition.description}</p>
+          )}
+          {!editing && !definition.fields?.length && (
+            <p className="settings-empty">No items available to configure.</p>
+          )}
+          {(editing?.fields ?? definition.fields)?.map((field) => (
+            <Field label={field.label} key={field.id}>
+              {field.control === 'select' ? (
+                <select
+                  disabled={busy}
+                  value={String(values[field.id] ?? '')}
+                  onChange={(event) => update(field.id, event.currentTarget.value)}
+                >
+                  {field.options?.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : field.control === 'boolean' ? (
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={values[field.id] === true}
+                  onChange={(event) => update(field.id, event.currentTarget.checked)}
+                />
+              ) : (
+                <input
+                  type={
+                    field.control === 'password'
+                      ? 'password'
+                      : field.control === 'number'
+                        ? 'number'
+                        : 'text'
+                  }
+                  disabled={busy}
+                  value={String(values[field.id] ?? '')}
+                  onChange={(event) => update(field.id, event.currentTarget.value)}
+                />
+              )}
+              {field.description && <small className="settings-help">{field.description}</small>}
+            </Field>
+          ))}
+          {editing?.metadata?.length && (
+            <details>
+              <summary>Details</summary>
+              <dl>
+                {editing.metadata.map((entry) => (
+                  <div key={entry.label}>
+                    <dt>{entry.label}</dt>
+                    <dd>{entry.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
+          {actions(
+            editing
+              ? editing.actions?.filter((action) => action.tone !== 'danger')
+              : definition.actions,
+          )}
+          {editing && Boolean(definition.fields?.length) && (
+            <button type="button" disabled={busy} onClick={reset}>
+              Cancel
+            </button>
+          )}
+          {feedback}
+          {!overflowTarget && (
+            <details className="memory-saved saved-accordion">
+              <summary>Saved {definition.label.toLowerCase()}</summary>
+              {inventoryContents}
+            </details>
+          )}
+        </SettingSection>
+        {overflowTarget && createPortal(inventory, overflowTarget)}
+      </>
+    );
   }
-  if (definition.layout === 'form') return <SettingSection title={definition.label}>
-    {definition.description && <p className="settings-help">{definition.description}</p>}
-    {definition.fields?.map((field: SettingsField) => <Field label={field.label} key={field.id}>{field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : field.control === 'select' ? <select value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}
-    {actions(definition.actions)}{feedback}
-  </SettingSection>;
+  if (definition.layout === 'form')
+    return (
+      <SettingSection title={definition.label}>
+        {definition.description && <p className="settings-help">{definition.description}</p>}
+        {definition.fields?.map((field: SettingsField) => (
+          <Field label={field.label} key={field.id}>
+            {field.control === 'boolean' ? (
+              <input
+                type="checkbox"
+                checked={values[field.id] === true}
+                onChange={(event) => update(field.id, event.currentTarget.checked)}
+              />
+            ) : field.control === 'select' ? (
+              <select
+                value={String(values[field.id] ?? '')}
+                onChange={(event) => update(field.id, event.currentTarget.value)}
+              >
+                {field.options?.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={
+                  field.control === 'password'
+                    ? 'password'
+                    : field.control === 'number'
+                      ? 'number'
+                      : 'text'
+                }
+                value={String(values[field.id] ?? '')}
+                onChange={(event) => update(field.id, event.currentTarget.value)}
+              />
+            )}
+            {field.description && <small className="settings-help">{field.description}</small>}
+          </Field>
+        ))}
+        {actions(definition.actions)}
+        {feedback}
+      </SettingSection>
+    );
   if (definition.layout === 'list-detail') {
-    const selected = definition.items?.find((item) => item.id === selectedId) ?? definition.items?.[0];
-    const detail = selected && <section className="setting-section"><h2>{selected.label}</h2>{selected.description && <p className="settings-help">{selected.description}</p>}{selected.meta && <p className="settings-help">{selected.meta}</p>}{selected.detail && <p>{selected.detail}</p>}{selected.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'select' ? <select value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? field.value ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}</Field>)}{actions(selected.actions)}{feedback}</section>;
-    return <><SettingSection title={definition.label}>{definition.description && <p className="settings-help">{definition.description}</p>}{definition.fields?.map((field) => <Field label={field.label} key={field.id}>{field.control === 'boolean' ? <input type="checkbox" checked={values[field.id] === true} onChange={(event) => update(field.id, event.currentTarget.checked)} /> : field.control === 'select' ? <select value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)}>{field.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input type={field.control === 'password' ? 'password' : field.control === 'number' ? 'number' : 'text'} value={String(values[field.id] ?? '')} onChange={(event) => update(field.id, event.currentTarget.value)} />}{field.description && <small className="settings-help">{field.description}</small>}</Field>)}{actions(definition.actions)}{!selected && feedback}<div className="mcp-server-selector">{definition.items?.map((item) => <button type="button" className={item.id === selected?.id ? 'active' : ''} aria-current={item.id === selected?.id ? 'page' : undefined} onClick={() => setSelectedId(item.id)} key={item.id}>{item.label}{item.meta && <small>{item.meta}</small>}</button>)}</div></SettingSection>{overflowTarget ? createPortal(detail, overflowTarget) : detail}</>;
+    const selected =
+      definition.items?.find((item) => item.id === selectedId) ?? definition.items?.[0];
+    const detail = selected && (
+      <section className="setting-section">
+        <h2>{selected.label}</h2>
+        {selected.description && <p className="settings-help">{selected.description}</p>}
+        {selected.meta && <p className="settings-help">{selected.meta}</p>}
+        {selected.detail && <p>{selected.detail}</p>}
+        {selected.fields?.map((field) => (
+          <Field label={field.label} key={field.id}>
+            {field.control === 'select' ? (
+              <select
+                value={String(values[field.id] ?? field.value ?? '')}
+                onChange={(event) => update(field.id, event.currentTarget.value)}
+              >
+                {field.options?.map((option) => (
+                  <option value={option.value} key={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : field.control === 'boolean' ? (
+              <input
+                type="checkbox"
+                checked={values[field.id] === true}
+                onChange={(event) => update(field.id, event.currentTarget.checked)}
+              />
+            ) : (
+              <input
+                type={
+                  field.control === 'password'
+                    ? 'password'
+                    : field.control === 'number'
+                      ? 'number'
+                      : 'text'
+                }
+                value={String(values[field.id] ?? field.value ?? '')}
+                onChange={(event) => update(field.id, event.currentTarget.value)}
+              />
+            )}
+          </Field>
+        ))}
+        {actions(selected.actions)}
+        {feedback}
+      </section>
+    );
+    return (
+      <>
+        <SettingSection title={definition.label}>
+          {definition.description && <p className="settings-help">{definition.description}</p>}
+          {definition.fields?.map((field) => (
+            <Field label={field.label} key={field.id}>
+              {field.control === 'boolean' ? (
+                <input
+                  type="checkbox"
+                  checked={values[field.id] === true}
+                  onChange={(event) => update(field.id, event.currentTarget.checked)}
+                />
+              ) : field.control === 'select' ? (
+                <select
+                  value={String(values[field.id] ?? '')}
+                  onChange={(event) => update(field.id, event.currentTarget.value)}
+                >
+                  {field.options?.map((option) => (
+                    <option value={option.value} key={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={
+                    field.control === 'password'
+                      ? 'password'
+                      : field.control === 'number'
+                        ? 'number'
+                        : 'text'
+                  }
+                  value={String(values[field.id] ?? '')}
+                  onChange={(event) => update(field.id, event.currentTarget.value)}
+                />
+              )}
+              {field.description && <small className="settings-help">{field.description}</small>}
+            </Field>
+          ))}
+          {actions(definition.actions)}
+          {!selected && feedback}
+          <div className="mcp-server-selector">
+            {definition.items?.map((item) => (
+              <button
+                type="button"
+                className={item.id === selected?.id ? 'active' : ''}
+                aria-current={item.id === selected?.id ? 'page' : undefined}
+                onClick={() => setSelectedId(item.id)}
+                key={item.id}
+              >
+                {item.label}
+                {item.meta && <small>{item.meta}</small>}
+              </button>
+            ))}
+          </div>
+        </SettingSection>
+        {overflowTarget ? createPortal(detail, overflowTarget) : detail}
+      </>
+    );
   }
-  return <SettingSection title={definition.label}>{definition.description && <p className="settings-help">{definition.description}</p>}{definition.items?.map((item) => <article className="provider-card" key={item.id}><strong>{item.label}</strong>{item.description && <p>{item.description}</p>}{item.meta && <small>{item.meta}</small>}{actions(item.actions)}</article>)}</SettingSection>;
+  return (
+    <SettingSection title={definition.label}>
+      {definition.description && <p className="settings-help">{definition.description}</p>}
+      {definition.items?.map((item) => (
+        <article className="provider-card" key={item.id}>
+          <strong>{item.label}</strong>
+          {item.description && <p>{item.description}</p>}
+          {item.meta && <small>{item.meta}</small>}
+          {actions(item.actions)}
+        </article>
+      ))}
+    </SettingSection>
+  );
 }
 
 function validSections(value: unknown): ModSettingsSection[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   return value.flatMap((item) => {
-    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) || typeof item.label !== 'string' || !item.label.trim() || seen.has(item.id)) return [];
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      typeof item.id !== 'string' ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) ||
+      typeof item.label !== 'string' ||
+      !item.label.trim() ||
+      seen.has(item.id)
+    )
+      return [];
     seen.add(item.id);
     return [{ id: item.id, label: item.label.trim() }];
   });
@@ -140,23 +544,42 @@ function createSurface(node: HTMLElement): SettingsSurface {
 
 function modApi(modId: string) {
   const prefix = `/api/mods/${modId}`;
-  return <T = unknown>(path: string, init?: RequestInit): Promise<T> => {
+  return <T = unknown,>(path: string, init?: RequestInit): Promise<T> => {
     const normalized = path.startsWith('/') ? path : `/${path}`;
-    if (normalized.includes('..')) return Promise.reject(new Error('Mod API paths cannot contain parent traversal.'));
+    if (normalized.includes('..'))
+      return Promise.reject(new Error('Mod API paths cannot contain parent traversal.'));
     return apiLocal<T>(`${prefix}${normalized}`, init);
   };
 }
 
 function modAccessApi(modId: string) {
   const path = `/api/operator/mods/${encodeURIComponent(modId)}/access`;
-  return <T = unknown>(init?: RequestInit): Promise<T> => apiLocal<T>(path, init);
+  return <T = unknown,>(init?: RequestInit): Promise<T> => apiLocal<T>(path, init);
 }
 
 function settingsFactoryContext(modId: string, agents: readonly Agent[]) {
   return { api: modApi(modId), accessApi: modAccessApi(modId), agents };
 }
 
-export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, navigationTarget, overflowTarget, selectedSectionId, onSectionChange }: { modId: string; settingsUrl: string; agents: Agent[]; onAgentsChanged: () => Promise<void>; navigationTarget: HTMLElement | null; overflowTarget: HTMLElement | null; selectedSectionId?: string; onSectionChange?: (sectionId: string) => void }) {
+export function ModSettingsHost({
+  modId,
+  settingsUrl,
+  agents,
+  onAgentsChanged,
+  navigationTarget,
+  overflowTarget,
+  selectedSectionId,
+  onSectionChange,
+}: {
+  modId: string;
+  settingsUrl: string;
+  agents: Agent[];
+  onAgentsChanged: () => Promise<void>;
+  navigationTarget: HTMLElement | null;
+  overflowTarget: HTMLElement | null;
+  selectedSectionId?: string;
+  onSectionChange?: (sectionId: string) => void;
+}) {
   const primaryRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
   const navigate = useUnsavedNavigation();
@@ -173,22 +596,43 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
 
   useEffect(() => {
     let active = true;
-    setModule(null); setContribution(null); setSections([]); setSection(''); setError('');
-    void import(/* @vite-ignore */ settingsUrl).then(async (loaded: ModSettingsModule) => {
-      if (!active) return;
-      const staticContribution = validateSettingsContribution(loaded.settingsContribution);
-      const contribution = loaded.createSettingsContribution
-        ? validateSettingsContribution(await loaded.createSettingsContribution(settingsFactoryContext(modId, agentsRef.current)))
-        : staticContribution;
-      if (!active) return;
-      const next = contribution?.sections ?? validSections(loaded.settingsSections);
-      if ((!contribution && typeof loaded.mountSettings !== 'function') || !next.length) throw new Error('The mod settings entry does not implement the Burrow settings contract.');
-      const initialSection = next.find((item) => item.id === selectedSectionId)?.id ?? next[0].id;
-      // A module namespace can be reused across remounts. Wrap it so every
-      // load has a distinct React state identity, even when its URL is unchanged.
-      setModule({ ...loaded }); setContribution(contribution); setSections(next); setSection(initialSection);
-    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load mod settings.'); });
-    return () => { active = false; };
+    setModule(null);
+    setContribution(null);
+    setSections([]);
+    setSection('');
+    setError('');
+    void import(/* @vite-ignore */ settingsUrl)
+      .then(async (loaded: ModSettingsModule) => {
+        if (!active) return;
+        const staticContribution = validateSettingsContribution(loaded.settingsContribution);
+        const contribution = loaded.createSettingsContribution
+          ? validateSettingsContribution(
+              await loaded.createSettingsContribution(
+                settingsFactoryContext(modId, agentsRef.current),
+              ),
+            )
+          : staticContribution;
+        if (!active) return;
+        const next = contribution?.sections ?? validSections(loaded.settingsSections);
+        if ((!contribution && typeof loaded.mountSettings !== 'function') || !next.length)
+          throw new Error(
+            'The mod settings entry does not implement the Burrow settings contract.',
+          );
+        const initialSection = next.find((item) => item.id === selectedSectionId)?.id ?? next[0].id;
+        // A module namespace can be reused across remounts. Wrap it so every
+        // load has a distinct React state identity, even when its URL is unchanged.
+        setModule({ ...loaded });
+        setContribution(contribution);
+        setSections(next);
+        setSection(initialSection);
+      })
+      .catch((cause) => {
+        if (active)
+          setError(cause instanceof Error ? cause.message : 'Could not load mod settings.');
+      });
+    return () => {
+      active = false;
+    };
   }, [settingsUrl, modId]);
 
   useEffect(() => {
@@ -198,22 +642,39 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
 
   const selectSection = (sectionId: string) => {
     if (sectionId === section) return;
-    navigate(() => { setSection(sectionId); onSectionChange?.(sectionId); });
+    navigate(() => {
+      setSection(sectionId);
+      onSectionChange?.(sectionId);
+    });
   };
 
   useEffect(() => {
     const primary = primaryRef.current;
     const definition = contribution?.sections.find((item) => item.id === section);
-    const hasDeclarativeContent = Boolean(definition && (definition.layout === 'form' ? (definition.fields?.length || definition.actions?.length) : definition.items?.length));
+    const hasDeclarativeContent = Boolean(
+      definition &&
+        (definition.layout === 'form'
+          ? definition.fields?.length || definition.actions?.length
+          : definition.items?.length),
+    );
     if (hasDeclarativeContent || !module?.mountSettings || !primary || !section) return;
     const node = document.createElement('div');
     node.className = 'mod-settings-surface';
     primary.replaceChildren(node);
     const overflowNode = overflowTarget ? document.createElement('div') : null;
-    if (overflowNode) { overflowNode.className = 'mod-settings-surface settings-overflow-content'; overflowTarget!.replaceChildren(overflowNode); }
+    if (overflowNode) {
+      overflowNode.className = 'mod-settings-surface settings-overflow-content';
+      overflowTarget!.replaceChildren(overflowNode);
+    }
     const primarySurface = createSurface(node);
     const overflowSurface = overflowNode ? createSurface(overflowNode) : null;
-    const disposeSafely = (candidate?: () => void) => { try { candidate?.(); } catch { /* Mod cleanup cannot break navigation. */ } };
+    const disposeSafely = (candidate?: () => void) => {
+      try {
+        candidate?.();
+      } catch {
+        /* Mod cleanup cannot break navigation. */
+      }
+    };
     let disposed = false;
     let cleanup: (() => void) | undefined;
     const draft = createDraft();
@@ -244,7 +705,21 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       setDraft: draft.setDraft,
       api: modApi(modId),
       fetchContent: (path, init = {}) => {
-        if (!path.startsWith('/api/') || /[\\#]/.test(path) || path.split('?')[0].split('/').some(part => { try { return ['.', '..'].includes(decodeURIComponent(part)); } catch { return true; } })) return Promise.reject(new Error('Invalid content URL.'));
+        if (
+          !path.startsWith('/api/') ||
+          /[\\#]/.test(path) ||
+          path
+            .split('?')[0]
+            .split('/')
+            .some((part) => {
+              try {
+                return ['.', '..'].includes(decodeURIComponent(part));
+              } catch {
+                return true;
+              }
+            })
+        )
+          return Promise.reject(new Error('Invalid content URL.'));
         return fetchApi(path, { ...init, method: 'GET' });
       },
       accessApi: modAccessApi(modId),
@@ -257,35 +732,99 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
         });
       },
     };
-    void Promise.resolve().then(() => { if (!disposed) return module.mountSettings!(context); }).then((result) => {
-      const candidate = typeof result === 'function' ? result : result?.unmount;
-      if (disposed) disposeSafely(candidate); else cleanup = candidate;
-    }).catch((cause) => { if (!disposed) setError(cause instanceof Error ? cause.message : 'Could not mount mod settings.'); });
+    void Promise.resolve()
+      .then(() => {
+        if (!disposed) return module.mountSettings!(context);
+      })
+      .then((result) => {
+        const candidate = typeof result === 'function' ? result : result?.unmount;
+        if (disposed) disposeSafely(candidate);
+        else cleanup = candidate;
+      })
+      .catch((cause) => {
+        if (!disposed)
+          setError(cause instanceof Error ? cause.message : 'Could not mount mod settings.');
+      });
     return () => {
       disposed = true;
-      navigationCancellations.forEach(cancel => cancel());
+      navigationCancellations.forEach((cancel) => cancel());
       draft.dispose();
-      node.remove(); overflowNode?.remove(); disposeSafely(cleanup); node.replaceChildren(); overflowNode?.replaceChildren();
+      node.remove();
+      overflowNode?.remove();
+      disposeSafely(cleanup);
+      node.replaceChildren();
+      overflowNode?.replaceChildren();
     };
   }, [module, contribution, section, modId, overflowTarget, confirm, navigate, createDraft]);
 
-  return <>
-    {navigationTarget && createPortal(<nav className="settings-prototype-section-items" aria-label={`${modId} settings sections`}>{sections.map((item) => <button type="button" className={section === item.id ? 'active' : ''} aria-current={section === item.id ? 'page' : undefined} onClick={() => selectSection(item.id)} key={item.id}>{item.label}</button>)}</nav>, navigationTarget)}
-    {error && <section className="setting-section"><h2>Mod settings unavailable</h2><p className="settings-request-error" role="alert">{error}</p></section>}
-    <div ref={primaryRef} className="mod-settings-mount" data-mod-id={modId}>
-      {contribution && <DeclarativeSection key={section} contribution={contribution} module={{ ...module, handleSettingsAction: async (actionId, values) => {
-        if (typeof module?.handleSettingsAction !== 'function') throw new Error('The mod does not provide an action handler.');
-        await module.handleSettingsAction(actionId, values);
-        if (module?.createSettingsContribution) {
-          try {
-            const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>('/api/agents');
-            const refreshed = validateSettingsContribution(await module.createSettingsContribution(settingsFactoryContext(modId, enabledAgents(currentAgents))));
-            void onAgentsChangedRef.current();
-            if (!refreshed) throw new Error("Invalid settings response.");
-            setContribution(refreshed); setError('');
-          } catch { setError('Saved, but could not refresh settings. Reopen Settings to reload the inventory.'); }
-        }
-      } }} section={sections.find((item) => item.id === section) ?? sections[0]} overflowTarget={overflowTarget} />}
-    </div>
-  </>;
+  return (
+    <>
+      {navigationTarget &&
+        createPortal(
+          <nav
+            className="settings-prototype-section-items"
+            aria-label={`${modId} settings sections`}
+          >
+            {sections.map((item) => (
+              <button
+                type="button"
+                className={section === item.id ? 'active' : ''}
+                aria-current={section === item.id ? 'page' : undefined}
+                onClick={() => selectSection(item.id)}
+                key={item.id}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>,
+          navigationTarget,
+        )}
+      {error && (
+        <section className="setting-section">
+          <h2>Mod settings unavailable</h2>
+          <p className="settings-request-error" role="alert">
+            {error}
+          </p>
+        </section>
+      )}
+      <div ref={primaryRef} className="mod-settings-mount" data-mod-id={modId}>
+        {contribution && (
+          <DeclarativeSection
+            key={section}
+            contribution={contribution}
+            module={{
+              ...module,
+              handleSettingsAction: async (actionId, values) => {
+                if (typeof module?.handleSettingsAction !== 'function')
+                  throw new Error('The mod does not provide an action handler.');
+                await module.handleSettingsAction(actionId, values);
+                if (module?.createSettingsContribution) {
+                  try {
+                    const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>(
+                      '/api/agents',
+                    );
+                    const refreshed = validateSettingsContribution(
+                      await module.createSettingsContribution(
+                        settingsFactoryContext(modId, enabledAgents(currentAgents)),
+                      ),
+                    );
+                    void onAgentsChangedRef.current();
+                    if (!refreshed) throw new Error('Invalid settings response.');
+                    setContribution(refreshed);
+                    setError('');
+                  } catch {
+                    setError(
+                      'Saved, but could not refresh settings. Reopen Settings to reload the inventory.',
+                    );
+                  }
+                }
+              },
+            }}
+            section={sections.find((item) => item.id === section) ?? sections[0]}
+            overflowTarget={overflowTarget}
+          />
+        )}
+      </div>
+    </>
+  );
 }

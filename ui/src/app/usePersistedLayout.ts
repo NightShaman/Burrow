@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
 import { panelIds } from './panelRegistry';
-import { readStorage, removeStorage, writeStorage, readStoredValue, writeStoredValue, type StoredValueValidator } from './browserStorage';
+import {
+  readStorage,
+  removeStorage,
+  writeStorage,
+  readStoredValue,
+  writeStoredValue,
+  type StoredValueValidator,
+} from './browserStorage';
 import type { PanelId } from './types';
 
 export const railSplitBounds = { min: 25, max: 75 } as const;
-export const clampRailSplit = (value: number) => Math.min(railSplitBounds.max, Math.max(railSplitBounds.min, value));
+export const clampRailSplit = (value: number) =>
+  Math.min(railSplitBounds.max, Math.max(railSplitBounds.min, value));
 const persistedStateVersion = 1;
 const rightPanelDefaultsVersionKey = 'hc.rightPanelDefaultsVersion';
 const rightPanelDefaultsVersion = '3';
@@ -14,41 +22,87 @@ function migrateRightPanelDefaults() {
   if (rightPanelDefaultsMigrated) return;
   rightPanelDefaultsMigrated = true;
   if (readStorage(rightPanelDefaultsVersionKey) === rightPanelDefaultsVersion) return;
-  ['hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftTopPanel', 'hc.leftBottomPanel'].forEach((key) => removeStorage(key));
+  ['hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftTopPanel', 'hc.leftBottomPanel'].forEach(
+    (key) => removeStorage(key),
+  );
   writeStorage(rightPanelDefaultsVersionKey, rightPanelDefaultsVersion);
 }
 
-export const themes = ['smatchet', 'midnight', 'halloween', 'blue-hour', 'nexus', 'hatchet', 'chaos', 'terminal'] as const;
+export const themes = [
+  'smatchet',
+  'midnight',
+  'halloween',
+  'blue-hour',
+  'nexus',
+  'hatchet',
+  'chaos',
+  'terminal',
+] as const;
 
 export const themeDetails = {
-  smatchet: { label: 'Smatchet Dark', description: 'Dense dark workspace with a magenta focus color.' },
+  smatchet: {
+    label: 'Smatchet Dark',
+    description: 'Dense dark workspace with a magenta focus color.',
+  },
   midnight: { label: 'Midnight', description: 'Black, blue outlines and a touch of magenta.' },
-  halloween: { label: 'Halloween', description: 'Midnight with orange, green and purple highlights.' },
+  halloween: {
+    label: 'Halloween',
+    description: 'Midnight with orange, green and purple highlights.',
+  },
   'blue-hour': { label: 'Blue Hour', description: 'Black and blue with purple accents.' },
-  nexus: { label: 'Nexus', description: 'Deep blue control-room surfaces with crisp electric focus.' },
-  hatchet: { label: 'Hatchet', description: 'Industrial dark teal with calm, deliberate contrast.' },
+  nexus: {
+    label: 'Nexus',
+    description: 'Deep blue control-room surfaces with crisp electric focus.',
+  },
+  hatchet: {
+    label: 'Hatchet',
+    description: 'Industrial dark teal with calm, deliberate contrast.',
+  },
   chaos: { label: 'Chaos', description: 'Charcoal and red with sharp, high-energy feedback.' },
   terminal: { label: 'Terminal', description: 'Near-black, compact, and quietly green.' },
 } as const;
-export type Theme = typeof themes[number];
+export type Theme = (typeof themes)[number];
 
-const isString: StoredValueValidator<string> = (value): value is string => typeof value === 'string';
-const isBoolean: StoredValueValidator<boolean> = (value): value is boolean => typeof value === 'boolean';
-const isTheme: StoredValueValidator<Theme> = (value): value is Theme => typeof value === 'string' && themes.includes(value as Theme);
-const isPanel: StoredValueValidator<PanelId> = (value): value is PanelId => typeof value === 'string' && panelIds.includes(value as PanelId);
+const isString: StoredValueValidator<string> = (value): value is string =>
+  typeof value === 'string';
+const isBoolean: StoredValueValidator<boolean> = (value): value is boolean =>
+  typeof value === 'boolean';
+const isTheme: StoredValueValidator<Theme> = (value): value is Theme =>
+  typeof value === 'string' && themes.includes(value as Theme);
+const isPanel: StoredValueValidator<PanelId> = (value): value is PanelId =>
+  typeof value === 'string' && panelIds.includes(value as PanelId);
 export const railLayouts = ['divided', 'single', 'top', 'bottom'] as const;
-export type RailLayout = typeof railLayouts[number];
-const isRailLayout: StoredValueValidator<RailLayout> = (value): value is RailLayout => typeof value === 'string' && railLayouts.includes(value as RailLayout);
-const boundedNumber = (min: number, max: number): StoredValueValidator<number> => (value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+export type RailLayout = (typeof railLayouts)[number];
+const isRailLayout: StoredValueValidator<RailLayout> = (value): value is RailLayout =>
+  typeof value === 'string' && railLayouts.includes(value as RailLayout);
+const boundedNumber =
+  (min: number, max: number): StoredValueValidator<number> =>
+  (value): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 
-function useStoredState<T>(key: string, fallback: T, validate: StoredValueValidator<T>, decodeLegacy: (raw: string) => T | undefined) {
-  const [value, setValue] = useState<T>(() => readStoredValue({ key, version: persistedStateVersion, fallback, validate, decodeLegacy: (raw) => decodeLegacy(raw) }));
+function useStoredState<T>(
+  key: string,
+  fallback: T,
+  validate: StoredValueValidator<T>,
+  decodeLegacy: (raw: string) => T | undefined,
+) {
+  const [value, setValue] = useState<T>(() =>
+    readStoredValue({
+      key,
+      version: persistedStateVersion,
+      fallback,
+      validate,
+      decodeLegacy: (raw) => decodeLegacy(raw),
+    }),
+  );
   useEffect(() => writeStoredValue(key, persistedStateVersion, value), [key, value]);
   return [value, setValue] as const;
 }
 
 export function usePersistedTheme() {
-  return useStoredState<Theme>('hc.theme', 'smatchet', isTheme, (raw) => isTheme(raw) ? raw : undefined);
+  return useStoredState<Theme>('hc.theme', 'smatchet', isTheme, (raw) =>
+    isTheme(raw) ? raw : undefined,
+  );
 }
 export function usePersistedAgentSelection() {
   return useStoredState('hc.selectedAgentId', '', isString, (raw) => raw);
@@ -56,22 +110,117 @@ export function usePersistedAgentSelection() {
 
 export function usePersistedLayout() {
   migrateRightPanelDefaults();
-  const [leftCollapsed, setLeftCollapsed] = useStoredState('hc.leftCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
-  const [rightCollapsed, setRightCollapsed] = useStoredState('hc.rightCollapsed', false, isBoolean, (raw) => raw === 'true' ? true : raw === 'false' ? false : undefined);
-  const [leftSplit, setLeftSplit] = useStoredState('hc.leftSplit', 40, boundedNumber(railSplitBounds.min, railSplitBounds.max), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
-  const [rightSplit, setRightSplit] = useStoredState('hc.rightSplit', 50, boundedNumber(railSplitBounds.min, railSplitBounds.max), (raw) => { const value = Number(raw); return Number.isFinite(value) ? value : undefined; });
-  const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>('hc.leftTopPanel', 'agents', isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>('hc.leftBottomPanel', 'workspace', isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  const [leftRailLayout, setLeftRailLayout] = useStoredState<RailLayout>('hc.leftRailLayout', 'divided', isRailLayout, (raw) => railLayouts.includes(raw as RailLayout) ? raw as RailLayout : undefined);
-  const [leftSinglePanel, setLeftSinglePanel] = useStoredState<PanelId>('hc.leftSinglePanel', leftRailLayout === 'bottom' ? leftBottomPanel : leftTopPanel, isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  const [rightTopPanel, setRightTopPanel] = useStoredState<PanelId>('hc.rightTopPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  const [rightBottomPanel, setRightBottomPanel] = useStoredState<PanelId>('hc.rightBottomPanel', 'none', isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  const [rightRailLayout, setRightRailLayout] = useStoredState<RailLayout>('hc.rightRailLayout', 'divided', isRailLayout, (raw) => railLayouts.includes(raw as RailLayout) ? raw as RailLayout : undefined);
-  const [rightSinglePanel, setRightSinglePanel] = useStoredState<PanelId>('hc.rightSinglePanel', rightRailLayout === 'bottom' ? rightBottomPanel : rightTopPanel, isPanel, (raw) => isPanel(raw) ? raw : undefined);
-  return { leftSinglePanel, setLeftSinglePanel, rightSinglePanel, setRightSinglePanel, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, leftSplit, setLeftSplit, rightSplit, setRightSplit, leftTopPanel, setLeftTopPanel, leftBottomPanel, setLeftBottomPanel, rightTopPanel, setRightTopPanel, rightBottomPanel, setRightBottomPanel, leftRailLayout, setLeftRailLayout, rightRailLayout, setRightRailLayout };
+  const [leftCollapsed, setLeftCollapsed] = useStoredState(
+    'hc.leftCollapsed',
+    false,
+    isBoolean,
+    (raw) => (raw === 'true' ? true : raw === 'false' ? false : undefined),
+  );
+  const [rightCollapsed, setRightCollapsed] = useStoredState(
+    'hc.rightCollapsed',
+    false,
+    isBoolean,
+    (raw) => (raw === 'true' ? true : raw === 'false' ? false : undefined),
+  );
+  const [leftSplit, setLeftSplit] = useStoredState(
+    'hc.leftSplit',
+    40,
+    boundedNumber(railSplitBounds.min, railSplitBounds.max),
+    (raw) => {
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : undefined;
+    },
+  );
+  const [rightSplit, setRightSplit] = useStoredState(
+    'hc.rightSplit',
+    50,
+    boundedNumber(railSplitBounds.min, railSplitBounds.max),
+    (raw) => {
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : undefined;
+    },
+  );
+  const [leftTopPanel, setLeftTopPanel] = useStoredState<PanelId>(
+    'hc.leftTopPanel',
+    'agents',
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  const [leftBottomPanel, setLeftBottomPanel] = useStoredState<PanelId>(
+    'hc.leftBottomPanel',
+    'workspace',
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  const [leftRailLayout, setLeftRailLayout] = useStoredState<RailLayout>(
+    'hc.leftRailLayout',
+    'divided',
+    isRailLayout,
+    (raw) => (railLayouts.includes(raw as RailLayout) ? (raw as RailLayout) : undefined),
+  );
+  const [leftSinglePanel, setLeftSinglePanel] = useStoredState<PanelId>(
+    'hc.leftSinglePanel',
+    leftRailLayout === 'bottom' ? leftBottomPanel : leftTopPanel,
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  const [rightTopPanel, setRightTopPanel] = useStoredState<PanelId>(
+    'hc.rightTopPanel',
+    'none',
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  const [rightBottomPanel, setRightBottomPanel] = useStoredState<PanelId>(
+    'hc.rightBottomPanel',
+    'none',
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  const [rightRailLayout, setRightRailLayout] = useStoredState<RailLayout>(
+    'hc.rightRailLayout',
+    'divided',
+    isRailLayout,
+    (raw) => (railLayouts.includes(raw as RailLayout) ? (raw as RailLayout) : undefined),
+  );
+  const [rightSinglePanel, setRightSinglePanel] = useStoredState<PanelId>(
+    'hc.rightSinglePanel',
+    rightRailLayout === 'bottom' ? rightBottomPanel : rightTopPanel,
+    isPanel,
+    (raw) => (isPanel(raw) ? raw : undefined),
+  );
+  return {
+    leftSinglePanel,
+    setLeftSinglePanel,
+    rightSinglePanel,
+    setRightSinglePanel,
+    leftCollapsed,
+    setLeftCollapsed,
+    rightCollapsed,
+    setRightCollapsed,
+    leftSplit,
+    setLeftSplit,
+    rightSplit,
+    setRightSplit,
+    leftTopPanel,
+    setLeftTopPanel,
+    leftBottomPanel,
+    setLeftBottomPanel,
+    rightTopPanel,
+    setRightTopPanel,
+    rightBottomPanel,
+    setRightBottomPanel,
+    leftRailLayout,
+    setLeftRailLayout,
+    rightRailLayout,
+    setRightRailLayout,
+  };
 }
 
 export function listenResize(move: (event: globalThis.PointerEvent) => void) {
-  const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
-  window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop);
+  const stop = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', stop);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', stop);
 }

@@ -9,23 +9,72 @@ const fetchApiMock = vi.hoisted(() => vi.fn());
 vi.mock('../../app/api', () => ({ api: apiMock, fetchApi: fetchApiMock }));
 
 const agent = { id: 'agent-a', name: 'Smatchet' } as Agent;
-const catalog = { music: { available: false, reason: 'music_model_not_configured', models: [] }, models: [{ connectionId: 'c1', modelId: 'image-1', label: 'Image One', kind: 'image', available: true, controls: [] }, { connectionId: 'c2', modelId: 'video-1', label: 'Video One', kind: 'video', available: false, unavailableReason: 'video_disabled', controls: [] }], video: { available: false, reason: 'video_disabled' }, sourceAttachments: { available: false, reason: 'unsupported' } };
+const catalog = {
+  music: { available: false, reason: 'music_model_not_configured', models: [] },
+  models: [
+    {
+      connectionId: 'c1',
+      modelId: 'image-1',
+      label: 'Image One',
+      kind: 'image',
+      available: true,
+      controls: [],
+    },
+    {
+      connectionId: 'c2',
+      modelId: 'video-1',
+      label: 'Video One',
+      kind: 'video',
+      available: false,
+      unavailableReason: 'video_disabled',
+      controls: [],
+    },
+  ],
+  video: { available: false, reason: 'video_disabled' },
+  sourceAttachments: { available: false, reason: 'unsupported' },
+};
 
 function renderForge(initialJobs: unknown[] = []) {
   apiMock.mockImplementation((path: string, init?: RequestInit) => {
     if (path === '/api/forge/catalog') return Promise.resolve(catalog);
-    if (init?.method === 'POST') return Promise.resolve({ job: { id: 'job-1', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'a castle', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+    if (init?.method === 'POST')
+      return Promise.resolve({
+        job: {
+          id: 'job-1',
+          connectionId: 'c1',
+          modelId: 'image-1',
+          kind: 'image',
+          prompt: 'a castle',
+          status: 'queued',
+          createdAt: '2026-09-27T00:00:00Z',
+          updatedAt: '2026-09-27T00:00:00Z',
+          artifacts: [],
+        },
+      });
     if (path === '/api/forge/jobs') return Promise.resolve({ jobs: initialJobs });
     return Promise.resolve({});
   });
-  return render(<ConfirmProvider><Forge agents={[agent]} selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
+  return render(
+    <ConfirmProvider>
+      <Forge agents={[agent]} selectedAgentId="agent-a" sessionId="session-1" />
+    </ConfirmProvider>,
+  );
 }
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe('Forge workspace', () => {
   it('uses origin for music and speech and keeps unresolved audio in Recents only', async () => {
-    const base = { kind: 'audio', modelId: 'same-model', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [] };
+    const base = {
+      kind: 'audio',
+      modelId: 'same-model',
+      status: 'succeeded',
+      createdAt: '2026-09-27T00:00:00Z',
+      artifacts: [],
+    };
     renderForge([
       { ...base, id: 'music', mode: 'music', prompt: 'music output' },
       { ...base, id: 'speech', mode: 'speech', prompt: 'speech output' },
@@ -37,22 +86,40 @@ describe('Forge workspace', () => {
     expect(screen.getByRole('button', { name: 'Music succeeded: music output' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Music succeeded: legacy music' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /speech output|unknown output/ })).toBeNull();
-    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Music');
+    expect(
+      screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent,
+    ).toBe('Music');
     fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
     expect(screen.getByRole('button', { name: 'Speech succeeded: speech output' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /music output|unknown output/ })).toBeNull();
-    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Speech');
+    expect(
+      screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent,
+    ).toBe('Speech');
     fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Audio succeeded: unknown output' }));
-    expect(screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent).toBe('Audio');
+    expect(
+      screen.getByRole('region', { name: 'Creation viewer' }).querySelector('h2')?.textContent,
+    ).toBe('Audio');
   });
 
   it('browses beyond five creations across kinds and selects an older creation without losing the draft', async () => {
-    const jobs = Array.from({ length: 9 }, (_, i) => ({ id: `old-${i}`, connectionId: 'c1', modelId: `model-${i}`, kind: i === 8 ? 'music' : 'image', prompt: `creation ${i}`, status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] }));
+    const jobs = Array.from({ length: 9 }, (_, i) => ({
+      id: `old-${i}`,
+      connectionId: 'c1',
+      modelId: `model-${i}`,
+      kind: i === 8 ? 'music' : 'image',
+      prompt: `creation ${i}`,
+      status: 'succeeded',
+      createdAt: '2026-09-27T00:00:00Z',
+      updatedAt: '2026-09-27T00:00:00Z',
+      artifacts: [],
+    }));
     renderForge(jobs);
     await screen.findByRole('button', { name: 'Image succeeded: creation 0' });
     expect(screen.queryByRole('button', { name: 'Image succeeded: creation 6' })).toBeNull();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'my draft' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'my draft' },
+    });
     fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
     expect(screen.getByRole('tab', { name: /Recents/ }).getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByRole('textbox', { name: 'Prompt' })).toBeNull();
@@ -62,11 +129,21 @@ describe('Forge workspace', () => {
     expect(screen.getByRole('heading', { name: 'Music' })).toBeTruthy();
     expect(screen.getByText('creation 8', { selector: 'p' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
-    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('my draft');
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe(
+      'my draft',
+    );
   });
 
   it('scopes the viewer to the active type while Recents permits cross-type selection', async () => {
-    const jobs = ['image', 'music'].map((kind) => ({ id: kind, kind, modelId: kind, prompt: `${kind} output`, status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [] }));
+    const jobs = ['image', 'music'].map((kind) => ({
+      id: kind,
+      kind,
+      modelId: kind,
+      prompt: `${kind} output`,
+      status: 'succeeded',
+      createdAt: '2026-09-27T00:00:00Z',
+      artifacts: [],
+    }));
     renderForge(jobs);
     await screen.findByRole('heading', { name: 'Image' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
@@ -84,7 +161,9 @@ describe('Forge workspace', () => {
 
   it('shows an empty recents state', async () => {
     renderForge();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' }).hasAttribute('disabled')).toBe(false));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Refresh' }).hasAttribute('disabled')).toBe(false),
+    );
     fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
     expect(screen.getByText('No recent creations.')).toBeTruthy();
   });
@@ -92,61 +171,122 @@ describe('Forge workspace', () => {
   it('restores per-mode selections, saves only explicit changes, and retains work across agents and remounts', async () => {
     const second = { ...catalog.models[0], modelId: 'image-2', label: 'Image Two' };
     const speech = { ...second, modelId: 'voice', kind: 'audio', label: 'Voice' };
-    let selections = { image: { connectionId: 'c1', modelId: 'image-2' }, speech: { connectionId: 'c1', modelId: 'voice' } };
+    let selections = {
+      image: { connectionId: 'c1', modelId: 'image-2' },
+      speech: { connectionId: 'c1', modelId: 'voice' },
+    };
     let finishSave: (() => void) | undefined;
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
-      if (path.endsWith('/catalog')) return Promise.resolve({ ...catalog, models: [...catalog.models, second, speech] });
+      if (path.endsWith('/catalog'))
+        return Promise.resolve({ ...catalog, models: [...catalog.models, second, speech] });
       if (path.endsWith('/selections')) {
-        if (init?.method === 'PUT') return new Promise((resolve) => { finishSave = () => {
-          const { mode, ...selection } = JSON.parse(init.body as string);
-          selections = { ...selections, [mode]: selection };
-          resolve({ selections });
-        }; });
+        if (init?.method === 'PUT')
+          return new Promise((resolve) => {
+            finishSave = () => {
+              const { mode, ...selection } = JSON.parse(init.body as string);
+              selections = { ...selections, [mode]: selection };
+              resolve({ selections });
+            };
+          });
         return Promise.resolve({ selections });
       }
       return Promise.resolve({ jobs: [] });
     });
-    const view = render(<ConfirmProvider><Forge selectedAgentId="a" sessionId="s" /></ConfirmProvider>);
-    const select = await screen.findByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
+    const view = render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="a" sessionId="s" />
+      </ConfirmProvider>,
+    );
+    const select = (await screen.findByRole('combobox', {
+      name: 'Forge model',
+    })) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe(JSON.stringify(['c1', 'image-2'])));
     expect(apiMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'keep my draft' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'keep my draft' },
+    });
     fireEvent.change(select, { target: { value: JSON.stringify(['c1', 'image-1']) } });
     expect(select.disabled).toBe(true);
     fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
     expect(select.value).toBe(JSON.stringify(['c1', 'voice']));
     finishSave!();
     await waitFor(() => expect(select.disabled).toBe(false));
-    view.rerender(<ConfirmProvider><Forge selectedAgentId="b" sessionId="s2" /></ConfirmProvider>);
+    view.rerender(
+      <ConfirmProvider>
+        <Forge selectedAgentId="b" sessionId="s2" />
+      </ConfirmProvider>,
+    );
     fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
     expect(select.value).toBe(JSON.stringify(['c1', 'image-1']));
-    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe('keep my draft');
+    expect((screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement).value).toBe(
+      'keep my draft',
+    );
     view.unmount();
-    render(<ConfirmProvider><Forge selectedAgentId="b" sessionId="s2" /></ConfirmProvider>);
-    await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['c1', 'image-1'])));
+    render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="b" sessionId="s2" />
+      </ConfirmProvider>,
+    );
+    await waitFor(() =>
+      expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
+        JSON.stringify(['c1', 'image-1']),
+      ),
+    );
   });
 
   it('does not fall back from an unavailable saved model and reports failed saves', async () => {
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path.endsWith('/catalog')) return Promise.resolve(catalog);
-      if (path.endsWith('/selections')) return init?.method === 'PUT'
-        ? Promise.reject(new Error('offline'))
-        : Promise.resolve({ selections: { image: { connectionId: 'gone', modelId: 'missing' } } });
+      if (path.endsWith('/selections'))
+        return init?.method === 'PUT'
+          ? Promise.reject(new Error('offline'))
+          : Promise.resolve({
+              selections: { image: { connectionId: 'gone', modelId: 'missing' } },
+            });
       return Promise.resolve({ jobs: [] });
     });
-    render(<ConfirmProvider><Forge selectedAgentId="a" sessionId="s" /></ConfirmProvider>);
+    render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="a" sessionId="s" />
+      </ConfirmProvider>,
+    );
     await screen.findByText(/Saved model unavailable/);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), { target: { value: 'castle' } });
-    expect((screen.getByRole('button', { name: 'Generate Image' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: JSON.stringify(['c1', 'image-1']) } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Prompt' }), {
+      target: { value: 'castle' },
+    });
+    expect(
+      (screen.getByRole('button', { name: 'Generate Image' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.change(screen.getByRole('combobox'), {
+      target: { value: JSON.stringify(['c1', 'image-1']) },
+    });
     await screen.findByText(/Could not save model selection: offline/);
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(JSON.stringify(['gone', 'missing']));
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
+      JSON.stringify(['gone', 'missing']),
+    );
   });
 
   it('keeps modes in the header and scopes compact recents to the active media type', async () => {
     const jobs = [
-      ...Array.from({ length: 30 }, (_, i) => ({ id: `image-${i}`, kind: 'image', modelId: 'image-1', prompt: `Long image prompt ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
-      ...Array.from({ length: 8 }, (_, i) => ({ id: `music-${i}`, mode: 'music', kind: 'audio', modelId: 'lyria', prompt: `Long music direction ${i} `.repeat(20), status: 'succeeded', createdAt: '2026-09-26T12:00:00Z', artifacts: [] })),
+      ...Array.from({ length: 30 }, (_, i) => ({
+        id: `image-${i}`,
+        kind: 'image',
+        modelId: 'image-1',
+        prompt: `Long image prompt ${i} `.repeat(20),
+        status: 'succeeded',
+        createdAt: '2026-09-26T12:00:00Z',
+        artifacts: [],
+      })),
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `music-${i}`,
+        mode: 'music',
+        kind: 'audio',
+        modelId: 'lyria',
+        prompt: `Long music direction ${i} `.repeat(20),
+        status: 'succeeded',
+        createdAt: '2026-09-26T12:00:00Z',
+        artifacts: [],
+      })),
     ];
     renderForge(jobs);
     await screen.findByRole('option', { name: 'Image One' });
@@ -154,7 +294,10 @@ describe('Forge workspace', () => {
     expect(screen.queryByRole('button', { name: /Music succeeded:/ })).toBeNull();
     expect(screen.getByRole('tablist').closest('header')).toBeTruthy();
     expect(screen.queryByText('FORGE')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Recent creations' }).closest('.forge-history')?.parentElement?.className).toBe('forge-grid');
+    expect(
+      screen.getByRole('heading', { name: 'Recent creations' }).closest('.forge-history')
+        ?.parentElement?.className,
+    ).toBe('forge-grid');
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     expect(screen.getAllByRole('button', { name: /Music succeeded:/ })).toHaveLength(5);
     expect(screen.queryByRole('button', { name: /Image succeeded:/ })).toBeNull();
@@ -178,23 +321,71 @@ describe('Forge workspace', () => {
     expect(screen.queryByRole('button', { name: 'Generate Music' })).toBeNull();
   });
 
-
   it('selects Lyria music models separately from Speech and submits music generation', async () => {
-    const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] }, models: [...catalog.models, { connectionId: 's1', modelId: 'speech', label: 'Speech', kind: 'audio', available: true, controls: [] }] };
+    const musicCatalog = {
+      ...catalog,
+      music: {
+        available: true,
+        reason: null,
+        models: [
+          {
+            connectionId: 'g1',
+            modelId: 'lyria',
+            label: 'Lyria',
+            kind: 'audio',
+            available: true,
+            controls: [],
+          },
+        ],
+      },
+      models: [
+        ...catalog.models,
+        {
+          connectionId: 's1',
+          modelId: 'speech',
+          label: 'Speech',
+          kind: 'audio',
+          available: true,
+          controls: [],
+        },
+      ],
+    };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
-      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-1', connectionId: 'g1', modelId: 'lyria', mode: 'music', kind: 'audio', prompt: 'a bright synth line', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (init?.method === 'POST')
+        return Promise.resolve({
+          job: {
+            id: 'music-1',
+            connectionId: 'g1',
+            modelId: 'lyria',
+            mode: 'music',
+            kind: 'audio',
+            prompt: 'a bright synth line',
+            status: 'queued',
+            createdAt: '2026-09-27T00:00:00Z',
+            updatedAt: '2026-09-27T00:00:00Z',
+            artifacts: [],
+          },
+        });
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
-    render(<ConfirmProvider><Forge selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
+    render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="agent-a" sessionId="session-1" />
+      </ConfirmProvider>,
+    );
     await screen.findByRole('option', { name: 'Image One' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
     expect(screen.getByRole('option', { name: 'Lyria' })).toBeTruthy();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'a bright synth line' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), {
+      target: { value: 'a bright synth line' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
     await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
-    const request = apiMock.mock.calls.find(([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST');
+    const request = apiMock.mock.calls.find(
+      ([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST',
+    );
     expect(JSON.parse(request![1].body as string).prompt).toBe('a bright synth line');
     fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
     expect(screen.queryByRole('option', { name: 'Lyria' })).toBeNull();
@@ -204,35 +395,106 @@ describe('Forge workspace', () => {
   it('composes optional music lyrics into the submitted prompt and keeps empty lyrics unchanged', async () => {
     expect(composeMusicPrompt(' bright synth line ', '')).toBe('bright synth line');
     expect(composeMusicPrompt(' bright synth line ', '  \n ')).toBe('bright synth line');
-    expect(composeMusicPrompt('bright synth line', '[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain')).toBe('bright synth line\n\nWith the following lyrics:\n[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain');
-    const musicCatalog = { ...catalog, music: { available: true, reason: null, models: [{ connectionId: 'g1', modelId: 'lyria', label: 'Lyria', kind: 'audio', available: true, controls: [] }] } };
+    expect(
+      composeMusicPrompt(
+        'bright synth line',
+        '[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain',
+      ),
+    ).toBe(
+      'bright synth line\n\nWith the following lyrics:\n[Verse 1]\nFirst line\n\n[Chorus]\n  Indented refrain',
+    );
+    const musicCatalog = {
+      ...catalog,
+      music: {
+        available: true,
+        reason: null,
+        models: [
+          {
+            connectionId: 'g1',
+            modelId: 'lyria',
+            label: 'Lyria',
+            kind: 'audio',
+            available: true,
+            controls: [],
+          },
+        ],
+      },
+    };
     apiMock.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/forge/catalog') return Promise.resolve(musicCatalog);
-      if (init?.method === 'POST') return Promise.resolve({ job: { id: 'music-lyrics', connectionId: 'g1', modelId: 'lyria', mode: 'music', kind: 'audio', prompt: 'dreamy synth pop', status: 'queued', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [] } });
+      if (init?.method === 'POST')
+        return Promise.resolve({
+          job: {
+            id: 'music-lyrics',
+            connectionId: 'g1',
+            modelId: 'lyria',
+            mode: 'music',
+            kind: 'audio',
+            prompt: 'dreamy synth pop',
+            status: 'queued',
+            createdAt: '2026-09-27T00:00:00Z',
+            updatedAt: '2026-09-27T00:00:00Z',
+            artifacts: [],
+          },
+        });
       if (path === '/api/forge/jobs') return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
     });
-    render(<ConfirmProvider><Forge selectedAgentId="agent-a" sessionId="session-1" /></ConfirmProvider>);
+    render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="agent-a" sessionId="session-1" />
+      </ConfirmProvider>,
+    );
     await screen.findByRole('option', { name: 'Image One' });
     fireEvent.click(screen.getByRole('tab', { name: /Music/ }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), { target: { value: 'dreamy synth pop' } });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Lyrics' }), { target: { value: 'Shine through the night' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Musical direction' }), {
+      target: { value: 'dreamy synth pop' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Lyrics' }), {
+      target: { value: 'Shine through the night' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Music' }));
     await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
-    const request = apiMock.mock.calls.find(([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST');
+    const request = apiMock.mock.calls.find(
+      ([path, init]) => path === '/api/forge/jobs' && init?.method === 'POST',
+    );
     expect(request).toBeTruthy();
     const body = JSON.parse(request![1].body as string);
-    expect(body.prompt).toBe('dreamy synth pop\n\nWith the following lyrics:\nShine through the night');
+    expect(body.prompt).toBe(
+      'dreamy synth pop\n\nWith the following lyrics:\nShine through the night',
+    );
     expect(body.idempotencyKey).toBeTruthy();
   });
 
   it('shows structured failure diagnostics without serializing raw objects or truncating messages', async () => {
     const longMessage = `Request rejected: Bearer abc123 api_key=secret-value ${'diagnostic '.repeat(80)}`;
-    const failed = { id: 'failed-diagnostic', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'provider_request_failed', errorDetails: { stage: 'provider', message: longMessage, code: 'invalid_request', httpStatus: 422, requestId: 'req-42', raw: { token: 'must-not-render' } }, artifacts: [] };
+    const failed = {
+      id: 'failed-diagnostic',
+      connectionId: 'c1',
+      modelId: 'image-1',
+      kind: 'image',
+      prompt: 'castle',
+      status: 'failed',
+      createdAt: '2026-09-27T00:00:00Z',
+      updatedAt: '2026-09-27T00:00:00Z',
+      error: 'provider_request_failed',
+      errorDetails: {
+        stage: 'provider',
+        message: longMessage,
+        code: 'invalid_request',
+        httpStatus: 422,
+        requestId: 'req-42',
+        raw: { token: 'must-not-render' },
+      },
+      artifacts: [],
+    };
     renderForge([failed]);
     await screen.findByText('Generation failed');
-    const renderedMessage = screen.getByLabelText('Failure details').querySelector('p')?.textContent ?? '';
-    expect(renderedMessage).toBe(`Request rejected: Bearer [redacted] api_key=[redacted] ${'diagnostic '.repeat(80)}`);
+    const renderedMessage =
+      screen.getByLabelText('Failure details').querySelector('p')?.textContent ?? '';
+    expect(renderedMessage).toBe(
+      `Request rejected: Bearer [redacted] api_key=[redacted] ${'diagnostic '.repeat(80)}`,
+    );
     expect(screen.getByText('Stage').parentElement?.textContent).toContain('provider');
     expect(screen.getByText('Code').parentElement?.textContent).toContain('invalid_request');
     expect(screen.getByText('HTTP').parentElement?.textContent).toContain('422');
@@ -241,15 +503,50 @@ describe('Forge workspace', () => {
   });
 
   it('explains provider error truncation at ingestion and labels observed bytes as a lower bound', async () => {
-    const failed = { id: 'truncated-diagnostic', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'provider_request_failed', errorDetails: { stage: 'provider', message: 'Provider rejected request.', truncated: true, observedBytes: 8192, maxBytes: 8192 }, artifacts: [] };
+    const failed = {
+      id: 'truncated-diagnostic',
+      connectionId: 'c1',
+      modelId: 'image-1',
+      kind: 'image',
+      prompt: 'castle',
+      status: 'failed',
+      createdAt: '2026-09-27T00:00:00Z',
+      updatedAt: '2026-09-27T00:00:00Z',
+      error: 'provider_request_failed',
+      errorDetails: {
+        stage: 'provider',
+        message: 'Provider rejected request.',
+        truncated: true,
+        observedBytes: 8192,
+        maxBytes: 8192,
+      },
+      artifacts: [],
+    };
     renderForge([failed]);
-    const notice = await screen.findByText('Provider error response truncated at ingestion (budget: 8192 bytes; at least 8192 bytes read).');
+    const notice = await screen.findByText(
+      'Provider error response truncated at ingestion (budget: 8192 bytes; at least 8192 bytes read).',
+    );
     expect(notice).toBeTruthy();
-    expect(screen.getByLabelText('Failure details').querySelector('p')?.textContent).toBe('Provider rejected request.');
+    expect(screen.getByLabelText('Failure details').querySelector('p')?.textContent).toBe(
+      'Provider rejected request.',
+    );
   });
 
   it('keeps older failed jobs useful when structured details are absent', async () => {
-    renderForge([{ id: 'legacy-failure', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'failed', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', error: 'legacy_provider_error', artifacts: [] }]);
+    renderForge([
+      {
+        id: 'legacy-failure',
+        connectionId: 'c1',
+        modelId: 'image-1',
+        kind: 'image',
+        prompt: 'castle',
+        status: 'failed',
+        createdAt: '2026-09-27T00:00:00Z',
+        updatedAt: '2026-09-27T00:00:00Z',
+        error: 'legacy_provider_error',
+        artifacts: [],
+      },
+    ]);
     expect(await screen.findByText('legacy_provider_error')).toBeTruthy();
   });
 
@@ -259,47 +556,124 @@ describe('Forge workspace', () => {
     fireEvent.change(prompt, { target: { value: 'a castle' } });
     fireEvent.click(screen.getByRole('button', { name: 'Generate Image' }));
     await waitFor(() => expect(screen.getByText('Forge job accepted.')).toBeTruthy());
-    expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs', expect.objectContaining({ method: 'POST' }));
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/forge/jobs',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(screen.getAllByText('queued').length).toBeGreaterThan(0);
   });
 
   it('uses authenticated transport for artifact previews and downloads', async () => {
-    const job = { id: 'job-2', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'castle', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', updatedAt: '2026-09-27T00:00:00Z', artifacts: [{ id: 'artifact-1', kind: 'image', name: 'castle.png', mimeType: 'image/png', sizeBytes: 10, previewUrl: '/protected/preview', downloadUrl: '/protected/download' }] };
-    fetchApiMock.mockResolvedValue(new Response(new Uint8Array([120]), { status: 200, headers: { 'content-type': 'image/png' } }));
+    const job = {
+      id: 'job-2',
+      connectionId: 'c1',
+      modelId: 'image-1',
+      kind: 'image',
+      prompt: 'castle',
+      status: 'succeeded',
+      createdAt: '2026-09-27T00:00:00Z',
+      updatedAt: '2026-09-27T00:00:00Z',
+      artifacts: [
+        {
+          id: 'artifact-1',
+          kind: 'image',
+          name: 'castle.png',
+          mimeType: 'image/png',
+          sizeBytes: 10,
+          previewUrl: '/protected/preview',
+          downloadUrl: '/protected/download',
+        },
+      ],
+    };
+    fetchApiMock.mockResolvedValue(
+      new Response(new Uint8Array([120]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      }),
+    );
     renderForge([job]);
     await screen.findByText('castle.png');
     await waitFor(() => expect(fetchApiMock).toHaveBeenCalled());
     expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual(['/protected/preview']);
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
-    await waitFor(() => expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual(['/protected/preview', '/protected/download']));
+    await waitFor(() =>
+      expect(fetchApiMock.mock.calls.map(([path]) => path)).toEqual([
+        '/protected/preview',
+        '/protected/download',
+      ]),
+    );
   });
 });
 
 it('attaches remote artifacts with verified raw conversation identity', async () => {
-  const job = { id: 'job-owner', kind: 'image', modelId: 'image-1', prompt: 'owner output', status: 'succeeded', createdAt: '2026-09-27T00:00:00Z', artifacts: [{ id: 'artifact', kind: 'image', name: 'a.png' }] };
-  apiMock.mockImplementation((path: string) => Promise.resolve(path.endsWith('/catalog') ? catalog : path === '/api/forge/jobs' ? { jobs: [job] } : {}));
+  const job = {
+    id: 'job-owner',
+    kind: 'image',
+    modelId: 'image-1',
+    prompt: 'owner output',
+    status: 'succeeded',
+    createdAt: '2026-09-27T00:00:00Z',
+    artifacts: [{ id: 'artifact', kind: 'image', name: 'a.png' }],
+  };
+  apiMock.mockImplementation((path: string) =>
+    Promise.resolve(
+      path.endsWith('/catalog') ? catalog : path === '/api/forge/jobs' ? { jobs: [job] } : {},
+    ),
+  );
   const remote = { ...agent, id: 'same', resourceId: 'same' };
-  render(<ConfirmProvider><Forge agents={[remote]} selectedAgentId={remote.id} sessionId="session" /></ConfirmProvider>);
+  render(
+    <ConfirmProvider>
+      <Forge agents={[remote]} selectedAgentId={remote.id} sessionId="session" />
+    </ConfirmProvider>,
+  );
   fireEvent.click(await screen.findByRole('button', { name: /Attach/ }));
-  await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs/job-owner/attach', expect.objectContaining({ body: JSON.stringify({ agentId: 'same', sessionId: 'session', artifactId: 'artifact' }) })));
+  await waitFor(() =>
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/forge/jobs/job-owner/attach',
+      expect.objectContaining({
+        body: JSON.stringify({ agentId: 'same', sessionId: 'session', artifactId: 'artifact' }),
+      }),
+    ),
+  );
 });
 
-const terminalJob = { id: 'delete-me', connectionId: 'c1', modelId: 'image-1', kind: 'image', prompt: 'a castle to delete', status: 'succeeded', createdAt: '2026-10-25T00:00:00Z', updatedAt: '2026-10-25T00:00:00Z', artifacts: [] };
+const terminalJob = {
+  id: 'delete-me',
+  connectionId: 'c1',
+  modelId: 'image-1',
+  kind: 'image',
+  prompt: 'a castle to delete',
+  status: 'succeeded',
+  createdAt: '2026-10-25T00:00:00Z',
+  updatedAt: '2026-10-25T00:00:00Z',
+  artifacts: [],
+};
 it('confirms deletion, cancels without mutation, removes selected job and refreshes', async () => {
   renderForge([terminalJob]);
   fireEvent.click(await screen.findByRole('button', { name: 'Delete creation' }));
-  expect(screen.getByRole('alertdialog').textContent).toContain('Calls, prompts, and outcomes remain in Archive');
+  expect(screen.getByRole('alertdialog').textContent).toContain(
+    'Calls, prompts, and outcomes remain in Archive',
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(apiMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
   await Promise.resolve();
   fireEvent.click(screen.getByRole('button', { name: 'Delete creation' }));
   fireEvent.click(screen.getAllByRole('button', { name: 'Delete creation' }).at(-1)!);
-  await waitFor(() => expect(apiMock).toHaveBeenCalledWith('/api/forge/jobs/delete-me', expect.objectContaining({ method: 'DELETE' })));
-  await waitFor(() => expect(screen.queryByRole('button', { name: /Image succeeded: a castle to delete/ })).toBeNull());
+  await waitFor(() =>
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/forge/jobs/delete-me',
+      expect.objectContaining({ method: 'DELETE' }),
+    ),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('button', { name: /Image succeeded: a castle to delete/ }),
+    ).toBeNull(),
+  );
   expect(screen.getByText('Creation deleted. Execution evidence remains in Archive.')).toBeTruthy();
   expect(apiMock.mock.calls.filter(([path]) => path === '/api/forge/jobs').length).toBe(2);
 });
-it.each(['queued', 'running'])('does not offer deletion for %s jobs', async status => {
+it.each(['queued', 'running'])('does not offer deletion for %s jobs', async (status) => {
   renderForge([{ ...terminalJob, status }]);
   await screen.findByRole('button', { name: `Image ${status}: a castle to delete` });
   expect(screen.queryByRole('button', { name: 'Delete creation' })).toBeNull();
@@ -308,7 +682,9 @@ it('keeps job and shows retryable error when deletion fails', async () => {
   renderForge([terminalJob]);
   await screen.findByRole('button', { name: 'Delete creation' });
   const original = apiMock.getMockImplementation()!;
-  apiMock.mockImplementation((path: string, init?: RequestInit) => init?.method === 'DELETE' ? Promise.reject(new Error('job is busy')) : original(path, init));
+  apiMock.mockImplementation((path: string, init?: RequestInit) =>
+    init?.method === 'DELETE' ? Promise.reject(new Error('job is busy')) : original(path, init),
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Delete creation' }));
   fireEvent.click(screen.getAllByRole('button', { name: 'Delete creation' }).at(-1)!);
   await screen.findByText('Could not delete creation: job is busy');

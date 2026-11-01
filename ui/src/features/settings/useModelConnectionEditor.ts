@@ -9,10 +9,15 @@ import { compatiblePoolMembers, isProviderPool } from './providerPools';
 import { useClaudeCodeLoginFlow } from './useClaudeCodeLoginFlow';
 import { useOpenAiOAuthConnectionFlow } from './useOpenAiOAuthConnectionFlow';
 
-const selectedRuntimeModels = (models: Array<string | RuntimeModel> = []): RuntimeModel[] => models.map((model) => {
-  if (typeof model === 'string') return { id: model, selected: true, acceptedInput: ['text'] };
-  return { ...model, selected: model.selected ?? true, acceptedInput: model.acceptedInput ?? model.discoveredInput ?? ['text'] };
-});
+const selectedRuntimeModels = (models: Array<string | RuntimeModel> = []): RuntimeModel[] =>
+  models.map((model) => {
+    if (typeof model === 'string') return { id: model, selected: true, acceptedInput: ['text'] };
+    return {
+      ...model,
+      selected: model.selected ?? true,
+      acceptedInput: model.acceptedInput ?? model.discoveredInput ?? ['text'],
+    };
+  });
 
 type Options = {
   savedProviders?: SavedProvider[];
@@ -20,12 +25,21 @@ type Options = {
   onModelConnectionsChanged: () => Promise<void>;
 };
 
-export function useModelConnectionEditor({ savedProviders = [], onModelConnectionsChanged, loadBalancing = false }: Options) {
+export function useModelConnectionEditor({
+  savedProviders = [],
+  onModelConnectionsChanged,
+  loadBalancing = false,
+}: Options) {
   const confirm = useConfirm();
   const navigate = useUnsavedNavigation();
   const editorGeneration = useRef(0);
   const isEditorCurrent = (generation: number) => generation === editorGeneration.current;
-  useEffect(() => () => { editorGeneration.current += 1; }, []);
+  useEffect(
+    () => () => {
+      editorGeneration.current += 1;
+    },
+    [],
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [provider, setProvider] = useState(loadBalancing ? 'OpenAI LB' : '');
   const [apiType, setApiType] = useState(loadBalancing ? 'openai-lb' : 'openai-chat-completions');
@@ -33,10 +47,20 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
   const [memberConnectionIds, setMemberConnectionIds] = useState<string[]>([]);
   const poolConnection = isProviderPool(apiType);
   const poolMembers = compatiblePoolMembers(apiType, savedProviders);
-  const missingPoolMembers = memberConnectionIds.filter(id => !poolMembers.some(member => member.id === id));
-  const pool = { enabled: poolEnabled, memberConnectionIds, sticky: true as const, preferEarlierReset: false as const };
+  const missingPoolMembers = memberConnectionIds.filter(
+    (id) => !poolMembers.some((member) => member.id === id),
+  );
+  const pool = {
+    enabled: poolEnabled,
+    memberConnectionIds,
+    sticky: true as const,
+    preferEarlierReset: false as const,
+  };
   const [url, setUrl] = useState('');
-  const connectionReady = Boolean(provider.trim() && (poolConnection ? memberConnectionIds.length && !missingPoolMembers.length : url.trim()));
+  const connectionReady = Boolean(
+    provider.trim() &&
+      (poolConnection ? memberConnectionIds.length && !missingPoolMembers.length : url.trim()),
+  );
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [oauthConnection, setOauthConnection] = useState(false);
@@ -51,12 +75,38 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
   const [requestState, setRequestState] = useState<'idle' | 'connecting' | 'saving'>('idle');
   const [requestError, setRequestError] = useState('');
   const [oauthModal, setOauthModal] = useState<'openai' | 'anthropic' | null>(null);
-  const draft = JSON.stringify([editingId, provider, apiType, poolEnabled, memberConnectionIds, url, apiKey, oauthIdToken, oauthAccessToken, oauthRefreshToken, availableModels]);
+  const draft = JSON.stringify([
+    editingId,
+    provider,
+    apiType,
+    poolEnabled,
+    memberConnectionIds,
+    url,
+    apiKey,
+    oauthIdToken,
+    oauthAccessToken,
+    oauthRefreshToken,
+    availableModels,
+  ]);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
   const writePending = useRef(false);
   const savedFingerprint = useRef<string | null>(null);
-  const [baseline, setBaseline] = useState(() => JSON.stringify([null, loadBalancing ? 'OpenAI LB' : '', loadBalancing ? 'openai-lb' : 'openai-chat-completions', true, [], '', '', '', '', '', []]));
+  const [baseline, setBaseline] = useState(() =>
+    JSON.stringify([
+      null,
+      loadBalancing ? 'OpenAI LB' : '',
+      loadBalancing ? 'openai-lb' : 'openai-chat-completions',
+      true,
+      [],
+      '',
+      '',
+      '',
+      '',
+      '',
+      [],
+    ]),
+  );
 
   const resetProvider = () => {
     editorGeneration.current += 1;
@@ -80,15 +130,32 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setConnected(false);
     setRequestState('idle');
     setRequestError('');
-    setBaseline(JSON.stringify([null, loadBalancing ? 'OpenAI LB' : '', loadBalancing ? 'openai-lb' : 'openai-chat-completions', true, [], '', '', '', '', '', []]));
+    setBaseline(
+      JSON.stringify([
+        null,
+        loadBalancing ? 'OpenAI LB' : '',
+        loadBalancing ? 'openai-lb' : 'openai-chat-completions',
+        true,
+        [],
+        '',
+        '',
+        '',
+        '',
+        '',
+        [],
+      ]),
+    );
     resetClaudeLogin();
     resetOpenAiOAuth();
   };
 
   const connect = async (connection?: OpenAiOAuthConnection, isCurrent = () => true) => {
-    const discoveryProvider = connection ? connection.provider ?? 'OpenAI' : provider;
-    const discoveryUrl = connection ? connection.baseUrl ?? 'https://chatgpt.com/backend-api' : url;
-    if (connection ? !discoveryProvider.trim() || !discoveryUrl.trim() : !connectionReady) return availableModels;
+    const discoveryProvider = connection ? (connection.provider ?? 'OpenAI') : provider;
+    const discoveryUrl = connection
+      ? (connection.baseUrl ?? 'https://chatgpt.com/backend-api')
+      : url;
+    if (connection ? !discoveryProvider.trim() || !discoveryUrl.trim() : !connectionReady)
+      return availableModels;
     const generation = ++editorGeneration.current;
     const current = () => isEditorCurrent(generation) && isCurrent();
     setRequestState('connecting');
@@ -97,20 +164,26 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
       const result = await modelConnectionsApi.discover({
         ...((connection?.id ?? editingId) ? { id: connection?.id ?? editingId! } : {}),
         provider: discoveryProvider.trim(),
-        apiType: connection ? connection.apiType ?? 'openai-responses' : apiType,
-        ...(!connection && poolConnection ? { pool } : { baseUrl: discoveryUrl.trim(), apiKey: connection ? '' : apiKey }),
+        apiType: connection ? (connection.apiType ?? 'openai-responses') : apiType,
+        ...(!connection && poolConnection
+          ? { pool }
+          : { baseUrl: discoveryUrl.trim(), apiKey: connection ? '' : apiKey }),
         models: connection ? selectedRuntimeModels(connection.models) : availableModels,
       });
       if (!current()) return [];
-      if (result.discovery?.status === 'error' || result.discovery?.error) throw new Error(result.discovery.error || 'Discovery failed');
+      if (result.discovery?.status === 'error' || result.discovery?.error)
+        throw new Error(result.discovery.error || 'Discovery failed');
       // Pools and their account/OAuth workflows retain their existing discovery semantics.
       // Ordinary API connections require an explicit opt-in for newly discovered IDs.
-      const models = connection || poolConnection || loadBalancing || oauthConnection
-        ? result.models
-        : result.models.map((model) => ({
-          ...model,
-          selected: availableModels.find((existing) => existing.id === model.id)?.selected ?? (availableModels.some((existing) => existing.id === model.id) ? true : false),
-        }));
+      const models =
+        connection || poolConnection || loadBalancing || oauthConnection
+          ? result.models
+          : result.models.map((model) => ({
+              ...model,
+              selected:
+                availableModels.find((existing) => existing.id === model.id)?.selected ??
+                (availableModels.some((existing) => existing.id === model.id) ? true : false),
+            }));
       setAvailableModels(models);
       setSelectedModelId(models[0]?.id ?? null);
       setConnected(true);
@@ -118,9 +191,11 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     } catch (error) {
       if (!current()) return [];
       setConnected(true);
-      setRequestError(error instanceof Error
-        ? `Could not discover models: ${error.message}. Add model IDs manually.`
-        : 'Could not discover models. Add model IDs manually.');
+      setRequestError(
+        error instanceof Error
+          ? `Could not discover models: ${error.message}. Add model IDs manually.`
+          : 'Could not discover models. Add model IDs manually.',
+      );
       if (connection) throw error;
       return availableModels;
     } finally {
@@ -130,8 +205,17 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const saveProvider = async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => {
     const models = modelsOverride ?? availableModels;
-    if (writePending.current || requestState !== 'idle' || !connectionReady || (!poolConnection && !models.some((model) => model.selected !== false))) return false;
-    if (savedFingerprint.current === draft) { setRequestError('Provider already saved. Refresh the connection list before editing again.'); return false; }
+    if (
+      writePending.current ||
+      requestState !== 'idle' ||
+      !connectionReady ||
+      (!poolConnection && !models.some((model) => model.selected !== false))
+    )
+      return false;
+    if (savedFingerprint.current === draft) {
+      setRequestError('Provider already saved. Refresh the connection list before editing again.');
+      return false;
+    }
     writePending.current = true;
     const snapshot = draft;
     const generation = ++editorGeneration.current;
@@ -147,11 +231,16 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
           apiType,
           ...(poolConnection ? { pool } : { baseUrl: url.trim() }),
           ...(!poolConnection && apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-          ...((!poolConnection && (oauthIdToken.trim() || oauthAccessToken.trim() || oauthRefreshToken.trim())) ? { oauthTokens: {
-            ...(oauthIdToken.trim() ? { id_token: oauthIdToken.trim() } : {}),
-            ...(oauthAccessToken.trim() ? { access_token: oauthAccessToken.trim() } : {}),
-            ...(oauthRefreshToken.trim() ? { refresh_token: oauthRefreshToken.trim() } : {}),
-          } } : {}),
+          ...(!poolConnection &&
+          (oauthIdToken.trim() || oauthAccessToken.trim() || oauthRefreshToken.trim())
+            ? {
+                oauthTokens: {
+                  ...(oauthIdToken.trim() ? { id_token: oauthIdToken.trim() } : {}),
+                  ...(oauthAccessToken.trim() ? { access_token: oauthAccessToken.trim() } : {}),
+                  ...(oauthRefreshToken.trim() ? { refresh_token: oauthRefreshToken.trim() } : {}),
+                },
+              }
+            : {}),
           ...(!poolConnection ? { models } : {}),
         }),
       });
@@ -164,23 +253,57 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
       }
       // The write succeeded even if the subsequent inventory refresh fails. Do not
       // retry a POST with consumed credentials or discard edits made while saving.
-      const accepted = JSON.stringify(JSON.parse(snapshot).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value));
-      if (isEditorCurrent(generation)) { savedFingerprint.current = accepted; setBaseline(accepted); }
-      try { await onModelConnectionsChanged(); } catch (error) {
-        if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Provider saved, but refresh failed: ${error.message}` : 'Provider saved, but refresh failed.');
+      const accepted = JSON.stringify(
+        JSON.parse(snapshot).map((value: unknown, index: number) =>
+          index >= 6 && index <= 9 ? '' : value,
+        ),
+      );
+      if (isEditorCurrent(generation)) {
+        savedFingerprint.current = accepted;
+        setBaseline(accepted);
+      }
+      try {
+        await onModelConnectionsChanged();
+      } catch (error) {
+        if (isEditorCurrent(generation))
+          setRequestError(
+            error instanceof Error
+              ? `Provider saved, but refresh failed: ${error.message}`
+              : 'Provider saved, but refresh failed.',
+          );
         return false;
       }
       if (!isEditorCurrent(generation)) return false;
-      if (JSON.stringify(JSON.parse(latestDraft.current).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value)) !== JSON.stringify(JSON.parse(snapshot).map((value: unknown, index: number) => index >= 6 && index <= 9 ? '' : value))) return false;
+      if (
+        JSON.stringify(
+          JSON.parse(latestDraft.current).map((value: unknown, index: number) =>
+            index >= 6 && index <= 9 ? '' : value,
+          ),
+        ) !==
+        JSON.stringify(
+          JSON.parse(snapshot).map((value: unknown, index: number) =>
+            index >= 6 && index <= 9 ? '' : value,
+          ),
+        )
+      )
+        return false;
       setSavedProvidersOpen(true);
       resetProvider();
       onSaved?.();
       return true;
     } catch (error) {
-      if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not save provider: ${error.message}` : 'Could not save provider.');
+      if (isEditorCurrent(generation))
+        setRequestError(
+          error instanceof Error
+            ? `Could not save provider: ${error.message}`
+            : 'Could not save provider.',
+        );
       return false;
     } finally {
-      if (isEditorCurrent(generation)) { writePending.current = false; setRequestState('idle'); }
+      if (isEditorCurrent(generation)) {
+        writePending.current = false;
+        setRequestState('idle');
+      }
     }
   };
 
@@ -195,11 +318,28 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setApiKey('');
     setApiKeyConfigured(Boolean(connection.apiKeyConfigured || connection.authConfigured));
     setOauthConnection(Boolean(connection.authConfigured));
-    const models = selectedRuntimeModels(connection.models).map((model) => ({ ...model, selected: true }));
+    const models = selectedRuntimeModels(connection.models).map((model) => ({
+      ...model,
+      selected: true,
+    }));
     setAvailableModels(models);
     setSelectedModelId(models[0]?.id ?? null);
     setConnected(Boolean(connection.authConfigured || connection.apiKeyConfigured));
-    setBaseline(JSON.stringify([connection.id, connection.provider ?? 'OpenAI', connection.apiType ?? 'openai-responses', true, [], connection.baseUrl ?? 'https://chatgpt.com/backend-api', '', '', '', '', models]));
+    setBaseline(
+      JSON.stringify([
+        connection.id,
+        connection.provider ?? 'OpenAI',
+        connection.apiType ?? 'openai-responses',
+        true,
+        [],
+        connection.baseUrl ?? 'https://chatgpt.com/backend-api',
+        '',
+        '',
+        '',
+        '',
+        models,
+      ]),
+    );
   };
 
   const openAiFlow = useOpenAiOAuthConnectionFlow({
@@ -231,61 +371,116 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
   const { reset: resetOpenAiOAuth } = openAiFlow;
   const { reset: resetClaudeLogin } = claudeFlow;
 
-  const toggleModel = (id: string) => setAvailableModels((all) => all.map((model) => model.id === id
-    ? { ...model, selected: model.selected === false }
-    : model));
+  const toggleModel = (id: string) =>
+    setAvailableModels((all) =>
+      all.map((model) =>
+        model.id === id ? { ...model, selected: model.selected === false } : model,
+      ),
+    );
 
-  const toggleModelInput = (id: string, input: 'text' | 'image') => setAvailableModels((all) => all.map((model) => {
-    if (model.id !== id) return model;
-    const acceptedInput = model.acceptedInput ?? model.discoveredInput ?? ['text'];
-    const acceptedInputOverride = acceptedInput.includes(input)
-      ? acceptedInput.filter((type) => type !== input)
-      : [...acceptedInput, input];
-    return { ...model, acceptedInput: acceptedInputOverride, acceptedInputOverride };
-  }));
+  const toggleModelInput = (id: string, input: 'text' | 'image') =>
+    setAvailableModels((all) =>
+      all.map((model) => {
+        if (model.id !== id) return model;
+        const acceptedInput = model.acceptedInput ?? model.discoveredInput ?? ['text'];
+        const acceptedInputOverride = acceptedInput.includes(input)
+          ? acceptedInput.filter((type) => type !== input)
+          : [...acceptedInput, input];
+        return { ...model, acceptedInput: acceptedInputOverride, acceptedInputOverride };
+      }),
+    );
 
-  const toggleModelOutput = (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => setAvailableModels((all) => all.map((model) => {
-    if (model.id !== id) return model;
-    const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
-    const acceptedOutputOverride = acceptedOutput.includes(output) ? acceptedOutput.filter((type) => type !== output) : [...acceptedOutput, output];
-    return { ...model, acceptedOutput: acceptedOutputOverride, acceptedOutputOverride };
-  }));
+  const toggleModelOutput = (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') =>
+    setAvailableModels((all) =>
+      all.map((model) => {
+        if (model.id !== id) return model;
+        const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
+        const acceptedOutputOverride = acceptedOutput.includes(output)
+          ? acceptedOutput.filter((type) => type !== output)
+          : [...acceptedOutput, output];
+        return { ...model, acceptedOutput: acceptedOutputOverride, acceptedOutputOverride };
+      }),
+    );
 
-  const setModelOutputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
-    if (model.id !== id) return model;
-    if (enabled) return { ...model, acceptedOutput: model.discoveredOutput ?? ['text'], acceptedOutputOverride: undefined };
-    const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
-    return { ...model, acceptedOutput, acceptedOutputOverride: acceptedOutput };
-  }));
+  const setModelOutputAuto = (id: string, enabled: boolean) =>
+    setAvailableModels((all) =>
+      all.map((model) => {
+        if (model.id !== id) return model;
+        if (enabled)
+          return {
+            ...model,
+            acceptedOutput: model.discoveredOutput ?? ['text'],
+            acceptedOutputOverride: undefined,
+          };
+        const acceptedOutput = model.acceptedOutput ?? model.discoveredOutput ?? ['text'];
+        return { ...model, acceptedOutput, acceptedOutputOverride: acceptedOutput };
+      }),
+    );
 
-  const setModelContextAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
-    if (model.id !== id) return model;
-    if (enabled) return { ...model, contextWindow: model.discoveredContextWindow, contextWindowOverride: undefined, contextWindowMode: 'auto' };
-    const value = model.contextWindowOverride ?? model.contextWindow ?? model.discoveredContextWindow;
-    return { ...model, contextWindow: value, contextWindowMode: 'manual', ...(value ? { contextWindowOverride: value } : { contextWindowOverride: undefined }) };
-  }));
+  const setModelContextAuto = (id: string, enabled: boolean) =>
+    setAvailableModels((all) =>
+      all.map((model) => {
+        if (model.id !== id) return model;
+        if (enabled)
+          return {
+            ...model,
+            contextWindow: model.discoveredContextWindow,
+            contextWindowOverride: undefined,
+            contextWindowMode: 'auto',
+          };
+        const value =
+          model.contextWindowOverride ?? model.contextWindow ?? model.discoveredContextWindow;
+        return {
+          ...model,
+          contextWindow: value,
+          contextWindowMode: 'manual',
+          ...(value ? { contextWindowOverride: value } : { contextWindowOverride: undefined }),
+        };
+      }),
+    );
 
-  const setModelContextOverride = (id: string, value: number | undefined) => setAvailableModels((all) => all.map((model) => model.id === id
-    ? { ...model, contextWindow: value, contextWindowOverride: value, contextWindowMode: 'manual' }
-    : model));
+  const setModelContextOverride = (id: string, value: number | undefined) =>
+    setAvailableModels((all) =>
+      all.map((model) =>
+        model.id === id
+          ? {
+              ...model,
+              contextWindow: value,
+              contextWindowOverride: value,
+              contextWindowMode: 'manual',
+            }
+          : model,
+      ),
+    );
 
-  const setModelInputAuto = (id: string, enabled: boolean) => setAvailableModels((all) => all.map((model) => {
-    if (model.id !== id) return model;
-    if (enabled) return { ...model, acceptedInput: model.discoveredInput ?? ['text'], acceptedInputOverride: undefined };
-    const acceptedInput = model.acceptedInput ?? model.discoveredInput ?? ['text'];
-    return { ...model, acceptedInput, acceptedInputOverride: acceptedInput };
-  }));
+  const setModelInputAuto = (id: string, enabled: boolean) =>
+    setAvailableModels((all) =>
+      all.map((model) => {
+        if (model.id !== id) return model;
+        if (enabled)
+          return {
+            ...model,
+            acceptedInput: model.discoveredInput ?? ['text'],
+            acceptedInputOverride: undefined,
+          };
+        const acceptedInput = model.acceptedInput ?? model.discoveredInput ?? ['text'];
+        return { ...model, acceptedInput, acceptedInputOverride: acceptedInput };
+      }),
+    );
 
   const addManualModel = () => {
     const id = manualModel.trim();
     if (!id) return;
-    setAvailableModels((all) => all.some((model) => model.id === id)
-      ? all
-      : [...all, { id, selected: true, manual: true, acceptedInput: ['text'] }]);
+    setAvailableModels((all) =>
+      all.some((model) => model.id === id)
+        ? all
+        : [...all, { id, selected: true, manual: true, acceptedInput: ['text'] }],
+    );
     setManualModel('');
   };
 
-  const deleteManualModel = (id: string) => setAvailableModels((all) => all.filter((model) => model.id !== id));
+  const deleteManualModel = (id: string) =>
+    setAvailableModels((all) => all.filter((model) => model.id !== id));
 
   const editProvider = (item: SavedProvider) => {
     editorGeneration.current += 1;
@@ -304,31 +499,48 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     setOauthRefreshToken('');
     setApiKeyConfigured(item.apiKeyConfigured === true);
     setOauthConnection(isOpenAiOAuthConnection(item));
-    const models = item.connectionModels ?? item.models.map((id) => {
-      const discoveredInput = item.modelDiscoveredInputs?.[id];
-      const acceptedInputOverride = item.modelInputOverrides?.[id];
-      return {
-        id,
-        selected: true,
-        manual: item.manualModels?.[id] === true,
-        displayName: item.modelLabels?.[id],
-        reasoningEfforts: item.modelEfforts?.[id],
-        defaultReasoningEffort: item.defaultEfforts?.[id],
-        contextWindow: item.modelContextWindows?.[id],
-        discoveredContextWindow: item.modelDiscoveredContextWindows?.[id],
-        contextWindowOverride: item.modelContextWindowOverrides?.[id],
-        discoveredInput,
-        acceptedInputOverride,
-        acceptedInput: acceptedInputOverride ?? discoveredInput ?? ['text'],
-        discoveredOutput: item.modelDiscoveredOutputs?.[id],
-        acceptedOutputOverride: item.modelOutputOverrides?.[id],
-        acceptedOutput: item.modelOutputOverrides?.[id] ?? item.modelDiscoveredOutputs?.[id] ?? ['text'],
-      };
-    });
+    const models =
+      item.connectionModels ??
+      item.models.map((id) => {
+        const discoveredInput = item.modelDiscoveredInputs?.[id];
+        const acceptedInputOverride = item.modelInputOverrides?.[id];
+        return {
+          id,
+          selected: true,
+          manual: item.manualModels?.[id] === true,
+          displayName: item.modelLabels?.[id],
+          reasoningEfforts: item.modelEfforts?.[id],
+          defaultReasoningEffort: item.defaultEfforts?.[id],
+          contextWindow: item.modelContextWindows?.[id],
+          discoveredContextWindow: item.modelDiscoveredContextWindows?.[id],
+          contextWindowOverride: item.modelContextWindowOverrides?.[id],
+          discoveredInput,
+          acceptedInputOverride,
+          acceptedInput: acceptedInputOverride ?? discoveredInput ?? ['text'],
+          discoveredOutput: item.modelDiscoveredOutputs?.[id],
+          acceptedOutputOverride: item.modelOutputOverrides?.[id],
+          acceptedOutput: item.modelOutputOverrides?.[id] ??
+            item.modelDiscoveredOutputs?.[id] ?? ['text'],
+        };
+      });
     setAvailableModels(models);
     setSelectedModelId(models[0]?.id ?? null);
     setConnected(true);
-    setBaseline(JSON.stringify([item.id, item.provider, item.apiType, item.pool?.enabled ?? true, item.pool?.memberConnectionIds ?? [], item.url, '', '', '', '', models]));
+    setBaseline(
+      JSON.stringify([
+        item.id,
+        item.provider,
+        item.apiType,
+        item.pool?.enabled ?? true,
+        item.pool?.memberConnectionIds ?? [],
+        item.url,
+        '',
+        '',
+        '',
+        '',
+        models,
+      ]),
+    );
     setRequestError('');
     resetClaudeLogin();
     resetOpenAiOAuth();
@@ -336,33 +548,75 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
 
   const deleteProvider = async (item: SavedProvider) => {
     const generation = editorGeneration.current;
-    if (!await confirm({
-      title: 'Delete provider?',
-      message: `Delete ${item.provider}? This removes its saved connection.`,
-      confirmLabel: 'Delete provider',
-      tone: 'danger',
-    })) return;
+    if (
+      !(await confirm({
+        title: 'Delete provider?',
+        message: `Delete ${item.provider}? This removes its saved connection.`,
+        confirmLabel: 'Delete provider',
+        tone: 'danger',
+      }))
+    )
+      return;
     if (isEditorCurrent(generation)) setRequestError('');
     try {
-      await api(`/api/settings/model-connections/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+      await api(`/api/settings/model-connections/${encodeURIComponent(item.id)}`, {
+        method: 'DELETE',
+      });
       await onModelConnectionsChanged();
       if (isEditorCurrent(generation) && editingId === item.id) resetProvider();
     } catch (error) {
-      if (isEditorCurrent(generation)) setRequestError(error instanceof Error ? `Could not delete provider: ${error.message}` : 'Could not delete provider.');
+      if (isEditorCurrent(generation))
+        setRequestError(
+          error instanceof Error
+            ? `Could not delete provider: ${error.message}`
+            : 'Could not delete provider.',
+        );
     }
   };
 
-  useUnsavedChanges({ dirty: draft !== baseline, busy: requestState !== 'idle', save: () => saveProvider(), discard: () => {
-    const [id, name, type, enabled, members, baseUrl, , , , , models] = JSON.parse(baseline) as [string | null, string, string, boolean, string[], string, string, string, string, string, RuntimeModel[]];
-    editorGeneration.current += 1; setEditingId(id); setProvider(name); setApiType(type); setPoolEnabled(enabled); setMemberConnectionIds(members); setUrl(baseUrl); setAvailableModels(models);
-    setApiKey(''); setOauthIdToken(''); setOauthAccessToken(''); setOauthRefreshToken(''); setSelectedModelId(models[0]?.id ?? null); setConnected(Boolean(id)); setManualModel(''); setRequestError('');
-  } });
-
-  const openOpenAiOAuth = () => navigate(() => {
-    if (editingId) resetOpenAiOAuth();
-    else resetProvider();
-    setOauthModal('openai');
+  useUnsavedChanges({
+    dirty: draft !== baseline,
+    busy: requestState !== 'idle',
+    save: () => saveProvider(),
+    discard: () => {
+      const [id, name, type, enabled, members, baseUrl, , , , , models] = JSON.parse(baseline) as [
+        string | null,
+        string,
+        string,
+        boolean,
+        string[],
+        string,
+        string,
+        string,
+        string,
+        string,
+        RuntimeModel[],
+      ];
+      editorGeneration.current += 1;
+      setEditingId(id);
+      setProvider(name);
+      setApiType(type);
+      setPoolEnabled(enabled);
+      setMemberConnectionIds(members);
+      setUrl(baseUrl);
+      setAvailableModels(models);
+      setApiKey('');
+      setOauthIdToken('');
+      setOauthAccessToken('');
+      setOauthRefreshToken('');
+      setSelectedModelId(models[0]?.id ?? null);
+      setConnected(Boolean(id));
+      setManualModel('');
+      setRequestError('');
+    },
   });
+
+  const openOpenAiOAuth = () =>
+    navigate(() => {
+      if (editingId) resetOpenAiOAuth();
+      else resetProvider();
+      setOauthModal('openai');
+    });
   const openAnthropicOAuth = () => {
     setApiType('anthropic-messages');
     setOauthModal('anthropic');
@@ -378,7 +632,9 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
       setRequestState('idle');
     } else if (isProviderPool(next) || poolConnection) {
       resetProvider();
-      setProvider(next === 'openai-lb' ? 'OpenAI LB' : next === 'anthropic-lb' ? 'Anthropic LB' : '');
+      setProvider(
+        next === 'openai-lb' ? 'OpenAI LB' : next === 'anthropic-lb' ? 'Anthropic LB' : '',
+      );
     } else {
       editorGeneration.current += 1;
       setRequestState('idle');
@@ -389,14 +645,23 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     editorGeneration.current += 1;
     setRequestState('idle');
     setRequestError('');
-    setMemberConnectionIds(ids => ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id]);
+    setMemberConnectionIds((ids) =>
+      ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
+    );
     setAvailableModels([]);
     setSelectedModelId(null);
     setConnected(false);
   };
 
   return {
-    poolConnection, poolEnabled, setPoolEnabled, poolMembers, memberConnectionIds, missingPoolMembers, togglePoolMember, connectionReady,
+    poolConnection,
+    poolEnabled,
+    setPoolEnabled,
+    poolMembers,
+    memberConnectionIds,
+    missingPoolMembers,
+    togglePoolMember,
+    connectionReady,
     editingId,
     provider,
     setProvider,
@@ -428,7 +693,9 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     claudeFlow,
     resetProvider: () => navigate(resetProvider),
     connect,
-    saveProvider: async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => { await saveProvider(modelsOverride, onSaved); },
+    saveProvider: async (modelsOverride?: RuntimeModel[], onSaved?: () => void) => {
+      await saveProvider(modelsOverride, onSaved);
+    },
     toggleModel,
     toggleModelInput,
     setModelInputAuto,
@@ -440,7 +707,9 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
     deleteManualModel,
     selectedModelId,
     setSelectedModelId,
-    editProvider: (item: SavedProvider) => { if (item.id !== editingId) navigate(() => editProvider(item)); },
+    editProvider: (item: SavedProvider) => {
+      if (item.id !== editingId) navigate(() => editProvider(item));
+    },
     deleteProvider,
     openOpenAiOAuth,
     openAnthropicOAuth,

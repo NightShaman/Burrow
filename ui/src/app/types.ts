@@ -1,10 +1,120 @@
 export type Page = 'chat' | 'tasks' | 'archive' | 'brains' | 'forge' | 'settings';
-export type SettingsTab = 'general' | 'agents' | 'skills' | 'connections' | 'mods' | `mod-settings:${string}:${string}`;
-export type FileNode = { name: string; path: string; type: 'file' | 'directory'; children?: FileNode[] };
-export type ContextDetails = { estimatedTokens: number | null; capacityTokens: number | null; pressure: string | null; source: string | null; compactionActive: boolean; summarizedTurnCount: number | null; rawRecentTurnCount: number | null; recallUsed?: boolean; recallScope?: string | null; recallSourceCount?: number };
-export type Subagent = import('./api').MinionAncestry & { agentId?: string; outcomeReason?: string; retained?: boolean; id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; stream: string; subagentId?: string; targetId?: string; resourceId?: string };
-export type Agent = { enabled?: boolean; id: string; name: string; avatar: string; activity: string; context: number | null; contextDetails?: ContextDetails; contextConfig?: { a2aInDefault?: boolean }; provider: string; modelConnectionId?: string; model: string; effort: string; thinkingMode?: string | null; temperature: number; workspace: string; files: FileNode[]; subagents: Subagent[]; minionScope?: 'agent' | 'session'; minionCoverage?: 'current' | 'stale' | 'unavailable'; executionEnvironment?: { kind: 'local' | 'remote' | 'unresolved'; providerId?: string; targetId?: string; legacyKind?: string; workspaceRoot: string } | null; targetId?: string; resourceId?: string; targetName?: string };
-export type Tab = { id: string; label: string; kind: 'chat' | 'file' | 'group'; channelId?: string; path?: string; content?: string; fileLoaded?: boolean; fileLoading?: boolean; fileError?: string; fileLoadId?: string; savedContent?: string; workspaceAgentId?: string; targetId?: string };
+export type SettingsTab =
+  | 'general'
+  | 'agents'
+  | 'skills'
+  | 'connections'
+  | 'mods'
+  | `mod-settings:${string}:${string}`;
+export type FileNode = {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: FileNode[];
+};
+export type ContextDetails = {
+  estimatedTokens: number | null;
+  capacityTokens: number | null;
+  pressure: string | null;
+  source: string | null;
+  compactionActive: boolean;
+  summarizedTurnCount: number | null;
+  rawRecentTurnCount: number | null;
+  recallUsed?: boolean;
+  recallScope?: string | null;
+  recallSourceCount?: number;
+};
+export type Subagent = import('./api').MinionAncestry & {
+  agentId?: string;
+  outcomeReason?: string;
+  retained?: boolean;
+  id: string;
+  name: string;
+  avatar: string;
+  activity: string;
+  context: number | null;
+  contextDetails?: ContextDetails;
+  stream: string;
+  subagentId?: string;
+  targetId?: string;
+  resourceId?: string;
+};
+export type Agent = {
+  enabled?: boolean;
+  id: string;
+  name: string;
+  avatar: string;
+  activity: string;
+  context: number | null;
+  contextDetails?: ContextDetails;
+  contextConfig?: { a2aInDefault?: boolean };
+  provider: string;
+  modelConnectionId?: string;
+  model: string;
+  effort: string;
+  thinkingMode?: string | null;
+  temperature: number;
+  workspace: string;
+  files: FileNode[];
+  subagents: Subagent[];
+  minionScope?: 'agent' | 'session';
+  minionCoverage?: 'current' | 'stale' | 'unavailable';
+  executionEnvironment?: {
+    kind: 'local' | 'remote' | 'unresolved';
+    providerId?: string;
+    targetId?: string;
+    legacyKind?: string;
+    workspaceRoot: string;
+  } | null;
+  targetId?: string;
+  resourceId?: string;
+  targetName?: string;
+};
+export type Tab = {
+  id: string;
+  label: string;
+  kind: 'chat' | 'file' | 'group';
+  channelId?: string;
+  path?: string;
+  content?: string;
+  fileLoaded?: boolean;
+  fileLoading?: boolean;
+  fileError?: string;
+  fileLoadId?: string;
+  savedContent?: string;
+  workspaceAgentId?: string;
+  targetId?: string;
+};
 export type PanelId = 'none' | 'agents' | 'workspace' | 'accounts' | 'system';
 export type PanelSlot = 'top' | 'bottom';
-export type SavedProvider = { pool?: import("./api").ProviderPool; id: string; provider: string; apiType: string; url: string; apiKey: string; apiKeyConfigured?: boolean; auth?: { type?: string | null; source?: string | null; provider?: string | null; expiresAt?: string | null }; oauthConfigured?: boolean; authSource?: string | null; expiresAt?: string | null; models: string[]; connectionModels?: import("./api").RuntimeModel[]; manualModels?: Record<string, boolean>; modelLabels?: Record<string, string>; modelEfforts?: Record<string, string[]>; defaultEfforts?: Record<string, string>; modelContextWindows?: Record<string, number>; modelDiscoveredContextWindows?: Record<string, number>; modelContextWindowOverrides?: Record<string, number>; modelDiscoveredInputs?: Record<string, ('text' | 'image')[]>; modelInputOverrides?: Record<string, ('text' | 'image')[]>; modelDiscoveredOutputs?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]>; modelOutputOverrides?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]> };
+export type SavedProvider = {
+  pool?: import('./api').ProviderPool;
+  id: string;
+  provider: string;
+  apiType: string;
+  url: string;
+  apiKey: string;
+  apiKeyConfigured?: boolean;
+  auth?: {
+    type?: string | null;
+    source?: string | null;
+    provider?: string | null;
+    expiresAt?: string | null;
+  };
+  oauthConfigured?: boolean;
+  authSource?: string | null;
+  expiresAt?: string | null;
+  models: string[];
+  connectionModels?: import('./api').RuntimeModel[];
+  manualModels?: Record<string, boolean>;
+  modelLabels?: Record<string, string>;
+  modelEfforts?: Record<string, string[]>;
+  defaultEfforts?: Record<string, string>;
+  modelContextWindows?: Record<string, number>;
+  modelDiscoveredContextWindows?: Record<string, number>;
+  modelContextWindowOverrides?: Record<string, number>;
+  modelDiscoveredInputs?: Record<string, ('text' | 'image')[]>;
+  modelInputOverrides?: Record<string, ('text' | 'image')[]>;
+  modelDiscoveredOutputs?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]>;
+  modelOutputOverrides?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]>;
+};
