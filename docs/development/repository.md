@@ -8,10 +8,10 @@ Burrow is assembled from separate source repositories; public promotion publishe
 
 | Artifact | Revision |
 |---|---|
-| Development assembly | `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` |
-| Build | `2026.10.25.9` |
-| Backend source | `3bf50374d3601c821e787912d52b9044eaf649ec` |
-| UI source | `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a` |
+| Development assembly | `fe851c4e546c9bf9f53f861e24f918474432c296` |
+| Build | `2026.11.01.7` |
+| Backend source | `8b5889115680bcdbf698f1b93126254e1cf4d2e6` |
+| UI source | `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef` |
 
 These pins describe the documentation's evidence baseline, not a claim about every running installation. Read your installed `SOURCE_VERSIONS` and health version when investigating a deployment.
 
@@ -70,4 +70,4 @@ See [source map](../project/source-map.md), [architecture](../architecture/overv
 
 ## Source review
 
-Reviewed on 25 October 2026 against development assembly `f9d1bc5b1b04e3d7f29c6b4f62e0feb935bff487` (build2026.10.25.9), Backend `3bf50374d3601c821e787912d52b9044eaf649ec` and UI `0610bac85b2e636b79bbdf09fc3a95c3a519fa5a`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.
+Reviewed on 1 November 2026 against development assembly `fe851c4e546c9bf9f53f861e24f918474432c296` (build2026.11.01.7), Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and UI `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.

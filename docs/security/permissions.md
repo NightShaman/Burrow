@@ -1,13 +1,13 @@
 # Permissions and execution boundaries
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
 
-The execution-boundary call sites and mod-authority additions below were checked against public release **2026.10.19**, commit `aa5a30da683a3a8ea919025f107ff53f182ef8d6`. This is a focused static review; it does not certify a deployed host's isolation or remove the earlier-reference warning.
+The execution-boundary call sites and mod-authority contracts below were checked against current Backend source. Static review does not certify a deployed host's isolation.
 
 ## Where authority lives
 
@@ -95,7 +95,7 @@ Once a process receives a credential, that process can use it. Protected handles
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/action-safety.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-safety.mjs)
 - [backend/src/execution-boundaries.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/execution-boundaries.mjs)

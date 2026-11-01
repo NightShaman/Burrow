@@ -1,8 +1,9 @@
 # Initial setup
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 Complete setup from the local listener before exposing Burrow to other machines. Keep [authentication](../security/authentication.md) and the [settings encryption key](../reference/configuration.md) under operator control.
@@ -25,6 +26,7 @@ The current wizard submits all six profile kinds: `SOUL`, `RULES`, `ORIENTATION`
 
 
 !!! note "Recovering the historical 2026.10.10.4 profile error"
+
     That wizard omitted `PREFERENCES` and could fail with `agent_profile_documents_complete_set_required`. The current UI repairs its known retained five-document submission by adding empty `PREFERENCES` and saving the repaired payload in this browser before sending. It preserves the operation ID, existing text and all other input. Failed profile validation does not commit that operation. Older installations may have partial records; use the [targeted recovery procedure](../operations/troubleshooting.md#first-run-profile-error) rather than assuming an agent exists or changing its name repeatedly.
 
 
@@ -36,7 +38,7 @@ For a lost response or transient error, retry in the same browser to recover the
 2. Choose **Connect** to discover models. This populates the editor; it is not the final **Save** step. If discovery fails or returns none, enter an exact provider-supported **Model ID** and choose **Add model**.
 3. Check **Use …** for every model you want available. Click a model's name to inspect **Model details**. **Input**, **Output**, and **Context window** each have **Auto** and **Manual** modes. Keep Auto unless you have reliable provider information; an override does not add a capability the provider lacks.
 4. Choose **Save**, then verify the connection appears among saved providers. To edit one, select its card. A blank API-key field on an existing connection preserves the configured key; entering a new key replaces it.
-5. Open **Chat**, select the intended agent, and choose **Provider** and **Model** in the toolbar. Adjust **Effort** or **Temp** only as supported by the model. These controls save the agent's selection; they are not merely one-turn overrides. **Agent details** edits the agent's identity and enabled state, not its model.
+5. Open **Chat**, select the intended agent, and choose **Provider** and **Model** in the toolbar. Adjust **Thinking** (native Anthropic), **Effort**, or **Temp** only as supported by the model. These controls save the agent's selection; they are not merely one-turn overrides. **Agent details** edits the agent's identity and enabled state, not its model.
 6. Reload and run the short conversation check below. A saved connection, an enabled model, and an agent selection are separate pieces of configuration.
 
 ### OpenAI: API key or ChatGPT sign-in
@@ -82,16 +84,12 @@ A provider error, missing model selection, or incomplete stream is a failed veri
 
 The main UI also has **Tasks**, **Archive**, **Brains**, **Forge**, and **Settings**. See the [interface guide](../concepts/interface.md) for their roles.
 
-## Source evidence
-
--  and
--  and
 
 
 
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)

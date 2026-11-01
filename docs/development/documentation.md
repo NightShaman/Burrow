@@ -1,63 +1,55 @@
 # Build this documentation
 
-This is a hand-written MkDocs Material site. Its sources are `docs/`, `mkdocs.yml`, `requirements-docs.txt`, and `scripts/docs/`. Building it does not require a running Burrow instance, database, model account, or application dependencies.
+This shared documentation site uses Docusaurus. Its source is GoblinKing-Burrow/Docs-Website, with project guides in `docs/`, navigation in `sidebars.json`, and site settings in `docusaurus.config.js`. A build does not require Burrow application dependencies, a running server, a database, or model credentials.
 
 ## Preview locally
 
-From the repository root, with Python 3.12:
+From the Docs-Website repository root, use Node.js 22 or newer:
 
 ```sh
-python3 -m venv .venv-docs
-. .venv-docs/bin/activate
-python -m pip install -r requirements-docs.txt
-python -m mkdocs serve --dev-addr 127.0.0.1:8000
+npm ci
+npm start
 ```
 
-Open `http://127.0.0.1:8000/`. Windows PowerShell uses `.venv-docs\Scripts\Activate.ps1` for activation.
-
-## Validate the site
+Open the local URL printed by Docusaurus. To validate and preview the production output:
 
 ```sh
-python -m mkdocs build --strict
-python scripts/docs/check_site.py site --base-path /
+npm run build
+npm run serve
 ```
 
-The strict build validates configuration, navigation, Markdown links, and anchors. The HTML checker validates built local links, assets, and fragments. The custom-domain site uses the root path `/`, without `/Burrow/`. Keep `site_url` and the checker base path aligned.
-
-The retained technical reference includes Mermaid diagrams. Check actual browser rendering separately:
-
-```sh
-python -m pip install -r requirements-docs-test.txt
-python -m playwright install chromium
-python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts
-```
-
-Set `DOCS_CHROMIUM_EXECUTABLE` to an existing Chromium executable if needed. Diagram rendering requires its external Mermaid distribution to be reachable. A failed network request is a blocked render check, not a pass. Check the homepage and user-guide layout at desktop and phone widths as well.
+Output is written to `build/`. Broken local links and missing Markdown assets fail the build. Search is indexed locally during the production build. Mermaid diagrams are bundled with the site; inspect their browser rendering and check both desktop and phone layouts after changing diagrams or styles.
 
 ## Maintain the source
 
-Edit the hand-written documentation in `docs/` and its build configuration in `mkdocs.yml`. Product instructions should describe an inspected public release. Do not mechanically repoint old source citations to a new commit without checking their claims.
+Edit `docs/<project>/` and preserve project-specific artwork. Use `.md` for CommonMark and `.mdx` for React components. Use Docusaurus admonitions such as `:::danger` and `:::warning`; MkDocs `!!!` blocks are not supported. Update `sidebars.json` when adding or moving a guide.
+
+Use current inspected development implementation as the documentation baseline rather than waiting for public mirrors. State which behavior requires a newer source snapshot, distinguish it from installed/tagged public versions, and record exact source pins. Do not mechanically repoint old source citations to a new commit without checking their claims. Keep prominent risk warnings and historical-reference labels intact.
 
 ## Publishing the documentation
 
-The consolidated documentation at `https://docs.goblin-kingdom.com/` is published from **GoblinKing-Burrow/Docs-Website**, not this repository. Its Docusaurus deployment owns the canonical root and component routes. This repository retains a separate MkDocs build with output in `site/`. Hosting, DNS and custom-domain settings are managed separately; changing a source URL does not change them.
+The canonical site is [docs.goblin-kingdom.com](https://docs.goblin-kingdom.com/), with project routes including `/burrow/`, `/node-goblin/`, `/burrow-backdoor/`, `/goblin-secret-store/`, `/burrow-switchboard/`, `/burrow-theater/`, `/burrow-tutor/`, and `/burrow-skills/`. The configured base path is `/`.
 
-The retained Documentation workflow builds and checks this repository’s MkDocs site. In **GoblinKing-Burrow/Burrow**, after successful checks on `main`, it uploads the static `site/` directory and deploys to that repository’s configured GitHub Pages site. Pull requests run checks only. This workflow does not build or publish Burrow application images.
+In **GoblinKing-Burrow/Docs-Website**, `.github/workflows/deploy.yml` builds pull requests and deploys successful builds from `main` using the GitHub Pages artifact flow. Deployments use narrowly scoped `pages: write` and `id-token: write` permissions and the `github-pages` environment. No application images are built or published.
 
-The deploy job has narrowly scoped `pages: write` and `id-token: write` permissions and uses the `github-pages` environment. Hosting and custom-domain settings are managed separately. The workflow reads existing Pages settings with automatic enablement disabled; an unconfigured Pages site must be configured by its owner before deployment can succeed. Do not assume that a successful build or an uploaded artifact updates the website: verify the deployment job and live URL.
+The custom domain is already the canonical publication target. Ordinary documentation maintenance does not require changing Pages settings, domain bindings or DNS. The repository owner manages those settings separately. A `static/CNAME` file does not itself change DNS or Pages settings. A private repository requires a plan that supports Pages for private repositories; the website may be public even when its source repository is private.
 
 Before publication:
 
-1. Review the documentation source changes.
-2. Run the static and browser checks against the final files.
-3. Confirm the existing host and custom-domain settings without changing DNS unnecessarily.
-4. Publish through the approved host, then verify its homepage, guide pages, assets, and canonical URLs.
+1. Review the documentation changes and run the production build.
+2. Check rendered links, screenshots, warnings, diagrams, and narrow-screen navigation.
+3. Confirm the deployment job succeeded, then verify the live homepage, project guides, images, and canonical URLs.
+
+Where maintained, original project repositories retain their own documentation source and workflows. Commands for those sites do not build this shared Docusaurus site.
 
 No credentials, real operator data, private transcripts, or secret-bearing screenshots belong in this public site.
 
 ## Updating the guide
 
-Use concrete UI labels, small safe examples, and links to immutable public source. Distinguish installed, enabled, connected, accepted, running, and completed states. Record verification limits in [Source and coverage](../project/source-map.md). Retained historical pages must stay visibly marked until their claims have been checked against a new public baseline.
+Use concrete UI labels, small safe examples, and links to immutable public source. Distinguish installed, enabled, connected, accepted, running, and completed states. Record verification limits in [Source and coverage](../project/source-map.md). Retained historical pages must stay visibly marked until their claims have been checked against the current implementation baseline.
+
+
+For upstream documentation-only maintenance, use `[skip ci]` commits where needed to avoid application/release workflows; do not skip this website’s deployment build. Ordinary runs reconcile drift since the last successful receipt; Sunday reviews cover every documented page, including unchanged topics. Retain source pins, page-level coverage and deployment/live receipts for the next run.
 
 ## Validate upstream copies as well as this site
 

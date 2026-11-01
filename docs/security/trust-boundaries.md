@@ -1,12 +1,13 @@
 # Trust boundaries
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+
 
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
 
-The focused corrections below were checked against public release **2026.10.19**, commit `aa5a30da683a3a8ea919025f107ff53f182ef8d6`. Earlier-reference caveats remain; live network, identity-provider, database, and host isolation must be verified in the actual deployment.
+The boundaries below were checked against current Backend and assembly source. Live network, identity-provider, database and host isolation still require verification in the actual deployment.
 
 ## Boundary map
 
@@ -79,7 +80,7 @@ BURROW's redaction is boundary-driven:
 - Traversal and text budgets limit output size
 
 Ordinary prose that resembles a credential assignment is deliberately not heuristically rewritten. A result labeled `clear` by the protected-value adapter means no supported protected declaration was found; it is not a guarantee that the content contains no secrets.
-Generic trace payload handling bounds content but does not apply blanket redaction. Different producers apply different projections. Chat progress can include commands, paths, queries, reasons, and errors, and diagnostics access includes private-content endpoints. Inspect and sanitize the actual material before sharing logs, trace artifacts, transcripts, or screenshots.  ·  · [Diagnostics scope](authentication.md#exact-allowlist)
+Generic trace payload handling bounds content but does not apply blanket redaction. Different producers apply different projections. Chat progress can include commands, paths, queries, reasons, and errors, and diagnostics access includes private-content endpoints. Inspect and sanitize the actual material before sharing logs, trace artifacts, transcripts, or screenshots. See [Diagnostics scope](authentication.md#exact-allowlist)
 
 ## Telemetry export is data sharing
 
@@ -91,7 +92,7 @@ A mod server runs in a Node child process. The host owns lifecycle, availability
 
 Core-owned APIs keep normal mod operations scoped and explicit. System-mod capabilities additionally depend on operator-owned grants and agent allowlists; declaring a capability in a manifest is insufficient. Those API checks do not sandbox the installed code. Mod HTTP projections strip `authorization`, `cookie`, `proxy-authorization`, and `x-api-key` headers and provide verified `enabled`/`authenticated` booleans. This protects that particular API projection; it does not remove the host/environment powers of installed JavaScript.
 
-Mod UI code is also trusted: it is dynamically imported into the operator page and mounts into DOM surfaces. Scoped API helpers, namespace validation, cleanup handlers, and error boundaries are useful contracts, not an iframe sandbox. Review a source's code and dependencies before installation or update, even when its tools have no agent grants.  · [Extensions](../development/extensions.md)
+Mod UI code is also trusted: it is dynamically imported into the operator page and mounts into DOM surfaces. Scoped API helpers, namespace validation, cleanup handlers, and error boundaries are useful contracts, not an iframe sandbox. Review a source's code and dependencies before installation or update, even when its tools have no agent grants. See [Extensions](../development/extensions.md)
 
 ### Child environments differ
 
@@ -132,7 +133,7 @@ Read [Deployment](../operations/deployment.md), [Configuration](../reference/con
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/mod-host.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-host.mjs)
 - [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)

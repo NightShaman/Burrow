@@ -1,6 +1,6 @@
 # Skills and memory
 
-Current implementation delta reviewed **31 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 
@@ -80,7 +80,9 @@ Memories you create or edit through the operator interface are operator-owned; a
 
 
 !!! warning "Check the selection before deleting"
+
     **Delete memory** and **Delete selected memories** act directly in this release; there is no confirmation dialog in the Brains page. **Select page** selects only the visible page. Bulk deletion runs independently for each record, so some deletions may succeed while others fail. Read the per-record result before retrying. This page has no restore button.
+
 
 [Source: deletion behavior](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L83-L118)
 

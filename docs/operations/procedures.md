@@ -1,10 +1,12 @@
 # Common operational procedures
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Implementation and historical evidence"
 
-These retained recipes include targeted corrections against public **2026.10.19** and assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
+
+These source-reviewed recipes assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
 
 ## Start, stop, inspect
 
@@ -66,10 +68,12 @@ Stop also holds all current and future main queue inputs; **Resume queue** relea
 1. Open **Tasks**, create a project if needed, and create or open a task.
 2. Fill in the description and **Assignee**, then save. **Execute** uses only the saved task and rejects unsaved edits.
 3. Choose **Execute** on a task that is neither Done nor cancelled. Expect a dispatch receipt and navigation to the assigned agent's chat.
-4. Follow progress in chat and inspect the task's saved execution/history. The current board does not continuously poll task execution; use **Refresh history** or reopen the task for newer records. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
+4. Follow progress in chat and inspect the task's saved execution/history. The board refreshes its task list about every 60 seconds; use **Refresh history** or reopen the task for newer history records, and chat for live execution. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
 5. Inspect the default conversation and **Archive → Proof** for its final answer, blockers, and verification. Update the board status to reflect the reviewed outcome.
 
 The dispatch lookup is awaited in this release; the former unassigned-task warning is obsolete. Execution success does not automatically move a task to Done. An uncertain dispatch response requires checking the active chat and retained task receipt. Check runtime activity and the task's persisted execution before retrying; a disconnected browser does not prove dispatch failed. Project paths supply context, not filesystem authorization.
+
+For recurring or one-time execution of saved To Do tasks, see [task scheduling](../guide/tasks.md#schedule-a-saved-board-task-or-a-one-time-run). A skipped schedule is not a completed task, and Run now consumes a one-time job even when it skips.
 
 ## Recover a prior decision or saved memory
 
@@ -96,12 +100,12 @@ Use **Settings → General → Trace retention** for managed trace cleanup:
 
 1. Take a recovery backup if traces may be needed for incident review.
 2. Choose the maximum age and/or storage limit and a cadence between 15 minutes and 7 days. **Maximum storage** now uses an explicit MiB/GiB selector; changing units preserves the underlying byte limit. Enable managed cleanup only when those limits are intended.
-3. Choose **Apply policy** only after reviewing its limits. **Applying an enabled policy can start scheduled deletion immediately, without Preview or Run now.** Check the applied result.
+3. Choose **Apply policy** only after reviewing its limits. Choosing **Save** in the unsaved-navigation dialog also applies the live policy. **Applying an enabled policy can start scheduled deletion immediately, without Preview or Run now.** Check the applied result.
 4. Choose **Preview cleanup** and inspect the trace count and reclaimable bytes. The UI summarizes the plan; it does not display individual paths.
 5. If the saved, previewed policy is still the intended one, choose **Run now**. Any form edit requires applying and previewing again.
 6. Check the cleanup result, last-run status, next-run status, and any error. A zero count may simply mean no trace qualifies.
 
-Managed cleanup is disabled until enabled with at least one limit. This surface removes trace data, not Brains records or a selected conversation. If a save/preview fails, resolve that error before proceeding. Do not use a different policy surface merely to bypass the guard. ]
+Managed cleanup is disabled until enabled with at least one limit. This surface removes trace data, not Brains records or a selected conversation. If a save/preview fails, resolve that error before proceeding. Do not use a different policy surface merely to bypass the guard.
 
 ### CLI retention is a separate policy
 
@@ -135,11 +139,9 @@ To remove the app and launcher while retaining durable state:
 
 Full removal also destroys the installation's durable state. Back up first, then use `uninstall --purge` only when that destruction is intended. Noninteractive uninstall requires explicit `--yes`. Container volume deletion is a separate destructive operation.
 
-## Source evidence
-
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
 - [backend/src/retention.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/retention.mjs)

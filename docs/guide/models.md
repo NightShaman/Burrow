@@ -1,6 +1,6 @@
 # Models and connections
 
-Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 An agent needs a saved model connection and a selected model to answer. A connection tells Burrow which API to call and how to authenticate; the model selector chooses what that agent uses. A provider account, quota, and any model charges are separate from installing Burrow.
 
@@ -40,9 +40,9 @@ OpenAI invalid-grant, reused, expired, invalidated and revoked-token failures ar
 
 ## Native OAuth account pools
 
-Use **Settings → Connections → Load Balancing**, separate from **Model providers**, to create a logical OpenAI or Anthropic OAuth pool.
+Use **Settings → Connections → Load Balancing**, separate from **Models**, to create a logical OpenAI or Anthropic OAuth pool.
 
-1. Connect and save the individual same-family OAuth accounts under **Model providers** first.
+1. Connect and save the individual same-family OAuth accounts under **Models** first.
 2. Open **Load Balancing**, enter **Name**, and choose **Adapter → OpenAI** or **Anthropic**.
 3. Select **Member accounts**, leave **Enabled** on when intended, and choose **Save**. The pool editor has no separate API key, URL, login, Connect button, or model checklist.
 4. Select the saved logical provider and a model in Chat. Pool models are the **intersection** of the members' discovered catalogs; manual member models do not contribute. Direct-account selection checkboxes do not disable a model for pool routing.
@@ -86,6 +86,20 @@ Keep **Auto** unless you have reliable information for the exact model and endpo
 In Chat, **Effort** and **Temp** adjust the selected agent's model settings where supported. Available effort choices depend on the connection/model; controls are locked while the displayed run is active. The context display is an estimate, not an exact tokenizer or billing statement.
 
 [Source: model capabilities and context controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModelConnectionViews.tsx) · [Chat controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatPage.tsx).
+
+## Anthropic thinking and effort
+
+For native Anthropic connections and pools, **Thinking** and **Effort** are independent controls. Available choices follow the selected model's capabilities:
+
+- **Default** thinking lets the provider choose; it does not mean Disabled.
+- **Disabled** explicitly disables thinking only where supported.
+- **Adaptive** uses adaptive thinking. **No up-front thinking** uses between-tools thinking when available.
+- **Manual** uses legacy budgeted thinking on models that support it. Effort is not silently converted into a manual token budget.
+- **Default** effort omits an explicit native effort choice; it does not turn thinking off.
+
+Older saved selections can display a **Legacy** mode. They retain their earlier effort-based behavior instead of silently becoming provider default. Legacy Off resolves to Disabled, so a model that cannot disable thinking needs an explicit supported mode before it can run. Resolve the displayed validation issue deliberately; unavailable choices are not automatically replaced. Settings are retained for the complete turn and its tool continuations. See [model behavior](../concepts/models.md) for compatibility details.
+
+Anthropic discovery follows all catalog pages. Advertised native capabilities take precedence over known-model fallbacks, including explicit unsupported values. An incomplete or failed refresh preserves the last good catalog; it must not be interpreted as the model being removed. A manual model ID still does not prove support or account access.
 
 ## Change or remove a connection
 

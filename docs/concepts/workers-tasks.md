@@ -1,8 +1,8 @@
 # Workers, tasks, and schedules
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW has several forms of work. Choose by the outcome you need, rather than treating every task record as a running agent.
@@ -13,7 +13,7 @@ BURROW has several forms of work. Choose by the outcome you need, rather than tr
 | Minion | A separate child task with an explicit filesystem target | `spawn_subagent` |
 | Peer agent message | Another registered agent's contribution | A reply-request message mode |
 | Task board | Track project work, status, priority, and assignment | Assignment alone does not dispatch |
-| Scheduled job | A recurring prompt in an agent/session | Scheduler due claim or manual run |
+| Scheduled job | A prompt or assigned To Do task, on cron or once | Scheduler due claim or manual run |
 | Forge job | Asynchronous generated media | Explicit generation request |
 | Legacy work item | Retained inspect/propose/verify/factory workflow | Explicit continuation control |
 
@@ -45,7 +45,7 @@ Current completed tasks are projected into **Archive → Tasks** after 48 hours 
 
 ## Scheduled jobs
 
-A scheduled job stores a name, prompt, five-field cron expression, owner agent, and session. Scheduling uses the operator timezone. Optional model selection can override the model for that job. Agent tools operate only on the active agent's non-mod-owned jobs; they cannot edit another agent's or a mod's jobs.
+A scheduled job stores a name and owner agent, a prompt or task target (`jobKind: prompt` or `task`), and a recurring or one-time schedule (`scheduleKind: cron` or `once`). Cron uses five fields; one-time jobs use `runAt`. Scheduling uses the operator timezone. Optional model selection can override the model for that job. Agent tools operate only on the active agent's non-mod-owned jobs; they cannot edit another agent's or a mod's jobs.
 
 Agent-created jobs default to disabled unless `enabled` is explicitly true. The default session is the current chat. Public **2026.10.19** uses the operator timezone for every job. Legacy payload timezone values are accepted but are not authoritative; migration 53 clears earlier overrides. Changing the operator timezone reconciles cached effective zones and recomputes next occurrences.
 
@@ -65,6 +65,14 @@ Example preparation of a disabled weekday job:
 Review the job before enabling it. A scheduled prompt executes as the configured agent and can select that agent's available tools; scheduling is not inherently read-only.
 
 For current `contextMode: fresh` jobs, a named non-default session is required. Dispatch archives/resets that session through the safe admission boundary before the scheduled turn. This preserves originals in Archive; it is not retention deletion. The ordinary cron editor does not expose a context-mode control. Existing continue-mode jobs retain their conversation behavior.
+
+### Scheduled board tasks and one-time jobs
+
+A task job selects a saved **To Do** task assigned to its owner agent. At dispatch, Core rechecks the durable task claim and executes the current saved task title, description, project context and optional `extraInstructions` through the same executor as **Execute**. Unsaved browser edits are not part of the run. Task jobs use the assigned agent's `default` session with continued context; they do not create a separate fresh conversation.
+
+A deleted task, changed assignee, non-To-Do status or an already-running task records a skipped occurrence rather than silently choosing different work. A scheduler acknowledgement is admission, not completion: its run stays running until that same task execution settles. Task execution state and board status remain separate. The execution instruction asks the agent to move the card to In Progress when beginning and Review when ready; the operator owns Done. These are instructed task-tool updates, not automatic scheduler status transitions.
+
+A one-time schedule is consumed and disabled when claimed, including manual Run now, skipped admission or a missed startup occurrence. Re-enabling a consumed timestamp is rejected; set a new future schedule to authorize another occurrence. Cron jobs remain recurring, but a task that has left To Do will be skipped on later occurrences. Native random timing or jitter is not part of this schedule contract.
 
 ### Scheduler lifecycle
 
@@ -117,7 +125,7 @@ Read the [CLI wiring caveats](../reference/cli.md#legacy-store-wiring-gap) befor
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)

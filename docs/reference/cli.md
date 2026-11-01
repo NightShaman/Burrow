@@ -1,7 +1,9 @@
 # Command-line reference
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+
 
 Burrow has two command layers: the installed shell launcher and the backend Node CLI. Use the installed launcher for a normal deployment; it loads the private environment and supplies the application root.
 
@@ -109,4 +111,5 @@ These are messages handled by the HTTP chat path, separate from shell commands:
 | `/compact` | Compact context without main-agent inference; originals remain archived, empty/irreducible history can be a no-op |
 
 `/context full` can reveal private conversation and evidence; review before sharing.
+
 

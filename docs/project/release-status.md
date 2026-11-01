@@ -18,14 +18,14 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://docs.goblin-kingdom.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
-## Current implementation check: 31 October 2026
+## Current implementation check: 1 November 2026
 
 This nightly pass uses current development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
 
-- Assembled Burrow: `203c3ed2d634680bb98a6e04bb75247cd9b3e2c2`.
-- Core: `8275b6bedf1fcd969fb5289cf0b673a80ddc8146`.
-- UI: `f48a29337abccdfeb8c34895d043d6be4110b1fb`.
-- Operating skills: `078031793d93118e463c0c780feefa3dd109e257`.
+- Assembled Burrow: `fe851c4e546c9bf9f53f861e24f918474432c296`.
+- Core: `8b5889115680bcdbf698f1b93126254e1cf4d2e6`.
+- UI: `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef`.
+- Operating skills: `1f464f48b651a78c3c90599ffee674a627cf67e3`.
 
 Recent operator-facing changes include a **Browse stored credentials** picker and configured-credential state for HTTPS mod sources, plus a per-agent **A2A in default** routing toggle and readable external-chat session labels. See [tools and mods](../guide/tools-and-mods.md#private-source-credentials-in-current-core) and [everyday use](../guide/everyday-use.md#current-session-routing-controls).
 
@@ -33,7 +33,7 @@ The dedicated Core/mod-managed skill catalog is implemented, not merely planned.
 
 Current Core also exposes mod-owned external-turn cancellation and session create/model controls. Cancellation is cooperative and must be polled to terminal status; new-session creation does not delete an old conversation or cancel its work. These are Core capabilities, not proof that every transport mod exposes matching commands. Follow each mod's documentation and installed-version requirements.
 
-The reviewed assembly identifies itself as **2026.10.31.6**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **83**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
+The reviewed assembly identifies itself as **2026.11.01.7**. Native **OpenAI LB** and **Anthropic LB** connection types are now present in default-branch UI and Core, with same-family OAuth membership and bounded text-model routing. See [account-pool setup and limitations](../guide/models.md#native-oauth-account-pools). This is implemented source, not a claim of successful live provider validation. Current schema inventory reaches migration **85**. `run_evidence_search` adds explicit agent-owned historical proof retrieval; it does not add automatic prompt recall or a new HTTP API.
 
 The earlier Sunday pass reconciled the full documentation surface, including historical-page scope. No live provider, OAuth, installation, database restore, runtime test, or unmerged branch was treated as successful verification. Historical examples remain historical; documentation publication does not establish runtime readiness.
 
@@ -69,3 +69,7 @@ Compared implementation changes since the successful 29 October baseline: indepe
 ## Ordinary update: 31 October 2026
 
 Compared changes since the successful 30 October baseline: retained Chat occurrence-day discovery, local-day transcript filtering and readable reset origins; bounded SQL transcript pages and revision-bound cursors; request-owned Archive cancellation/timeouts and separate calendar/foreground reader lanes; mod-submitted image attachments; OAuth refresh persistence and selected-token identity across caller cancellation; and schema migrations 80–83. Managed-skill ownership/version guidance and Switchboard Telegram image support are reconciled in their component guides. This is static delta reconciliation, not a full-page recertification, application/provider test, runtime deployment or release promotion. Unchanged historical source links and screenshot qualifications remain intact.
+
+## Sunday full reconciliation: 1 November 2026
+
+Existing guides were compared with the current implementation across setup, configuration, routing, APIs, operations, troubleshooting and skills. Corrections include saved board-task scheduling and one-time consumption, independent Anthropic thinking modes and paginated native catalogues, current Settings/task-board behavior, and migration inventory through 85. Historical screenshots and immutable public-source receipts remain explicitly historical. This is static documentation reconciliation, not a runtime installation, provider call, application test run or release promotion.

@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 These are privileged operator routes. They share the normal interactive authentication gate; `diagnostics:read` Bearer tokens do not authorize them. Stored settings, environment overrides and effective runtime behavior are explained in [configuration](../configuration.md).
@@ -14,11 +14,19 @@ These are privileged operator routes. They share the normal interactive authenti
 Create an API token with `name`, optional `scopes` (currently only `diagnostics:read`) and optional future `expiresAt`. The plaintext appears only in the creation result; list returns metadata. DELETE revokes rather than returning the secret. Tokens cannot create more tokens or administer settings.
 ## Model connections and provider login
 
-In the UI, use **Settings → Connections → Models → Connect**, select the models to enable, and **Save**. Select a saved provider card to edit it. Select the agent in **Chat**, then use its **Provider**, **Model**, **Effort**, and **Temp** controls to persist that agent's selection. Agent details has no model selector. See the [operator walkthrough](../../getting-started/initial-setup.md#configure-a-usable-model).
+In the UI, use **Settings → Connections → Models → Connect**, select the models to enable, and **Save**. Select a saved provider card to edit it. Select the agent in **Chat**, then use its **Provider**, **Model**, provider-specific **Thinking**/**Effort**, and **Temp** controls to persist that agent's selection. Agent details has no model selector. See the [operator walkthrough](../../getting-started/initial-setup.md#configure-a-usable-model).
 
 Connection save accepts `provider`, `apiType`, `baseUrl`, and `models`; include `id` to update an existing connection. Omit `apiKey` to preserve an existing credential, or supply a nonblank replacement. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Discovery, connection authentication, model enablement, and agent selection are separate state transitions.
 
-A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`) and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects an unknown connection, a model not enabled in its catalog, absent authentication, or an advertised unsupported reasoning effort. Archive-summary selection is independent and can be cleared. There is also a separate per-agent Minion selection at `/api/agents/{agentId}/minion-model-selection`, using the same connection/model, effort and temperature fields. Adapter compatibility rules can omit a saved temperature from the provider request.
+A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`), nullable `thinkingMode`, and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects unknown connections, models not enabled in the catalog, absent authentication, and unsupported mode/effort combinations. `/api/agents/{agentId}/minion-model-selection` has the same independent fields. Archive-summary selection is separate and can be cleared. Adapter compatibility can omit saved temperature from the provider request.
+
+For Anthropic Messages and native Anthropic pools, `thinkingMode` is `default`, `disabled`, `adaptive`, `enabled` (Manual), or `between_tools` (No up-front thinking), subject to the selected model's capabilities. Explicit `default` omits the provider thinking field; `null` preserves the legacy effort-based interpretation and is **not** provider default. Omitting mode when saving the same connection/model preserves its prior mode; changing model with omitted mode starts legacy/null. Explicit null clears the selection to legacy. Other provider families reject an explicit Anthropic mode.
+
+Effort Default retains the `off` storage sentinel but omits native effort; it does not disable thinking when an explicit mode is selected. Legacy/null Off resolves to Disabled, so a model that cannot disable thinking needs a deliberate supported mode before running. Native effort names are independent: `xhigh` is not an alias for `max`. The UI retains incompatible saved selections for correction, rather than silently substituting a supported value. Main/minion and turn snapshots retain these controls through continuations.
+
+### Anthropic discovery
+
+Native discovery follows all declared `has_more`/`last_id` pages with `after_id`. Invalid/repeated/missing cursors, cancellation or a later-page failure do not overwrite the saved catalog with a partial result. Legacy single-page proxies can omit paging metadata. Native bounded `anthropicMetadata` and `capabilityProvenance` describe provider facts; missing/null values remain unknown, distinct from explicit unsupported values. Fallback provenance identifies fields filled by the models.dev snapshot. Refresh replaces provider facts while retaining explicit operator overrides and selections; discovered tool support does not enable tools or select a thinking mode. Input/output capacity remains metadata, not a request to spend the full output allowance.
 
 Prompt-cache flags, arbitrary request extras and cache-retention controls are not exposed by the standard model-connection form. See [current cache semantics](../../concepts/models.md#what-caching-currently-means) before treating an adapter option as a supported settings field.
 
@@ -151,7 +159,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
 - [backend/scripts/ui/general-settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/general-settings-routes.mjs)

@@ -2,7 +2,8 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+
 
 The API serves BURROW's UI and external clients. It is an operator-level control surface: it can create agents, change credentials and grants, execute model/tool work, import data and delete retained content. Read [authentication](../security/authentication.md) and [trust boundaries](../security/trust-boundaries.md) before exposing it.
 
@@ -13,7 +14,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 | [Chat and streaming](api/chat.md) | Turn submission, NDJSON events, cancellation and reconnection |
 | [Agents and setup](api/agents.md) | Registry, profile documents, initial setup |
 | [Sessions and Archive](api/sessions.md) | Current/original history, reset/fork/archive, context, handoffs |
-| [Tasks, schedules and groups](api/work.md) | Task board, recurring jobs, group chat, legacy workbench |
+| [Tasks, schedules and groups](api/work.md) | Task board, recurring and one-time jobs, group chat, legacy workbench |
 | [Settings and integrations](api/settings.md) | Auth, models/OAuth, MCP grants, skills, timezone, retention, API tokens |
 | [Memory and Dreams](api/memory.md) | Brains, explicit conversation recall, Tiddle, Dream controls |
 | [Files, Forge and exports](api/artifacts.md) | Workspace editing, attachments, generated artifacts, selective export/import |
@@ -35,11 +36,12 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-10-30** has **194 paths, 257 operations and 198 component schemas**, adding grouped Dream history and retained workflow-event Archive reads to the prior Minion Depth, telemetry and durable-chat contracts. Its SHA-256 is `74796181e804b9c52fdaddbda1afa15c264956b736165961e80dc5359454ffb4`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-11-01** has **194 paths, 257 operations and 206 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `43e53af292b31437a96c123dfe5ef117f75597cab8f05cf62b28c2eded310968`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
     The current schema declares the GitHub webhook signature scheme, but not the ordinary interactive UI authentication modes. It omits non-API OIDC/logout routes and contains broad open-object schemas. Its Forge request/catalog and mod-catalog shapes lag implementation. Do not infer anonymous access, unsupported features or complete client compatibility from generated types alone.
+
 
 Specific drift:
 
@@ -94,7 +96,7 @@ For Basic authentication, add `--user "$BURROW_USERNAME"` and let curl prompt fo
 
 ## Targeted source review
 
-The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)

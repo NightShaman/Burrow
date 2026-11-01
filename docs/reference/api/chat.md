@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 `POST /api/chat` submits one user-visible turn. Select an existing agent; its configured model and tools determine what the turn can do. A request can incur provider charges and execute granted tools.
@@ -17,7 +17,7 @@
 | `runId` | Optional caller-supplied run identifier; absence generates one, not a general idempotency key |
 | `attachments` | Array of `{name, type, size, encoding, content}` records |
 | `modelConnectionId`, `model` | Optional exact enabled connection/model overrides |
-| `reasoningEffort`, `temperature` | Per-turn generation preferences, subject to model support |
+| `reasoningEffort`, `thinkingMode`, `temperature` | Per-turn generation preferences, subject to model support; nullable Anthropic mode is distinct from explicit provider default (see [selection semantics](settings.md#model-connections-and-provider-login)) |
 | `continuityScope` | Explicit continuity namespace; `workingProject` is a compatibility alias |
 | `noCallModel` | Literal `true` selects no-model behavior; not an authorization or sandbox control |
 
@@ -135,7 +135,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Source review
 
-Reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`; static source inspection only, with no live API or provider calls.
+Reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`; static source inspection only, with no live API or provider calls.
 
 ## 27 October delta review
 

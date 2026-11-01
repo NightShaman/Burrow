@@ -1,12 +1,18 @@
 # Installation
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
 
 Burrow runs as a local Node.js application with PostgreSQL and an optional browser interface. Choose a [native installation](#native-installation) or [container deployment](../operations/containers.md).
 
+
 !!! warning "Grant access deliberately"
+
     Burrow does not provide a comprehensive sandbox around agent actions. Its tools can use the host permissions and credentials you grant. Start with an unprivileged account, restricted network access, and a test workspace. Read [trust boundaries](../security/trust-boundaries.md) before enabling integrations.
+
 
 ## Requirements
 
@@ -112,4 +118,5 @@ curl -fsS http://127.0.0.1:42817/health
 Inspect the JSON `ok` and `version` fields. Both `/health` and `/api/health` are public readiness/build-identity routes in this snapshot. Health does not prove that a model is configured or that a chat has succeeded.
 
 Next: [initial setup](initial-setup.md), [deployment](../operations/deployment.md), [upgrades](../operations/upgrades.md), and [backup and recovery](../operations/backup-recovery.md).
+
 

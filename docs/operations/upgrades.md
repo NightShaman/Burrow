@@ -1,8 +1,9 @@
 # Upgrades
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 Upgrade the deployment through its own distribution path: the native launcher for user installs, image replacement for containers. Preserve durable state and the settings encryption key.
@@ -15,7 +16,7 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
 
-The public **2026.10.19** release includes PostgreSQL migrations through version 60. The inspected development build **2026.10.21.2** adds version 61; do not treat that newer schema as already published. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+Current inspected development source includes PostgreSQL migrations through **85**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
 
 If startup appears to wait on PostgreSQL, use [long-migration checks](troubleshooting.md#upgrade-waits-on-a-database-migration) to distinguish elapsed time, CPU activity and lock waits before taking action.
 
@@ -29,7 +30,7 @@ Run as the installation owner:
 "$HOME/.burrow/bin/burrow" update --verbose
 ```
 
-The launcher enters the installed updater, which resolves the current public `main` SHA, downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing managed user service. It preserves the service enablement state, so a disabled service is not re-enabled. Existing manual installations remain manual; the automatic creation of a persistent service applies to fresh default installs only.
+The launcher enters the installed updater, which resolves the selected update repository’s current `main` SHA (the public repository for a default public install), downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing managed user service. It preserves the service enablement state, so a disabled service is not re-enabled. Existing manual installations remain manual; the automatic creation of a persistent service applies to fresh default installs only.
 
 Durable `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and integrations remain under the install root. Installer-owned path variables are reconciled. Existing listener values are preserved unless supplied explicitly:
 
@@ -56,6 +57,7 @@ Check the returned version against the installed build, then verify a normal con
 
 
 !!! note "Public readiness verification"
+
     The installer checks `/api/health` after restarting. Both health paths now run before authentication and report readiness/build identity. If verification fails, inspect the service invocation, listener, logs, and expected version; authentication alone is no longer the source-backed explanation. Health does not validate a complete model or integration workflow.
 
 
@@ -76,7 +78,7 @@ Pin the intended image tag, then follow [container upgrade](containers.md#upgrad
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [install.sh](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/install.sh)
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)

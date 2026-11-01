@@ -1,8 +1,8 @@
 # Configuration
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 BURROW stores operator-managed configuration in PostgreSQL. The service environment supplies deployment paths, database connectivity, encryption keys and optional overrides. The retained `loadBurrowConfig()` function is inert: it does not read or write `burrow.json`.
@@ -63,6 +63,7 @@ Select an enabled connection and an enabled model within it. Agent defaults can 
 
 | Parameter | Runtime behavior |
 |---|---|
+| Anthropic thinking mode | Independent nullable selection: `default`, `disabled`, `adaptive`, `enabled`, `between_tools`; null is legacy inference, not provider default. See [selection API](api/settings.md#model-connections-and-provider-login). |
 | Reasoning effort | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; selected provider/model may support a subset |
 | Temperature | Default `0.2`, finite range `0..2`; omitted when unsupported by the selected model |
 | Context capacity | Explicit model metadata wins; fallback is 292,000 for the OpenAI family and 1,000,000 for Anthropic |
@@ -95,7 +96,7 @@ Unknown fields are discarded. This format does not define executable tools, gran
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)

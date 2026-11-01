@@ -1,7 +1,9 @@
 # Architecture overview
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 BURROW separates the operator surface, runtime orchestration, authoritative state, execution placement, and provider transport. This keeps the conversational interface small while preserving inspectable evidence for work performed behind it.
 
@@ -93,3 +95,4 @@ See [Extensions](../development/extensions.md), [MCP](../concepts/mcp.md), and [
 - [Persistence](persistence.md): authoritative stores and data lifecycle
 - [Source map](../project/source-map.md): repository layout and source ownership
 - [Known limitations](../project/known-limitations.md): observed implementation gaps, separate from intended contracts
+

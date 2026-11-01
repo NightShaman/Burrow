@@ -1,11 +1,11 @@
 # Known limitations
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
-These retained observations include targeted source checks against public **2026.10.19** and explicitly labeled newer development behavior. They are not an independently tested running installation or a claim that every historical statement has been revalidated. Recheck them when upgrading.
+These observations were statically reconciled against the 1 November implementation baseline, while explicitly labeled older release examples remain historical. They are not an independently tested running installation. Recheck installed behavior when upgrading.
 
 ## Configuration and command compatibility
 
@@ -82,7 +82,7 @@ The local process runner supports abort-driven process-group termination with a 
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](source-map.md); static inspection is not a live deployment test.
 
 - [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
@@ -90,4 +90,4 @@ Corrections on this page were checked against public **2026.10.19**; any newer d
 
 ## 28 October development delta
 
-Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](source-map.md).

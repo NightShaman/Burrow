@@ -1,10 +1,11 @@
 # Storage schema
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-This reference retains the historical 2026.10.19 ownership map and now records the current migration ledger through **83**, checked against Core on **31 October 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+
+This reference reviews application storage ownership and records the current migration ledger through **85**, checked against Core on **1 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -99,8 +100,8 @@ Early schema constants intentionally remain immutable. Read them together with l
 | `model_connection_secrets` | `id`; unique `(connection_id, name)`; connection FK cascades | Ciphertext, nonce and authentication tag |
 | `model_auth_previews` | `connection_id`; connection FK cascades | Non-secret authentication preview JSON text |
 | `model_settings_cache` | `cache_key` | Catalog/settings cache JSON text and update time |
-| `agent_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Selected connection/model, reasoning effort and temperature |
-| `agent_minion_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Optional separate Minion connection/model, effort and temperature |
+| `agent_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Selected connection/model, reasoning effort, nullable thinking mode and temperature |
+| `agent_minion_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Optional separate Minion connection/model, effort, nullable thinking mode and temperature |
 Temperature is constrained to 0–2, default 0.2. Profile kind is constrained by the database; profile size and complete-replacement semantics are enforced by the store. Secret tables store encrypted bytes, not the external `BURROW_SETTINGS_KEY`. See [Authentication](../security/authentication.md).
 
 ## Conversations and original evidence
@@ -255,7 +256,7 @@ See [Persistence architecture](../architecture/persistence.md#filesystem-state) 
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/postgres-skill-sources.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-skill-sources.mjs)
@@ -298,3 +299,12 @@ Changed contracts above were checked statically against Backend `4057b50a5d5a9b1
 Migration 82 maintains per-source revisions on ordinary SQL writes; rollback does not publish a revision and TRUNCATE rotates an epoch. The automatic backfill examines at most 256 keys per transaction, checkpoints progress and writes only derived side rows; retained original JSON is not rewritten. Unprojected history remains readable by fallback until completion. Index creation still takes PostgreSQL DDL locks. Reset count caches are revision-bound and process-local; listing/detail GETs no longer update historical metadata.
 
 These are application migrations, not a PostgreSQL major upgrade or permission to edit SQL/ledger checksums. Source: Core `8275b6bedf1fcd969fb5289cf0b673a80ddc8146`, statically reviewed on **31 October 2026**.
+
+## Additions after migration 83
+
+| Version | Migration name | Purpose |
+|---:|---|---|
+| 84 | `scheduled-board-tasks-and-once` | Adds job kind, task target, extra instructions, schedule kind, one-time instant and consumption timestamp; cron becomes nullable for once jobs; run receipts retain task identity. |
+| 85 | `anthropic-thinking-mode-selections` | Adds nullable `thinking_mode` to main and Minion model selections, constrained to the supported mode names. Existing rows remain legacy null, not provider default. |
+
+Task schedules are constrained to the default session and continued context. Cron and once schedules have mutually exclusive cron/run-at fields. One-time consumption, task eligibility and restart reconciliation are application lifecycle contracts; never rearm by editing these rows directly. Read [scheduling](api/work.md#scheduled-jobs) and [model selection](api/settings.md#model-connections-and-provider-login).

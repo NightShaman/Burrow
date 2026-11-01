@@ -1,7 +1,9 @@
 # Core concepts
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 BURROW is a chat-first runtime. An operator talks to a configured agent; the agent can answer, inspect files, run tools, delegate a bounded task, or use an enabled integration. The normal result is an assistant response. Progress, traces, receipts, and task state explain how that result was produced.
 
@@ -55,8 +57,10 @@ Normal chat is model-owned: runtime planning and route labels provide context an
 
 An agent's workspace is its default context and working directory. An explicit filesystem target or per-command `cwd` can select another existing directory.
 
+
 !!! warning "Workspace roots are not sandboxes"
     Agent homes and minion targets do not themselves enforce filesystem isolation. Native tools may address absolute paths outside the default workspace. Execution availability also depends on configured hard blocks, tool grants, operating-system permissions, and the selected execution environment. Read [Permissions](../security/permissions.md) before granting access to a host.
+
 
 This is explicit in the execution-context implementation, which describes roots as selected-context facts rather than access-control boundaries.  
 
@@ -78,3 +82,4 @@ Normal chat and the retained legacy work-loop have different completion and veri
 - [Models](models.md): providers, capabilities, and context estimates
 - [Conversation history](conversation-history.md) and [Memory](memory.md): continuity and storage
 - [Architecture overview](../architecture/overview.md): component and ownership map
+

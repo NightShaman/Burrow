@@ -1,11 +1,11 @@
 # Environment variables
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Current source review"
+    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
-This reference separates supported service settings from installer, test and compatibility names. The focused additions below are checked against public release 2026.10.19; the earlier-reference warning still applies to the full inventory. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
+This reference separates supported service settings from installer, test and compatibility names. The inventory was statically checked against the current source; internal/test names are classified separately below. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
 
 See [configuration ownership](configuration.md), [deployment](../operations/deployment.md) and [containers](../operations/containers.md).
 
@@ -42,12 +42,19 @@ OIDC has no configurable session-TTL environment variable in the reviewed implem
 | `BURROW_GITHUB_WEBHOOK_SECRET` | Optional nonempty override for the global `/api/events/github` receiver; takes precedence over the encrypted secret saved in Settings |
 
 Settings-first configuration does not require this override. Changing a deployment environment override requires restarting/recreating its process; saving the supported receiver settings applies without a restart. Clearing a saved secret does not clear an active environment override. See [task workflows](../guide/tasks.md).
+
+### Browser request controls
+
+| Variable | Default / meaning |
+|---|---|
 | `BURROW_UI_ORIGIN_CHECK` | `true` by default; `true`/`false` overrides saved browser `checkOrigin`; keep enabled for browser-facing deployments |
 | `BURROW_UI_ALLOWED_ORIGINS` | Empty; comma-separated exact additional origins |
 | `BURROW_UI_ALLOWED_HOSTS` | Empty disables Host allowlist enforcement; otherwise exact host/port authorities, no wildcards |
 | `BURROW_UI_TRUSTED_PROXIES` | Empty; exact peer IPs trusted for forwarded host/protocol, separate from authentication proxies |
 | `BURROW_REQUEST_MAX_BYTES` | `100663296` (96 MiB) JSON body limit |
 | `BURROW_REQUEST_TIMEOUT_MS` | `30000` JSON body read timeout |
+| `BURROW_IMPORT_MAX_COMPRESSED_BYTES` | `67108864` (64 MiB) encoded-bundle compressed resource ceiling |
+| `BURROW_IMPORT_MAX_DECOMPRESSED_BYTES` | `268435456` (256 MiB) expanded export resource ceiling |
 | `BURROW_JSON_MAX_DEPTH` | `128` JSON traversal depth |
 | `BURROW_JSON_MAX_ITEMS` | `1000000` JSON traversal item budget |
 See [Authentication caveats](../security/authentication.md)
@@ -127,6 +134,7 @@ Compression controls normalize invalid values to supported defaults. The retaine
 | `BURROW_CLAUDE_BIN` | Login-helper executable; installer/container supplies its managed integration path |
 | `BURROW_OPENAI_OAUTH_CALLBACK_HOST` | Loopback callback host; only `localhost`, `127.0.0.1`, `::1` accepted |
 | `BURROW_OPENAI_OAUTH_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage`; specialized usage endpoint override |
+| `BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS` | Managed skill reconciliation interval, default six hours and minimum one minute; not a runtime/release version override |
 | `BURROW_PROVIDER_ERROR_MAX_BYTES` | `16384`; positive safe-integer Forge provider-error capture budget |
 | `BURROW_MOD_ARCHIVE_RESERVE_BYTES` | `268435456` (256 MiB); nonnegative safe-integer free-space reserve during mod extraction |
 
@@ -177,7 +185,7 @@ These names occur in the repository but are not a second supported application-c
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
 - [backend/src/browser-origin-policy.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/browser-origin-policy.mjs)

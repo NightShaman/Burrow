@@ -1,6 +1,6 @@
 # Everyday use
 
-Current implementation delta reviewed **28 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 ## Find your way around
 
@@ -8,10 +8,14 @@ The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **For
 
 [Source: main navigation](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L192-L223) · [Source: settings sections](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/SettingsPage.tsx#L88-L167)
 
+## Save settings deliberately
+
+Many settings editors guard unsaved changes when you switch sections, select another record, or leave the page. **Save** validates and persists the draft before continuing; **Discard** drops it; **Stay** keeps the current editor. Failed saves keep the draft available. This does not turn every field into autosave: some controls save explicitly, while documented toggles and sliders save independently. Check each section's saved/error feedback.
+
 ## Talk to an agent
 
 1. Open **chat** and select the agent in the **Agents** panel.
-2. Check the **Provider**, **Model**, and **Effort** controls above the conversation. These use your saved model connections. These model controls remain locked while the displayed run is active; **New session** and **Group Chat** remain available.
+2. Check the **Provider**, **Model**, **Thinking** (native Anthropic), and **Effort** controls above the conversation. These use your saved model connections. These model controls remain locked while the displayed run is active; **New session** and **Group Chat** remain available.
 3. Type a message and press **Enter** or click **Send message**. Use **Shift+Enter** for a new line.
 4. Watch the response and tool activity. Use **Stop response** to request cancellation. Choose Queue next, Steer, or Side question explicitly while a main run is busy; see the delivery choices below.
 

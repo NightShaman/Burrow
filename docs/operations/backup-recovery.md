@@ -1,7 +1,10 @@
 # Backup and recovery
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
 
 A complete recovery set contains both PostgreSQL state and the associated filesystem state, including the **matching encryption key**. Selective export is useful for portability but is not disaster recovery.
 
@@ -116,4 +119,5 @@ These exports do not capture complete conversations, original archives, Brain kn
 - Required MCP connections and per-agent grants still work
 - Background schedules and operator timezone are correct
 - A low-risk model turn completes without duplicate external actions
+
 

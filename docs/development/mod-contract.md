@@ -82,13 +82,17 @@ Tools publish under `mod.<id>`. Default `grant-required` availability uses per-a
 
 Ordinary mods may call `agents.list`, operator identity/timezone, paged conversation list/read, model list/generateText, and owner-scoped scheduler list/read/create/update/delete/runs/trigger. Model credentials remain in Core; generation uses `tools:null` and does not mutate chat. Scheduler jobs are bound to the mod. Use the scheduler, not private recurring timers. At most four generic capability calls are active per mod.
 
+### Durable external agent turns
+
+Where the installed Core exposes `context.agents.turns.submit/read/cancel`, submission is separate from generic tool-free model generation. Optional normalized chat attachments can include inline images; omitted attachments and an empty list are equivalent. Attachment metadata and content participate in the durable idempotency identity alongside the target/message fields. Accepted bytes are retained privately with the receipt and normal artifacts, not returned in the public submit/read projection. A changed payload under the same key conflicts instead of starting another turn. See [Tutor external turns](https://docs.goblin-kingdom.com/burrow-tutor/advanced/external-agent-turns/) for capability, encoding and example limitations.
+
 ## UI modules
 
 UI is trusted browser ESM. Assets in declared UI directories can be publicly served; keep server code/secrets elsewhere. Scoped `api(path,init?)` prefixes the mod namespace.
 
 Control exports `mountControl({modId,root,api})` and may return cleanup or `{unmount}`.
 
-Settings exports lowercase-kebab `settingsSections` and `mountSettings({modId,runtimeScope,section,agents,primary,overflow,api,accessApi,refreshAgents,saveAgentExecutionEnvironment})`. Surfaces expose `replace`, `replaceChildren`, and `clear`. Ordinary mods normally need only `section`, `primary`, and `api`. Declarative `settingsContribution`/`createSettingsContribution` is also supported.
+Settings exports lowercase-kebab `settingsSections` and `mountSettings({modId,runtimeScope,section,agents,primary,overflow,api,accessApi,refreshAgents,saveAgentExecutionEnvironment,confirm,navigate,setDraft})`. Surfaces expose `replace`, `replaceChildren`, and `clear`. Ordinary mods normally need only `section`, `primary`, and `api`. Declarative `settingsContribution`/`createSettingsContribution` is also supported. Current imperative hosts additionally supply app-owned `confirm`, guarded `navigate`, and `setDraft` lifecycle helpers; use these rather than native browser dialogs or bypassing dirty-form navigation. See the [Tutor UI contribution contract](https://docs.goblin-kingdom.com/burrow-tutor/advanced/ui-contributions/) for exact signatures and disposal behavior.
 
 Archive exports `mountArchive({modId,runtimeScope,root,api,date})`; `date` is `YYYY-MM-DD` or empty. Return cleanup or `{update?,unmount?}`.
 

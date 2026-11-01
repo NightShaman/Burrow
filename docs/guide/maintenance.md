@@ -1,6 +1,6 @@
 # Maintenance and recovery
 
-Current implementation reviewed **25 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Keep a restorable backup before updating or changing database configuration. The examples below assume a native install at `~/.burrow`; use your actual installation path if different.
 

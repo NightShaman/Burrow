@@ -1,7 +1,10 @@
 # Deployment
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
 
 Use one replaceable application and one clearly owned durable-state root. Keep the database, encryption key, and filesystem artifacts recoverable together.
 
@@ -92,4 +95,5 @@ Normal shutdown records active-run interruption evidence and drains connections 
 - A model-backed chat completes for the intended agent
 - A recent backup has been restored in an isolated rehearsal
 - Logs and retention have explicit owners
+
 

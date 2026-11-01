@@ -1,7 +1,9 @@
 # Execution flow
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 This page follows a selected native tool call through validation, dispatch, provider continuation, and terminal reporting. For setup and tool arguments, see [Tools](../concepts/tools.md).
 
@@ -82,6 +84,7 @@ The retained work-loop verification helper looks for a successful model call, a 
 | Minion prose without terminal signal | Not a completed child result |
 
 The runtime is not a transaction manager for arbitrary shell commands, remote systems, or multi-tool work. Recovery must reconcile observed effects. [Known limitations](../project/known-limitations.md) records static wiring and edge-path concerns; [Troubleshooting](../operations/troubleshooting.md) explains operational diagnosis.
+
 
 ## 29 October development delta
 

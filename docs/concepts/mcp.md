@@ -1,8 +1,8 @@
 # MCP connections and tools
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW separates a provider connection, its discovered tool catalog and each agent's grants. Saving or discovering a connection does not grant an agent permission to call its tools. PostgreSQL owns these records; mcporter supplies transport.
@@ -52,7 +52,7 @@ Execution rechecks the connection, exact tool and agent grant. Mod-provided tool
 
 The adapter runtime directory is mode `0700`. Disable/delete or changes affecting provider launch stop the daemon and remove its configuration. Unchanged stable configuration is not rewritten. Encrypted database storage does not mean decrypted credentials never reach disk: the adapter needs a restricted configuration for transport.
 
-Discovery and daemon operations normally have a 20-second deadline; calls have 30 seconds. Timeout sends TERM then KILL after one second. Each stdout/stderr capture retains at most a 256 KiB tail. A parsed provider `isError` response remains a tool error even if mcporter exits nonzero.
+Discovery and daemon operations normally have a 20-second deadline; calls have 30 seconds. Timeout sends TERM then KILL after one second. Normal discovery/transport stdout/stderr capture retains at most a 256 KiB tail; the typed-content-preserving invocation path allows a bounded 32 MiB capture for supported images. Truncated image JSON is rejected instead of exposed as plain text. A parsed provider `isError` response remains a tool error even if mcporter exits nonzero.
 
 The server stores at most 200 sanitized keep-alive lifecycle events in PostgreSQL. At startup it imports an existing `mcp-provider-events.jsonl` once per source path, preserves the full original text in a separate import receipt, and leaves the source file in place. That raw legacy receipt can contain unknown or malformed content and is not guaranteed redacted. Standalone adapter use without the injected store retains the JSONL fallback. Restored state is labeled `lastKnown`; it is not proof that a provider process is currently alive.
 ## Updating secrets and grants
@@ -92,7 +92,7 @@ The API endpoints are listed in [settings and integrations](../reference/api/set
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
 - [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)

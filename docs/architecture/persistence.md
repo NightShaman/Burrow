@@ -1,8 +1,8 @@
 # Persistence architecture
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW uses PostgreSQL for application settings, conversation history, memory and execution metadata. File attachments, generated artifacts, traces and several worker records remain on disk. A recoverable installation therefore includes both database and filesystem state, plus the key that decrypts stored credentials.
@@ -56,7 +56,7 @@ Changing lifecycle mode does not migrate data between clusters. Plan a database 
 
 ## Migrations and transactions
 
-The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **72 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, scheduled context mode, and provider pools. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
+The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **85 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, provider pools, Archive projections, scheduled board tasks/one-time jobs, and independent Anthropic thinking-mode selections. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
 Nested transaction work uses savepoints. A nested operation cannot commit the outer transaction; rollback failure causes the client to be discarded. Per-domain locks add narrower guarantees: session appends lock the session row, Tiddle writes lock the agent, and scheduled occurrences have unique database identities.
 
 !!! warning "A reader command may apply migrations"
@@ -107,7 +107,7 @@ Resetting a conversation archives its previous active entries. Archiving a sessi
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)

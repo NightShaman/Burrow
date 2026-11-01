@@ -1,7 +1,9 @@
 # Models and providers
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 Model selection is explicit configuration. A connection describes the provider endpoint and credential source; a model identifies the configured capability to use through that connection. The connection ID is durable identity. A display label is presentation.
 
@@ -11,7 +13,7 @@ Configure and enable the connection/model, then select it for an agent. Do not p
 
 Use **Settings → Connections → Models** to Connect, inspect discovery results, check the models to use, and Save. Model names open capability details; the checkbox enables the model. Manual Model ID entry is available after Connect, including when discovery fails. Follow the [step-by-step connection and OpenAI sign-in guide](../getting-started/initial-setup.md#configure-a-usable-model).
 
-Then select the agent in **Chat** and use the **Provider** and **Model** toolbar controls. **Effort** and **Temp** also persist with that agent's selection. Changing provider/model may reset effort to that model's default. The backend checks that the model is enabled and the connection has authentication. A UI temperature choice is not a promise that the adapter sends temperature: GPT-6.1, ChatGPT backend requests, and other models marked as not supporting it omit the field.
+Then select the agent in **Chat** and use the **Provider** and **Model** toolbar controls. **Effort**, supported **Thinking** mode, and **Temp** also persist with that agent's selection. Changing provider/model may reset effort to that model's default. The backend checks that the model is enabled and the connection has authentication. A UI temperature choice is not a promise that the adapter sends temperature: GPT-6.1, ChatGPT backend requests, and other models marked as not supporting it omit the field.
 ## Supported adapter paths
 
 | Path | Role | Important behavior |
@@ -56,7 +58,21 @@ Use [Forge jobs](workers-tasks.md#background-maintenance-and-generation) when ge
 
 Reasoning/thought deltas are separate from answer text. Clients must not concatenate them into the final answer or durable assistant message.
 
-Anthropic configuration supports effort controls, adaptive/manual thinking modes, and bounded manual thinking budgets. Prompt caching is enabled by default unless explicitly disabled. Some sampling/effort decisions depend on model-name compatibility rules in the checked-in source. Unsupported or new model names must be tested; do not assume a provider marketing name implies a particular runtime setting.  
+Current Anthropic selections separate **Thinking** mode from **Effort**. Native catalogue capabilities take precedence, including explicit unsupported values; conservative checked-in fallbacks support known models on older catalogues/proxies. Unknown models offer provider default unless native metadata declares more. Discovery follows declared catalogue pages and fails an invalid or incomplete pagination chain instead of accepting its first page as a complete refresh. Native capability provenance remains distinct from optional catalogue enrichment.
+
+| Thinking selection | Request behavior |
+|---|---|
+| Default | Omits `thinking`; uses the provider's default |
+| Disabled | Sends `thinking.type: disabled` only where supported |
+| Adaptive | Sends `thinking.type: adaptive`; effort is independent |
+| No up-front thinking | Sends `thinking.type: between_tools`; supported combinations are limited to High effort or lower |
+| Manual | Sends `thinking.type: enabled`; default budget is 8,000 tokens, bounded below the total request allowance |
+
+Effort **Default** uses the stored `off` sentinel but omits native effort; it does **not** turn thinking off. Explicit native effort names are preserved (`xhigh` is not silently mapped to `max`). Unsupported mode/effort combinations fail validation rather than changing operator intent.
+
+A saved `thinkingMode: null` is a **legacy effort-based selection**, not provider default. Legacy Off resolves to Disabled; if the model cannot disable thinking, deliberately select a supported mode before running it. Saving the same model without a mode retains its previous mode; changing models with the mode omitted resets to legacy. Explicit `default` chooses provider defaults. Main and Minion selections preserve this distinction, and the full logical turn snapshots mode and effort for its tool continuations.
+
+Prompt caching is enabled by default unless explicitly disabled. Unsupported or new model names still require validation; source compatibility metadata is not proof of live account availability.  
 
 ### What caching currently means
 
@@ -86,8 +102,10 @@ OpenAI Responses continuations replay prepared context rather than relying on `p
 
 The runtime selects and compresses context before calling a model. The current message is kept intact; lower-priority material is reduced, or a request that still cannot fit is rejected.
 
+
 !!! note "The meter is an estimate"
     Character-based estimates and image allowances are not a provider tokenizer. Some schema and wire fields are not fully represented in the current adapter estimate. Provider telemetry can refine the display, and a run keeps its high-water mark. Do not use the meter as an exact billing count or a guarantee that a provider will accept a request at the advertised limit.
+
 
 Inspect the current session with `/context` and the redacted provider-ready request with `/context full` where supported by the chat transport. See [Observability](../operations/observability.md), [Runtime architecture](../architecture/runtime.md), and [Known limitations](../project/known-limitations.md). 
 

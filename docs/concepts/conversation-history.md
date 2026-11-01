@@ -1,8 +1,9 @@
 # Conversation history and archives
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current operator guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Source review and historical material"
+    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 A conversation is scoped by agent and session. PostgreSQL stores active entries, immutable archive snapshots and session metadata. Explicit session search and Dream can resolve evidence through these persisted originals. Brains stores saved memories separately.
 
@@ -28,6 +29,7 @@ Compaction and reset update generation counters transactionally. Fork defaults t
 
 !!! warning "Reset preserves history"
     Reset starts a fresh active transcript but retains earlier original messages in reset archives. Explicit agent-history search and Dream can still use those originals. Reset is not an erasure operation.
+
 
 ## Compression and prompt context
 
@@ -111,6 +113,7 @@ Trace cleanup plans are dry-run by default; deletion requires explicit confirmat
 
 !!! warning "Deletion is not a complete-erasure guarantee"
     The old `/api/albdruck/purge-conversation` route is no longer mounted. Internal legacy purge code is not a supported HTTP workflow. Brains soft deletion, session retention, attachment cleanup, migration snapshots and external backups are distinct; no single operation here establishes erasure of every derivative or copy. The current retention preview/run API manages traces; it does not restore per-conversation purge. Inspect the appropriate cleanup targets before confirming any deletion.
+
 
 Use the operator [API reference](../reference/api.md) and [procedures](../operations/procedures.md) rather than direct SQL deletion. Review [Backup and recovery](../operations/backup-recovery.md) before applying irreversible retention changes.
 

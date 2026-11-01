@@ -1,6 +1,6 @@
 # Tools, mods, and execution
 
-Current implementation reviewed **26 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Start here when an agent needs access to files, a service, or another execution machine.
 
@@ -111,7 +111,9 @@ Both examples currently declare the mod ID `burrow-reference-mod`. Treat them as
 
 
 !!! warning "A workspace is not a sandbox"
+
     Agent workspaces organize files and context. Core explicitly does not create an agent-specific filesystem boundary. Run Burrow and third-party code with appropriate operating-system permissions and only give it access you intend it to have. Mods run JavaScript in a child process; a separate process is not an operating-system sandbox.
+
 
 To configure a hard block, open **Settings → Agents → Global → Execution boundaries**, click **Add hard block**, and fill in its ID, target type, pattern, match mode, operations, and optional reason. Click **Save boundaries**. Removing or toggling a rule also needs **Save boundaries**.
 

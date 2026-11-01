@@ -1,15 +1,15 @@
 # Source and coverage
 
-The operator guide follows inspected current development implementation, without waiting for the daily public-source mirror. The Sunday reconciliation on **25 October 2026** compared every Burrow and Skills page with source for its setup, configuration, API, operations, troubleshooting, and historical scope. This is static documentation reconciliation, not a runtime acceptance test.
+The operator guide follows inspected current development implementation, without waiting for the daily public-source mirror. The Sunday reconciliation on **1 November 2026** compared every Burrow and Skills page with source for its setup, configuration, API, operations, troubleshooting, and historical scope. This is static documentation reconciliation, not a runtime acceptance test.
 
 ## Current implementation baseline
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.10.31.6` | `203c3ed2d634680bb98a6e04bb75247cd9b3e2c2` |
-| Core / Backend | `8275b6bedf1fcd969fb5289cf0b673a80ddc8146` |
-| UI | `f48a29337abccdfeb8c34895d043d6be4110b1fb` |
-| Skills | `078031793d93118e463c0c780feefa3dd109e257` |
+| Assembled Burrow, build `2026.11.01.7` | `fe851c4e546c9bf9f53f861e24f918474432c296` |
+| Core / Backend | `8b5889115680bcdbf698f1b93126254e1cf4d2e6` |
+| UI | `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef` |
+| Skills | `1f464f48b651a78c3c90599ffee674a627cf67e3` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -34,7 +34,7 @@ The original user-guide baseline was `deec398` (public 2026.10.19). The public r
 
 Newer implementation and source documentation were also compared through the current assembled build, including Dream-generated Brains, Global profiles, managed skills, compression, lifecycle recovery, the mod contract and update-channel handling. These behaviors are identified as newer/unpromoted in [release status](release-status.md); the current guide does not imply they shipped in 2026.10.19.
 
-The older technical pages have mixed historical baselines, including early-October source and later corrections. Their warning labels remain where a full end-to-end revalidation has not been performed. A page's publication date alone is not a runtime compatibility claim.
+The older technical pages have mixed historical baselines, including early-October source and later corrections. Their source-review labels distinguish static reconciliation from end-to-end runtime validation. A page's publication date alone is not a runtime compatibility claim.
 
 ## What was refreshed
 
@@ -79,3 +79,7 @@ Compared implementation changes since the successful 29 October baseline: indepe
 ## Ordinary update: 31 October 2026
 
 Compared changes since the successful 30 October baseline: retained Chat occurrence-day discovery, local-day transcript filtering and readable reset origins; bounded SQL transcript pages and revision-bound cursors; request-owned Archive cancellation/timeouts and separate calendar/foreground reader lanes; mod-submitted image attachments; OAuth refresh persistence and selected-token identity across caller cancellation; and schema migrations 80–83. Managed-skill ownership/version guidance and Switchboard Telegram image support are reconciled in their component guides. This is static delta reconciliation, not a full-page recertification, application/provider test, runtime deployment or release promotion. Unchanged historical source links and screenshot qualifications remain intact.
+
+## Sunday full reconciliation: 1 November 2026
+
+Existing guides were compared with the current implementation across setup, configuration, routing, APIs, operations, troubleshooting and skills. Corrections include saved board-task scheduling and one-time consumption, independent Anthropic thinking modes and paginated native catalogues, current Settings/task-board behavior, and migration inventory through 85. Historical screenshots and immutable public-source receipts remain explicitly historical. This is static documentation reconciliation, not a runtime installation, provider call, application test run or release promotion.

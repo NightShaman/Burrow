@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 BURROW exposes several work surfaces with different state models. The task board, scheduled jobs, group channels and retained Workbench compatibility API are not interchangeable task queues.
@@ -22,11 +22,20 @@ See [Task semantics](../../concepts/workers-tasks.md)
 
 ## Scheduled jobs
 
-Create requires nonblank `agentId`, `name`, `prompt` and a five-field `cron` expression. Optional explicit model overrides use a complete `modelConnectionId`/`model` pair. New jobs are disabled unless `enabled: true` is supplied. Scheduling uses the operator timezone; legacy per-job timezone input is not authoritative. List can filter `agentId` and `enabled`. Job detail, PATCH, DELETE and run history use the job ID; run history accepts `limit`.
+Always supply `agentId` and a nonblank `name`. New jobs default to `jobKind: "prompt"`, `scheduleKind: "cron"`, and disabled unless `enabled: true` is supplied. Scheduling uses the operator timezone; legacy per-job timezone input is accepted but ignored. List can filter `agentId` and `enabled`; detail, PATCH, DELETE and run history use the job ID.
 
-The API accepts `contextMode: "continue"` (default) or `"fresh"`. Fresh mode requires an explicit named `sessionId`, not `default`; invalid values are rejected. This backend setting is not a promise of a matching control in the current cron editor.
+| Target | Required fields and behavior |
+|---|---|
+| `jobKind: "prompt"` | Nonblank `prompt` (up to 20,000 characters); optional `sessionId` and `contextMode: "continue"` or `"fresh"`. Fresh requires a named non-default session. |
+| `jobKind: "task"` | `taskId` assigned to `agentId` and in `todo` when choosing a new target. Uses that task's saved instructions plus optional `extraInstructions` (up to 20,000 characters), not a replacement schedule prompt. Core normalizes execution to session `default` and context mode `continue`. |
+| `scheduleKind: "cron"` | Five-field `cron`; returned `runAt` is null. |
+| `scheduleKind: "once"` | `runAt`; returned `cron` is null. A consumed job requires a new `runAt` to rearm. |
 
-`POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission. Inspect run history for terminal outcome. To cancel an active run, POST its `/runs/{runId}/cancel` path with optional `reason`; a non-active run returns 404. Cancellation does not undo completed tools.
+`runAt` accepts an offset ISO datetime or offsetless `YYYY-MM-DDTHH:mm[:ss]` in the operator timezone. Nonexistent DST wall times are rejected; repeated offsetless times choose the first occurrence. Supply an explicit offset to select the second. Enabled one-time jobs cannot be newly scheduled in the past. Optional model overrides require a complete `modelConnectionId`/`model` pair.
+
+At execution, task targets must still exist, be assigned to the selected agent and remain To Do. Missing, reassigned or other-state targets produce **skipped** receipts without moving the task's status. A one-time schedule is consumed and disabled on its due occurrence **or manual trigger**, even when the task is skipped; it is not a retry-until-eligible loop.
+
+`POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission/skipping, not completion. Inspect `/runs` and optional `lastRun` in job reads for status/error/completion. Per-job overlap is skipped; missed downtime occurrences are recorded, not replayed. Restart reconciles exact terminal task receipts where available, otherwise interrupted work is recorded rather than automatically rerun. To request cancellation while execution is active, POST `/runs/{runId}/cancel` with optional `reason`; a non-active/finalizing run returns 404. Cancellation does not undo completed tools or reverse task status.
 
 
 !!! warning "Validate execution, not only scheduling"
@@ -116,7 +125,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/task-board-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/task-board-routes.mjs)
 - [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)

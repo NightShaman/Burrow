@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-10-25**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 These endpoints read and modify runtime-owned files or produce transferable data. These routes pass through the configured interactive-auth gate; diagnostics tokens do not grant them. With authentication mode `none`, that gate does not require credentials.
@@ -44,11 +44,11 @@ Delete removes the live job and eligible generated files, not separate chat atta
 
 ## Selective export/import
 
-Read `/api/export/catalog` to discover categories. POST export with the selected categories and format/security options returns a downloadable bundle, not the ordinary JSON envelope. Treat exports as sensitive, especially when including identities, conversations, provider configuration or credentials.
+Read `/api/export/catalog` to discover categories. POST export with the selected categories and format/security options returns a downloadable bundle, not the ordinary JSON envelope. The current catalog contains agents/profiles, operator text skills, Core scheduled definitions, portable settings, model connections, MCP connections, UI authentication and task-board state. Sessions, traces and API documentation are not selectable categories. Treat all exports as sensitive, particularly identities and provider credentials; secret-bearing categories require a password of at least 12 characters.
 
 Import is preview-first: submit the encoded bundle to `/api/export/import/preview`, inspect changes/conflicts, then apply with explicit confirmation and conflict policy through `/api/export/import`. Without confirmation the apply endpoint returns `400 import_confirmation_required` with the preview.
 
-Categories can span stores; do not assume a full installation image or a single all-or-nothing cross-category transaction. The public assembly includes `backend/docs/openapi.json`; the earlier missing-contract-asset claim no longer applies. API-contract export still needs live verification for the installed release. Follow [backup and recovery](../../operations/backup-recovery.md) for disaster recovery rather than relying on selective export alone.
+Categories can span stores; do not assume a full installation image or a single all-or-nothing cross-category transaction. The public assembly includes `backend/docs/openapi.json`, but that file is not a portable export category. Follow [backup and recovery](../../operations/backup-recovery.md) for disaster recovery rather than relying on selective export alone.
 
 ## Endpoint inventory
 
@@ -80,7 +80,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-10-25** against Backend commit `3bf50374d3601c821e787912d52b9044eaf649ec`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/ui/export-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/export-routes.mjs)

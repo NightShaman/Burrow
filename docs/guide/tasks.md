@@ -1,8 +1,8 @@
 # Tasks and schedules
 
-Current implementation delta reviewed **27 October 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
-The **tasks** page records work and dispatches saved tasks. **Cron jobs** run agent prompts on a schedule. Creating a board record does not itself start agent work.
+The **tasks** page records work and dispatches saved tasks. **Cron jobs** schedule prompts or saved board tasks, either recurring or once. Creating a board record does not itself start agent work.
 
 ## Create a project
 
@@ -40,9 +40,9 @@ Done or cancelled tasks cannot be executed. Dispatch runs in the assigned agent'
 
 ## Attach documents and review activity
 
-After creating a task, open its card and use **Documents → Attach document**. Saved attachments have **Download** and **Remove** actions. Task document storage is distinct from chat attachment extraction; an uploaded document is not a promise that every format will be readable by the model.
+Use **Documents → Attach document** while creating a task or after opening its saved card. For a new task, files upload after the task record is created. If an upload fails, the task remains saved and **Save changes** retries the remaining files; do not create another task just to retry attachments. Saved attachments have **Download** and **Remove** actions. Task document storage is distinct from chat attachment extraction; an uploaded document is not a promise that every format will be readable by the model.
 
-The **History** section lists recorded changes, actors, times, and execution events. Use **Refresh history** for newer activity or **Load older activity** for earlier records. The board itself loads on entry; it does not continuously poll every task's execution state.
+The **History** section lists recorded changes, actors, times, and execution events. Use **Refresh history** for newer activity or **Load older activity** for earlier records. The board loads on entry and refreshes its task list about every 60 seconds, including archive eligibility. This is not live execution streaming; task-history paging is separate.
 
 **Delete task** asks for confirmation. **Manage projects → Delete** deletes the project and all its tasks, so review that confirmation carefully.
 
@@ -62,7 +62,7 @@ In a chat session, type `$project` to open the project picker and select a proje
 
 1. Check **Settings → General → Operator profile → Operator timezone** first.
 2. Open **Settings → Agents**, select an agent, and choose **Cron jobs**.
-3. Enter **Name**, **Prompt**, and a five-field **Cron** expression in the order `minute hour day month weekday`. For example, `0 9 * * *` means daily at 09:00 in the operator timezone.
+3. Select **Run → Prompt** and **Schedule → Recurring**. Enter **Name**, **Prompt**, and a five-field **Cron** expression in the order `minute hour day month weekday`. For example, `0 9 * * *` means daily at 09:00 in the operator timezone.
 4. Keep **Use agent chat model**, or choose a model override for this job only.
 5. Check **Enabled** and click **Add job**.
 
@@ -71,6 +71,23 @@ Select a saved job to edit it; click **Save job** after changing its prompt, sch
 Mod-owned jobs show **Managed by [mod]**. Edit them through that mod. The scheduler page lets you run them or open their details to delete them, but the mod may recreate a deleted job.
 
 [Source: cron form, timezone, model override, and managed jobs](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentSchedules.tsx#L57-L91)
+
+## Schedule a saved board task or a one-time run
+
+In the same **Cron jobs** editor:
+
+1. For existing work, select **Run → Board task** and choose a saved **To Do** task assigned to this agent. Tasks are grouped by project. Save changes to the task itself before scheduling it.
+2. Add optional **Extra instructions**. These supplement the task's saved title, description and project context; they do not replace its instructions or copy an unsaved board draft.
+3. Choose **Schedule → Recurring** with a cron expression, or **Once** with a future **Run at** time in the displayed **Operator timezone**. The section is still called Cron jobs even for a one-time job.
+4. Review the model choice and **Enabled**, then choose **Add job** or **Save job**. **Refresh jobs** reloads the inventory and task eligibility; **Retry tasks** or **Retry timezone** addresses those separate load failures.
+
+A task job always executes in the assigned agent's **default** conversation, continuing that context. Eligibility is checked again at dispatch. A missing, reassigned, archived, or non-To-Do task is **skipped**, with a durable receipt and no task-status change. Keeping an existing now-ineligible target allows you to pause or edit its schedule; it does not make the task executable. Ordinary manual **Execute** has different eligibility: it excludes Done/cancelled rather than requiring To Do.
+
+A **Once** job is consumed and disabled by its due occurrence **or Run now**, even when its task is skipped. It does not remain armed for the original date after manual execution. Missed downtime occurrences are recorded as missed, not replayed. Recurring schedules are fixed cron expressions; this editor has no random interval or jitter option.
+
+The **Saved jobs** inventory shows next time and last outcome, including skipped/missed, with **Open chat** when a run has usable chat evidence. “Started” means background admission, not completion. A task run is instructed to move work to In Progress and then Review; the operator owns the final Done decision. Inspect the board and run receipt rather than assuming the schedule updated the status successfully.
+
+Changing a guarded settings draft or moving away can offer **Save**, **Discard**, or **Stay**. A save error keeps you in the editor; do not treat navigation as proof of persistence.
 
 ## Run an instruction when a GitHub workflow finishes
 
@@ -89,7 +106,7 @@ Signed ping is acknowledged without creating work. Accepted completed events are
 
 ## Work delegated to minions
 
-An agent may spawn a minion for part of a request. The **Agents** panel lets you inspect child activity by expanding its parent and selecting the child. To choose a default minion model, open **Settings → Agents → [agent] → Agent details**, use the **Default minion model** panel in the additional-settings column to configure **Default minion provider/model**, and click **Save minion model**. Inheritance uses the current parent turn's model; an explicit model choice at spawn takes precedence.
+An agent may spawn a minion for part of a request. The **Agents** panel lets you inspect child activity by expanding its parent and selecting the child. To choose a default minion model, open **Settings → Agents → [agent] → Agent details**, use **Minion settings** in the additional-settings column to configure **Default minion provider/model**. Complete model selections and supported thinking/effort choices autosave; temperature saves when adjustment ends. Check saved feedback and use the displayed retry action after a failure. Inheritance uses the current parent turn's model; an explicit model choice at spawn takes precedence.
 
 [Source: child selection](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L119-L132) · [Source: default minion model](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/DefaultMinionModel.tsx#L53-L71)
 

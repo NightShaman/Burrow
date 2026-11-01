@@ -1,8 +1,9 @@
 # Troubleshooting
 
 
-!!! warning "Earlier technical reference"
-    This page is retained from earlier documentation and has not been fully revalidated for the public 2026.10.19 release. Its revision-specific links and examples may describe older or development behavior. Start with the [current public-release user guide](../guide/installation.md); do not use this page alone to select installation commands, image tags, or security settings.
+!!! note "Implementation and historical evidence"
+
+    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 Start with the installed version, exact error, expected deployment shape, and relevant agent/session/run ID. Avoid changing several settings at once or retrying an operation that may still be running.
@@ -214,7 +215,7 @@ Include build version/source pins, deployment shape, sanitized exact error, rele
 
 ## Targeted source review
 
-Corrections on this page were checked against public **2026.10.19**; any newer development behavior is labeled separately. This was static source inspection, not a live deployment test. Other retained details remain subject to the earlier-reference warning.
+The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
@@ -242,3 +243,11 @@ Current Core lets the canceled caller stop waiting while an already-started toke
 Do not independently rotate copies of the same refresh-token lineage in Burrow and another application. Cancellation shielding does not cover another application's refreshes or a crash/transport failure with an unknown exchange outcome. Never include tokens or raw provider responses in the diagnostic report. See [OAuth refresh behavior](../guide/models.md#oauth-refresh-and-cancellation).
 
 These changed behaviors were source-reviewed on **31 October 2026**; no provider login, token refresh, database or application tests were executed by this documentation pass.
+
+## Anthropic selection fails after an update
+
+Check the saved **Thinking** mode as well as **Effort**. Legacy Off means Disabled, not provider default; a model that cannot disable thinking rejects that combination. Choose a supported explicit mode and inspect saved feedback. A failed or incomplete catalog refresh preserves prior models, so first inspect discovery status instead of deleting a connection or inventing replacement model IDs. See [thinking and effort](../guide/models.md#anthropic-thinking-and-effort).
+
+## A scheduled task did not execute
+
+Read the saved job's **Last** outcome and task's current assignment/status. Only a saved, unarchived To Do task assigned to that job's agent can start. Skipped/missed is not completion. A one-time job is consumed by manual Run now or its due occurrence even if skipped; it is not still waiting for the original time. Correct the task or create a deliberately new schedule after reviewing existing receipts. See [scheduling](../guide/tasks.md#schedule-a-saved-board-task-or-a-one-time-run).
