@@ -1,4 +1,5 @@
 import base from '../styles/base.css?raw';
+import halloweenCss from '../styles/halloween.css?raw';
 import { expect, it } from 'vitest';
 import { themes } from './usePersistedLayout';
 const sheets = import.meta.glob('../**/*.css', { query: '?raw', import: 'default', eager: true }) as Record<string,string>;
@@ -49,4 +50,13 @@ it('provides readable Halloween text/status roles and contrasting filled control
  }
  expect(contrast(p['--on-accent'], p['--accent'])).toBeGreaterThanOrEqual(4.5);
  expect(contrast(p['--accent-contrast'], p['--accent'])).toBeGreaterThanOrEqual(3);
+});
+
+it('limits the Halloween operator bubble adjustment to a readable plum fill and warm text', () => {
+ const block = halloweenCss.match(/\[data-theme="halloween"\] \.message\.operator \.message-bubble\s*\{([^}]*)\}/)?.[1];
+ expect(block).toBeDefined();
+ const declarations = Object.fromEntries(Array.from(block!.matchAll(/([\w-]+):\s*([^;]+);/g), match => [match[1], match[2].trim()]));
+ expect(declarations).toEqual({ background: '#160e20', color: '#f5eee6' });
+ expect(contrast(declarations.color, declarations.background)).toBeGreaterThanOrEqual(7);
+ expect(palette('halloween')['--accent-border']).toBe('#8653a3');
 });

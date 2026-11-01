@@ -23,3 +23,9 @@
 [data-theme="halloween"] .context-usage:not(.pressure-watch, .pressure-compress, .pressure-blocked) i b {
   background: var(--ok);
 }
+
+/* Keep the operator bubble plum-dark; orange remains on actions, not body text. */
+[data-theme="halloween"] .message.operator .message-bubble {
+  background: #160e20;
+  color: #f5eee6;
+}
