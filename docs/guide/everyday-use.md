@@ -2,6 +2,8 @@
 
 Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
+For a detailed screen inventory, historical illustrations, and browser-cache boundaries, see the [interface reference](../concepts/interface.md).
+
 ## Find your way around
 
 The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **Forge**, and **settings**. Enabled mods can add their own pages. In chat, side panels can show agents, workspace files, account status, or system information. Change those panels under **Settings → General → Rail panels**; change the theme under **Appearance**.

@@ -4,6 +4,7 @@
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
+For task-oriented instructions, start with [Everyday use](../guide/everyday-use.md). This page is the detailed screen, control, and browser-state reference.
 
 The BURROW interface brings conversations, agent configuration, project tasks, retained evidence, and media generation into one operator console. This guide was statically reconciled with current implementation on **1 November 2026**; its older screenshots are not a complete inventory of current controls. Start by checking the agent and session: these determine which conversation and records you are viewing.
 
@@ -12,7 +13,6 @@ The runtime owns durable state. The browser presents API responses and live acti
 
 !!! note "Development screenshots"
     The screenshots below show synthetic development fixtures captured on October 16, 2026. They illustrate interface layout, not verified task execution, provider generation, or saved configuration. Empty outer canvas has been cropped; application content is unchanged. Select an image to inspect it at full resolution. The source-backed behavior described in this guide remains pinned to the documented release.
-
 
 ## Find the right page
 
@@ -31,15 +31,8 @@ Enabled mods can add control pages beside the built-in navigation, settings sect
 
 The interface discovers the authentication mode through `/api/auth/discovery` on startup and opens its sign-in form when Basic authentication is required. Basic credentials entered here are held in browser memory. See [Authentication](../security/authentication.md) for server modes, proxy requirements, and exposure precautions.
 
-A fresh or incomplete response from `GET /api/setup/status` opens **Settings → Agents** and the five-step setup wizard:
+A fresh or incomplete response from `GET /api/setup/status` opens **Settings → Agents** and the first-run wizard. Follow [Your first agent and model](../guide/first-agent.md) for the illustrated procedure, import precautions, completion rules, and recovery. An intentionally empty, already configured agent registry does not itself force the wizard.
 
-1. Import an existing export, or start fresh.
-2. Set the operator profile.
-3. Name the first agent and optionally choose an avatar.
-4. Write its initial `SOUL.md` personality.
-5. Choose a model connection, or finish and configure one later.
-
-Successful completion marks setup complete and returns to Chat. An intentionally empty, already configured agent registry does not itself force the wizard. Follow [Initial setup](../getting-started/initial-setup.md) for the full procedure and import precautions.
 ## Runtime and resource ownership
 
 The built-in console uses the local runtime serving the page. There is no built-in remote target selector. Node Goblin integrations, when installed, use explicit mod-owned APIs; a mod page is not a global runtime switch. Confirm any mod-specific destination before using its controls.
@@ -261,7 +254,6 @@ Migrated records show **Migrated from legacy Albdruck** and expandable **Legacy 
 
 !!! warning "Review before deleting memories"
     **Delete memory** and **Delete selected memories** issue deletion immediately; the workspace does not present the old conversation-purge confirmation. **Select page** selects only the displayed page. Bulk deletion is independent per record, not atomic: inspect every reported result, then **Reload list** before retrying conflicts. Deleting a saved memory does not erase its source conversation.
-
 
 <figure markdown="span">
 [![Brains with an Agent owner selector, saved-memory list, and an editor for a synthetic memory and source references.](../assets/screenshots/06-brains-memory.webp){ loading=lazy }](../assets/screenshots/06-brains-memory.webp)

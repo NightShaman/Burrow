@@ -6,21 +6,36 @@ Choose a native Linux installation or a container, then [create your first agent
 
 Burrow starts with authentication set to **None**. Keep the first-run interface on localhost or behind an SSH tunnel. Before opening it to other computers, configure authentication, HTTPS, and network access controls.
 
+!!! warning "Grant access deliberately"
+    Burrow does not provide a comprehensive sandbox around agent actions. Its tools can use the host permissions and credentials you grant. Start with an unprivileged account, restricted network access, and a test workspace. Read [trust boundaries](../security/trust-boundaries.md) before enabling integrations.
+
 ## Native Linux installation
 
 The fully automated path is **Ubuntu with systemd**, using the ordinary, non-root account that will own Burrow. Have `curl` available and sudo permission for missing system packages and user-service setup.
 
-The installer needs:
+The installer needs `curl`, `tar`, and gzip support. Reserve disk space for application staging, dependencies, database growth, workspaces, and a separate backup; the source does not define a universal minimum RAM or disk requirement.
+
+It also needs:
 
 - Node.js **24 or newer** and npm
 - PostgreSQL **17** with the **pgvector** extension
 - Git and an SSH client for skill repositories
 - systemd and `loginctl` for the default persistent service
 
-It installs missing Node.js on Ubuntu or RHEL-family Linux 9+, but automatic PostgreSQL installation is Ubuntu-only. Other hosts need the database prerequisites prepared separately. Managed PostgreSQL refuses to run as root; do not run the whole installer with sudo.
+It installs missing Node.js on Ubuntu or RHEL-family Linux 9+, but automatic PostgreSQL installation is Ubuntu-only. Other hosts need the database prerequisites prepared separately. Managed PostgreSQL refuses to run as root; do not run the whole installer with sudo. The repository does not establish a supported native Windows or macOS installer workflow.
+
+Download and review the installer before running it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh | sh
+curl -fsSLo install-burrow.sh \
+  https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh
+sh install-burrow.sh --help
+```
+
+After reviewing the downloaded script:
+
+```sh
+sh install-burrow.sh
 ```
 
 This downloads the current assembled `main`, installs into `~/.burrow`, and enables a systemd user service. The installer enables lingering so the service can survive logout and reboot. It waits for the running server to report the installed build before printing its ready URL. Database initialization and migrations can take time.
@@ -46,10 +61,9 @@ Keep that terminal open and visit **http://127.0.0.1:42817** on your computer. I
 
 ### Custom location or manual supervision
 
-Download the script when you need options:
+Use the downloaded and reviewed script when you need options:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/GoblinKing-Burrow/Burrow/main/install.sh -o install-burrow.sh
 sh install-burrow.sh --dir "$HOME/burrow"
 ```
 
@@ -66,6 +80,22 @@ Keep the process running or provide your own supervisor. `--no-service` changes 
 
 `--host` and `--port` set durable listener values. Keep `127.0.0.1` for local-only use. `--source-dir /absolute/checkout` installs an assembled checkout without downloading it; it must contain both `backend` and `ui`. The normal installer and `burrow update` follow current `main`, rather than a selected release tag.
 
+Re-running the installer updates/restarts an existing managed service without re-enabling a disabled service. Existing manual installations remain manual; reinstalling does not silently add a service. You can opt into service management later with `burrow service install`.
+
+### Installer options
+
+| Option | Effect |
+|---|---|
+| `--dir PATH` | Choose application and durable-state root |
+| `--source-dir PATH` | Use a local assembled checkout instead of downloading |
+| `--host HOST` | Set listener; fresh native default is `127.0.0.1` |
+| `--port PORT` | Set listener port; default is `42817` |
+| `--install-node` | Compatibility alias; Node 24 provisioning is already automatic when needed |
+| `--no-service` | Skip automatic service setup for foreground use or an operator-managed supervisor |
+| `--no-install-dependencies` | Skip dependency installation/build and automatic service setup; development only |
+| `--verbose` | Show timestamped installer/update diagnostics |
+| `--help` | Display installer usage |
+
 ### What is stored where?
 
 Under the default `~/.burrow` root:
@@ -74,10 +104,11 @@ Under the default `~/.burrow` root:
 - `bin/burrow`: the launcher
 - `burrow.env`: durable environment settings and the settings-encryption key
 - `postgres/`: the managed PostgreSQL database
+- `postgres-socket/`: the private managed database socket
 - `workspace/`: agent files, skills, tools, and artifacts
 - `config/`, `cache/`, `reports/`, `integrations/`: additional runtime state and installed integrations
 
-Keep `burrow.env` private and back it up with the matching database. Updates replace application files while preserving durable state. See [maintenance and recovery](maintenance.md).
+Keep `burrow.env` private and back it up with the matching database. Updates replace application files while preserving durable state. The database is authoritative for core settings and conversations; a workspace directory is not a transcript database. See [persistence](../architecture/persistence.md) and [maintenance and recovery](maintenance.md).
 
 ### Using an existing PostgreSQL server
 
