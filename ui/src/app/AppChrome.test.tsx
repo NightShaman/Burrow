@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Tab } from './types';
 import { AppStatusBar, DocumentTabs } from './AppChrome';
 
+vi.mock('./ProviderPoolMetrics', () => ({ ProviderPoolMetrics: () => <div>Pool metrics</div> }));
+
 const tabs: Tab[] = [
   { id: 'chat', label: 'Chat', kind: 'chat' },
   { id: 'group:local:design', label: 'Design', kind: 'group', channelId: 'design', targetId: 'local' },
@@ -30,16 +32,20 @@ describe('DocumentTabs', () => {
 });
 
 describe('AppStatusBar', () => {
-  it('clamps usage percentages and exposes semantic progress values', () => {
-    render(<AppStatusBar
-      anthropicUsage={{ windows: [{ key: 'five_hour', usedPercent: 25 }] }}
-      openAiUsage={{ windows: [{ key: 'primary', label: 'Weekly', usedPercent: 125 }] }}
-      runtimeVersion="1.2.3"
-    />);
+  it('renders pool metrics and version without provider quota indicators', () => {
+    const { container } = render(<AppStatusBar runtimeVersion="1.2.3" />);
 
-    expect(screen.getByRole('progressbar', { name: '5hr usage remaining' }).getAttribute('aria-valuenow')).toBe('75');
-    expect(screen.getByRole('progressbar', { name: 'Weekly usage remaining' }).getAttribute('aria-valuenow')).toBe('0');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(container.querySelector('.usage-meter')).toBeNull();
+    expect(screen.queryByText(/5hr|7day|Weekly/)).toBeNull();
+    expect(screen.getByText('Pool metrics')).toBeTruthy();
     expect(screen.getByText('v. 1.2.3').getAttribute('title')).toBeNull();
     expect(screen.queryByText(/UI|BE|ASM/)).toBeNull();
+  });
+
+  it('preserves the stale registry warning and missing version fallback', () => {
+    render(<AppStatusBar registryStale />);
+    expect(screen.getByRole('status').textContent).toBe('Agents stale');
+    expect(screen.getByText('v. —')).toBeTruthy();
   });
 });

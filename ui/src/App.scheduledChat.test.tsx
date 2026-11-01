@@ -45,7 +45,7 @@ vi.mock('./app/useRuntimeAgents', () => ({
 }));
 vi.mock('./app/useRuntimeDashboard', () => ({
   useRuntimeDashboard: () => ({
-    anthropicUsage: undefined, openAiUsage: undefined, operatorProfile: { name: 'Operator', avatar: 'O' }, providerConnectionStatus: {},
+    operatorProfile: { name: 'Operator', avatar: 'O' }, providerConnectionStatus: {},
     refreshModelConnections: vi.fn().mockResolvedValue(undefined), savedProviders: [], setOperatorProfile: vi.fn(),
   }),
 }));

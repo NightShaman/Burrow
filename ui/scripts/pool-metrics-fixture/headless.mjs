@@ -33,7 +33,8 @@ try {
   const geometry=await evaluate(`(()=>{const f=document.querySelector('.status-bar');return {width:innerWidth,body:document.documentElement.scrollWidth,footer:f.getBoundingClientRect().toJSON(),client:f.clientWidth,scroll:f.scrollWidth,text:f.innerText,clipped:[...f.querySelectorAll('strong')].some(e=>e.scrollWidth>e.clientWidth)}})()`);
   assert(geometry.body<=width && !geometry.clipped, 'footer/page clips numbers');
   if(width>=1100)assert(geometry.scroll<=geometry.client+1,'desktop footer overflow');
-  if(width===720){await evaluate("document.querySelector('.status-bar').scrollLeft=9999");assert(await evaluate("document.querySelector('.status-bar').scrollLeft>0"),'narrow scrolling unavailable');}
+  assert(await evaluate("!document.querySelector('.usage-meter')"),'provider quota meter remains');
+  if(geometry.scroll>geometry.client+1){await evaluate("document.querySelector('.status-bar').scrollLeft=9999");assert(await evaluate("document.querySelector('.status-bar').scrollLeft>0"),'narrow scrolling unavailable');}
   results.push({label,...geometry});
   await c('Page.captureScreenshot',{format:'png'}).then(async r=>(await import('node:fs/promises')).writeFile(`/tmp/smatchet-metrics-${label}.png`,Buffer.from(r.data,'base64')));
  }

@@ -7,4 +7,4 @@
 .pool-footer-stat{display:inline-flex;align-items:baseline;gap:5px}
 .pool-footer-stat+.pool-footer-stat::before{content:'·';margin-right:5px;color:var(--muted)}
 .pool-footer-stat strong{color:var(--text-strong);font-weight:600}
-@media(max-width:1300px){.status-bar{gap:10px}.status-bar .usage-meter{min-width:0}.status-bar .usage-meter-track{width:24px}.pool-footer-metrics{gap:7px}}
+@media(max-width:1300px){.status-bar{gap:10px}.pool-footer-metrics{gap:7px}}
