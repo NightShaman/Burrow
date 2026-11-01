@@ -19,6 +19,15 @@ it('mounts locally scoped Settings API regardless of selected remote target', as
   expect(fetch.mock.calls[0][0]).toBe('/api/mods/example/status');
   expect(fetch.mock.calls[0][0]).not.toContain('remote.example');
   expect(fetch.mock.calls[1][0]).toBe('/api/operator/mods/example/access');
+  const response = await context.fetchContent('/api/reference/content');
+  expect(response).toBeInstanceOf(Response);
+  expect(fetch.mock.calls[2][0]).toBe('/api/reference/content');
+  for (const path of ['https://evil.example/api/photo', '//evil.example/api/photo', '/api/../secret', '/api/%2e%2e/secret', '/api/photo#fragment']) {
+    await expect(context.fetchContent(path)).rejects.toThrow('Invalid content URL');
+  }
+  await context.fetchContent('/api/mod-reference-images/theater/opaque/content?id=version');
+  expect(fetch.mock.calls[3][0]).toBe('/api/mod-reference-images/theater/opaque/content?id=version');
+  expect(fetch).toHaveBeenCalledTimes(4);
 });
 
 function render(ui: Parameters<typeof baseRender>[0]) { return baseRender(ui, { wrapper: ConfirmProvider }); }

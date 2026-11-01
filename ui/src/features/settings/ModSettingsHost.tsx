@@ -4,7 +4,7 @@ import { useImperativeUnsavedChanges, useUnsavedNavigation, type UnsavedDraft } 
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import type { Agent } from '../../app/types';
-import { apiLocal } from '../../app/api';
+import { apiLocal, fetchApi } from '../../app/api';
 import { validateSettingsContribution, type SettingsContribution, type SettingsField, type SettingsAction, type SettingsContributionFactory } from './SettingsContribution';
 import { Field, SettingSection } from './SettingsPrimitives';
 
@@ -26,6 +26,7 @@ type ModSettingsContext = {
   navigate: (proceed: () => void) => void;
   setDraft: (draft: UnsavedDraft | null) => void;
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  fetchContent: (path: string, init?: RequestInit) => Promise<Response>;
   accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   refreshAgents: () => Promise<void>;
   saveAgentExecutionEnvironment: (agentId: string, executionEnvironment: Agent['executionEnvironment']) => Promise<void>;
@@ -242,6 +243,10 @@ export function ModSettingsHost({ modId, settingsUrl, agents, onAgentsChanged, n
       },
       setDraft: draft.setDraft,
       api: modApi(modId),
+      fetchContent: (path, init = {}) => {
+        if (!path.startsWith('/api/') || /[\\#]/.test(path) || path.split('?')[0].split('/').some(part => { try { return ['.', '..'].includes(decodeURIComponent(part)); } catch { return true; } })) return Promise.reject(new Error('Invalid content URL.'));
+        return fetchApi(path, { ...init, method: 'GET' });
+      },
       accessApi: modAccessApi(modId),
       refreshAgents: () => onAgentsChangedRef.current(),
       saveAgentExecutionEnvironment: async (agentId, executionEnvironment) => {
