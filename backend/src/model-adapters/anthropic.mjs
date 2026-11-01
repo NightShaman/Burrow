@@ -4,7 +4,7 @@ import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResul
 import { CLAUDE_CODE_VERSION, CLAUDE_CODE_BILLING_SYSTEM_BLOCK } from './anthropic-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
-import { anthropicSupportsSamplingParameters } from '../anthropic-model-capabilities.mjs';
+import { anthropicSupportsSamplingParameters, anthropicThinkingCapabilities, anthropicLegacyThinkingMode, normalizeAnthropicThinkingMode, validateAnthropicThinkingSelection, ANTHROPIC_MANUAL_BUDGETS } from '../anthropic-model-capabilities.mjs';
 import {
   DEFAULT_MAX_RESPONSE_BYTES,
   MAX_MODEL_TEXT_CHARS,
@@ -142,98 +142,58 @@ function anthropicCachedTokens(usage = {}) {
   return providerUsageValues(usage, { provider:'anthropic' }).cached;
 }
 
-const ANTHROPIC_THINKING_BUDGETS = Object.freeze({ minimal: 1024, low: 4000, medium: 8000, high: 16000, xhigh: 32000, ultra: 32000 });
-const ANTHROPIC_ADAPTIVE_EFFORTS = Object.freeze({ minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'max' });
-
-function normalizeAnthropicModelId(model = '') {
-  return String(model || '').trim().toLowerCase().replace(/^anthropic\//, '').replace(/[._\s]+/g, '-');
-}
-
 function supportsAnthropicThinking(model = '') {
-  const normalized = normalizeAnthropicModelId(model);
-  if (!normalized || normalized.includes('haiku')) return false;
-  return /(^|-)claude-/.test(normalized);
+  return anthropicThinkingCapabilities({ model }).thinkingModes.some(mode => !['default', 'disabled'].includes(mode));
 }
 
 function supportsAdaptiveAnthropicThinking(model = '') {
-  const normalized = normalizeAnthropicModelId(model);
-  return /(^|-)claude-(?:fable-5|mythos-(?:5|preview)|opus-(?:4-(?:6|7|8)|5(?:-5)?)|sonnet-(?:5|4-6))($|[^a-z0-9])/.test(normalized);
-}
-
-function supportsAnthropicXhighEffort(model = '') {
-  const normalized = normalizeAnthropicModelId(model);
-  return /(^|-)claude-(?:fable-5|mythos-5|opus-(?:4-(?:7|8)|5(?:-5)?)|sonnet-5)($|[^a-z0-9])/.test(normalized);
-}
-
-function anthropicReasoningEffort(config = {}) {
-  const effort = String(config.reasoningEffort ?? config.extra?.reasoning?.effort ?? '').trim().toLowerCase();
-  // Global max is the established ultra tier: native max on adaptive
-  // models and the existing ultra budget on manual-thinking models.
-  if (effort === 'max') return 'ultra';
-  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra'].includes(effort) ? effort : null;
-}
-
-function anthropicExtraWithoutGenericReasoning(extra = {}, model = '') {
-  if (!extra || typeof extra !== 'object') return undefined;
-  const { reasoning: _reasoning, ...rest } = extra;
-  // Opus 4.7+ rejects these knobs; do not let arbitrary connection extras
-  // reintroduce provider-deprecated sampling parameters for newer models.
-  if (!anthropicSupportsSamplingParameters(model)) {
-    delete rest.top_p;
-    delete rest.top_k;
-  }
-  return Object.keys(rest).length ? rest : undefined;
+  return anthropicThinkingCapabilities({ model }).thinkingModes.includes('adaptive');
 }
 
 function anthropicThinkingConfig({ model, config = {}, maxTokens = DEFAULT_MODEL_OUTPUT_TOKENS } = {}) {
-  const effort = anthropicReasoningEffort(config);
-  const adaptiveOnly = /(^|-)claude-opus-5(?:-5)?($|[^a-z0-9])/.test(normalizeAnthropicModelId(model));
-  if (effort === 'off' && supportsAnthropicThinking(model) && !adaptiveOnly) {
-    const extra = { ...anthropicExtraWithoutGenericReasoning(config.extra, model) };
-    // Explicit off must override inherited native thinking and effort, while
-    // preserving unrelated output configuration (for example JSON schemas).
-    delete extra.thinking;
-    if (extra.output_config && typeof extra.output_config === 'object') {
-      extra.output_config = { ...extra.output_config };
-      delete extra.output_config.effort;
-      if (!Object.keys(extra.output_config).length) delete extra.output_config;
-    }
-    return { enabled: false, thinking: { type: 'disabled' }, maxTokens, extra };
+  const selected = normalizeAnthropicThinkingMode(config.thinkingMode);
+  const native = config.extra?.thinking;
+  const rawEffort = config.reasoningEffort ?? config.extra?.reasoning?.effort;
+  const hasEffort = rawEffort !== undefined && rawEffort !== null && rawEffort !== '';
+  const legacy = selected === null && !native;
+  const mode = selected ?? (native ? normalizeAnthropicThinkingMode(native.type)
+    : anthropicLegacyThinkingMode({ ...config, model, reasoningEffort: rawEffort }));
+  let effort = hasEffort ? String(rawEffort).trim().toLowerCase() : config.extra?.output_config?.effort;
+  // Only old generic effort records retain their established aliases. Explicit
+  // native selections use exact native effort names, never a silent downgrade.
+  if (legacy && mode !== 'enabled') effort = ({ minimal: 'low', ultra: 'max' })[effort] ?? effort;
+  if (effort === 'off') effort = undefined;
+  validateAnthropicThinkingSelection({ ...config, model, thinkingMode: mode, reasoningEffort: legacy && mode === 'enabled' ? 'off' : effort ?? 'off' });
+  const { reasoning: _reasoning, thinking: _thinking, ...extra } = config.extra || {};
+  if (extra.output_config) {
+    extra.output_config = { ...extra.output_config };
+    delete extra.output_config.effort;
+    if (!Object.keys(extra.output_config).length) delete extra.output_config;
   }
-  if ((!effort && !adaptiveOnly) || !supportsAnthropicThinking(model)) return { enabled: false, maxTokens, extra: anthropicExtraWithoutGenericReasoning(config.extra, model) };
-  if (supportsAdaptiveAnthropicThinking(model)) {
-    // Adaptive-only models cannot disable thinking; off maps to their lowest
-    // supported effort rather than emitting a request the provider rejects.
-    const mappedEffort = effort === 'off' ? 'low' : ANTHROPIC_ADAPTIVE_EFFORTS[effort] || 'medium';
-    const finalEffort = mappedEffort === 'xhigh' && !supportsAnthropicXhighEffort(model) ? 'max' : mappedEffort;
-    return {
-      enabled: true,
-      mode: 'adaptive',
-      effort: finalEffort,
-      thinking: { type: 'adaptive', display: config.anthropicThinkingDisplay || 'summarized' },
-      outputConfig: { ...(config.extra?.output_config || {}), effort: finalEffort },
-      maxTokens,
-      extra: anthropicExtraWithoutGenericReasoning(config.extra, model),
-    };
+  const outputConfig = effort && !(legacy && mode === 'enabled') ? { ...(extra.output_config || {}), effort } : undefined;
+  if (outputConfig) delete extra.output_config;
+  let thinking;
+  let budgetTokens;
+  if (mode === 'adaptive') thinking = { ...(selected === null ? native : {}), type: 'adaptive', display: native?.display || config.anthropicThinkingDisplay || 'summarized' };
+  if (mode === 'disabled' || mode === 'between_tools') thinking = { type: mode };
+  if (mode === 'enabled') {
+    const total = Number(maxTokens);
+    if (!Number.isSafeInteger(total) || total <= 1024) throw new Error(`Anthropic manual thinking requires max_tokens greater than 1024; received ${maxTokens}`);
+    const suppliedBudget = native?.budget_tokens;
+    if (suppliedBudget !== undefined && (!Number.isSafeInteger(suppliedBudget) || suppliedBudget < 1024 || suppliedBudget >= total)) throw new Error('model_thinking_budget_invalid');
+    budgetTokens = suppliedBudget ?? Math.min((legacy ? ANTHROPIC_MANUAL_BUDGETS[effort] : undefined) ?? ANTHROPIC_MANUAL_BUDGETS.medium, total - 1);
+    thinking = { ...(selected === null ? native : {}), type: 'enabled', budget_tokens: budgetTokens };
   }
-  const totalMaxTokens = Number(maxTokens) || DEFAULT_MODEL_OUTPUT_TOKENS;
-  if (totalMaxTokens <= ANTHROPIC_THINKING_BUDGETS.minimal) {
-    throw new Error(`Anthropic manual thinking requires max_tokens greater than ${ANTHROPIC_THINKING_BUDGETS.minimal}; received ${totalMaxTokens}`);
+  const caps = anthropicThinkingCapabilities({ ...config, model });
+  const enabled = !['disabled', 'default'].includes(mode) || (mode === 'default' && caps.thinkingDefault === 'adaptive');
+  // Thinking disallows temperature/top_k; legacy top_p is permitted only
+  // from 0.95 to 1. Newer models reject all sampling knobs.
+  if (enabled || !anthropicSupportsSamplingParameters(model)) {
+    delete extra.temperature;
+    if (!anthropicSupportsSamplingParameters(model) || !(extra.top_p >= 0.95 && extra.top_p <= 1)) delete extra.top_p;
+    delete extra.top_k;
   }
-  const requestedBudgetTokens = ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium;
-  // Anthropic manual thinking budgets are part of the total max_tokens allowance,
-  // and the protocol requires budget_tokens to be strictly less than max_tokens.
-  // Preserve the caller/provider total and clamp only the mapped effort budget.
-  const budgetTokens = Math.min(requestedBudgetTokens, totalMaxTokens - 1);
-  return {
-    enabled: true,
-    mode: 'manual',
-    effort,
-    budgetTokens,
-    thinking: { type: 'enabled', budget_tokens: budgetTokens },
-    maxTokens: totalMaxTokens,
-    extra: anthropicExtraWithoutGenericReasoning(config.extra, model),
-  };
+  return { enabled, mode, effort, budgetTokens, thinking, outputConfig, maxTokens, extra };
 }
 
 function safeAnthropicAssistantBlocks(content = []) {
@@ -520,6 +480,9 @@ async function readAnthropicSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTE
 
 export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
+  // One adapter owns one logical turn and all of its tool continuations. Later
+  // settings changes cannot switch mode/effort midway through that turn.
+  config = { ...config, ...(config.extra ? { extra: structuredClone(config.extra) } : {}), ...(config.anthropicMetadata ? { anthropicMetadata: structuredClone(config.anthropicMetadata) } : {}) };
   const url = anthropicUrl(config);
   const model = config.model;
   if (!model) throw new Error('model is required');

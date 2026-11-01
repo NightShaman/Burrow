@@ -2711,7 +2711,14 @@
         "summary": "Update agent model selection",
         "operationId": "updateAgentModelSelection",
         "requestBody": {
-          "$ref": "#/components/requestBodies/JsonBody"
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSelectionWrite"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -6959,7 +6966,14 @@
         "summary": "Save or clear default minion model",
         "operationId": "updateAgentMinionModelSelection",
         "requestBody": {
-          "$ref": "#/components/requestBodies/JsonBody"
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelSelectionWrite"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -10009,6 +10023,21 @@
             "items": {
               "$ref": "#/components/schemas/ChatAttachment"
             }
+          },
+          "thinkingMode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "default",
+              "disabled",
+              "adaptive",
+              "enabled",
+              "between_tools",
+              null
+            ],
+            "description": "Anthropic native thinking mode, independent of effort. Null is legacy effort-based selection; default omits thinking. Omitted mode retains an existing same-model selection, or resets to legacy on model change. Supported modes and efforts are advertised on catalogue models."
           }
         },
         "additionalProperties": true
@@ -18476,6 +18505,47 @@
             ],
             "description": "Required for scheduleKind=once. Accept an ISO date-time with UTC/explicit offset or an offsetless local YYYY-MM-DDTHH:mm[:ss] interpreted in the server operator IANA timezone. Responses are normalized ISO date-times. Null for cron jobs.",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:\\d{2})?$"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ModelSelectionWrite": {
+        "type": "object",
+        "properties": {
+          "connectionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "thinkingMode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "default",
+              "disabled",
+              "adaptive",
+              "enabled",
+              "between_tools",
+              null
+            ],
+            "description": "Anthropic native thinking mode, independent of effort. Null is legacy effort-based selection; default omits thinking. Omitted mode retains an existing same-model selection, or resets to legacy on model change. Supported modes and efforts are advertised on catalogue models."
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
           }
         },
         "additionalProperties": true

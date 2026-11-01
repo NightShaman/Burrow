@@ -9,6 +9,7 @@ import {
 } from './model-settings-store.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 import { operationalEvent } from './operational-log.mjs';
+import { isAnthropicMessagesConnection, normalizeAnthropicThinkingMode, validateAnthropicThinkingSelection } from './anthropic-model-capabilities.mjs';
 
 export const POSTGRES_MODEL_SETTINGS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS chat_identities (
@@ -238,16 +239,16 @@ export class PostgresModelSettingsStore {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');
     const table = minion ? 'agent_minion_model_selections' : 'agent_model_selections';
-    const result = await this.pool.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1`, [agent]);
+    const result = await this.pool.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at FROM ${table} WHERE agent_id=$1`, [agent]);
     const row = result.rows[0];
-    return row ? { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at } : null;
+    return row ? { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, thinkingMode: row.thinking_mode, temperature: Number(row.temperature), updatedAt: row.updated_at } : null;
   }
   async clearModelSelection(agentId, { minion = false } = {}) {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');
     await this.pool.query(`DELETE FROM ${minion ? 'agent_minion_model_selections' : 'agent_model_selections'} WHERE agent_id=$1`, [agent]);
   }
-  async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', temperature = undefined, minion = false } = {}) {
+  async saveModelSelection({ agentId, connectionId, model, reasoningEffort = 'off', thinkingMode = undefined, temperature = undefined, minion = false } = {}) {
     const agent = String(agentId ?? '').trim();
     if (!agent) throw new Error('agent_id_invalid');
     const id = String(connectionId ?? '').trim();
@@ -268,22 +269,35 @@ export class PostgresModelSettingsStore {
         if (!connection.pool?.enabled) throw new Error('provider_pool_disabled');
       } else if (!await this.authWithClient(client, id, connection.provider)) throw new Error('model_connection_auth_required');
       const effort = normalizeReasoningEffort(reasoningEffort);
-      if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) throw new Error('model_reasoning_effort_not_supported');
       const table = minion ? 'agent_minion_model_selections' : 'agent_model_selections';
-      let priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
+      let priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
       let prior = priorResult.rows[0];
       if (!prior) {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`agent-model-selection:${agent}`]);
-        priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
+        priorResult = await client.query(`SELECT agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at FROM ${table} WHERE agent_id=$1 FOR UPDATE`, [agent]);
         prior = priorResult.rows[0];
+      }
+      // Omission is a patch only for the same connection/model; an explicit
+      // null intentionally restores legacy behavior, and 'default' is a real
+      // provider-default selection, not an alias for null.
+      const sameModel = prior?.connection_id === connection.id && prior?.model_id === modelId;
+      const selectedMode = normalizeAnthropicThinkingMode(thinkingMode === undefined
+        ? (sameModel ? prior.thinking_mode : null) : thinkingMode);
+      if (selectedMode !== null) {
+        if (!isAnthropicMessagesConnection(connection)) throw new Error('model_thinking_mode_not_supported');
+        validateAnthropicThinkingSelection({ model: modelId, anthropicMetadata: enabled.anthropicMetadata,
+          reasoningEfforts: enabled.reasoningEfforts, thinkingMode: selectedMode, reasoningEffort: effort });
+      } else if (enabled.reasoningEfforts?.length && effort !== 'off' && !enabled.reasoningEfforts.includes(effort)) {
+        // Preserve the pre-existing validation contract for migrated/null rows.
+        throw new Error('model_reasoning_effort_not_supported');
       }
       const selectedTemperature = normalizeTemperature(temperature, prior ? Number(prior.temperature) : 0.2);
       const stamp = this.clock();
-      const result = await client.query(`INSERT INTO ${table} (agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at) VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT(agent_id) DO UPDATE SET connection_id=EXCLUDED.connection_id,model_id=EXCLUDED.model_id,reasoning_effort=EXCLUDED.reasoning_effort,temperature=EXCLUDED.temperature,updated_at=EXCLUDED.updated_at
-        RETURNING agent_id,connection_id,model_id,reasoning_effort,temperature,updated_at`, [agent, connection.id, modelId, effort, selectedTemperature, stamp]);
+      const result = await client.query(`INSERT INTO ${table} (agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT(agent_id) DO UPDATE SET connection_id=EXCLUDED.connection_id,model_id=EXCLUDED.model_id,reasoning_effort=EXCLUDED.reasoning_effort,thinking_mode=EXCLUDED.thinking_mode,temperature=EXCLUDED.temperature,updated_at=EXCLUDED.updated_at
+        RETURNING agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at`, [agent, connection.id, modelId, effort, selectedMode, selectedTemperature, stamp]);
       const row = result.rows[0];
-      return { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, temperature: Number(row.temperature), updatedAt: row.updated_at };
+      return { agentId: row.agent_id, connectionId: row.connection_id, model: row.model_id, reasoningEffort: row.reasoning_effort, thinkingMode: row.thinking_mode, temperature: Number(row.temperature), updatedAt: row.updated_at };
     });
   }
 

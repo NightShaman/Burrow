@@ -3,7 +3,7 @@ import { operationalEvent } from './operational-log.mjs';
 import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
 import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
-import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicModelMetadata, anthropicDiscoveredReasoningEfforts } from './anthropic-model-capabilities.mjs';
+import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicModelMetadata, anthropicDiscoveredReasoningEfforts, anthropicThinkingCapabilities } from './anthropic-model-capabilities.mjs';
 
 const AAD_PREFIX = 'burrow-model-secret-v1';
 
@@ -279,6 +279,7 @@ function safeModelMetadata(model = {}, { provider = '', apiType = '' } = {}) {
   const capabilityProvenance = incompatibleNative ? null : normalizeCapabilityProvenance(model.capabilityProvenance);
   const fallbackCapabilityProvenance = fallbackFields.length ? { ...fallbackProvenance, fields: fallbackFields } : null;
   return {
+    ...(nativeProtocol ? anthropicThinkingCapabilities({ model: model.id, anthropicMetadata, reasoningEfforts: reasoningEfforts.length ? reasoningEfforts : undefined }) : {}),
     ...(anthropicMetadata ? { anthropicMetadata } : nativeOwned && model.anthropicMetadata === null ? { anthropicMetadata: null } : {}),
     ...(Array.isArray(model.supportedGenerationMethods) ? { supportedGenerationMethods: model.supportedGenerationMethods.filter(x => typeof x === 'string') } : {}),
     ...(model.googleMetadata && typeof model.googleMetadata === 'object' ? { googleMetadata: Object.fromEntries(['name','baseModelId','version','description','inputTokenLimit','outputTokenLimit','thinking','temperature','maxTemperature','topP','topK','metadataSource','outputCapabilitySource'].filter(k => model.googleMetadata[k] !== undefined).map(k => [k, model.googleMetadata[k]])) } : {}),

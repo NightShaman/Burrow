@@ -132,6 +132,21 @@ export async function decodeExport(body, { password = null, maxCompressedBytes =
     throw Object.assign(new Error('export_categories_mismatch'), { statusCode: 400 });
   }
   if (!declared.length) throw Object.assign(new Error('export_categories_required'), { statusCode: 400 });
+  // An older v2 agent bundle represents the legacy selection semantics by
+  // omitting thinkingMode. Import it as null, rather than letting a replace
+  // silently inherit the target's explicit mode for the same connection/model.
+  // A missing selection field itself still means 'leave unchanged'.
+  const agentCategory = payload.categories.agents;
+  if (agentCategory?.schema === 'burrow.agents-and-profiles/v2' && Array.isArray(agentCategory.records)) {
+    for (const agent of agentCategory.records) {
+      for (const field of ['modelSelection', 'minionModelSelection']) {
+        const selection = agent?.[field];
+        if (selection && typeof selection === 'object' && !Array.isArray(selection) && !Object.hasOwn(selection, 'thinkingMode')) {
+          selection.thinkingMode = null;
+        }
+      }
+    }
+  }
   // Both preview and application now consume the same validated category set.
   const categories = actual;
   return { payload, encrypted, categories };

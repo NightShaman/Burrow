@@ -85,6 +85,7 @@ export function chatTurnInputFromBody({ body = {}, rootDir, dataRoot, agentDataR
     args: {
       ...(body.noCallModel === true ? { no_call_model: true } : {}),
       ...(agentRuntime ? {} : (agentDataRoot ? { agent_data_root: agentDataRoot } : { data_root: dataRoot })),
+      ...(body.thinkingMode !== undefined ? { model_thinking_mode: body.thinkingMode } : {}),
       ...(body.reasoningEffort ? { model_reasoning_effort: String(body.reasoningEffort) } : {}),
       ...(body.temperature !== undefined ? { model_temperature: body.temperature } : {}),
       ...(body.model ? { model: String(body.model) } : {}),
@@ -124,6 +125,7 @@ export function chatTurnInputFromWorkbenchContinuation({ item, body = {}, rootDi
       ...(body.noCallModel === true ? { no_call_model: true } : {}),
       ...(agentRuntime ? {} : (agentDataRoot ? { agent_data_root: agentDataRoot } : { data_root: dataRoot })),
       ...(body.target && typeof body.target === 'object' ? { target: body.target } : {}),
+      ...(body.thinkingMode !== undefined ? { model_thinking_mode: body.thinkingMode } : {}),
       ...(body.reasoningEffort ? { model_reasoning_effort: String(body.reasoningEffort) } : {}),
       ...(body.temperature !== undefined ? { model_temperature: body.temperature } : {}),
       ...(body.model ? { model: String(body.model) } : {}),

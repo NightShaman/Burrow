@@ -2,7 +2,7 @@ import { isProviderPool, assertProviderPoolMembers } from './model-settings-stor
 import { createProviderUsageService } from './provider-usage-service.mjs';
 import path from 'node:path';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
-import { anthropicSupportsTemperature, isAnthropicMessagesConnection } from './anthropic-model-capabilities.mjs';
+import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicThinkingMode, validateAnthropicThinkingSelection } from './anthropic-model-capabilities.mjs';
 
 export const MODEL_REASONING_EFFORT_VALUES = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const MODEL_REASONING_EFFORTS = new Set(MODEL_REASONING_EFFORT_VALUES);
@@ -102,17 +102,26 @@ export async function resolveModelConfig(args = {}) {
   let connectionId = text(args.model_connection_id ?? args.modelConnectionId);
   let modelId = text(args.model ?? args.model_id ?? args.modelId);
   let agentSelection = null;
-  if (text(args.agent_id ?? args.agentId)) {
+  if (text(args.agent_id ?? args.agentId) && args.model_selection_snapshot !== true) {
     agentSelection = await resolveModelSelection(args, text(args.agent_id ?? args.agentId));
     connectionId = connectionId || agentSelection?.connectionId || '';
     modelId = modelId || agentSelection?.model || '';
   }
   if (!connectionId || !modelId) return null;
   const { connection, model, auth } = await resolveInjectedModel(connectionId, modelId, args);
-  const reasoningEffort = normalizeModelReasoningEffort(args.model_reasoning_effort ?? args.reasoning_effort ?? agentSelection?.reasoningEffort ?? 'off');
+  const reasoningEffort = normalizeModelReasoningEffort(args.model_reasoning_effort ?? args.reasoning_effort ?? args.reasoningEffort ?? agentSelection?.reasoningEffort ?? 'off');
   const suppliedTemperature = args.temperature ?? args.model_temperature;
   const temperature = suppliedTemperature === undefined || suppliedTemperature === null || suppliedTemperature === '' ? (agentSelection?.temperature ?? 0.2) : Number(suppliedTemperature);
   if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new Error(`invalid model temperature: ${suppliedTemperature}`);
+  const isAnthropic = isAnthropicMessagesConnection(connection);
+  const sameSelection = agentSelection?.connectionId === connectionId && agentSelection?.model === modelId;
+  const modeOverride = ['model_thinking_mode', 'thinking_mode', 'thinkingMode'].find(key => args[key] !== undefined);
+  const thinkingMode = normalizeAnthropicThinkingMode(modeOverride ? args[modeOverride] : (sameSelection ? agentSelection?.thinkingMode : null));
+  if (thinkingMode !== null) {
+    if (!isAnthropic) throw new Error('model_thinking_mode_not_supported');
+    validateAnthropicThinkingSelection({ model: model.id, anthropicMetadata: model.anthropicMetadata, reasoningEfforts: model.reasoningEfforts, thinkingMode, reasoningEffort });
+  }
+  const effortSelected = ['model_reasoning_effort', 'reasoning_effort', 'reasoningEffort'].some(key => args[key] !== undefined) || Boolean(agentSelection?.reasoningEffort);
   const extra = reasoningEffort === 'off' ? undefined : { reasoning: { effort: reasoningEffort } };
   const result = {
     provider: connection.provider,
@@ -148,6 +157,7 @@ export async function resolveModelConfig(args = {}) {
     // Unknown outputs remain absent so exact native contracts can supply their
     // defaults; an explicit empty array is a deliberate disable.
     capabilities: { images: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'), vision: (model.acceptedInput ?? connection.acceptedInput ?? []).includes('image'), ...((model.acceptedOutput ?? model.discoveredOutput) !== undefined ? { outputs: model.acceptedOutput ?? model.discoveredOutput } : {}) },
+    ...(isAnthropic ? { thinkingMode, ...(effortSelected ? { reasoningEffort } : {}) } : {}),
     extra,
     connectionId: connection.id,
     availableModels: selectedModels(connection),
@@ -172,15 +182,15 @@ export async function resolveModelConfig(args = {}) {
         assertProviderPoolMembers(current, members.filter(Boolean));
         return { connection: current, members };
       },
-      resolveMember: id => resolveModelConfig({ ...args, [POOL_MEMBER_MODEL]: { connectionId: id, modelId: model.id }, model_connection_id: id, modelConnectionId: id, model: model.id }),
+      resolveMember: id => resolveModelConfig({ ...args, model_selection_snapshot: true, [POOL_MEMBER_MODEL]: { connectionId: id, modelId: model.id }, model_connection_id: id, modelConnectionId: id, model: model.id, model_thinking_mode: thinkingMode, ...(effortSelected ? { model_reasoning_effort: reasoningEffort } : {}) }),
     };
   }
   Object.defineProperty(result, 'resolveChildModel', { enumerable: false, value: async (childId = null) => {
-    if (childId) return resolveModelConfig({ ...args, model_connection_id: connection.id, modelConnectionId: connection.id, model: childId });
+    if (childId) return resolveModelConfig({ ...args, model_selection_snapshot: true, model_connection_id: connection.id, modelConnectionId: connection.id, model: childId, model_thinking_mode: thinkingMode, thinkingMode, model_reasoning_effort: effortSelected ? reasoningEffort : undefined, reasoning_effort: undefined, reasoningEffort: undefined, temperature });
     const configured = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
     const selection = configured?.modelSelection ? await configured.modelSelection(text(args.agent_id ?? args.agentId), { minion: true }) : null;
     if (!selection?.connectionId || !selection?.model) return result;
-    return resolveModelConfig({ ...args, model_connection_id: selection.connectionId, modelConnectionId: selection.connectionId, model: selection.model, model_reasoning_effort: selection.reasoningEffort, reasoning_effort: selection.reasoningEffort, temperature: selection.temperature });
+    return resolveModelConfig({ ...args, model_connection_id: selection.connectionId, modelConnectionId: selection.connectionId, model: selection.model, model_thinking_mode: selection.thinkingMode ?? null, thinkingMode: selection.thinkingMode ?? null, model_reasoning_effort: selection.reasoningEffort, reasoning_effort: selection.reasoningEffort, temperature: selection.temperature });
   } });
   return result;
 }

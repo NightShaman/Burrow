@@ -1,3 +1,4 @@
+import { POSTGRES_ANTHROPIC_THINKING_SQL } from './postgres-anthropic-thinking.mjs';
 import { POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL } from './postgres-archive-discovery-indexes.mjs';
 import { POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL } from './postgres-archive-chat-projection.mjs';
 import { POSTGRES_ARCHIVE_LEXICAL_SQL } from './postgres-archive-lexical.mjs';
@@ -218,4 +219,5 @@ ALTER TABLE scheduled_jobs ADD CONSTRAINT scheduled_jobs_schedule_check CHECK ((
 ALTER TABLE scheduled_job_runs ADD COLUMN task_id TEXT;
 CREATE INDEX scheduled_job_runs_latest_idx ON scheduled_job_runs(job_id,created_at DESC,scheduled_for DESC,id DESC);
 ` },
+  { version: 85, name: 'anthropic-thinking-mode-selections', sql: POSTGRES_ANTHROPIC_THINKING_SQL },
 ]);

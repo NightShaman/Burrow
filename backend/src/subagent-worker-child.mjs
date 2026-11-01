@@ -34,10 +34,12 @@ async function main() {
     const selected = childArgs.modelConfig;
     childArgs.modelConfig = await resolveModelConfig({
       modelSettings: new PostgresModelSettingsStore({ pool, key: settingsKeyFromEnvironment() }),
-      agentId: childArgs.owner?.agentId,
+      // Rehydrate the already-selected turn snapshot, not today's agent defaults.
+      agentId: childArgs.owner?.agentId, model_selection_snapshot: true,
       modelConnectionId: selected.connectionId, model: selected.model,
       temperature: selected.temperature, maxTokens: selected.maxTokens,
-      reasoning_effort: selected.extra?.reasoning?.effort || 'off',
+      ...((selected.reasoningEffort ?? selected.extra?.reasoning?.effort) !== undefined ? { reasoning_effort: selected.reasoningEffort ?? selected.extra?.reasoning?.effort } : {}),
+      model_thinking_mode: selected.thinkingMode ?? null,
     });
   }
   const { telemetry, telemetryRun } = await startSubagentChildTelemetry(childArgs);
