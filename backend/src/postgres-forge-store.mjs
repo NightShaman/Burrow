@@ -151,7 +151,8 @@ export class PostgresForgeStore {
       : this.connections || []);
   }
   async catalog({agentId = null} = {}) {
-    return forgeCatalog(await this.connectionList(agentId));
+    const catalog = forgeCatalog(await this.connectionList(agentId));
+    return { ...catalog, defaults: await this.selections() };
   }
   async selections() {
     const r = await this.pool.query(
