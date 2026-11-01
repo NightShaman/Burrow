@@ -2,6 +2,7 @@ import { isNativeThinkingProvider, nativeThinkingOptions, thinkingModeLabel, rea
 import type { ChatLiveStage } from './chatLiveStage';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import { api } from '../../app/api';
 import type { ChatAttachment, ProgressEntry, SessionTurn, ToolActivity } from '../../app/api';
 import type { Agent, SavedProvider, Subagent, Tab } from '../../app/types';
 import { useComposerHistory } from './useComposerHistory';
@@ -82,11 +83,8 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
   const chooseProvider = (providerName: string) => { const next = savedProviders.find((item) => item.provider === providerName); updateForModel(next, next?.models[0] ?? ''); };
   const chooseModel = (nextModel: string) => updateForModel(provider, nextModel);
   const chooseTemperature = (value: string) => updateAgent({ temperature: Number(value) });
-  const visibleSessions = !a2aInDefault && !selectableSessions.some((session) => session.id === 'a2a')
-    ? [...selectableSessions, { id: 'a2a' }]
-    : selectableSessions;
-  // Keep the controlled value represented even while session metadata is pending
-  // (including the synthetic inbox after routing returns to the default session).
+  const visibleSessions = [...selectableSessions];
+  // Keep the selected address represented while session metadata is pending.
   if (sessionId && !visibleSessions.some((session) => session.id === sessionId)) {
     visibleSessions.push({ id: sessionId });
   }
@@ -115,7 +113,7 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
       </select></label>
       {effortControl}{temperatureControl}
     </div>}
-    <div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup}>Group Chat</button><button className="new-session" onClick={onNewNamedSession}>New session</button><button className="new-session" onClick={onNewSession} disabled={locked || isResettingSession}>{isResettingSession ? 'Resetting…' : 'Reset Session'}</button><label className="a2a-default-control" htmlFor="chat-a2a-in-default"><span>A2A in default</span><input id="chat-a2a-in-default" className="a2a-default-switch" type="checkbox" role="switch" checked={a2aInDefault} onChange={(event) => updateAgent({ contextConfig: { a2aInDefault: event.target.checked } })} /></label><label className="session-selector-control" htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={!visibleSessions.length}>{visibleSessions.map((session) => { const label = switchboardLabels.get(session.id); return <option key={session.id} value={session.id} title={label?.title}>{label?.label ?? (session.id === 'a2a' ? 'A2A' : session.id)}</option>; })}</select></label></div>
+    <div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup}>Group Chat</button><button className="new-session" onClick={onNewNamedSession}>New session</button><button className="new-session" onClick={onNewSession} disabled={locked || isResettingSession}>{isResettingSession ? 'Resetting…' : 'Reset Session'}</button><label className="a2a-default-control" htmlFor="chat-a2a-in-default"><span>A2A in default</span><input id="chat-a2a-in-default" className="a2a-default-switch" type="checkbox" role="switch" checked={a2aInDefault} onChange={(event) => updateAgent({ contextConfig: { a2aInDefault: event.target.checked } })} /></label><label className="session-selector-control" htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={!visibleSessions.length}>{visibleSessions.map((session) => { const label = switchboardLabels.get(session.id); return <option key={session.id} value={session.id} title={label?.title}>{session.label ?? label?.label ?? (session.id === 'a2a' ? 'A2A' : session.id)}</option>; })}</select></label></div>
     {savingNative && <span className="model-selection-save-status" role="status">Saving model selection…</span>}
     {retryNative && <button className="new-session" disabled={locked} onClick={() => nativeDraft && void saveModelPatch(nativeDraft.patch, nativeDraft.displayPair)}>Retry model selection</button>}
   </div>;
@@ -132,11 +130,14 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   useEffect(() => {
     if (!parentSessionId) return;
     const controller = new AbortController();
-    void loadSwitchboardSessionLabels([parentSessionId], controller.signal).then((labels) => {
-      if (!controller.signal.aborted) setParentSessionLabel({ id: parentSessionId, label: labels.get(parentSessionId)?.label ?? (parentSessionId === 'a2a' ? 'A2A' : parentSessionId) });
+    void Promise.all([
+      loadSwitchboardSessionLabels([parentSessionId], controller.signal).catch(() => new Map<string, SwitchboardSessionLabel>()),
+      api<{ sessions: import('../../app/api').SessionSummary[] }>(`/api/sessions?agentId=${encodeURIComponent(parent.resourceId ?? parent.id)}`, { signal: controller.signal }).catch(() => undefined),
+    ]).then(([labels, detail]) => {
+      if (!controller.signal.aborted) setParentSessionLabel({ id: parentSessionId, label: detail?.sessions?.find(session => session.id === parentSessionId)?.label ?? labels.get(parentSessionId)?.label ?? (parentSessionId === 'a2a' ? 'A2A' : parentSessionId) });
     }).catch(() => { /* The recorded session name remains available without Switchboard. */ });
     return () => controller.abort();
-  }, [parentSessionId]);
+  }, [parentSessionId, parent.id, parent.resourceId]);
   const parentSessionName = parentSessionId && (parentSessionLabel?.id === parentSessionId
     ? parentSessionLabel.label
     : parentSessionId === 'a2a' ? 'A2A' : parentSessionId);

@@ -14288,6 +14288,14 @@
             "type": "object",
             "additionalProperties": true
           },
+          "label": {
+            "type": "string",
+            "description": "Optional stored display label, e.g. A2A - Cipher. Routing always uses sessionId."
+          },
+          "a2aPeerAgentId": {
+            "type": "string",
+            "description": "Canonical sending peer ID for an automatically created dedicated A2A inbox."
+          },
           "summary": {
             "type": "string"
           }

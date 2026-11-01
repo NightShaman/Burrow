@@ -62,6 +62,19 @@ describe('Minion owning-session banner', () => {
     expect(screen.getByText('Discovery check observer')).toBeTruthy();
   });
 
+  it('loads the parent peer label using the parent resource identity without downloading a transcript', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input) === '/api/sessions?agentId=parent-resource'
+      ? { sessions: [{ id: 'a2a-cipher', label: 'A2A - Cipher' }] } : { generation: 1, inputs: [] }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      renderChat({ parent: { ...agent, resourceId: 'parent-resource' }, selected: { ...child, rootSessionId: 'a2a-cipher' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
+      expect(await screen.findByText('Workspace remains attached to Smatchet · A2A - Cipher')).toBeTruthy();
+      const paths = fetchMock.mock.calls.map(([input]) => String(input));
+      expect(paths).toContain('/api/sessions?agentId=parent-resource');
+      expect(paths.some(path => path.startsWith('/api/sessions/a2a-cipher'))).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('uses the recorded direct parent for a legacy first-level minion', () => {
     renderChat({ selected: { ...child, parentSessionId: 'default' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
     expect(screen.getByText('Workspace remains attached to Smatchet · default')).toBeTruthy();
@@ -190,18 +203,18 @@ describe('Chat session picker', () => {
     expect(onSessionChange).not.toHaveBeenCalled();
   });
 
-  it('shows the dedicated A2A session before it has messages when A2A routing is separate', () => {
+  it('does not invent an inbox when A2A routing is separate', () => {
     const provider = { id: 'provider', provider: 'test', apiType: 'openai', url: '', apiKey: '', models: ['test-model'] };
     const separateAgent = { ...agent, contextConfig: { a2aInDefault: false } };
 
     render(<ChatModelSelector selected={separateAgent} savedProviders={[provider]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
 
     const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
-    expect(Array.from(picker.options).map((option) => [option.value, option.text])).toEqual([['default', 'default'], ['a2a', 'A2A']]);
+    expect(Array.from(picker.options).map((option) => [option.value, option.text])).toEqual([['default', 'default']]);
     expect(screen.getByRole('switch', { name: 'A2A in default' })).toHaveProperty('checked', false);
   });
 
-  it('retains the selected synthetic inbox when routing is toggled back on before metadata arrives', () => {
+  it('retains the selected legacy inbox when routing is toggled back on before metadata arrives', () => {
     const props: Parameters<typeof ChatModelSelector>[0] = {
       selected: { ...agent, contextConfig: { a2aInDefault: false } }, savedProviders: [],
       updateAgent: vi.fn(), sessions: [{ id: 'default' }], sessionId: 'a2a',
@@ -218,6 +231,26 @@ describe('Chat session picker', () => {
     expect(props.onSessionChange).not.toHaveBeenCalled();
   });
 
+  it('displays stored peer labels while selecting exact canonical addresses', () => {
+    const onSessionChange = vi.fn();
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }, { id: 'a2a-cipher', label: 'A2A - Cipher', a2aPeerAgentId: 'cipher' }, { id: 'a2a-hatchet', label: 'A2A - Hatchet' }]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+    const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map(option => [option.value, option.text])).toEqual([['default', 'default'], ['a2a-cipher', 'A2A - Cipher'], ['a2a-hatchet', 'A2A - Hatchet']]);
+    for (const value of ['a2a-cipher', 'a2a-hatchet']) {
+      fireEvent.change(picker, { target: { value } });
+      expect(onSessionChange).toHaveBeenLastCalledWith(value);
+    }
+  });
+
+  it('keeps identical peer display names as separate canonical options', () => {
+    const onSessionChange = vi.fn();
+    render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'a2a-one', label: 'A2A - Same' }, { id: 'a2a-two', label: 'A2A - Same' }]} sessionId="a2a-one" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
+    const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
+    expect(Array.from(picker.options).map(option => option.value)).toEqual(['a2a-one', 'a2a-two']);
+    fireEvent.change(picker, { target: { value: 'a2a-two' } });
+    expect(onSessionChange).toHaveBeenCalledWith('a2a-two');
+  });
+
   it('retains any current session while its metadata is unavailable', () => {
     render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="pending-session" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
     expect(screen.getByRole('combobox', { name: 'Session' })).toHaveProperty('value', 'pending-session');
@@ -228,9 +261,9 @@ describe('Chat session picker', () => {
     render(<ChatModelSelector selected={{ ...agent, contextConfig: { a2aInDefault: false } }} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }, { id: 'A2A' }, { id: 'A2a' }, ...(stored ? [{ id: 'a2a' }] : [])]} sessionId="default" onSessionChange={onSessionChange} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
     const picker = screen.getByRole('combobox', { name: 'Session' }) as HTMLSelectElement;
     expect(Array.from(picker.options).map(option => [option.value, option.text])).toEqual([
-      ['default', 'default'], ['A2A', 'A2A'], ['A2a', 'A2a'], ['a2a', 'A2A'],
+      ['default', 'default'], ['A2A', 'A2A'], ['A2a', 'A2a'], ...(stored ? [['a2a', 'A2A']] : []),
     ]);
-    for (const value of ['A2A', 'A2a', 'a2a']) {
+    for (const value of ['A2A', 'A2a', ...(stored ? ['a2a'] : [])]) {
       fireEvent.change(picker, { target: { value } });
       expect(onSessionChange).toHaveBeenLastCalledWith(value);
     }

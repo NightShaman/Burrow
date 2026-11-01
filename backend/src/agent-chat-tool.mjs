@@ -112,8 +112,11 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   // Only runtime-attested exchange context supplies an implicit return address.
   // Resolve agent aliases first, and never infer routes from transcript/prose.
   const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
-  const incomingSession = recipientRuntime.agent?.contextConfig?.a2aInDefault === false ? 'a2a' : 'default';
-  const session = sessionId(text(targetSessionId) || implicitReplySession || incomingSession);
+  const separateInbox = recipientRuntime.agent?.contextConfig?.a2aInDefault === false;
+  const incomingSession = separateInbox ? `a2a-${sender}` : 'default';
+  const explicitSession = text(targetSessionId);
+  const session = sessionId(explicitSession || implicitReplySession || incomingSession);
+  const peerInbox = separateInbox && !explicitSession && !implicitReplySession;
   const sourceMetadata = await conversationStore.getMetadata({ agentId: sender, sessionId: sourceSessionId || 'default' });
   const source = sessionId(sourceMetadata?.contextIsolation?.historySessionId || sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
@@ -125,6 +128,15 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
 
   const deliver = async () => {
+    // Only automatic ingress owns peer-inbox metadata. Labels are presentation,
+    // never routing keys; a display-name change cannot create another lane.
+    // Materialize on contact, not on the preference toggle, and retain unrelated
+    // metadata (including the existing archive/reset lifecycle).
+    if (peerInbox) {
+      await conversationStore.updateMetadata({ agentId: recipient, sessionId: session,
+        update: metadata => ({ ...metadata, a2aPeerAgentId: sender,
+          label: `A2A - ${text(senderRuntime.agent?.name) || sender}` }) });
+    }
     const recipientEntry = await appendAgentMessage({
       conversationStore, agentId: recipient, sessionId: session, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,

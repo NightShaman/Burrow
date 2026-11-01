@@ -180,6 +180,8 @@ export type MemoryConnection = {
 
 export type SessionSummary = {
   id: string;
+  label?: string;
+  a2aPeerAgentId?: string;
   summary?: string;
   updatedAt?: string;
   archived?: boolean;
@@ -367,6 +369,8 @@ export type ChatSession = {
   turns?: SessionTurn[];
   activities?: SessionToolActivity[];
   metadata?: {
+    label?: string;
+    a2aPeerAgentId?: string;
     conversationId?: string;
     transcriptGeneration?: string;
     resetAt?: string;
