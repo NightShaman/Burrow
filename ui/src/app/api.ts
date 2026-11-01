@@ -120,6 +120,9 @@ export type RuntimeModel = {
   outputTokens?: number;
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;
+  thinkingModes?: string[];
+  thinkingEfforts?: Record<string, string[]>;
+  anthropicMetadata?: { capabilities?: Record<string, unknown> | null; [key: string]: unknown } | null;
   contextWindow?: number;
   discoveredContextWindow?: number;
   contextWindowOverride?: number;

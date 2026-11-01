@@ -412,3 +412,15 @@ describe('Stop retirement', () => {
     await act(async () => { complete({ terminalType: 'run.completed', finalResult: { answerText: 'Late' } }); await completion; });
   });
 });
+
+
+it.each([['anthropic-messages','adaptive'],['anthropic-messages','default'],['anthropic-messages',null],['anthropic-lb','adaptive']])('submits explicit native mode unchanged only on deliberate send (%s/%s)',async (apiType,thinkingMode)=>{
+ const session=createSession();
+ streamChatMock.mockResolvedValue({terminalType:'run.completed',finalResult:{ok:true}});
+ const selected={id:'native',name:'Native',avatar:'',activity:'idle',context:null,provider:'Native',model:'claude-fixture',effort:'off',thinkingMode,temperature:0.2,workspace:'',files:[],subagents:[]};
+ const providers=[{id:'p',provider:'Native',apiType:apiType!,url:'',apiKey:'',models:['claude-fixture']}];
+ const {result}=renderHook(()=>useChatRun({selectedAgentId:'native',selected,savedProviders:providers,session,setAgentActivity:vi.fn()}));
+ expect(streamChatMock).not.toHaveBeenCalled();
+ await act(async()=>{await result.current.sendMessage();});
+ expect(streamChatMock.mock.calls[0][0].requestBody).toMatchObject({model:'claude-fixture',modelConnectionId:'p',thinkingMode,reasoningEffort:'off'});
+});

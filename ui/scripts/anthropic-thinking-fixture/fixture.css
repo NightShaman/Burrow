@@ -1,0 +1,4 @@
+/* Fixture shell only: model controls, Settings host and content use production CSS. */
+.app-header{display:flex;justify-content:space-between;gap:12px}.app-header small{color:var(--muted)}
+.fixture-rail{padding:16px;display:flex;flex-direction:column;gap:12px;font-size:12px}.fixture-rail button{text-align:left}.fixture-rail span{color:var(--muted)}
+@media(max-width:600px){.fixture-rail{display:none}}

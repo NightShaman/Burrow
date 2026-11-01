@@ -1,3 +1,4 @@
+import { isNativeThinkingProvider } from '../../app/modelSelectionOptions';
 import { chatToolIdentity } from './chatToolIdentity';
 import { useEffect, useRef, useState } from 'react';
 import { answerFromChatResult, api, createRunId, type ChatAttachment, type ProgressEntry, type RunProgress, type SessionTurn, type ToolActivityItem } from '../../app/api';
@@ -84,7 +85,7 @@ export function useChatRun({ selectedAgentId, selected, savedProviders, session,
     const provider = savedProviders.find((item) => item.provider === selected?.provider) ?? savedProviders[0];
     const model = selected?.model || provider?.models[0];
     const attachments = session.attached;
-    const requestBody = { agentId: target.resourceAgentId, sessionId: target.sessionId, runId, message, ...(attachments.length ? { attachments } : {}), reasoningEffort: selected?.effort, temperature: selected?.temperature, ...(model && provider ? { model, modelConnectionId: provider.id } : {}) };
+    const requestBody = { agentId: target.resourceAgentId, sessionId: target.sessionId, runId, message, ...(attachments.length ? { attachments } : {}), reasoningEffort: selected?.effort, ...(isNativeThinkingProvider(provider) ? { thinkingMode: selected?.thinkingMode ?? null } : {}), temperature: selected?.temperature, ...(model && provider ? { model, modelConnectionId: provider.id } : {}) };
     const abortController = new AbortController();
     const targetKey = runKey(target.agentId, target.sessionId);
     streamAbortRef.current[targetKey] = abortController;

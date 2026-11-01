@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import type { SavedProvider } from './types';
 import { useRuntimeAgents } from './useRuntimeAgents';
+import { reconcileModelCatalog } from './useRuntimeDashboard';
 import { childStreamId } from './useRuntimeSelection';
 
 vi.mock('./api', async (importOriginal) => ({
@@ -503,4 +504,21 @@ describe('coverage evidence and anchor fencing', () => {
     expect(result.current.agents[0]).toMatchObject({ activity: 'Thinking', context: 75, contextDetails: { estimatedTokens: 123 }, minionCoverage: 'current', subagents: [{ resourceId: 'child' }] });
     expect(result.current.agents[0].subagents[0].retained).toBeUndefined();
   });
+});
+
+
+it.each(['adaptive', null])('preserves raw native selection when overview precedes the catalog (mode=%s)', async thinkingMode => {
+ apiMock.mockReset(); runtimeProviders.current = [];
+ apiMock.mockImplementation(async path => {
+   if(path==='/api/agents') return {agents:[{id:'native-agent',name:'Native agent',enabled:true}]};
+   if(path==='/api/agents/overview') return {agents:[{agent:{id:'native-agent',name:'Native agent',enabled:true},sessionId:'default',selection:{connectionId:'native-p',model:'native-model',thinkingMode,reasoningEffort:'xhigh',temperature:0.8},status:{agents:[]},contexts:{}}]};
+   throw new Error('Unexpected '+path);
+ });
+ const {result}=renderRuntimeAgents('native-agent');
+ await waitFor(()=>expect(result.current.registryState).toBe('ready'));
+ expect(result.current.agents[0]).toMatchObject({modelConnectionId:'native-p',model:'native-model',thinkingMode,effort:'xhigh',temperature:0.8});
+ const providers = [{id:'other',provider:'Other',models:['other'],apiType:'openai-responses'}, {id:'native-p',provider:'Native',apiType:'anthropic-messages',models:['native-model'],modelEfforts:{'native-model':['low','high','max']}}] as SavedProvider[];
+ const [reconciled]=reconcileModelCatalog(result.current.agents, providers);
+ expect(reconciled).toMatchObject({provider:'Native',modelConnectionId:'native-p',model:'native-model',thinkingMode,effort:'xhigh',temperature:0.8});
+ runtimeProviders.current=[];
 });

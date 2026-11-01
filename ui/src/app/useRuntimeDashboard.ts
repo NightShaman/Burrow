@@ -1,3 +1,4 @@
+import { isNativeThinkingProvider } from './modelSelectionOptions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AnthropicUsage, type ModelConnection, type OpenAiUsage } from './api';
 import type { Agent, SavedProvider } from './types';
@@ -50,6 +51,19 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   modelOutputOverrides: Object.fromEntries(connection.models.flatMap((model) => model.acceptedOutputOverride ? [[model.id, model.acceptedOutputOverride]] : [])),
 });
 
+/** Catalog arrival must not erase an overview selection that arrived first. */
+export function reconcileModelCatalog(agents: Agent[], providers: SavedProvider[]): Agent[] {
+  if (!providers.length) return agents;
+  return agents.map(agent => {
+    const provider = providers.find(item => item.id === agent.modelConnectionId)
+      ?? providers.find(item => item.provider === agent.provider) ?? providers[0];
+    const model = provider.models.includes(agent.model) ? agent.model : provider.models[0];
+    const efforts = ['off', ...(provider.modelEfforts?.[model] ?? []).filter(item => item !== 'off')];
+    return { ...agent, provider: provider.provider, modelConnectionId: provider.id, model,
+      effort: isNativeThinkingProvider(provider) || efforts.includes(agent.effort) ? agent.effort : provider.defaultEfforts?.[model] ?? 'off' };
+  });
+}
+
 export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProviders, reportError }: RuntimeDashboardOptions) {
   const [savedProviders, setSavedProviders] = useState<SavedProvider[]>([]);
   const [modelConnectionsLoaded, setModelConnectionsLoaded] = useState(false);
@@ -70,13 +84,7 @@ export function useRuntimeDashboard({ selectedProvider, setAgents, runtimeProvid
     runtimeProviders.current = providers;
     setSavedProviders(saved); setModelConnectionsLoaded(true);
     if (!providers.length) return;
-    const fallbackProvider = providers[0];
-    setAgents((all) => all.map((agent) => {
-      const provider = providers.find((item) => item.provider === agent.provider) ?? fallbackProvider;
-      const model = provider.models.includes(agent.model) ? agent.model : provider.models[0];
-      const efforts = ['off', ...(provider.modelEfforts?.[model] ?? []).filter((item) => item !== 'off')];
-      return { ...agent, provider: provider.provider, model, effort: efforts.includes(agent.effort) ? agent.effort : provider.defaultEfforts?.[model] ?? 'off' };
-    }));
+    setAgents(all => reconcileModelCatalog(all, providers));
   }, [setAgents, generation]);
 
   useEffect(() => {

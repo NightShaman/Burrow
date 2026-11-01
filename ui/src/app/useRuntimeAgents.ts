@@ -1,3 +1,4 @@
+import { isNativeThinkingProvider } from './modelSelectionOptions';
 import { enabledAgents } from './agentCatalog';
 import { minionOutcome } from './minionOutcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -18,7 +19,7 @@ type RuntimeAgentHydrationOptions = {
 };
 
 type AgentIdentity = { id: string; name: string; avatar: string };
-type ModelSelection = { connectionId: string; model: string; reasoningEffort: string; temperature?: number } | null;
+type ModelSelection = { connectionId: string; model: string; reasoningEffort: string; thinkingMode?: string | null; temperature?: number } | null;
 type AgentOverviewEntry = {
   agent: RuntimeAgent;
   identity?: AgentIdentity | null;
@@ -42,7 +43,7 @@ const asAgent = (entry: AgentOverviewEntry): Agent => ({
   name: entry.identity?.name || entry.agent.name,
   avatar: entry.identity?.avatar || avatarFor(entry.agent),
   activity: entry.agent.enabled ? 'Idle' : 'Disabled',
-  context: null, contextConfig: entry.agent.contextConfig, provider: '', model: '', effort: 'medium', temperature: 0.2,
+  context: null, contextConfig: entry.agent.contextConfig, provider: '', modelConnectionId: entry.selection?.connectionId, model: entry.selection?.model ?? '', effort: entry.selection?.reasoningEffort ?? 'medium', thinkingMode: entry.selection?.thinkingMode ?? null, temperature: entry.selection?.temperature ?? 0.2,
   workspace: workspacePathFor(entry.agent.id), files: [], subagents: [],
   executionEnvironment: entry.agent.executionEnvironment ?? null,
 });
@@ -175,9 +176,9 @@ export function useRuntimeAgents({ selectedAgentId, selectedStreamId, setSelecte
         const configured = !provider ? agent : (() => {
           const model = selectedProvider && selection ? selection.model : provider.models.includes(agent.model) ? agent.model : provider.models[0];
           const efforts = ['off', ...(provider.modelEfforts?.[model] ?? []).filter((item) => item !== 'off')];
-          const effort = selectedProvider && selection && efforts.includes(selection.reasoningEffort) ? selection.reasoningEffort : provider.defaultEfforts?.[model] ?? agent.effort;
+          const effort = selectedProvider && selection && (isNativeThinkingProvider(provider) || efforts.includes(selection.reasoningEffort)) ? selection.reasoningEffort : provider.defaultEfforts?.[model] ?? agent.effort;
           const temperature = typeof selection?.temperature === 'number' && Number.isFinite(selection.temperature) ? selection.temperature : agent.temperature;
-          return { ...agent, provider: provider.provider, model, effort, temperature };
+          return { ...agent, provider: provider.provider, modelConnectionId: provider.id, model, effort, thinkingMode: selection?.thinkingMode ?? null, temperature };
         })();
         const parentContext = entry.contexts[entry.sessionId] ?? {};
         // An agent-level failure is not an authoritative empty minion list or

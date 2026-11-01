@@ -1,6 +1,6 @@
-import { reasoningEffortsForModel, defaultReasoningEffort } from '../../app/modelSelectionOptions';
+import { isNativeThinkingProvider, nativeThinkingOptions, thinkingModeLabel, reasoningEffortsForModel, defaultReasoningEffort } from '../../app/modelSelectionOptions';
 import type { ChatLiveStage } from './chatLiveStage';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { ChatAttachment, ProgressEntry, SessionTurn, ToolActivity } from '../../app/api';
 import type { Agent, SavedProvider, Subagent, Tab } from '../../app/types';
@@ -17,15 +17,50 @@ export { ChatComposer } from './ChatComposer';
 
 type OperatorProfile = { name: string; avatar: string };
 
-export function ChatModelSelector({ selected, savedProviders, updateAgent, sessions, sessionId, onSessionChange, onNewSession, onNewNamedSession, onCreateGroup, locked = false, isResettingSession = false }: { selected: Agent; savedProviders: SavedProvider[]; updateAgent: (patch: Partial<Agent>) => void | Promise<void>; sessions: import('../../app/api').SessionSummary[]; sessionId: string; onSessionChange: (sessionId: string) => void; onNewSession: () => void; onNewNamedSession: () => void; onCreateGroup: () => void; locked?: boolean; isResettingSession?: boolean }) {
+export function ChatModelSelector({ selected, savedProviders, updateAgent, sessions, sessionId, onSessionChange, onNewSession, onNewNamedSession, onCreateGroup, locked = false, isResettingSession = false, savingSelection = false, onSelectionBlockedChange }: { selected: Agent; savedProviders: SavedProvider[]; updateAgent: (patch: Partial<Agent>) => void | boolean | Promise<void | boolean>; sessions: import('../../app/api').SessionSummary[]; sessionId: string; onSessionChange: (sessionId: string) => void; onNewSession: () => void; onNewNamedSession: () => void; onCreateGroup: () => void; locked?: boolean; isResettingSession?: boolean; savingSelection?: boolean; onSelectionBlockedChange?: (blocked: boolean) => void }) {
   const provider = savedProviders.find((item) => item.provider === selected.provider) ?? savedProviders[0];
   const models = provider?.models ?? [];
   const model = models.includes(selected.model) ? selected.model : models[0] ?? '';
-  const modelEfforts = provider?.modelEfforts?.[model] ?? [];
-  // "off" is a runtime-supported override, even when a provider only advertises
-  // its enabled reasoning levels for a model.
-  const efforts = reasoningEffortsForModel(provider, model);
-  const effort = efforts.includes(selected.effort) ? selected.effort : provider?.defaultEfforts?.[model] ?? modelEfforts[0] ?? 'off';
+  const native = isNativeThinkingProvider(provider);
+  const identity = JSON.stringify([selected.id, provider?.id, model]);
+  type Draft = { patch: Partial<Agent>; displayPair: boolean; pending: boolean; failed: boolean };
+  // Keep local intent per owner/model. Leaving and returning cannot erase a
+  // still-pending write or move its failure onto a different agent.
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const busyOwners = useRef(new Set<string>());
+  const nativeDraft = drafts[identity];
+  const savingNative = savingSelection || nativeDraft?.pending === true;
+  const retryNative = nativeDraft?.failed === true;
+  const thinkingMode = nativeDraft?.displayPair ? nativeDraft.patch.thinkingMode ?? null : selected.thinkingMode ?? null;
+  const effort = nativeDraft?.displayPair ? nativeDraft.patch.effort! : native ? selected.effort
+    : reasoningEffortsForModel(provider, model).includes(selected.effort) ? selected.effort : defaultReasoningEffort(provider, model);
+  const thinking = nativeThinkingOptions(provider, model, thinkingMode, effort);
+  const efforts = native ? thinking.efforts : reasoningEffortsForModel(provider, model);
+  const blocked = savingNative || Boolean(nativeDraft) || native && (thinking.modeInvalid || thinking.effortInvalid);
+  useLayoutEffect(() => { onSelectionBlockedChange?.(blocked); }, [blocked, onSelectionBlockedChange]);
+  const saveModelPatch = async (patch: Partial<Agent>, displayPair: boolean) => {
+    if (busyOwners.current.has(identity) || savingSelection) return;
+    const value: Draft = { patch, displayPair, pending: false, failed: false };
+    setDrafts(current => ({ ...current, [identity]: value }));
+    if (displayPair) {
+      const next = nativeThinkingOptions(provider, model, patch.thinkingMode, patch.effort!);
+      // Preserve an incompatible counterpart for deliberate correction, never
+      // save half a pair or substitute a native effort behind the operator.
+      if (next.modeInvalid || next.effortInvalid) return;
+    }
+    busyOwners.current.add(identity);
+    setDrafts(current => ({ ...current, [identity]: { ...value, pending: true } }));
+    try {
+      const accepted = await updateAgent(patch);
+      setDrafts(current => {
+        if (accepted === false) return { ...current, [identity]: { ...value, failed: true } };
+        const next = { ...current }; delete next[identity]; return next;
+      });
+    } catch {
+      setDrafts(current => ({ ...current, [identity]: { ...value, failed: true } }));
+    } finally { busyOwners.current.delete(identity); }
+  };
+  const saveNative = (nextMode: string | null, nextEffort: string) => saveModelPatch({ thinkingMode: nextMode, effort: nextEffort }, true);
   const temperature = Number.isFinite(selected.temperature) ? Math.max(0, Math.min(2, selected.temperature)) : 0.2;
   const a2aInDefault = selected.contextConfig?.a2aInDefault !== false;
   const selectableSessions = sessions.filter((session) => {
@@ -38,7 +73,12 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
       && !id.startsWith('group-')
       && !id.startsWith('artifact-');
   });
-  const updateForModel = (next: SavedProvider | undefined, nextModel: string) => updateAgent({ provider: next?.provider ?? '', model: nextModel, effort: defaultReasoningEffort(next, nextModel) });
+  const updateForModel = (next: SavedProvider | undefined, nextModel: string) => {
+    const patch = { provider: next?.provider ?? '', model: nextModel, effort: isNativeThinkingProvider(next) ? 'off' : defaultReasoningEffort(next, nextModel), thinkingMode: isNativeThinkingProvider(next) ? 'default' : null };
+    // Identity changes are full intents too. Lock tuning against the old model
+    // while its new identity is in flight, rather than merging across models.
+    return native || isNativeThinkingProvider(next) ? saveModelPatch(patch, false) : updateAgent(patch);
+  };
   const chooseProvider = (providerName: string) => { const next = savedProviders.find((item) => item.provider === providerName); updateForModel(next, next?.models[0] ?? ''); };
   const chooseModel = (nextModel: string) => updateForModel(provider, nextModel);
   const chooseTemperature = (value: string) => updateAgent({ temperature: Number(value) });
@@ -59,10 +99,31 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
       .catch(() => { if (!controller.signal.aborted) setSwitchboardLabels(new Map()); });
     return () => controller.abort();
   }, [visibleSessionKey]);
-  return <div className="workspace-toolbar"><label htmlFor="chat-provider">Provider <select id="chat-provider" name="provider" value={provider?.provider ?? ''} onChange={(e) => chooseProvider(e.target.value)} disabled={locked || !savedProviders.length}>{!savedProviders.length && <option value="">Configured runtime</option>}{savedProviders.map((item) => <option value={item.provider} key={item.id}>{item.provider}</option>)}</select></label><label htmlFor="chat-model">Model <select id="chat-model" name="model" value={model} onChange={(e) => chooseModel(e.target.value)} disabled={locked || !models.length}>{!models.length && <option value="">Configured runtime</option>}{models.map((item) => <option key={item} value={item}>{provider?.modelLabels?.[item] ?? item}</option>)}</select></label><label htmlFor="chat-effort">Effort <select id="chat-effort" name="effort" value={effort} onChange={(e) => updateAgent({ effort: e.target.value })} disabled={locked || !efforts.length}>{!efforts.length && <option value="">Not configured</option>}{efforts.map((item) => <option key={item}>{item}</option>)}</select></label><label className="temperature-control" htmlFor="chat-temperature">Temp <span>{temperature.toFixed(1)}</span><input id="chat-temperature" name="temperature" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => chooseTemperature(e.target.value)} disabled={locked || !provider} /></label><div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup}>Group Chat</button><button className="new-session" onClick={onNewNamedSession}>New session</button><button className="new-session" onClick={onNewSession} disabled={locked || isResettingSession}>{isResettingSession ? 'Resetting…' : 'Reset Session'}</button><label className="a2a-default-control" htmlFor="chat-a2a-in-default"><span>A2A in default</span><input id="chat-a2a-in-default" className="a2a-default-switch" type="checkbox" role="switch" checked={a2aInDefault} onChange={(event) => updateAgent({ contextConfig: { a2aInDefault: event.target.checked } })} /></label><label className="session-selector-control" htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={!visibleSessions.length}>{visibleSessions.map((session) => { const label = switchboardLabels.get(session.id); return <option key={session.id} value={session.id} title={label?.title}>{label?.label ?? (session.id === 'a2a' ? 'A2A' : session.id)}</option>; })}</select></label></div></div>;
+  const effortControl = <label htmlFor="chat-effort">Effort <select id="chat-effort" name="effort" value={effort} aria-invalid={native && thinking.effortInvalid || undefined} aria-describedby={native && thinking.issue ? 'chat-thinking-issue' : undefined} onChange={event => native ? void saveNative(thinkingMode, event.target.value) : void updateAgent({ effort: event.target.value })} disabled={locked || savingNative || !provider || native && thinkingMode == null}>
+    {!efforts.includes(effort) && <option value={effort}>Unavailable · {effort}</option>}
+    {efforts.map(value => <option key={value} value={value}>{native && thinkingMode != null && value === 'off' ? 'Default' : value}</option>)}
+  </select></label>;
+  const temperatureControl = <label className="temperature-control" htmlFor="chat-temperature">Temp <span>{temperature.toFixed(1)}</span><input id="chat-temperature" name="temperature" type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => chooseTemperature(e.target.value)} disabled={locked || savingNative || !provider} /></label>;
+  return <div className={`workspace-toolbar${native ? ' native-model-toolbar' : ''}`}>
+    <label htmlFor="chat-provider">Provider <select id="chat-provider" name="provider" value={provider?.provider ?? ''} onChange={(e) => chooseProvider(e.target.value)} disabled={locked || savingNative || !savedProviders.length}>{!savedProviders.length && <option value="">Configured runtime</option>}{savedProviders.map((item) => <option value={item.provider} key={item.id}>{item.provider}</option>)}</select></label><label htmlFor="chat-model">Model <select id="chat-model" name="model" value={model} onChange={(e) => chooseModel(e.target.value)} disabled={locked || savingNative || !models.length}>{!models.length && <option value="">Configured runtime</option>}{models.map((item) => <option key={item} value={item}>{provider?.modelLabels?.[item] ?? item}</option>)}</select></label>
+    {!native && <>{effortControl}{temperatureControl}</>}
+    <div className="session-controls"><button className="new-session group-chat-trigger" onClick={onCreateGroup}>Group Chat</button><button className="new-session" onClick={onNewNamedSession}>New session</button><button className="new-session" onClick={onNewSession} disabled={locked || isResettingSession}>{isResettingSession ? 'Resetting…' : 'Reset Session'}</button><label className="a2a-default-control" htmlFor="chat-a2a-in-default"><span>A2A in default</span><input id="chat-a2a-in-default" className="a2a-default-switch" type="checkbox" role="switch" checked={a2aInDefault} onChange={(event) => updateAgent({ contextConfig: { a2aInDefault: event.target.checked } })} /></label><label className="session-selector-control" htmlFor="chat-session"><span className="sr-only">Session</span><select id="chat-session" name="session" value={sessionId} onChange={(e) => onSessionChange(e.target.value)} disabled={!visibleSessions.length}>{visibleSessions.map((session) => { const label = switchboardLabels.get(session.id); return <option key={session.id} value={session.id} title={label?.title}>{label?.label ?? (session.id === 'a2a' ? 'A2A' : session.id)}</option>; })}</select></label></div>
+    {native && <div className="model-tuning-controls">
+      <label htmlFor="chat-thinking">Thinking <select id="chat-thinking" name="thinkingMode" value={thinkingMode ?? ''} aria-invalid={thinking.modeInvalid || undefined} aria-describedby={thinking.issue ? 'chat-thinking-issue' : undefined} disabled={locked || savingNative || !provider} onChange={event => void saveNative(event.target.value, effort)}>
+        {thinkingMode == null && <option value="">{thinking.legacyLabel}</option>}
+        {thinkingMode != null && !thinking.modes.includes(thinkingMode) && <option value={thinkingMode}>Unavailable · {thinkingModeLabel(thinkingMode)}</option>}
+        {thinking.modes.map(value => <option key={value} value={value}>{thinkingModeLabel(value)}</option>)}
+      </select></label>
+      {effortControl}{temperatureControl}
+      {thinking.issue && <span id="chat-thinking-issue" className="model-selection-issue" role="status">{thinking.issue}</span>}
+    </div>}
+    {savingNative && <span className="model-selection-save-status" role="status">Saving model selection…</span>}
+    {retryNative && <button className="new-session" disabled={locked} onClick={() => nativeDraft && void saveModelPatch(nativeDraft.patch, nativeDraft.displayPair)}>Retry model selection</button>}
+  </div>;
+
 }
 
-export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, steeringReady, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, liveStage, a2aActivities, runtimeUserMessage, runtimeUserMessageMetadata, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, composerResetGeneration = 0 }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; steeringReady?: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; liveStage?: ChatLiveStage; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; runtimeUserMessageMetadata?: SessionTurn['metadata']; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; composerResetGeneration?: number }) {
+export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, steeringReady, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, liveStage, a2aActivities, runtimeUserMessage, runtimeUserMessageMetadata, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, composerResetGeneration = 0, selectionBlocked = false }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; steeringReady?: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; liveStage?: ChatLiveStage; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; runtimeUserMessageMetadata?: SessionTurn['metadata']; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; composerResetGeneration?: number; selectionBlocked?: boolean }) {
   // Show the owning conversation, not the child's stream id or the agent's
   // last selected chat. Nested minions share their recorded root session.
   const parentSessionId = 'stream' in selected
@@ -174,8 +235,8 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
       }).finally(() => { if (currentContext.current === context) { submittingRef.current = false; setSubmitting(false); } });
       return;
     }
-    onSend(value, accepted);
-  }, [onSend, setDraft, explicitDelivery, intent, attached, steering, inputs, onRemoveAttachment, promotion, activeRunId, context, updateLocalDraft, exactTargetAvailable]);
+    if (!selectionBlocked) onSend(value, accepted);
+  }, [onSend, setDraft, explicitDelivery, intent, attached, steering, inputs, onRemoveAttachment, promotion, activeRunId, context, updateLocalDraft, exactTargetAvailable, selectionBlocked]);
   const inputAction = useCallback((id: string, action: 'cancel' | 'resume') => {
     setSteeringError('');
     void inputs.action(id, action).catch(error => { if (currentContext.current === context) setSteeringError(`Could not ${action}: ${error instanceof Error ? error.message : 'Unknown error'}`); });
@@ -188,7 +249,7 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
     {inputs.error && <p className="error" role="alert">{inputs.error}</p>}
     {promotion && <div className="chat-promotion" role="status">Side answer staged for editing<button onClick={() => setPromotion(null)}>Remove link</button></div>}
     {steeringError && <p className="error" role="alert">{steeringError}</p>}
-    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={false} sendDisabled={submitting || (explicitDelivery && (intent === 'steer' ? !steeringReady || !exactTargetAvailable : intent === 'side_question' ? !exactTargetAvailable || inputs.generation === null : inputs.generation === null)) || Boolean(promotion && inputs.generation === null)} steeringActive={isSending} showIntent={explicitDelivery} busyIntent={intent} onIntentChange={chooseIntent} canSteer={Boolean(isSending && activeRunId && steeringReady)} canAskSide={Boolean(isSending && activeRunId)} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={transcriptTurns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
+    <ChatComposer draft={localDraft} setDraft={composerHistory.setDraft} attached={attached} onAttach={onAttach} onRemoveAttachment={onRemoveAttachment} disabled={false} sendDisabled={selectionBlocked || submitting || (explicitDelivery && (intent === 'steer' ? !steeringReady || !exactTargetAvailable : intent === 'side_question' ? !exactTargetAvailable || inputs.generation === null : inputs.generation === null)) || Boolean(promotion && inputs.generation === null)} steeringActive={isSending} showIntent={explicitDelivery} busyIntent={intent} onIntentChange={chooseIntent} canSteer={Boolean(isSending && activeRunId && steeringReady)} canAskSide={Boolean(isSending && activeRunId)} onSend={sendLocalDraft} selectedAgentId={selectedAgentId} resourceAgentId={resourceAgentId} sessionId={sessionId} onCancel={onCancel} onKeyDown={composerHistory.onKeyDown} conversationTurns={transcriptTurns} assistantName={selected.name} operatorName={operator.name} agentNames={new Map([[parent.id, parent.name], [selected.id, selected.name]])} placeholder={isNewSession ? `Message ${selected.name}…` : 'Message the active agent…'} />
   </div>;
 }
 

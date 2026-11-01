@@ -889,3 +889,9 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .mod-settings-surface .memory-connection-select{flex:1 1 140px;min-width:0}
 .mod-settings-surface .memory-connection strong{overflow-wrap:anywhere}
 .mod-settings-surface .memory-connection-actions{flex-wrap:wrap;max-width:100%;min-width:0}
+.minion-native-temperature{grid-column:1/-1}
+.settings-field-pair select[aria-invalid=true]{border-color:var(--warn)}
+.minion-native-temperature input[type=range]{margin-inline:0;accent-color:var(--accent)}
+
+.minion-native-controls{container-type:inline-size;container-name:minion-thinking}
+@container minion-thinking (max-width:360px){.minion-native-controls>.settings-field-pair{grid-template-columns:minmax(0,1fr)}}

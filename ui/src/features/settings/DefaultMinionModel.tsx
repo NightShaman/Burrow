@@ -2,15 +2,15 @@ import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/Unsave
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
-import { defaultReasoningEffort, reasoningEffortsForModel } from '../../app/modelSelectionOptions';
+import { isNativeThinkingProvider, defaultReasoningEffort, nativeThinkingOptions, thinkingModeLabel, reasoningEffortsForModel } from '../../app/modelSelectionOptions';
 import { Field } from './SettingsPrimitives';
 import { ProviderModelFields } from './ProviderModelFields';
 
-type Selection = { connectionId: string; model: string; reasoningEffort: string; temperature?: number } | null;
-type Scope = 'identity' | 'reasoningEffort' | 'temperature';
+type Selection = { connectionId: string; model: string; reasoningEffort: string; thinkingMode?: string | null; temperature?: number } | null;
+type Scope = 'identity' | 'thinkingMode' | 'reasoningEffort' | 'temperature';
 const sameSelection = (left: Selection, right: Selection) => left === right || Boolean(left && right
   && left.connectionId === right.connectionId && left.model === right.model
-  && left.reasoningEffort === right.reasoningEffort && left.temperature === right.temperature);
+  && left.reasoningEffort === right.reasoningEffort && (left.thinkingMode ?? null) === (right.thinkingMode ?? null) && left.temperature === right.temperature);
 
 // Read only the editable selection, not server metadata such as updatedAt.
 // An absent selection is not an acknowledgement of Inherit: it must be null.
@@ -22,11 +22,12 @@ function responseSelection(value: unknown): Selection {
   if (!selection || typeof selection.connectionId !== 'string' || !selection.connectionId.trim()
     || typeof selection.model !== 'string' || !selection.model.trim()
     || typeof selection.reasoningEffort !== 'string' || !selection.reasoningEffort.trim()
+    || (selection.thinkingMode !== undefined && selection.thinkingMode !== null && typeof selection.thinkingMode !== 'string')
     || (selection.temperature !== undefined && (typeof selection.temperature !== 'number'
       || !Number.isFinite(selection.temperature) || selection.temperature < 0 || selection.temperature > 2))) {
     throw new Error('Invalid minion model selection response.');
   }
-  return { connectionId: selection.connectionId, model: selection.model, reasoningEffort: selection.reasoningEffort, temperature: selection.temperature };
+  return { connectionId: selection.connectionId, model: selection.model, reasoningEffort: selection.reasoningEffort, ...(selection.thinkingMode !== undefined ? { thinkingMode: selection.thinkingMode } : {}), temperature: selection.temperature };
 }
 
 // Keyed by the full UI identity at the mount boundary, not just the resource ID.
@@ -69,7 +70,12 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
   };
   const provider = savedProviders.find(item => item.id === selection?.connectionId);
   const available = valid(selection);
-  const efforts = reasoningEffortsForModel(provider, selection?.model ?? '');
+  const native = isNativeThinkingProvider(provider);
+  const thinking = nativeThinkingOptions(provider, selection?.model ?? '', selection?.thinkingMode, selection?.reasoningEffort ?? 'off');
+  const efforts = native ? thinking.efforts : reasoningEffortsForModel(provider, selection?.model ?? '');
+  const acceptedIdentity = selection?.connectionId === baseline?.connectionId && selection?.model === baseline?.model;
+  const pairDirty = (selection?.thinkingMode ?? null) !== (baseline?.thinkingMode ?? null)
+    || selection?.reasoningEffort !== baseline?.reasoningEffort;
   const change = (next: Selection) => { draft.current = next; setSelection(next); setSaved(false); setError(''); };
   const save = async (scope: Scope | 'all' = 'all', values = draft.current) => {
     if (state !== 'idle' || busy.current) return false;
@@ -79,11 +85,19 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
     // from a later independently failed effort draft.
     const intent = scope === 'identity' && values === draft.current && identityIntent.current !== undefined
       ? identityIntent.current : values;
+    if (native && scope !== 'identity' && scope !== 'all' && !acceptedIdentity) return false;
+    const pair = (scope === 'thinkingMode' || scope === 'reasoningEffort') && native
+      && baseline?.connectionId === values?.connectionId && baseline?.model === values?.model;
     const value = scope === 'all' ? values : scope === 'identity'
       ? intent && { ...intent, temperature: baseline?.temperature ?? 0.2 }
-      : baseline && values && { ...baseline, [scope]: values[scope] };
+      : baseline && values && { ...baseline, ...(pair ? { thinkingMode: values.thinkingMode ?? null, reasoningEffort: values.reasoningEffort } : { [scope]: values[scope] }) };
     if (!valid(value) || (scope !== 'all' && scope !== 'identity' && !baseline)) return false;
-    const scopes: Scope[] = scope === 'all' ? ['identity', 'reasoningEffort', 'temperature'] : [scope];
+    const valueProvider = savedProviders.find(item => item.id === value?.connectionId);
+    if (value && isNativeThinkingProvider(valueProvider)) {
+      const options = nativeThinkingOptions(valueProvider, value.model, value.thinkingMode, value.reasoningEffort);
+      if (options.modeInvalid || options.effortInvalid) return false;
+    }
+    const scopes: Scope[] = scope === 'all' ? ['identity', 'thinkingMode', 'reasoningEffort', 'temperature'] : pair ? ['thinkingMode', 'reasoningEffort'] : [scope];
     const clearFailures = () => setFailures(current => {
       const next = { ...current };
       scopes.forEach(key => { delete next[key]; });
@@ -104,14 +118,19 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
         || (value && accepted && (value.connectionId !== accepted.connectionId || value.model !== accepted.model))) {
         throw new Error('Invalid minion model selection acknowledgement.');
       }
+      if (value && accepted && isNativeThinkingProvider(valueProvider)
+        && ((value.thinkingMode ?? null) !== (accepted.thinkingMode ?? null) || value.reasoningEffort !== accepted.reasoningEffort)) {
+        throw new Error('Invalid native minion model selection acknowledgement.');
+      }
       const current = draft.current;
       const next = scope === 'all' || !accepted || !current ? accepted
         : scope === 'identity' ? {
           ...accepted,
+          thinkingMode: (current.thinkingMode ?? null) === (value?.thinkingMode ?? null) ? accepted.thinkingMode : current.thinkingMode,
           reasoningEffort: current.reasoningEffort === value?.reasoningEffort ? accepted.reasoningEffort : current.reasoningEffort,
           temperature: current.temperature === baseline?.temperature ? accepted.temperature : current.temperature,
         }
-        : { ...current, [scope]: accepted[scope] };
+        : { ...current, ...(pair ? { thinkingMode: accepted.thinkingMode, reasoningEffort: accepted.reasoningEffort } : { [scope]: accepted[scope] }) };
       draft.current = next;
       if (scope === 'identity' || scope === 'all') identityIntent.current = undefined;
       setSelection(next); setBaseline(accepted); clearFailures();
@@ -141,7 +160,7 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
     <ProviderModelFields providers={savedProviders} connectionId={selection?.connectionId} model={selection?.model} inheritLabel="Inherit current parent turn" disabled={disabled} providerLabel="Default minion provider" modelLabel="Default minion model" onChange={(connectionId, model) => {
       if (!connectionId) { identityIntent.current = null; change(null); void save('identity', null); return; }
       const nextProvider = savedProviders.find(item => item.id === connectionId);
-      const next = { connectionId, model: model ?? '', reasoningEffort: defaultReasoningEffort(nextProvider, model ?? ''), temperature: selection?.temperature ?? 0.2 };
+      const next = { connectionId, model: model ?? '', reasoningEffort: isNativeThinkingProvider(nextProvider) ? 'off' : defaultReasoningEffort(nextProvider, model ?? ''), ...(isNativeThinkingProvider(nextProvider) ? { thinkingMode: 'default' } : {}), temperature: selection?.temperature ?? 0.2 };
       identityIntent.current = next;
       change(next);
       if (valid(next)) void save('identity', next);
@@ -149,12 +168,19 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
     <p className="settings-description">Used when this agent spawns a minion. Inherit uses the current parent turn’s model selection. An explicit spawn model overrides this default.</p>
     {state === 'loading' && <p role="status">Loading default minion model…</p>}
     {!available && <p className="settings-help">The saved connection or model is unavailable. Choose an available model or inherit; no replacement has been selected automatically.</p>}
-    {selection && <div className="field-pair">
-      <Field label="Minion reasoning effort"><select value={selection.reasoningEffort} disabled={disabled || !available || !baseline || !valid(baseline)} onChange={event => { const next = { ...selection, reasoningEffort: event.target.value }; change(next); void save('reasoningEffort', next); }}>
+    {selection && <div className={native ? 'minion-native-controls' : undefined}>
+      <div className={native ? 'settings-field-pair' : 'field-pair'}>
+      {native && <Field label="Minion thinking mode"><select value={selection.thinkingMode ?? ''} aria-invalid={thinking.modeInvalid || undefined} disabled={disabled || !available || !baseline || !valid(baseline) || native && !acceptedIdentity} onChange={event => { const next = { ...selection, thinkingMode: event.target.value }; change(next); void save('thinkingMode', next); }}>
+        {selection.thinkingMode == null && <option value="">{thinking.legacyLabel}</option>}
+        {selection.thinkingMode != null && !thinking.modes.includes(selection.thinkingMode) && <option value={selection.thinkingMode}>Unavailable · {thinkingModeLabel(selection.thinkingMode)}</option>}
+        {thinking.modes.map(mode => <option key={mode} value={mode}>{thinkingModeLabel(mode)}</option>)}
+      </select></Field>}
+
+      <Field label="Minion reasoning effort"><select aria-invalid={native && thinking.effortInvalid || undefined} value={selection.reasoningEffort} disabled={disabled || !available || !baseline || !valid(baseline) || native && (!acceptedIdentity || selection.thinkingMode == null)} title={native && selection.thinkingMode == null ? 'Choose a thinking mode to change effort' : undefined} onChange={event => { const next = { ...selection, reasoningEffort: event.target.value }; change(next); void save('reasoningEffort', next); }}>
         {!efforts.includes(selection.reasoningEffort) && <option value={selection.reasoningEffort}>Unavailable · {selection.reasoningEffort}</option>}
-        {efforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
+        {efforts.map(effort => <option key={effort} value={effort}>{native && selection.thinkingMode != null && effort === 'off' ? 'Default' : effort}</option>)}
       </select></Field>
-      <Field label={`Minion temperature${selection.temperature === undefined ? ' (runtime default)' : ` (${selection.temperature})`}`}><input aria-label="Minion temperature" type="range" min="0" max="2" step="0.1" value={selection.temperature ?? 0.2} disabled={disabled || !available || !baseline || !valid(baseline)}
+      <div className={native ? 'minion-native-temperature' : undefined}><Field label={`Minion temperature${selection.temperature === undefined ? ' (runtime default)' : ` (${selection.temperature})`}`}><input aria-label="Minion temperature" type="range" min="0" max="2" step="0.1" value={selection.temperature ?? 0.2} disabled={disabled || !available || !baseline || !valid(baseline) || native && (!acceptedIdentity || thinking.modeInvalid || thinking.effortInvalid || pairDirty)}
         onPointerDown={event => { temperatureInteraction.current = true; event.currentTarget.setPointerCapture?.(event.pointerId); }}
         onPointerUp={commitTemperature}
         onPointerCancel={commitTemperature}
@@ -165,13 +191,15 @@ export function DefaultMinionModel({ resourceId, savedProviders }: { resourceId:
           if (isUnsavedChangesModalTarget(event.relatedTarget)) { temperatureInteraction.current = false; return; }
           commitTemperature();
         }}
-        onChange={event => { temperatureInteraction.current = true; change({ ...selection, temperature: Number(event.target.value) }); }} /></Field>
+        onChange={event => { temperatureInteraction.current = true; change({ ...selection, temperature: Number(event.target.value) }); }} /></Field></div>
+    </div>
+    {native && thinking.issue && <p className="settings-help" role="status">{thinking.issue}</p>}
     </div>}
     {state === 'saving' && <p role="status">Saving default minion model…</p>}
     {dirty && state !== 'saving' && <p role="status">Unsaved default minion model changes.</p>}
     {state === 'error' && <button type="button" className="secondary" onClick={() => setRetry(value => value + 1)}>Retry minion model</button>}
-    {Object.keys(failures).map(scope => <div key={scope}>
-      {state === 'idle' && dirty && <button type="button" className="secondary" onClick={() => void save(scope as Scope)}>Retry saving minion {scope === 'identity' ? 'model' : scope === 'reasoningEffort' ? 'reasoning effort' : 'temperature'}</button>}
+    {Object.keys(failures).filter(scope => !(native && scope === 'reasoningEffort' && failures.thinkingMode)).map(scope => <div key={scope}>
+      {state === 'idle' && dirty && <button type="button" className="secondary" onClick={() => void save(scope as Scope)}>Retry saving minion {scope === 'identity' ? 'model' : scope === 'thinkingMode' ? 'thinking mode' : scope === 'reasoningEffort' ? 'reasoning effort' : 'temperature'}</button>}
     </div>)}
     {[...new Set(Object.values(failures))].map(message => <p key={message} className="settings-request-error" role="alert">{message}</p>)}
     {error && <p className="settings-request-error" role="alert">{error}</p>}
