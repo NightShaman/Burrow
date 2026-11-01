@@ -228,7 +228,7 @@ jobs:
             -r sources/Node-Goblin/requirements-docs-test.txt
           python -m playwright install --with-deps chromium
           (cd sources/Burrow && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
-          (cd sources/Node-Goblin && python -m mkdocs build --strict && python scripts/docs/check_site.py site && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
+          (cd sources/Node-Goblin && python -m unittest discover -s scripts/docs -p 'test_*.py' && python -m mkdocs build --strict && python scripts/docs/check_site.py site --base-path /node-goblin/ && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
       - name: Stage allowlisted public trees and release notes
         if: steps.plan.outputs.validation_required == 'true'
         env:

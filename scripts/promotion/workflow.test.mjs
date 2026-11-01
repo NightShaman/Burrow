@@ -16,6 +16,10 @@ test('manifest lookup distinguishes missing manifests from request failures', ()
   assert.match(workflow, /public manifest HTTP \$status.*exit 1/);
   assert.doesNotMatch(workflow, /output previous.json \|\|/);
 });
+test('Node Goblin documentation validates its mounted site including error pages', () => {
+  assert.match(workflow, /cd sources\/Node-Goblin && python -m unittest discover -s scripts\/docs -p 'test_\*\.py'/);
+  assert.match(workflow, /cd sources\/Node-Goblin[^\n]*python scripts\/docs\/check_site\.py site --base-path \/node-goblin\//);
+});
 test('complete validation has a deadline rather than hanging indefinitely', () => {
   assert.match(workflow, /timeout-minutes: 45/);
   assert.match(workflow, /timeout --kill-after=15s 10m npm test/);
