@@ -63,6 +63,23 @@ export function ChatModelSelector({ selected, savedProviders, updateAgent, sessi
 }
 
 export function Chat({ selected, parent, operator, draft, setDraft, attached, onAttach, onRemoveAttachment, isNewSession, turns, isLoading, error, isSending, steeringReady, activeRunId, activeToolActivity, runtimeChildActivities, liveProgress, liveAnswer, liveStage, a2aActivities, runtimeUserMessage, runtimeUserMessageMetadata, onSend, onCancel, selectedAgentId, resourceAgentId, sessionId, composerResetGeneration = 0 }: { selected: Agent | Subagent; parent: Agent; operator: OperatorProfile; draft: string; setDraft: (value: string) => void; attached: ChatAttachment[]; onAttach: (files: File[]) => void; onRemoveAttachment: (index: number) => void; isNewSession: boolean; turns: SessionTurn[]; isLoading: boolean; error: string; isSending: boolean; steeringReady?: boolean; activeRunId: string; activeToolActivity?: ToolActivity; runtimeChildActivities?: ToolActivity[]; liveProgress: ProgressEntry[]; liveAnswer: string; liveStage?: ChatLiveStage; a2aActivities?: import('../../app/api').ActiveA2AActivity[]; runtimeUserMessage?: string; runtimeUserMessageMetadata?: SessionTurn['metadata']; onSend: (draft?: string, onAccepted?: () => void) => void; onCancel: () => void; selectedAgentId?: string; resourceAgentId?: string; sessionId?: string; composerResetGeneration?: number }) {
+  // Show the owning conversation, not the child's stream id or the agent's
+  // last selected chat. Nested minions share their recorded root session.
+  const parentSessionId = 'stream' in selected
+    ? selected.rootSessionId || (selected.depth === 1 ? selected.parentSessionId || undefined : undefined)
+    : undefined;
+  const [parentSessionLabel, setParentSessionLabel] = useState<{ id: string; label: string }>();
+  useEffect(() => {
+    if (!parentSessionId) return;
+    const controller = new AbortController();
+    void loadSwitchboardSessionLabels([parentSessionId], controller.signal).then((labels) => {
+      if (!controller.signal.aborted) setParentSessionLabel({ id: parentSessionId, label: labels.get(parentSessionId)?.label ?? (parentSessionId === 'a2a' ? 'A2A' : parentSessionId) });
+    }).catch(() => { /* The recorded session name remains available without Switchboard. */ });
+    return () => controller.abort();
+  }, [parentSessionId]);
+  const parentSessionName = parentSessionId && (parentSessionLabel?.id === parentSessionId
+    ? parentSessionLabel.label
+    : parentSessionId === 'a2a' ? 'A2A' : parentSessionId);
   const draftContext = `${selectedAgentId ?? ''}:${sessionId ?? ''}`;
   const [localDraft, setLocalDraft] = useState(draft);
   const localDraftRef = useRef(localDraft);
@@ -165,7 +182,7 @@ export function Chat({ selected, parent, operator, draft, setDraft, attached, on
   }, [inputs.action, context]);
 
   return <div className="chat-view">
-    <ChatTranscript selected={selected} parent={parent} operator={operator} isNewSession={isNewSession} turns={transcriptTurns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeUserMessageMetadata={runtimeUserMessageMetadata} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} chatInputs={inputs.inputs} onPromote={promote} onInputAction={inputAction} inputActionPending={inputs.pending} />
+    <ChatTranscript selected={selected} parent={parent} parentSessionName={parentSessionName} operator={operator} isNewSession={isNewSession} turns={transcriptTurns} isLoading={isLoading} error={error} isSending={isSending} activeRunId={activeRunId} activeToolActivity={activeToolActivity} liveProgress={liveProgress} liveAnswer={liveAnswer} liveStage={liveStage} a2aActivities={a2aActivities} runtimeUserMessage={runtimeUserMessage} runtimeUserMessageMetadata={runtimeUserMessageMetadata} runtimeChildActivities={runtimeChildActivities} attachmentAgentId={resourceAgentId ?? selected.id} chatInputs={inputs.inputs} onPromote={promote} onInputAction={inputAction} inputActionPending={inputs.pending} />
 
     {intent !== 'queue_next' && !exactTargetAvailable && <p className="chat-promotion" role="status">The selected run is no longer active. Choose Queue next or select an intent for the current run.</p>}
     {inputs.error && <p className="error" role="alert">{inputs.error}</p>}

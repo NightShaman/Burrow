@@ -134,6 +134,7 @@ describe('App minion navigation integration', () => {
     }
     await click(`Select ${name}`);
     expectTranscript('hatchet', childSessionId);
+    expect(screen.getByText('Workspace remains attached to Hatchet · named-root')).toBeTruthy();
     expectSelected(name, true);
     expectSelected('Hatchet', false);
     expect(vi.mocked(api)).toHaveBeenCalledWith(`/api/sessions/${childSessionId}?agentId=hatchet`);
@@ -144,8 +145,18 @@ describe('App minion navigation integration', () => {
     await click('Select Hatchet');
     expectTranscript('hatchet', 'named-root');
     expectSelected('Hatchet', true);
+    expect(screen.queryByText(/Workspace remains attached to/)).toBeNull();
     expectSelected(name, false);
     expect(screen.queryByText(`hatchet/${childSessionId} transcript`)).toBeNull();
+  });
+
+  it('shows the default owning session at the end of its minion banner', async () => {
+    await renderApp();
+    await click('Expand Hatchet');
+    await click('Select Default child');
+    expectTranscript('hatchet', 'default-child');
+    expect(screen.getByText('Workspace remains attached to Hatchet · default')).toBeTruthy();
+    expect(screen.queryByText(/^Session:/)).toBeNull();
   });
 
   it('opens a child under another agent and returns to that agent’s root without inheriting the previous session', async () => {
@@ -153,6 +164,7 @@ describe('App minion navigation integration', () => {
     await click('Expand Other agent');
     await click('Select Other child');
     expectTranscript('other', 'other-child');
+    expect(screen.getByText('Workspace remains attached to Other agent · other-root')).toBeTruthy();
     expectSelected('Other child', true);
     expectSelected('Hatchet', false);
     expect(vi.mocked(api)).toHaveBeenCalledWith('/api/sessions/other-child?agentId=other');

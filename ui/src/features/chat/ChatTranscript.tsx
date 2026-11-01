@@ -23,6 +23,7 @@ type ChatTranscriptProps = {
   inputActionPending?: string;
   selected: Agent | Subagent;
   parent: Agent;
+  parentSessionName?: string;
   operator: OperatorProfile;
   isNewSession: boolean;
   turns: SessionTurn[];
@@ -41,7 +42,7 @@ type ChatTranscriptProps = {
   attachmentAgentId?: string;
 };
 
-export const ChatTranscript = memo(function ChatTranscript({ selected, parent, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId, chatInputs = [], onPromote, onInputAction, inputActionPending }: ChatTranscriptProps) {
+export const ChatTranscript = memo(function ChatTranscript({ selected, parent, parentSessionName, operator, isNewSession, turns, isLoading, error, isSending, activeRunId, activeToolActivity, liveProgress, liveAnswer, liveStage, a2aActivities = [], runtimeUserMessage = '', runtimeUserMessageMetadata, runtimeChildActivities = [], attachmentAgentId, chatInputs = [], onPromote, onInputAction, inputActionPending }: ChatTranscriptProps) {
   const isSubagent = 'stream' in selected;
   const messages = turns.filter((turn) => (turn.type === 'message' || (turn.type === 'event' && turn.role === 'user' && (turn.metadata?.visibility === 'chat' || turn.metadata?.chatInput))) && turn.metadata?.visibility !== 'debug' && turn.metadata?.kind !== 'subagent-runtime-context' && turn.metadata?.kind !== 'subagent-task' && (turn.content || turn.metadata?.attachments?.length || turn.metadata?.outputArtifacts?.length) && (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') && !(turn.role === 'user' && !turn.metadata?.chatInput && isChatCommand(textFromChatValue(turn.content)) && !/^\/compact$/i.test(textFromChatValue(turn.content).trim())));
   // Provider role=user is not speaker identity. Workflow and delegation
@@ -81,7 +82,7 @@ export const ChatTranscript = memo(function ChatTranscript({ selected, parent, o
   }, [isLoading, isNewSession, messages.length, isSending, liveProgress, liveAnswer, activeActivity, chatInputs]);
   return <div className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`} ref={messagesRef} onScroll={updateScrollIntent} aria-busy={isLoading || isSending}>
     {isEmptySession ? <div className="new-session-empty"><img src="/burrow-logo.png" alt="Burrow" /></div> : <>
-      {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}</small></div>}
+      {isSubagent && <div className="stream-banner"><span>Minion stream</span><strong>{selected.name}</strong><small>Workspace remains attached to {parent.name}{parentSessionName && <> · {parentSessionName}</>}</small></div>}
       {isLoading && <p className="chat-state">{messages.length ? 'Refreshing conversation…' : 'Loading conversation…'}</p>}
       {runtimeUserMessage && !messages.some((turn) => turn.role === 'user' && (!activeRunId || turn.runId === activeRunId) && textFromChatValue(turn.content) === runtimeUserMessage) && <ChatMessage side="operator" name={runtimeIdentity.name} avatar={runtimeIdentity.avatar} time="Now" text={runtimeUserMessage} />}
       {messages.map((turn, index) => {

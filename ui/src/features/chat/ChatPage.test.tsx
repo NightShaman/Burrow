@@ -53,6 +53,46 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('Minion owning-session banner', () => {
+  const child = { id: 'child', name: 'Discovery check observer', avatar: 'C', activity: '', context: null, stream: 'child', depth: 1 };
+  it('keeps the session at the end of the existing attachment line', () => {
+    renderChat({ selected: { ...child, rootSessionId: 'UI review', parentSessionId: 'UI review' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
+    expect(screen.getByText('Workspace remains attached to Smatchet · UI review').tagName).toBe('SMALL');
+    expect(screen.getByText('Minion stream')).toBeTruthy();
+    expect(screen.getByText('Discovery check observer')).toBeTruthy();
+  });
+
+  it('uses the recorded direct parent for a legacy first-level minion', () => {
+    renderChat({ selected: { ...child, parentSessionId: 'default' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
+    expect(screen.getByText('Workspace remains attached to Smatchet · default')).toBeTruthy();
+  });
+
+  it('does not invent a session name for missing nested ancestry or use the child id', () => {
+    renderChat({ selected: { ...child, depth: 2, parentSessionId: 'another-minion' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
+    expect(screen.getByText('Workspace remains attached to Smatchet').textContent).toBe('Workspace remains attached to Smatchet');
+    expect(screen.queryByText(/Workspace remains attached to.*(?:child|another-minion)/)).toBeNull();
+  });
+
+  it('uses the same friendly Switchboard session label as the picker without changing routing ids', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const body = path === '/api/mods' ? { mods: [{ id: 'burrow-switchboard', status: 'loaded' }] }
+        : path === '/api/mods/burrow-switchboard/bootstrap' ? { connections: [{ id: 'default', mappings: [{ chatId: '-1001', topicId: null, chatTitle: 'Kingdom Trouble' }] }] }
+        : { generation: 1, inputs: [] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = renderChat({ selected: { ...child, rootSessionId: 'telegram:-1001:root' }, sessionId: 'child', turns: [{ type: 'message', role: 'assistant', content: 'Result' }] });
+      expect(await screen.findByText('Workspace remains attached to Smatchet · Telegram · Kingdom Trouble')).toBeTruthy();
+      result.rerender(<Chat {...result.props} selected={{ ...child, rootSessionId: 'Different session' }} />);
+      expect(screen.getByText('Workspace remains attached to Smatchet · Different session')).toBeTruthy();
+      expect(screen.queryByText('Workspace remains attached to Smatchet · Telegram · Kingdom Trouble')).toBeNull();
+      expect(child.stream).toBe('child');
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
 describe('Chat session picker', () => {
   it('orders session controls from actions through routing to the picker', () => {
     render(<ChatModelSelector selected={agent} savedProviders={[]} updateAgent={vi.fn()} sessions={[{ id: 'default' }]} sessionId="default" onSessionChange={vi.fn()} onNewSession={vi.fn()} onNewNamedSession={vi.fn()} onCreateGroup={vi.fn()} />);
