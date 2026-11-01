@@ -15,6 +15,7 @@ const endpoint = '/api/agents/node%3A%3Aa/reference-image';
 const photo = (id = 'one', agentId = 'node::a') => ({ id, attachmentId: `attachment-${id}`, contentUrl: `/api/agents/${encodeURIComponent(agentId)}/reference-image/content?id=${id}`, mimeType: 'image/png', fileName: `${id}.png`, sizeBytes: 3, updatedAt: '2026-11-01T12:00:00Z' });
 const ack = (image: ReturnType<typeof photo> | null, agentId = 'node::a') => ({ ok: true, agentId, referenceImage: image });
 const mutations = () => vi.mocked(api).mock.calls.filter(([, init]) => init?.method);
+const paste = (file = new File(['abc'], 'portrait.png', { type: 'image/png' })) => fireEvent.paste(screen.getByLabelText('Reference photo file'), { clipboardData: { items: [{ type: file.type, getAsFile: () => file }] } });
 const upload = (file = new File(['abc'], 'portrait.png', { type: 'image/png' })) => fireEvent.change(screen.getByLabelText('Upload reference photo'), { target: { files: [file] } });
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (error: Error) => void;
@@ -49,25 +50,25 @@ it('loads metadata with API identity, retains the avatar and renders the origina
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:photo');
 });
 
-it('uploads exact original bytes as JSON, independently of a name draft, then replaces and removes without identity writes', async () => {
+it.each([upload, paste])('saves exact original bytes (%#) as JSON, independently of a name draft, then replaces and removes without identity writes', async choose => {
   render(<Form />);
   await waitFor(() => expect(screen.getByText('Upload')).toHaveProperty('disabled', false));
   const name = screen.getByLabelText('Displayed name');
   fireEvent.change(name, { target: { value: 'unfinished' } });
   fireEvent.blur(name, { relatedTarget: screen.getByText('Upload') });
-  upload();
+  choose();
   await screen.findByText('Reference photo saved.');
   expect(mutations()).toEqual([[endpoint, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fileName: 'portrait.png', content: 'data:image/png;base64,YWJj' }) }]]);
   expect(name).toHaveProperty('value', 'unfinished');
   expect(screen.getByLabelText('Reference photo file')).toHaveProperty('value', 'saved.png');
-  upload(new File(['xyz'], 'replacement.webp', { type: 'image/webp' }));
+  choose(new File(['xyz'], 'replacement.webp', { type: 'image/webp' }));
   await waitFor(() => expect(mutations()).toHaveLength(2));
   await waitFor(() => expect(screen.getByText('Replace')).toHaveProperty('disabled', false));
   expect(JSON.parse(mutations()[1][1]!.body as string)).toEqual({ fileName: 'replacement.webp', content: 'data:image/webp;base64,eHl6' });
   fireEvent.click(screen.getByText('Remove reference photo'));
   await screen.findByText('Reference photo removed.');
   expect(mutations()[2]).toEqual([endpoint, { method: 'DELETE', headers: { 'content-type': 'application/json' } }]);
-  expect(screen.queryByRole('img', { name: 'Alpha reference photo' })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('img', { name: 'Alpha reference photo' })).toBeNull());
   expect(screen.getByText('Upload')).toBeTruthy();
   expect(name).toHaveProperty('value', 'unfinished');
 });
@@ -100,12 +101,12 @@ it('accepts the 20 MiB boundary and prevents duplicate writes or unrelated edits
   expect(screen.getByLabelText('Displayed name')).toHaveProperty('disabled', false);
 });
 
-it('preserves failed file intent and old accepted preview, retries via shared guard, and can discard without removing the photo', async () => {
+it.each([upload, paste])('preserves failed file intent (%#) and old accepted preview, retries via shared guard, and can discard without removing the photo', async choose => {
   vi.mocked(api).mockImplementation(async (_path, init) => { if (init?.method) throw new Error('upload denied'); return ack(photo()); });
   const leave = vi.fn();
   render(<Form leave={leave} />);
   await screen.findByRole('img', { name: 'Alpha reference photo' });
-  upload();
+  choose();
   await screen.findByText('upload denied');
   expect(screen.getByLabelText('Reference photo file')).toHaveProperty('value', 'portrait.png');
   expect(screen.getByRole('img', { name: 'Alpha reference photo' })).toHaveProperty('src', 'blob:photo');
@@ -118,7 +119,7 @@ it('preserves failed file intent and old accepted preview, retries via shared gu
   fireEvent.click(screen.getByText('Discard'));
   expect(leave).toHaveBeenCalledOnce();
   expect(screen.getByLabelText('Reference photo file')).toHaveProperty('value', 'one.png');
-  upload();
+  choose();
   await screen.findByText('upload denied');
   vi.mocked(api).mockResolvedValue(ack(photo('new')));
   fireEvent.click(screen.getByText('Leave'));
@@ -212,4 +213,62 @@ it('loads under React StrictMode without accepting the disposed first effect', a
   upload();
   await screen.findByText('Reference photo saved.');
   expect(mutations()).toHaveLength(1);
+});
+
+
+it('keeps text, missing clipboard files and unrelated-field paste native and local', async () => {
+  render(<Form />);
+  await waitFor(() => expect(screen.getByText('Upload')).toHaveProperty('disabled', false));
+  const target = screen.getByLabelText('Reference photo file');
+  expect(target).toHaveProperty('placeholder', 'Paste an image or choose a file');
+  expect(fireEvent.paste(target, { clipboardData: { items: [{ type: 'text/plain', getAsFile: () => null }] } })).toBe(true);
+  expect(fireEvent.paste(target, { clipboardData: { items: [{ type: 'image/png', getAsFile: () => null }] } })).toBe(true);
+  expect(fireEvent.paste(screen.getByLabelText('Displayed name'), { clipboardData: { items: [{ type: 'image/png', getAsFile: () => new File(['x'], 'other.png', { type: 'image/png' }) }] } })).toBe(true);
+  expect(mutations()).toHaveLength(0);
+});
+
+it.each([
+  new File(['x'], 'animated.gif', { type: 'image/gif' }),
+  new File([], 'empty.png', { type: 'image/png' }),
+  Object.defineProperty(new File(['x'], 'large.jpg', { type: 'image/jpeg' }), 'size', { value: 20 * 1024 * 1024 + 1 }),
+])('validates pasted images through the picker path: $name', async file => {
+  render(<Form />);
+  await waitFor(() => expect(screen.getByText('Upload')).toHaveProperty('disabled', false));
+  expect(paste(file)).toBe(false);
+  expect(screen.getByRole('alert').textContent).toContain('PNG, JPEG or WebP');
+  expect(mutations()).toHaveLength(0);
+});
+
+it('ignores paste before metadata loads and while a paste save is in flight', async () => {
+  const loading = deferred<unknown>();
+  const saving = deferred<unknown>();
+  vi.mocked(api).mockImplementation((_path, init) => init?.method ? saving.promise : loading.promise);
+  render(<Form />);
+  expect(paste()).toBe(true);
+  expect(mutations()).toHaveLength(0);
+  await act(async () => loading.resolve(ack(null)));
+  expect(paste()).toBe(false);
+  expect(paste()).toBe(true);
+  await waitFor(() => expect(mutations()).toHaveLength(1));
+  expect(screen.getByLabelText('Displayed name')).toHaveProperty('disabled', true);
+  await act(async () => saving.resolve(ack(photo())));
+  await screen.findByText('Reference photo saved.');
+});
+
+it('guards pasted file reads after owner changes', async () => {
+  const view = render(<Form />);
+  await waitFor(() => expect(screen.getByText('Upload')).toHaveProperty('disabled', false));
+  let reader: FileReader | undefined;
+  const read = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) { reader = this; });
+  try {
+    paste();
+    view.rerender(<Form selected={{ ...agent, resourceId: 'node::b', name: 'Bravo' }} />);
+    await waitFor(() => expect(screen.getByText('Upload')).toHaveProperty('disabled', false));
+    await act(async () => {
+      Object.defineProperty(reader!, 'result', { value: 'data:image/png;base64,YWJj' });
+      reader!.dispatchEvent(new ProgressEvent('load'));
+    });
+    expect(mutations()).toHaveLength(0);
+    expect(screen.getByLabelText('Reference photo file')).toHaveProperty('value', '');
+  } finally { read.mockRestore(); }
 });

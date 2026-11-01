@@ -117,8 +117,14 @@ export function AgentReferencePhoto({ agentId, name, disabled, onBusyChange }: {
         {preview && !previewError ? <img src={preview} alt={`${name} reference photo`} onError={() => setPreviewError(true)} /> : <span aria-hidden="true">—</span>}
       </div>
       <div className="operator-profile-details">
-        <div className="avatar-file-control">
-          <label className="avatar-file-name">Reference photo<input aria-label="Reference photo file" readOnly value={pending instanceof File ? pending.name : image?.fileName ?? ''} placeholder={loading ? 'Loading…' : 'No reference photo'} title={pending instanceof File ? pending.name : image?.fileName} disabled={disabled || busy} /></label>
+        <div className="avatar-file-control" onPaste={event => {
+          if (working.current || disabled || !loaded) return;
+          const file = Array.from(event.clipboardData.items).find(item => item.type.startsWith('image/'))?.getAsFile();
+          if (!file) return;
+          event.preventDefault();
+          choose(file);
+        }}>
+          <label className="avatar-file-name">Reference photo<input aria-label="Reference photo file" readOnly value={pending instanceof File ? pending.name : image?.fileName ?? ''} placeholder={loading ? 'Loading…' : 'Paste an image or choose a file'} title={pending instanceof File ? pending.name : image?.fileName} disabled={disabled || busy} /></label>
           <button className="secondary" type="button" onMouseDown={event => event.preventDefault()} disabled={locked} onClick={() => input.current?.click()}>{image ? 'Replace' : 'Upload'}</button>
           <input ref={input} className="avatar-file-input" aria-label="Upload reference photo" type="file" accept="image/png,image/jpeg,image/webp" disabled={locked} onChange={event => { choose(event.target.files?.[0]); event.currentTarget.value = ''; }} />
         </div>

@@ -23,15 +23,16 @@ try {
  const wait = async expression => { for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error('Wait failed '+expression); };
  const shot = async name => { const image = await c('Page.captureScreenshot',{format:'png'});await writeFile(join(output,name+'.png'),Buffer.from(image.data,'base64')); };
  const results=[];
+ const pasteMode = process.argv.includes('--paste');
  const desktopWidth = Number(process.argv[3] || 1440);
  const desktopHeight = Number(process.argv[4] || 1000);
- results.push({ desktopWidth, desktopHeight });
+ results.push({ desktopWidth, desktopHeight, entrance: pasteMode ? 'clipboard' : 'picker' });
  await c('Emulation.setDeviceMetricsOverride',{width:desktopWidth,height:desktopHeight,deviceScaleFactor:1,mobile:false});
- await c('Page.navigate',{url:`http://127.0.0.1:${port}/before/`});await wait("!!document.querySelector('.agent-profile')");await shot('before-desktop');
+ await c('Page.navigate',{url:`http://127.0.0.1:${port}/before/`});await wait("!!document.querySelector('.agent-profile')");await wait("!document.querySelector('[aria-label=\"Upload reference photo\"]')?.disabled");await shot('before-desktop');
  await c('Page.navigate',{url:`http://127.0.0.1:${port}/after/`});await wait("document.querySelector('[aria-label=\"Upload reference photo\"]')?.disabled===false");await shot('after-empty-desktop');
  // Local synthetic portrait bytes: no paid generation or backend request.
  const portrait = await evaluate(`(()=>{const canvas=document.createElement('canvas');canvas.width=180;canvas.height=260;const x=canvas.getContext('2d');x.fillStyle='#252341';x.fillRect(0,0,180,260);x.fillStyle='#d946ef';x.beginPath();x.arc(90,88,48,0,Math.PI*2);x.fill();x.fillRect(35,145,110,100);return canvas.toDataURL('image/png');})()`);
- const choose = async filename => evaluate(`(()=>{const content=${JSON.stringify(portrait)};const bytes=Uint8Array.from(atob(content.split(',')[1]),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([bytes],${JSON.stringify(filename)},{type:'image/png'}));const input=document.querySelector('[aria-label="Upload reference photo"]');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+ const choose = async filename => evaluate(`(()=>{const content=${JSON.stringify(portrait)};const bytes=Uint8Array.from(atob(content.split(',')[1]),c=>c.charCodeAt(0));const dt=new DataTransfer();dt.items.add(new File([bytes],${JSON.stringify(filename)},{type:'image/png'}));const input=document.querySelector('[aria-label="Upload reference photo"]');${pasteMode ? `const target=document.querySelector('[aria-label="Reference photo file"]');target.focus();target.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:dt}));` : `input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));`}})()`);
  await choose('Canonical reference portrait — original composition.png');await wait("!!document.querySelector('.agent-reference-preview img')");await shot('after-photo-desktop');
  results.push(await evaluate("(()=>{const e=document.querySelector('.agent-reference-preview img');return {previewWidth:e.naturalWidth,previewHeight:e.naturalHeight,objectFit:getComputedStyle(e).objectFit,sectionCount:document.querySelectorAll('.setting-section').length,overflow:document.documentElement.scrollWidth>innerWidth};})()"));
  await evaluate("document.querySelector('#fail-writes').click()");await choose('replacement.png');await wait("document.body.textContent.includes('Fixture upload unavailable')");await shot('after-error-desktop');

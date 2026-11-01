@@ -8,3 +8,7 @@ Mounts actual AgentSettings, AgentDetails, shared guard and app CSS. The before 
 Verify upload, original composition preview, replacement, remove, owner switch; type an unfinished name and verify photo actions do not save it. Fail photo writes checkbox supports retry and shared Save/Discard/Stay. Compare screenshots at the same desktop viewport; check long filenames and narrow view. Run `node scripts/agent-reference-fixture/headless.mjs` for disposable Chromium upload/retry/selection/removal checks and screenshots in `/tmp/agent-reference-acceptance`. This is frontend acceptance, not backend integration.
 
 For exact 1920×1200 desktop captures: `node scripts/agent-reference-fixture/headless.mjs /tmp/agent-reference-acceptance-1920 1920 1200`. Desktop baseline/empty/photo/error/removal use that viewport; narrow probes remain 1024/600/375 ×1000. `bundle/` (including generated screenshot galleries) is gitignored and must not be staged.
+
+## Clipboard follow-up
+
+For the file-picker-only reference-photo baseline, build with `node scripts/agent-reference-fixture/build.mjs --before --baseline=ad8fdf9`, then build the candidate normally. Run `node scripts/agent-reference-fixture/headless.mjs /tmp/reference-paste-acceptance 1920 1200 --paste` for DOM ClipboardEvent image paste, failed replacement/retry, selection and removal captures. This exercises the actual browser paste handler with a synthetic DataTransfer, not the operating system clipboard. Omitting `--paste` retains the picker entrance.
