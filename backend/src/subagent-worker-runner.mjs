@@ -1,3 +1,4 @@
+import { CHAT_RESULT_VERSION, chatResultMetadata } from './chat-result-metadata.mjs';
 import { canSpawnMinion, nextMinionDepth, normalizeMinionDepth } from './minion-depth.mjs';
 import { CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, exactRepeatVerdict, fingerprint, normalizedToolOutcome, appendBoundedChatHistory } from './tool-loop-detection.mjs';
 import { accumulateToolConsequences } from './runtime-result-shapes.mjs';
@@ -645,13 +646,14 @@ async function runRegisteredSpawnSubagentChild({
     ...result,
     ...projectModelRecoveryMetadata({ modelFailure: source.modelFailure, modelRecovery: adapter.recoverySummary() }),
   });
-  const recordModelFailure = async (failure) => {
+  const recordModelFailure = async (response) => {
+    const failure = response.modelFailure;
     // Failure classification is producer-owned and bounded; provider error
     // bodies are not appropriate for live activity or child conversation.
     const code = projectModelRecoveryMetadata({ modelFailure: failure }).modelFailure?.code || 'model_failure_unknown';
     await authority.appendTurn({ sessionId: childSessionId, role: 'assistant',
-      visibility: 'chat', entersPrompt: false, content: `[model_error: ${code}]`,
-      runId: id, traceDir, metadata: { kind: 'subagent-model-error', decision: 'model_failed', error: code } });
+      visibility: 'chat', entersPrompt: false, content: response.choice?.text || '',
+      runId: id, traceDir, metadata: { kind: 'subagent-model-error', decision: 'model_failed', ...chatResultMetadata({ ok: false, decision: 'model_failed', ...projectModelRecoveryMetadata(response) }) } });
     await conversationStore.updateMetadata({ agentId, sessionId: childSessionId,
       update: old => ({ ...old, subagentStatus: 'failed', subagentOk: false }) });
     return code;
@@ -665,7 +667,7 @@ async function runRegisteredSpawnSubagentChild({
     // Empty output has a separate terminal-synthesis recovery path.
     if (!response.ok && response.error !== 'model_response_empty') {
       const code = response.cancelled || signal?.aborted
-        ? 'model_cancelled' : await recordModelFailure(response.modelFailure);
+        ? 'model_cancelled' : await recordModelFailure(response);
       response = { ...response, error: code };
     }
     return response;
@@ -697,7 +699,7 @@ async function runRegisteredSpawnSubagentChild({
   const firstToolCalls = choiceToolCalls(first.choice);
   const firstText = choiceText(first.choice);
   // Tool requests are persisted as canonical structured activity, not fake assistant text.
-  if (compactString(firstText)) await authority.appendTurn({ visibility: terminalResultFromToolCalls(firstToolCalls) ? 'debug' : 'chat', entersPrompt: !terminalResultFromToolCalls(firstToolCalls), sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
+  if (compactString(firstText)) await authority.appendTurn({ visibility: terminalResultFromToolCalls(firstToolCalls) ? 'debug' : 'chat', entersPrompt: !terminalResultFromToolCalls(firstToolCalls), sessionId: childSessionId, role: 'assistant', content: firstText, runId: id, traceDir, metadata: { chatResultVersion: CHAT_RESULT_VERSION, kind: 'subagent-model-response', toolCallCount: firstToolCalls.length } });
 
   let lastText = firstText;
   let activitySequence = 0;
@@ -798,7 +800,7 @@ async function runRegisteredSpawnSubagentChild({
     terminalResult = terminalResultFromToolCalls(nextToolCalls, { toolResults, target });
     const nextText = choiceText(next.choice);
     if (compactString(nextText)) lastText = nextText;
-    if (compactString(nextText)) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
+    if (compactString(nextText)) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { chatResultVersion: CHAT_RESULT_VERSION, kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
   }
 
   if (terminalResult) {
@@ -833,7 +835,7 @@ async function runRegisteredSpawnSubagentChild({
   if (compactString(synthesisText)) lastText = synthesisText;
   const synthesisToolCalls = choiceToolCalls(synthesis.choice);
   terminalResult = terminalResultFromToolCalls(synthesisToolCalls, { toolResults, target });
-  if (compactString(synthesisText) || !terminalResult) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
+  if (compactString(synthesisText) || !terminalResult) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { chatResultVersion: CHAT_RESULT_VERSION, kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
 
   if (terminalResult) {
     terminalResult = withRecovery(terminalResult);

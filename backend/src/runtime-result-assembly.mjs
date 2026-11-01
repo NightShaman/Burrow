@@ -1,3 +1,4 @@
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { appendRuntimeSessionContextState } from './runtime-session-writer.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { createExecutionPolicyEvidence } from './execution-policy-evidence.mjs';
@@ -161,7 +162,7 @@ export function compactRuntimeReceipt({
 } = {}) {
   return {
     decision,
-    ...projectModelRecoveryMetadata({ modelFailure, modelRecovery }),
+    ...chatResultMetadata({ ok: outcome?.ok ?? !['model_failed', 'failed', 'incomplete', 'cancelled', 'superseded'].includes(decision), decision, modelFailure, modelRecovery }),
     executionContext: compactExecutionContext(executionContext),
     acceptanceChecklist: acceptanceChecklist ? {
       required: Boolean(acceptanceChecklist.required),
@@ -239,7 +240,11 @@ export function compactPersistedReceipt({ receipt = {}, logger = null } = {}) {
     runId: logger?.runId || receipt.workResult?.runId || null,
     traceDir: logger?.traceDir || null,
     decision: receipt.decision || null,
-    ...projectModelRecoveryMetadata(receipt),
+    ...chatResultMetadata({
+      ok: receipt.terminalStatus ? receipt.terminalStatus === 'completed' : !['model_failed', 'failed', 'incomplete', 'cancelled', 'superseded'].includes(receipt.decision),
+      decision: ['cancelled', 'superseded'].includes(receipt.terminalStatus) ? receipt.terminalStatus : receipt.decision,
+      ...projectModelRecoveryMetadata(receipt),
+    }),
     route: receipt.routeDecision ? { kind: receipt.routeDecision.routeKind || null, action: receipt.routeDecision.action || null } : null,
     outcome: receipt.outcome ? { kind: receipt.outcome.kind || null, changedFiles: compactStrings(receipt.outcome.changedFiles) } : null,
     ...(receipt.acceptanceChecklist ? { acceptance: { status: receipt.acceptanceChecklist.status || null, complete: Boolean(receipt.acceptanceChecklist.complete) } } : {}),
@@ -329,8 +334,8 @@ export function compactAskChatResult(result = {}) {
     handoffCandidate: result.handoffCandidate,
     memoryWrite: result.memoryWrite,
     answerText: result.answerText,
+    ...chatResultMetadata(result),
     modelUsage: result.modelUsage,
-    ...projectModelRecoveryMetadata(result),
     proposedActionCount: result.proposedActions?.length ?? 0,
     proposedActions: result.proposedActions,
   };

@@ -1,7 +1,7 @@
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { migrationLockKey } from './postgres-foundation.mjs';
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
-import { isChatMessage } from './session-entry.mjs';
+import { isDisplayChatMessage as isChatMessage } from './session-entry.mjs';
 import { continuityStateStore } from './postgres-continuity-state-store.mjs';
 import { continuityOwner } from './postgres-continuity-owner.mjs';
 

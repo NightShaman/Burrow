@@ -10572,6 +10572,21 @@
           },
           "modelRecovery": {
             "$ref": "#/components/schemas/ModelRecovery"
+          },
+          "chatResultVersion": {
+            "type": "integer",
+            "const": 2,
+            "description": "Structured chat result contract. Assistant content is real output, never an encoded model-error marker."
+          },
+          "terminalStatus": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "cancelled",
+              "superseded"
+            ],
+            "description": "Runtime-owned terminal state; independent of HTTP success and answer spelling."
           }
         },
         "additionalProperties": true
@@ -10644,6 +10659,21 @@
           },
           "modelRecovery": {
             "$ref": "#/components/schemas/ModelRecovery"
+          },
+          "chatResultVersion": {
+            "type": "integer",
+            "const": 2,
+            "description": "Structured chat result contract. Assistant content is real output, never an encoded model-error marker."
+          },
+          "terminalStatus": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "cancelled",
+              "superseded"
+            ],
+            "description": "Runtime-owned terminal state; independent of HTTP success and answer spelling."
           }
         },
         "additionalProperties": true
@@ -13476,7 +13506,8 @@
           },
           "metadata": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Extensible transcript metadata. Version-2 assistant results include chatResultVersion, terminalStatus, and optional modelFailure/modelRecovery as defined by ChatSummary; other existing metadata fields remain supported."
           }
         },
         "additionalProperties": false

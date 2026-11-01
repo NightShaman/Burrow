@@ -1,3 +1,4 @@
+import { chatTurnResultProjection } from './chat-result-metadata.mjs';
 import { compactDelegationMetadata } from './compact-delegation-metadata.mjs';
 
 function compactAttachmentMetadata(attachment = {}, index = 0) {
@@ -17,7 +18,8 @@ function compactAttachmentMetadata(attachment = {}, index = 0) {
 
 
 export function compactChatTurn(turn = {}) {
-  const metadata = compactDelegationMetadata(turn.metadata);
+  const result = chatTurnResultProjection(turn);
+  const metadata = { ...compactDelegationMetadata(turn.metadata), ...result.metadata };
   if (turn.metadata?.toolActivity) metadata.toolActivity = turn.metadata.toolActivity;
   if (Array.isArray(turn.metadata?.attachments)) {
     const attachments = turn.metadata.attachments.map(compactAttachmentMetadata).filter(Boolean);
@@ -32,7 +34,7 @@ export function compactChatTurn(turn = {}) {
     ts: turn.ts,
     type: turn.type,
     role: turn.role,
-    content: turn.content,
+    content: result.content,
     contentTruncated: Boolean(turn.contentTruncated),
     runId: turn.runId ?? null,
     visibility: turn.visibility,

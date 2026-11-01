@@ -1,3 +1,4 @@
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { toolActivityPresentation } from './tool-activity-labels.mjs';
 import { appendRuntimeActivity, appendRuntimeSessionEntry, appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
 import { appendValidatedRuntimeReceipt, validateCompletedRuntimeInvariantsBeforeSideEffects, validateRuntimeInvariantsBeforeSideEffects } from './runtime-receipt-finalizer.mjs';
@@ -135,12 +136,12 @@ export function assistantTurnMetadata({ subjectScope = null, decision, proposal 
   return {
     ...(subjectScope ? { subjectScope } : {}),
     decision,
+    ...chatResultMetadata({ ok: !['model_failed', 'failed', 'incomplete', 'cancelled', 'superseded'].includes(decision), decision, modelFailure, modelRecovery }),
     proposedActions: proposal?.actions?.length ?? 0,
     ...(outputArtifacts.length ? { outputArtifacts } : {}),
     chatToolLoop: compactLoop,
     acceptanceChecklist,
     ...(integrityViolation ? { terminalIntegrity: integrityViolation } : {}),
-    ...projectModelRecoveryMetadata({ modelFailure, modelRecovery }),
   };
 }
 
@@ -159,7 +160,7 @@ export function enforcePlainChatTerminalIntegrity({ modelOk = false, answerText 
   };
   return {
     decision: 'incomplete',
-    answerText: 'I inspected with tools, but the model produced no final answer. I’m not claiming the work is complete.',
+    answerText: rawAnswer,
     integrityViolation,
   };
 }
@@ -304,6 +305,7 @@ export async function finalizePlainChatRuntimeResult({
       sessionId,
       role: 'assistant',
       content: finalAnswerText,
+      ...(decision === 'incomplete' ? { entersPrompt: false } : {}),
       runId: logger.runId,
       traceDir: logger.traceDir,
       metadata: { ...assistantTurnMetadata({ subjectScope, decision, proposal, outputArtifacts, compactLoop, acceptanceChecklist, integrityViolation: terminalIntegrity.integrityViolation, ...recoveryMetadata }), ...(model?.providerPool ? { providerPool: model.providerPool } : {}) },
@@ -314,10 +316,11 @@ export async function finalizePlainChatRuntimeResult({
       stores, agentId, sessionRoot,
       sessionId,
       role: 'assistant',
-      content: `[model_error: ${recoveryMetadata.modelFailure.code}]`,
+      content: finalAnswerText || '',
+      entersPrompt: false,
       runId: logger.runId,
       traceDir: logger.traceDir,
-      metadata: { ...(subjectScope ? { subjectScope } : {}), decision: 'model_failed', error: recoveryMetadata.modelFailure.code, ...recoveryMetadata },
+      metadata: { ...(subjectScope ? { subjectScope } : {}), decision: 'model_failed', ...chatResultMetadata({ ok: false, decision, ...recoveryMetadata }) },
     });
   }
   const outcome = buildOutcome({
@@ -351,6 +354,7 @@ export async function finalizePlainChatRuntimeResult({
 
   const result = {
     ok: model ? Boolean(model.ok) && decision === 'answered' : true,
+    ...chatResultMetadata({ ok: model ? Boolean(model.ok) && decision === 'answered' : true, decision, ...recoveryMetadata }),
     transportOk: model ? Boolean(model.ok) : null,
     mode: 'ask',
     command,

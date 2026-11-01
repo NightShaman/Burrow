@@ -1,3 +1,4 @@
+import { POSTGRES_CHAT_RESULT_PROJECTION_SQL } from './postgres-chat-result-projection.mjs';
 import { POSTGRES_AGENT_REFERENCE_IMAGE_SQL, POSTGRES_MOD_REFERENCE_IMAGE_SQL } from './postgres-agent-reference-image-store.mjs';
 import { POSTGRES_ANTHROPIC_THINKING_SQL } from './postgres-anthropic-thinking.mjs';
 import { POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL } from './postgres-archive-discovery-indexes.mjs';
@@ -223,4 +224,5 @@ CREATE INDEX scheduled_job_runs_latest_idx ON scheduled_job_runs(job_id,created_
   { version: 85, name: 'anthropic-thinking-mode-selections', sql: POSTGRES_ANTHROPIC_THINKING_SQL },
   { version: 86, name: 'canonical-agent-reference-images', sql: POSTGRES_AGENT_REFERENCE_IMAGE_SQL },
   { version: 87, name: 'mod-character-reference-images', sql: POSTGRES_MOD_REFERENCE_IMAGE_SQL },
+  { version: 88, name: 'structured-chat-result-projection', sql: POSTGRES_CHAT_RESULT_PROJECTION_SQL },
 ]);

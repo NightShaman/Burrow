@@ -1,5 +1,6 @@
 // Pure transcript projections; core persistence belongs to PostgresSessionStore.
 import { randomUUID } from 'node:crypto';
+import { isStructuredAssistantTurn } from './chat-result-metadata.mjs';
 import { boundedRedactedValue, redactAndTruncateText, truncateText } from './redaction.mjs';
 function safeId(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || randomUUID();
@@ -22,7 +23,7 @@ function retainedChatMetadata(metadata = {}) {
   // Successor transcripts preserve conversational provenance, not bulky
   // finalizer/debug receipts from the archived generation.
   const projected = {};
-  for (const key of ['attachments', 'decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState', 'chatInput', 'lane']) {
+  for (const key of ['attachments', 'decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState', 'chatInput', 'lane', 'chatResultVersion', 'terminalStatus', 'modelFailure', 'modelRecovery']) {
     if (metadata?.[key] !== undefined) projected[key] = metadata[key];
   }
   return redactedMetadata(projected);
@@ -43,6 +44,10 @@ function isChatMessage(entry) {
   return entry?.type === 'message' && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
     && entry?.visibility === 'chat' && entry?.entersPrompt === true
     && Boolean(String(entry?.content || '').trim() || (Array.isArray(entry?.metadata?.attachments) && entry.metadata.attachments.length));
+}
+
+export function isDisplayChatMessage(entry) {
+  return isChatMessage(entry) || isStructuredAssistantTurn(entry);
 }
 
 function normalizedArchiveTitleText(value = '') { return String(value || '').replace(/[`*_#[\]()>|]/g, ' ').replace(/\s+/g, ' ').trim(); }
@@ -82,7 +87,7 @@ function isExecutionDigestEntry(entry) {
     && String(entry?.content || '').trim();
 }
 function isCompactionTailEntry(entry) {
-  return String(entry?.type || '') === 'context_state' || isChatMessage(entry) || isExecutionDigestEntry(entry) || isCanonicalExecutionEntry(entry);
+  return String(entry?.type || '') === 'context_state' || isDisplayChatMessage(entry) || isExecutionDigestEntry(entry) || isCanonicalExecutionEntry(entry);
 }
 
 export function buildSessionEntry({ sessionId, type = 'message', role = null, content, runId = null, traceDir = null, metadata = {}, visibility = null, entersPrompt = undefined, parentId = null, clock = nowIso, maxContentChars } = {}) {

@@ -1,4 +1,4 @@
-import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
 import { randomUUID } from 'node:crypto';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
@@ -97,7 +97,7 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
       const outcome = classifyRuntimeOutcome(result, { cancelled: signal.aborted });
       receipt = { ownerId, ownerLockId: job.ownerLockId,
         status: lifecycle.stopped ? 'interrupted' : signal.aborted ? 'cancelled' : outcome.ok ? 'succeeded' : 'failed',
-        result: { ...projectModelRecoveryMetadata(result), ok: outcome.ok, answerText: result.answerText || null, decision: result.decision || null, blockers: result.blockers || [] },
+        result: { ...chatResultMetadata({ ...result, decision: signal.aborted ? 'cancelled' : result.decision }), ok: outcome.ok, answerText: result.answerText || null, decision: result.decision || null, blockers: result.blockers || [] },
         error: lifecycle.stopped ? 'service_shutdown' : signal.aborted ? 'chat_input_cancelled' : outcome.ok ? null : result.error || 'agent_turn_failed',
         traceDir: result.traceDir || null };
     } catch (error) {

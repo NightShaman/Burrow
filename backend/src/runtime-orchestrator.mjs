@@ -280,6 +280,8 @@ export async function runPlainModelTurn({
   let model = null;
   let recoveryAdapter = null;
   let modelCall = 0;
+  let partialAnswerText = '';
+  let partialAnswerModelCall = null;
   // Defined outside the provider-call setup so failed/no-callback turns still
   // return a harmless null meter value.
   let peakContextUsage = null;
@@ -321,7 +323,7 @@ export async function runPlainModelTurn({
     const adapter = recoveryAdapter = createModelRequestRecovery(modelAdapter || createModelAdapter({ config: modelConfig || {} }), {
       ...modelRecoveryOptions,
       beforeAttempt: beforeModelAttempt,
-      onAttempt: () => ++modelCall,
+      onAttempt: () => { partialAnswerText = ''; partialAnswerModelCall = null; return ++modelCall; },
     });
     outputOnlyArtifact = ['image', 'audio'].includes(adapter.outputKind);
     // Output-only generators are not conversational agents. Their paid request
@@ -362,7 +364,13 @@ export async function runPlainModelTurn({
     const withModelCall = (callback) => typeof callback === 'function'
       ? async (event) => callback({ ...event, modelCall: event.modelCall ?? modelCall })
       : null;
-    const emitTextDelta = withModelCall(onTextDelta);
+    const captureTextDelta = async (event) => {
+      if (partialAnswerModelCall !== event.modelCall) { partialAnswerText = ''; partialAnswerModelCall = event.modelCall; }
+      partialAnswerText += String(event.delta || '');
+      await onTextDelta?.(event);
+    };
+    // Do not enable provider streaming for a previously nonstreaming request.
+    const emitTextDelta = typeof onTextDelta === 'function' ? withModelCall(captureTextDelta) : null;
     const emitThoughtDelta = withModelCall(onThoughtDelta);
     // A terminal synthesis request is intentionally small. Keep the largest
     // actual request from this run as the completed-session meter instead of
@@ -673,7 +681,7 @@ export async function runPlainModelTurn({
   }
   const outputArtifacts = [];
   const skipped = allSkippedChatTools(chatToolLoop);
-  const answerText = proposal?.answerText ?? null;
+  const answerText = model?.ok === false ? (partialAnswerText || (proposal?.answerText ?? null)) : proposal?.answerText ?? null;
   const runtime = createRuntimeTurnResult({
     finalText: answerText || '',
     blocker: model?.ok ? null : (model?.error || 'model_failed'),

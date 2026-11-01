@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute } from './ui/agent-reference-image-routes.mjs';
 import { createBoardTaskExecutor } from '../src/task-execution.mjs';
+import { isDisplayChatMessage } from '../src/session-entry.mjs';
+import { chatResultMetadata } from '../src/chat-result-metadata.mjs';
 import { compactChatTurn } from '../src/compact-chat-turn.mjs';
 import { createArchiveReadProcess } from './ui/archive-read-process.mjs';
 import { createArchiveAgentContext } from './ui/archive-agent-context.mjs';
@@ -2011,7 +2013,7 @@ async function sessionDetail(id, { rootDir, agentId = null } = {}) {
     postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'activity', limit: 20 }),
   ]);
   const chatTurns = chatEntries.filter(isChatMessage);
-  const visibleTurns = chatEntries.filter(entry => isChatMessage(entry) || Boolean(entry.metadata?.chatInput && entry.role));
+  const visibleTurns = chatEntries.filter(entry => isDisplayChatMessage(entry) || Boolean(entry.metadata?.chatInput && entry.role));
   const turns = [...visibleTurns, ...activityTurns].sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || ''))).map(compactChatTurn);
   return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities: activityTurns.filter((turn) => turn.metadata?.toolActivity).map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || null })) };
 }
@@ -2838,7 +2840,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       return sendJson(res, result.status, result.response);
     } catch (error) {
       if (owner?.signal.aborted) {
-        const response = { ok: false, error: String(owner.record.reason || error?.message || 'agent_stopped'), runId };
+        const response = { ...chatResultMetadata({ ok: false, decision: 'cancelled' }), ok: false, error: String(owner.record.reason || error?.message || 'agent_stopped'), runId };
         if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
         return sendJson(res, 499, response);
       }
@@ -2927,7 +2929,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       },
     });
     if (sessionContinuityHeads.get(headKey) !== record) {
-      const response = { ok: false, decision: 'superseded', runId, sessionId, blockers: ['superseded_by_newer_session_run'] };
+      const response = { ...chatResultMetadata({ ok: false, decision: 'superseded' }), ok: false, decision: 'superseded', runId, sessionId, blockers: ['superseded_by_newer_session_run'] };
       if (streaming) { writeNdjson(res, { type: 'run.superseded', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
       return sendJson(res, 409, response);
     }
@@ -2944,21 +2946,21 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
     observeHttpResult(res, 200, { ok: result.ok, result }, { event: 'run_failed' });
     const response = chatTurnResponse(result, { ok: result.ok });
     const streamResponse = chatTurnProgressResponse(result, { ok: result.ok });
-    if (streaming) { writeNdjson(res, { type: 'run.completed', runId, sessionId, ts: new Date().toISOString(), data: { response: streamResponse } }); return res.end(); }
+    if (streaming) { writeNdjson(res, { type: `run.${streamResponse.result.terminalStatus}`, runId, sessionId, ts: new Date().toISOString(), data: { response: streamResponse } }); return res.end(); }
     return sendJson(res, 200, response);
   } catch (error) {
     if (controller.signal.aborted) {
-      const response = { ok: false, error: String(record.reason || error?.message || 'agent_stopped'), runId };
+      const response = { ...chatResultMetadata({ ok: false, decision: 'cancelled' }), ok: false, error: String(record.reason || error?.message || 'agent_stopped'), runId };
       if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
       return sendJson(res, 499, response);
     }
     const errorResponse = chatTurnErrorResponse(error);
     if (errorResponse) {
-      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: errorResponse.body } }, { status: errorResponse.status }); return res.end(); }
-      return sendJson(res, errorResponse.status, errorResponse.body);
+      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...errorResponse.body, ...chatResultMetadata({ ok: false, decision: 'failed' }) } } }, { status: errorResponse.status }); return res.end(); }
+      return sendJson(res, errorResponse.status, { ...errorResponse.body, ...chatResultMetadata({ ok: false, decision: 'failed' }) });
     }
     recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_run_failed' });
-    if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ok: false, error: String(error?.message || error), runId } } }); return res.end(); }
+    if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...chatResultMetadata({ ok: false, decision: 'failed' }), ok: false, error: String(error?.message || error), runId } } }); return res.end(); }
     throw error;
   } finally {
     if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));

@@ -1,9 +1,9 @@
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { createChatTurnRunId } from './chat-turn-run-id.mjs';
 export { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { loadRuntimeConfig, runAskChat } from './app-runtime.mjs';
 export { beginRuntimeSessionExecutionSupersession, finishRuntimeSessionExecutionSupersession } from './app-runtime.mjs';
 import { buildChatSupportStatus } from './workbench-status.mjs';
-import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 // ChatTurnController owns one user-visible chat turn.
 // HTTP/UI/CLI adapters should normalize transport details, then hand the turn here.
@@ -155,7 +155,7 @@ export function chatTurnSummary(result) {
   const promptStats = result.prompt?.stats || null;
   return {
     decision: result.decision,
-    ...projectModelRecoveryMetadata(result),
+    ...chatResultMetadata(result),
     intent: result.intent || null,
     routeKind: result.session?.kind || null,
     observedResultKind: result.observedResultKind || null,
@@ -204,7 +204,7 @@ export function chatTurnSummary(result) {
 }
 
 export function chatTurnResponse(result, { ok = result?.ok } = {}) {
-  return { ok, summary: chatTurnSummary(result), result };
+  return { ok, summary: chatTurnSummary(result), result: { ...result, ...chatResultMetadata(result) } };
 }
 
 // Stream consumers need a stable terminal result without inheriting the
@@ -216,6 +216,7 @@ export function chatTurnProgressResponse(result, { ok = result?.ok } = {}) {
     ok,
     summary: chatTurnSummary(result),
     result: {
+      ...chatResultMetadata(result),
       decision: result?.decision || null,
       runId: result?.runId || null,
       sessionId: result?.sessionId || null,
@@ -228,7 +229,6 @@ export function chatTurnProgressResponse(result, { ok = result?.ok } = {}) {
         reason: result.verification.reason ?? null,
       } : null,
       completionEvidence: result?.completionEvidence || null,
-      ...projectModelRecoveryMetadata(result),
     },
   };
 }

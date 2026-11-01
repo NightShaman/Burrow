@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { isChatMessage } from './session-entry.mjs';
+import { isDisplayChatMessage as isChatMessage } from './session-entry.mjs';
 import { archivePayloadKeySQL, archiveTruthyPayloadSQL } from './postgres-archive-lexical.mjs';
 import { withArchiveRead } from './postgres-archive-read.mjs';
 

@@ -21,7 +21,7 @@ function statusFor({ receipt = null, evidence = null, answer = null } = {}) {
   if (['model_failed', 'incomplete', 'failed'].includes(decision)) return 'failed';
   if (['cancelled','interrupted'].includes(decision)) return 'warning';
   if (failureEvidence(evidence).length || unresolvedEvidence(evidence).length) return 'warning';
-  if (answer && /^\[model_error:/u.test(text(answer.content))) return 'failed';
+  if (answer?.metadata?.terminalStatus === 'failed' || answer?.metadata?.decision === 'model_failed') return 'failed';
   return 'completed';
 }
 function receiptFor(entries) {

@@ -1,3 +1,4 @@
+import { chatTurnResultProjection } from './chat-result-metadata.mjs';
 export const RECOVERY_TRANSCRIPT_MAX_MESSAGES = 20;
 export const RECOVERY_TRANSCRIPT_MAX_CHARS = 256 * 1024;
 
@@ -12,10 +13,12 @@ export async function readRecoveryTranscriptTail({ rootDir, sessionId, readChatM
   let remaining = RECOVERY_TRANSCRIPT_MAX_CHARS;
   const tail = [];
   for (const message of [...messages].reverse()) {
-    const content = boundedText(message?.content, remaining);
-    if (!content) continue;
-    tail.unshift({ role: message.role, content, ts: message.ts || null, runId: message.runId || null, metadata: message?.metadata?.kind === 'agent-message' ? { kind: 'agent-message' } : null });
-    remaining -= content.length;
+    const projected = chatTurnResultProjection(message);
+    const content = boundedText(projected.content, remaining);
+    const metadata = { ...(message?.metadata?.kind === 'agent-message' ? { kind: 'agent-message' } : {}), ...projected.metadata };
+    if (!content && !metadata.terminalStatus) continue;
+    tail.unshift({ role: message.role, content: content || '', ts: message.ts || null, runId: message.runId || null, metadata: Object.keys(metadata).length ? metadata : null });
+    remaining -= content?.length || 0;
     if (remaining <= 0) break;
   }
   return tail;

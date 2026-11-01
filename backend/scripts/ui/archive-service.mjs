@@ -1,3 +1,4 @@
+import { isStructuredAssistantTurn } from '../../src/chat-result-metadata.mjs';
 import { createHmac } from 'node:crypto';
 import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-scope.mjs';
 import { archiveRunListPage } from './archive-run-list.mjs';
@@ -344,7 +345,7 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
     };
     const lower = from ? instant(from) : null, upper = to ? instant(to) : null;
     if ((from && lower === null) || (to && upper === null)) throw new Error('archive_date_invalid');
-    const turns = source.filter(isChatMessage).filter((turn) => {
+    const turns = source.filter(entry => isChatMessage(entry) || isStructuredAssistantTurn(entry)).filter((turn) => {
       if (!from && !to) return true;
       const at = instant(turn.timestamp ?? turn.ts ?? turn.at ?? turn.createdAt);
       return at !== null && (lower === null || at >= lower) && (upper === null || at <= upper);

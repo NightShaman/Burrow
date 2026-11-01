@@ -1,3 +1,4 @@
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { createContinuityOwner } from './postgres-continuity-owner.mjs';
@@ -145,6 +146,7 @@ async function sideReceipt(client,row,now) {
   await append(client,row,{id:randomUUID(),sessionId:row.session_id,runId:row.run_id,ts:now,type:'receipt',role:null,
     content:'Snapshot side-question terminal outcome.',visibility:'debug',entersPrompt:false,traceDir:row.trace_dir,
     metadata:{lane:'side_question',chatInput:metadata(row),receiptRef:{runId:row.run_id,sessionId:row.session_id,traceDir:row.trace_dir,
+      ...chatResultMetadata({ ...row.result, ok: row.status === 'succeeded', decision: row.status === 'succeeded' ? 'answered' : row.status }),
       decision:row.status==='succeeded'?'answered':row.status,source:'side_question',blockers:row.result?.blockers || []}}},now);
 }
 async function sideAnswer(client, row, now) {
@@ -152,7 +154,7 @@ async function sideAnswer(client, row, now) {
   if (row.intent !== 'side_question' || row.status !== 'succeeded' || typeof answer !== 'string') return;
   await append(client, row, { id: randomUUID(), sessionId: row.session_id, runId: row.run_id, ts: now, timestamp: now,
     type: 'message', role: 'assistant', content: answer, entersPrompt: false, visibility: 'chat',
-    traceDir: row.trace_dir, metadata: { chatInput: metadata(row), lane: 'side_question' } }, now);
+    traceDir: row.trace_dir, metadata: { chatInput: metadata(row), lane: 'side_question', ...chatResultMetadata({ ...row.result, ok: true, decision: 'answered' }) } }, now);
 }
 
 async function setSessionHold(client, ids, generation, held, now) {
