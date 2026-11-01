@@ -1,3 +1,4 @@
+import { PostgresAgentReferenceImageStore } from './postgres-agent-reference-image-store.mjs';
 import { startArchiveChatBackfill } from './postgres-archive-chat-backfill.mjs';
 import { PostgresChatInputStore } from './postgres-chat-input-store.mjs';
 import { PostgresCompletionEventSettingsStore } from './postgres-completion-event-settings-store.mjs';
@@ -67,10 +68,12 @@ export async function createPostgresApplication({
   try {
     await migratePostgres(sharedPool);
     const workingMemoryRetention = new PostgresWorkingMemoryRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) });
+    const referenceImages = new PostgresAgentReferenceImageStore({ pool: sharedPool, runtimeRoot, logger });
     const stores = {
+    referenceImages,
     steering: new PostgresLiveRunSteering({ ...common, ...(clock ? { clock } : {}) }),
     brains: new PostgresBrainStore(common),
-    agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities }),
+    agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities, referenceImages }),
     profiles: new PostgresAgentProfileStore({ ...common, ...(clock ? { clock } : {}) }),
     models: new PostgresModelSettingsStore({ ...common, key: encryptionKey, logger, ...(clock ? { clock } : {}), ...(bootstrapSampleIdentities !== undefined ? { bootstrapSampleIdentities } : {}) }),
     mcpProviderStates: new PostgresMcpProviderStateStore(common),
@@ -84,7 +87,7 @@ export async function createPostgresApplication({
     dreamDiary: new PostgresDreamDiaryStore(common),
     dreamCycles: new PostgresDreamCycleReceiptStore({ ...common, ...(clock ? { clock } : {}), ...(runtimeInstanceId ? { runtimeInstanceId } : {}) }),
     continuity: new PostgresContinuityHandoffStore(common),
-    forge: new PostgresForgeStore({ ...common, runtimeRoot, resolveAgent, resolveOperator, connections, resolveConfig, ...(ownerId ? { ownerId } : {}) }),
+    forge: new PostgresForgeStore({ ...common, referenceImages, runtimeRoot, resolveAgent, resolveOperator, connections, resolveConfig, ...(ownerId ? { ownerId } : {}) }),
     workingMemory: new PostgresWorkingMemoryStore({ ...common, retention: retention || (client => workingMemoryRetention.read(client)), ...(clock ? { clock } : {}) }),
     apiTokens: new PostgresApiTokenStore({ pool: sharedPool, ...(clock ? { clock } : {}) }),
     skillSources: new PostgresSkillSources({ ...common, ...(clock ? { clock } : {}) }),

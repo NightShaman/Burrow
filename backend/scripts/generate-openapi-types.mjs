@@ -44,9 +44,10 @@ function operationTypes(spec) {
       const response = success?.$ref && success.$ref.startsWith('#/components/responses/')
         ? spec.components.responses[refName(success.$ref)]
         : success;
+      const binary = Object.values(response?.content || {}).some(media => media.schema?.type === 'string' && media.schema?.format === 'binary');
       const responseSchema = response?.content?.['application/json']?.schema?.$ref
         ? refName(response.content['application/json'].schema.$ref)
-        : 'JsonObject';
+        : binary ? 'Blob' : 'JsonObject';
       rows.push(`  ${JSON.stringify(operation.operationId)}: { method: ${JSON.stringify(method.toUpperCase())}; path: ${JSON.stringify(route)}; response: ${responseSchema}; };`);
     }
   }

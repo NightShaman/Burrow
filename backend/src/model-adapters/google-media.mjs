@@ -3,16 +3,26 @@ import { googleNativeBase, googleNativeHeaders, googleMediaKind, googleModelId }
 import { createGoogleLyriaAdapter } from './google-lyria.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { readProviderError } from '../forge-diagnostics.mjs';
+import { referenceImageCapability, validatedSourceImages } from './reference-image-capability.mjs';
 export function createGoogleMediaAdapter({ config = {}, fetchImpl = fetch, idFactory = randomUUID } = {}) {
   const kind = googleMediaKind(config);
-  if (kind === 'audio') return createGoogleLyriaAdapter({ config, fetchImpl, idFactory });
+  if (kind === 'audio') {
+    const adapter = createGoogleLyriaAdapter({ config, fetchImpl, idFactory });
+    return { ...adapter, async complete(options = {}) {
+      if (options.sourceImages !== undefined) throw new Error('agent_reference_image_unsupported');
+      return adapter.complete(options);
+    } };
+  }
   if (kind !== 'image') throw new Error('google_media_contract_unsupported');
   if (config.supportedGenerationMethods && !config.supportedGenerationMethods.includes('generateContent')) throw new Error('google_media_method_unsupported');
   const base = googleNativeBase(config), headers = googleNativeHeaders(config), model = googleModelId(config.model), budgets = mediaBudgets(config);
   return { provider:'google', api:'google-generative-language', model, outputKind:kind,
-    async complete({ prompt, signal } = {}) {
+    async complete({ prompt, signal, sourceImages: inputImages } = {}) {
+      const sourceImages = validatedSourceImages(inputImages);
+      if (sourceImages && !referenceImageCapability(config).available) throw new Error('agent_reference_image_unsupported');
+      const parts = [{ text:String(prompt || '') }, ...(sourceImages || []).map(({ bytes, mimeType }) => ({ inlineData: { mimeType, data: bytes.toString('base64') } }))];
       const requestId=idFactory();
-      const response=await fetchImpl(`${base}/models/${encodeURIComponent(model)}:generateContent`, { method:'POST', headers, body:JSON.stringify({ contents:[{ role:'user', parts:[{ text:String(prompt || '') }] }], generationConfig:{ responseModalities:['TEXT','IMAGE'] } }), ...(signal ? {signal} : {}) });
+      const response=await fetchImpl(`${base}/models/${encodeURIComponent(model)}:generateContent`, { method:'POST', headers, body:JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ responseModalities:['TEXT','IMAGE'] } }), ...(signal ? {signal} : {}) });
       if (!response.ok) { const details=await readProviderError(response,[config.apiKey,config.auth?.token].filter(Boolean)); return {ok:false,status:response.status,error:details.message,errorDetails:details,outputArtifacts:[]}; }
       const data=JSON.parse((await mediaBytes(response,budgets.metadata)).toString('utf8'));
       const outputArtifacts=[]; let total=0;

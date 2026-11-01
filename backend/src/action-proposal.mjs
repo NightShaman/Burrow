@@ -126,6 +126,7 @@ function normalizeAction(action, index) {
     mcpArguments: action?.mcpArguments && typeof action.mcpArguments === 'object' && !Array.isArray(action.mcpArguments) ? action.mcpArguments : {},
     jobId: action?.jobId ? String(action.jobId).trim() : null,
     artifactId: action?.artifactId ? String(action.artifactId).trim() : null,
+    useAgentReferenceImage: action?.useAgentReferenceImage,
     forgeMode: action?.mode ? String(action.mode).trim() : null,
     forgeConnectionId: action?.connectionId ? String(action.connectionId).trim() : null,
     forgeModelId: action?.modelId ? String(action.modelId).trim() : null,
@@ -282,7 +283,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
       type: 'function',
       function: {
         name: 'attachment_view',
-        description: 'Reopen an attachment by its runtime-owned attachment id/reference from this agent/session. PNG, JPEG, GIF, and WebP images are returned as model-visible image content; text/JSON-like attachments return bounded text; other types return metadata. The id must come from Burrow attachment metadata, not an arbitrary filesystem path.',
+        description: 'Reopen an attachment by its runtime-owned attachment id/reference from this agent/session. Canonical reference images from forge_catalog can also be reopened using their attachmentId. PNG, JPEG, GIF, and WebP images are returned as model-visible image content; text/JSON-like attachments return bounded text; other types return metadata. The id must come from Burrow attachment metadata, not an arbitrary filesystem path.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -519,7 +520,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'agents_list') return normalizeNative({ tool, reason: args.reason, query: args.query, includeDisabled: args.includeDisabled, cursor: args.cursor, limit: args.limit });
   if (tool === 'agent_send_message') return normalizeNative({ tool, reason: args.reason, recipientAgentId: args.recipientAgentId, targetSessionId: args.targetSessionId, messageMode: args.messageMode, content: args.content });
   if (tool === 'forge_catalog' || tool === 'forge_list_jobs') return normalizeNative({ tool, reason: args.reason });
-  if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, mode: args.mode, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey });
+  if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, mode: args.mode, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey, useAgentReferenceImage: args.useAgentReferenceImage });
   if (tool === 'forge_inspect_job') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId });
   if (tool === 'forge_attach_artifact') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, artifactId: args.artifactId });
   if (tool === 'mcp_providers') return normalizeNative({ tool, reason: args.reason });

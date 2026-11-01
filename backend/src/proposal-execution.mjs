@@ -1,3 +1,4 @@
+import { REFERENCE_IMAGE_ATTACHMENT_PREFIX } from './postgres-agent-reference-image-store.mjs';
 import { searchAgentRunEvidence } from './run-evidence.mjs';
 import { executeBrainTool } from './brain-tool-executor.mjs';
 import { redactText } from './redaction.mjs';
@@ -272,12 +273,16 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const started = await traceLogger?.toolStart?.({ tool: 'attachment_view', attachmentId, toolCallId: action.toolCallId || null });
       let result;
       try {
-        const attachment = await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
+        const attachment = attachmentId?.startsWith(REFERENCE_IMAGE_ATTACHMENT_PREFIX)
+          ? await executionContext?.stores?.referenceImages?.view(agentId || executionContext?.agentId, attachmentId)
+          : await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
         result = attachment
           ? { tool: 'attachment_view', ok: true, attachmentId, attachment }
           : { tool: 'attachment_view', ok: false, attachmentId, error: 'attachment_not_found' };
       } catch (error) {
-        result = { tool: 'attachment_view', ok: false, attachmentId, error: String(error?.message || error) };
+        result = { tool: 'attachment_view', ok: false, attachmentId, error: attachmentId?.startsWith(REFERENCE_IMAGE_ATTACHMENT_PREFIX)
+          ? error?.statusCode === 404 ? 'agent_reference_image_not_found' : 'agent_reference_image_unavailable'
+          : String(error?.message || error) };
       }
       toolResults.push(withExecutionProvenance(result, { kind: 'local' }, executionContext, action.toolCallId));
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
@@ -311,7 +316,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       let result;
       try {
         const args = action.tool === 'forge_create_job'
-          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey }
+          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage }
           : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
           : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
         result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId });

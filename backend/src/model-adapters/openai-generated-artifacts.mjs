@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { redactHeaders } from './adapter-primitives.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
 import { readProviderError } from '../forge-diagnostics.mjs';
+import { referenceImageCapability, validatedSourceImages } from './reference-image-capability.mjs';
 
 const AUDIO_FORMATS = Object.freeze({
   mp3: { mimeType: 'audio/mpeg', extension: 'mp3' },
@@ -34,7 +35,7 @@ function azureHost(baseUrl) {
   }
 }
 
-function requestHeaders(config = {}) {
+function requestHeaders(config = {}, { multipart = false } = {}) {
   const token = text(config.apiKey);
   const authType = text(config.auth?.type).toLowerCase();
   const explicitBearer = ['oauth', 'token', 'bearer_token'].includes(authType);
@@ -43,11 +44,14 @@ function requestHeaders(config = {}) {
   // hostname is the stable protocol boundary unless auth explicitly says the
   // credential is a bearer token.
   const isAzureApiKey = azureHost(config.baseUrl || config.apiBaseUrl || config.url) && !explicitBearer;
-  return {
+  const headers = {
     'content-type': 'application/json',
     ...(token ? (isAzureApiKey ? { 'api-key': token } : { authorization: `Bearer ${token}` }) : {}),
     ...(config.headers || {}),
   };
+  // fetch must supply the multipart boundary. Even an explicitly configured
+  // JSON content type would corrupt FormData; preserve all auth/custom headers.
+  return multipart ? Object.fromEntries(Object.entries(headers).filter(([key]) => key.toLowerCase() !== 'content-type')) : headers;
 }
 
 function safeError(value, secrets = []) {
@@ -151,13 +155,25 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
   const complete = async (options = {}) => {
     const requestId = idFactory();
     const prompt = promptFrom(options);
-    const headers = requestHeaders(config);
+    const sourceImages = validatedSourceImages(options.sourceImages);
+    if (sourceImages && (kind !== 'image' || !referenceImageCapability({ ...config, api: config.api || config.apiType || 'openai-responses' }).available))
+      throw new Error('agent_reference_image_unsupported');
+    const requestUrl = sourceImages ? endpoint(text(baseUrl).replace(/\/images\/(?:generations|edits)\/?$/, ''), 'images/edits') : url;
+    const headers = requestHeaders(config, { multipart: Boolean(sourceImages) });
     const artifactOptions = supportedArtifactOptions(kind, config.generatedArtifactOptions);
     const body = kind === 'image'
       ? { model: wireModel, prompt, n: 1, ...artifactOptions }
       : { model: wireModel, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };
-    await traceRequest(options.traceLogger, { requestId, provider, model, url, headers, body, clock, protectedValues: options.protectedValues || [] });
-    const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}) });
+    let requestBody;
+    if (sourceImages) {
+      requestBody = new FormData();
+      for (const [key, value] of Object.entries(body)) requestBody.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+      for (const image of sourceImages) requestBody.append(sourceImages.length === 1 ? 'image' : 'image[]', new Blob([image.bytes], { type: image.mimeType }), image.name);
+    } else requestBody = JSON.stringify(body);
+    // Trace only immutable metadata, not binary input or an encoded portrait.
+    const traceBody = sourceImages ? { ...body, sourceImages: sourceImages.map(({ mimeType, name, bytes }) => ({ mimeType, name, sizeBytes: bytes.length })) } : body;
+    await traceRequest(options.traceLogger, { requestId, provider, model, url: requestUrl, headers, body: traceBody, clock, protectedValues: options.protectedValues || [] });
+    const response = await fetchImpl(requestUrl, { method: 'POST', headers, body: requestBody, ...(options.signal ? { signal: options.signal } : {}) });
     if (!response.ok) {
       const providerErrorDetails = await providerError(response, [config.apiKey]);
       const error = providerErrorDetails.message;

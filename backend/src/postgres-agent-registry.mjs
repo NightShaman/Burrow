@@ -59,12 +59,14 @@ export class PostgresAgentRegistryStore {
   constructor({
     pool,
     ownsPool = false,
+    referenceImages = null,
     bootstrapSampleIdentities = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES,
   } = {}) {
     if (!pool?.query || !pool?.connect)
       throw Error("agent_registry_postgres_pool_required");
     this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
+    this.referenceImages = referenceImages;
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(
       String(bootstrapSampleIdentities ?? "0")
         .trim()
@@ -222,16 +224,23 @@ export class PostgresAgentRegistryStore {
     });
   }
   async delete(id) {
-    return withPostgresTransaction(this.pool, async (c) => {
+    let storageReference;
+    const deleted = await withPostgresTransaction(this.pool, async (c) => {
       const locked = await c.query(
         "SELECT * FROM agents WHERE id=$1 FOR UPDATE",
         [text(id)],
       );
       const current = row(locked.rows[0]);
       if (!current) throw Error("agent_not_found");
+      if (this.referenceImages) {
+        const image = await c.query('SELECT storage_reference FROM agent_reference_images WHERE agent_id=$1', [text(id)]);
+        storageReference = image.rows[0]?.storage_reference;
+      }
       await c.query("DELETE FROM agents WHERE id=$1", [text(id)]);
       return current;
     });
+    if (storageReference) await this.referenceImages.discard(storageReference);
+    return deleted;
   }
 }
 export const __postgresAgentRegistry = Object.freeze({

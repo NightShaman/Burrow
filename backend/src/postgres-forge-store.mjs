@@ -5,7 +5,7 @@ import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { findSessionReplay, PostgresSessionStore } from './postgres-session-store.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
   createOpenAIGeneratedArtifactAdapter,
@@ -28,6 +28,7 @@ import {
   withPostgresTransaction,
 } from "./postgres-foundation.mjs";
 import { forgeCatalog } from "./forge-store.mjs";
+import { referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
 
 const fail = (error, statusCode = 400) => {
   throw Object.assign(new Error(error), { statusCode });
@@ -49,6 +50,15 @@ const stable = (value) => {
 const sameRequest = (a, b, current) => {
   if (stable(a) === stable(b)) return true;
   if (current.modOwnerId) return false;
+  // Never let legacy identities (including the broad implicit-default match)
+  // replay an image request with different bytes or a different portrait owner.
+  if (a?.useAgentReferenceImage || current.useAgentReferenceImage || a?.referenceImage || current.referenceImage) {
+    return !a?.modOwnerId && a?.useAgentReferenceImage === true && current.useAgentReferenceImage === true &&
+      current.implicitSelection && a.implicitSelection === true &&
+      a.mode === current.mode && a.prompt === current.prompt &&
+      a.idempotencyKey === current.idempotencyKey &&
+      stable(a.referenceImage) === stable(current.referenceImage);
+  }
   try {
     if (
       current.implicitSelection &&
@@ -82,6 +92,13 @@ CREATE TABLE IF NOT EXISTS forge_selections (
  mode TEXT PRIMARY KEY, connection_id TEXT NOT NULL, model_id TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL
 );`;
 
+// The injected managed-image store owns storage references. Keep this strict
+// projection safe even if that implementation gains private fields later.
+function portraitMetadata(image) {
+  return image ? Object.fromEntries(['id', 'contentUrl', 'mimeType', 'fileName', 'sizeBytes', 'updatedAt', 'attachmentId']
+    .filter(key => image[key] !== undefined).map(key => [key, image[key]])) : null;
+}
+
 function publicJob(job) {
   const {
     storageReference,
@@ -91,6 +108,7 @@ function publicJob(job) {
     ownerToken,
     ownerId,
     modOwnerId,
+    referenceImage,
     ...safe
   } = job;
   return {
@@ -115,6 +133,7 @@ export class PostgresForgeStore {
     runtimeRoot,
     connections,
     resolveConfig,
+    referenceImages,
     adapterFactory = createOpenAIGeneratedArtifactAdapter,
     googleAdapterFactory = createGoogleLyriaAdapter,
     ownerId = randomUUID(),
@@ -133,6 +152,7 @@ export class PostgresForgeStore {
     this.runtimeRoot = runtimeRoot;
     this.connections = connections;
     this.resolveConfig = resolveConfig;
+    this.referenceImages = referenceImages;
     this.adapterFactory = adapterFactory;
     this.googleAdapterFactory = googleAdapterFactory;
     this.ownerId = ownerId;
@@ -152,7 +172,32 @@ export class PostgresForgeStore {
   }
   async catalog({agentId = null} = {}) {
     const catalog = forgeCatalog(await this.connectionList(agentId));
-    return { ...catalog, defaults: await this.selections() };
+    return { ...catalog, defaults: await this.selections(),
+      ...(typeof agentId === 'string' && agentId.trim()
+        ? { agentReferenceImage: portraitMetadata(await this.referenceImages?.get(agentId) ?? null) }
+        : {}),
+    };
+  }
+  async referenceImageSnapshot(agentId) {
+    if (typeof agentId !== 'string' || !agentId.trim()) fail('forge_context_unavailable', 409);
+    if (!this.referenceImages?.read) fail('agent_reference_image_missing', 409);
+    let saved;
+    try { saved = await this.referenceImages.read(agentId); }
+    catch (error) {
+      if (error?.statusCode === 404) fail('agent_reference_image_missing', 409);
+      throw error;
+    }
+    if (!saved?.image || !saved?.bytes) fail('agent_reference_image_missing', 409);
+    // A private owned byte copy survives portrait replacement/removal. Only the
+    // immutable metadata and content digest enter SQL JSON; never media bytes.
+    const bytes = Buffer.isBuffer(saved.bytes) ? Buffer.from(saved.bytes) : null;
+    let sourceImages;
+    try { sourceImages = validatedSourceImages([{ bytes, mimeType: saved.image.mimeType, name: saved.image.fileName }]); }
+    catch { fail('agent_reference_image_invalid', 409); }
+    const referenceImage = { ...portraitMetadata(saved.image), agentId,
+      sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+    if (typeof referenceImage.id !== 'string' || !referenceImage.id) fail('agent_reference_image_invalid', 409);
+    return { referenceImage: Object.freeze(referenceImage), sourceImages };
   }
   async selections() {
     const r = await this.pool.query(
@@ -339,6 +384,7 @@ export class PostgresForgeStore {
       "modelId",
       "prompt",
       "idempotencyKey",
+      "useAgentReferenceImage",
     ];
     if (
       Object.keys(body).some((k) => !keys.includes(k)) ||
@@ -353,6 +399,10 @@ export class PostgresForgeStore {
       !["image", "music", "speech", "video"].includes(body.mode)
     )
       fail("forge_request_invalid");
+    if (body.useAgentReferenceImage !== undefined && body.useAgentReferenceImage !== null && typeof body.useAgentReferenceImage !== 'boolean')
+      fail('forge_request_invalid');
+    const useAgentReferenceImage = body.useAgentReferenceImage === true;
+    if (useAgentReferenceImage && body.mode && body.mode !== 'image') fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
     if (
@@ -379,6 +429,15 @@ export class PostgresForgeStore {
     )
       fail("forge_model_unavailable", 409);
     if (ownerModId !== null && (typeof ownerModId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(ownerModId))) fail('forge_request_invalid');
+    const snapshot = useAgentReferenceImage ? await this.referenceImageSnapshot(agentId) : null;
+    const dispatch = snapshot ? { sourceImages: snapshot.sourceImages } : null;
+    // Config resolution may borrow this same pool. Resolve before holding the
+    // claim transaction (including max-one pools), but defer admission errors
+    // until after replay matching so saved-default retries remain valid.
+    if (snapshot && model?.available && model.agentReferenceImage?.available) {
+      try { dispatch.config = await this.resolveConfig(saved.connectionId, saved.modelId); }
+      catch { dispatch.configurationUnavailable = true; }
+    }
     const request = {
       mode: body.mode ?? null,
       connectionId: saved.connectionId,
@@ -387,6 +446,7 @@ export class PostgresForgeStore {
       idempotencyKey: body.idempotencyKey,
       implicitSelection: !explicit,
       ...(ownerModId ? { modOwnerId: ownerModId } : {}),
+      ...(snapshot ? { useAgentReferenceImage: true, referenceImage: snapshot.referenceImage } : {}),
     };
     const owner = await this.owner();
     let result;
@@ -411,6 +471,12 @@ export class PostgresForgeStore {
           };
         }
         if (!model?.available) fail("forge_model_unavailable", 409);
+        if (snapshot) {
+          if (model.kind !== 'image') fail('agent_reference_image_image_only');
+          if (!model.agentReferenceImage?.available) fail('agent_reference_image_unsupported', 409);
+          if (dispatch.configurationUnavailable) fail('forge_model_unavailable', 409);
+          if (!referenceImageCapability(dispatch.config).available) fail('agent_reference_image_unsupported', 409);
+        }
         const job = {
           id: randomUUID(),
           ...request,
@@ -456,7 +522,7 @@ export class PostgresForgeStore {
     }
     if (!result.replayed) {
       const task = Promise.resolve()
-        .then(() => this.run(result.raw, owner))
+        .then(() => this.run(result.raw, owner, dispatch))
         .catch(async () => {
           // Own the failure even when the failed-state receipt cannot be saved.
           // Never retain driver/provider messages, which may contain secrets.
@@ -474,7 +540,7 @@ export class PostgresForgeStore {
     }
     return { job: result.job, replayed: result.replayed };
   }
-  async run(job, owner) {
+  async run(job, owner, dispatch = null) {
     let stage = "configuration",
       config;
     try {
@@ -491,7 +557,9 @@ export class PostgresForgeStore {
         return;
       job.status = "running";
       if (!(await this.save(job))) return;
-      config = await this.resolveConfig(job.connectionId, job.modelId);
+      config = dispatch?.config ?? await this.resolveConfig(job.connectionId, job.modelId);
+      if (job.useAgentReferenceImage && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
+        throw new Error('agent_reference_image_snapshot_unavailable');
       const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
       const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
       if (
@@ -509,7 +577,7 @@ export class PostgresForgeStore {
       stage = "provider";
       job.calls = [{ connectionId: job.connectionId, modelId: job.modelId, startedAt: at(), status: 'running' }];
       if (!(await this.save(job))) return;
-      const result = await adapter.complete({ prompt: job.prompt });
+      const result = await adapter.complete({ prompt: job.prompt, ...(dispatch?.sourceImages ? { sourceImages: dispatch.sourceImages } : {}) });
       if (!result.ok || !result.outputArtifacts?.length)
         throw Object.assign(
           new Error(result.error || "Provider returned no artifacts"),

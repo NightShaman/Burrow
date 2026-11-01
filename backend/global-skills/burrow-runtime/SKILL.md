@@ -173,6 +173,8 @@ On releases with Core/mod-managed skills, Core and loaded mods provision their c
 
 Discover models with `forge_catalog`. `forge_create_job` can incur cost and requires an operator generation request. Follow `forge_inspect_job` until terminal, then attach succeeded artifacts with `forge_attach_artifact`. Do not claim unsupported modes or tuning are available.
 
+For images of yourself, `forge_catalog` exposes your saved Agent Details reference photo and each model’s `agentReferenceImage` capability. Use `attachment_view` with its `attachmentId` to inspect it if needed. Set `useAgentReferenceImage: true` on a supported image job to send the actual saved photo. The runtime supplies your identity; do not supply a filesystem path or another agent ID. Upload alone never starts generation; missing photos or unsupported models fail rather than silently dropping the image.
+
 ## Use other agents without abandoning the task
 
 Another agent may own a domain or be useful for isolated work.
