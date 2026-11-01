@@ -18,11 +18,12 @@ function migrateRightPanelDefaults() {
   writeStorage(rightPanelDefaultsVersionKey, rightPanelDefaultsVersion);
 }
 
-export const themes = ['smatchet', 'midnight', 'blue-hour', 'nexus', 'hatchet', 'chaos', 'terminal'] as const;
+export const themes = ['smatchet', 'midnight', 'halloween', 'blue-hour', 'nexus', 'hatchet', 'chaos', 'terminal'] as const;
 
 export const themeDetails = {
   smatchet: { label: 'Smatchet Dark', description: 'Dense dark workspace with a magenta focus color.' },
   midnight: { label: 'Midnight', description: 'Black, blue outlines and a touch of magenta.' },
+  halloween: { label: 'Halloween', description: 'Midnight with orange, green and purple highlights.' },
   'blue-hour': { label: 'Blue Hour', description: 'Black and blue with purple accents.' },
   nexus: { label: 'Nexus', description: 'Deep blue control-room surfaces with crisp electric focus.' },
   hatchet: { label: 'Hatchet', description: 'Industrial dark teal with calm, deliberate contrast.' },

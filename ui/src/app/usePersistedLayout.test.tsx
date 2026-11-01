@@ -17,6 +17,16 @@ describe('persisted layout state', () => {
     expect(JSON.parse(localStorage.getItem('hc.selectedAgentId') ?? '{}')).toEqual({ version: 1, value: 'node-1::smatchet' });
   });
 
+  it.each(['midnight', 'halloween'] as const)('roundtrips %s independently through reload', (selected) => {
+    const theme = renderHook(() => usePersistedTheme());
+    act(() => theme.result.current[1](selected));
+    expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}')).toEqual({ version: 1, value: selected });
+    theme.unmount();
+    const reloaded = renderHook(() => usePersistedTheme());
+    expect(reloaded.result.current[0]).toBe(selected);
+    reloaded.unmount();
+  });
+
   it('rejects invalid themes', () => {
     localStorage.setItem('hc.theme', JSON.stringify({ version: 1, value: 'ultraviolet-chaos' }));
     expect(renderHook(() => usePersistedTheme()).result.current[0]).toBe('smatchet');
