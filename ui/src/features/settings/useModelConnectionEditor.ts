@@ -103,10 +103,18 @@ export function useModelConnectionEditor({ savedProviders = [], onModelConnectio
       });
       if (!current()) return [];
       if (result.discovery?.status === 'error' || result.discovery?.error) throw new Error(result.discovery.error || 'Discovery failed');
-      setAvailableModels(result.models);
-      setSelectedModelId(result.models[0]?.id ?? null);
+      // Pools and their account/OAuth workflows retain their existing discovery semantics.
+      // Ordinary API connections require an explicit opt-in for newly discovered IDs.
+      const models = connection || poolConnection || loadBalancing || oauthConnection
+        ? result.models
+        : result.models.map((model) => ({
+          ...model,
+          selected: availableModels.find((existing) => existing.id === model.id)?.selected ?? (availableModels.some((existing) => existing.id === model.id) ? true : false),
+        }));
+      setAvailableModels(models);
+      setSelectedModelId(models[0]?.id ?? null);
       setConnected(true);
-      return result.models;
+      return models;
     } catch (error) {
       if (!current()) return [];
       setConnected(true);

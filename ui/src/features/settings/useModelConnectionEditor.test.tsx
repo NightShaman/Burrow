@@ -72,6 +72,10 @@ describe('useModelConnectionEditor', () => {
     expect(modelConnectionsApi.discover).toHaveBeenCalledWith(expect.objectContaining({ provider: 'Example', baseUrl: 'https://example.test/v1', apiKey: 'secret' }));
     expect(result.current.availableModels).toEqual([expect.objectContaining({ id: 'model-a' })]);
 
+    expect(result.current.availableModels[0].selected).toBe(false);
+    await act(() => result.current.saveProvider());
+    expect(apiMock).not.toHaveBeenCalled();
+    act(() => result.current.toggleModel('model-a'));
     await act(() => result.current.saveProvider());
     expect(apiMock).toHaveBeenCalledWith('/api/settings/model-connections', expect.objectContaining({
       method: 'POST',
@@ -80,6 +84,21 @@ describe('useModelConnectionEditor', () => {
     expect(onModelConnectionsChanged).toHaveBeenCalledOnce();
     expect(result.current.provider).toBe('');
     expect(result.current.savedProvidersOpen).toBe(true);
+  });
+
+  it('keeps Azure selections on rediscovery and leaves new models unchecked', async () => {
+    const discover = vi.spyOn(modelConnectionsApi, 'discover').mockResolvedValue({ models: [
+      { id: 'on', selected: true }, { id: 'off', selected: true }, { id: 'new', selected: true },
+    ] });
+    const { result } = renderEditor();
+    act(() => result.current.editProvider({ ...savedProvider, provider: 'Azure', connectionModels: [
+      { id: 'on', selected: true }, { id: 'off', selected: false },
+    ] }));
+    await act(() => result.current.connect());
+    expect(discover).toHaveBeenCalledOnce();
+    expect(result.current.availableModels.map(({ id, selected }) => [id, selected])).toEqual([
+      ['on', true], ['off', false], ['new', false],
+    ]);
   });
 
   it('retains the authorized OpenAI connection for discovery and manual selection', async () => {
