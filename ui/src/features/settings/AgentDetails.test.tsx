@@ -8,6 +8,7 @@ import { AgentSettings } from './AgentSettings';
 import { optimizeAvatar } from './OperatorProfile';
 
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
+vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('./OperatorProfile', () => ({ optimizeAvatar: vi.fn() }));
 vi.mock('./DefaultMinionModel', () => ({ DefaultMinionModel: () => null }));
 vi.mock('./MinionDepthSettings', () => ({ MinionDepthSettings: () => null }));

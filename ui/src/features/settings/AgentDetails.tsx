@@ -5,6 +5,7 @@ import { isAgentEnabled } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { optimizeAvatar } from './OperatorProfile';
+import { AgentReferencePhoto } from './AgentReferencePhoto';
 import { Field, SettingSection } from './SettingsPrimitives';
 
 type Details = { name: string; avatar: string; enabled: boolean };
@@ -35,6 +36,7 @@ function acknowledgement(endpoint: keyof Accepted, value: unknown, resourceId: s
 export function AgentDetails({ selected, onAgentsChanged }: { selected: Agent; onAgentsChanged: () => Promise<void> }) {
   const resourceId = selected.resourceId ?? selected.id;
   const initial = { name: selected.name, avatar: selected.avatar.startsWith('data:image/') ? selected.avatar : '', enabled: isAgentEnabled(selected) };
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [draft, setDraft] = useState<Details>(initial);
   const [baseline, setBaseline] = useState<Details>(initial);
   const [avatarFileName, setAvatarFileName] = useState('');
@@ -56,7 +58,7 @@ export function AgentDetails({ selected, onAgentsChanged }: { selected: Agent; o
     return () => { owner.current = null; };
   }, []);
   const confirm = useConfirm();
-  const busy = state !== 'idle';
+  const busy = state !== 'idle' || photoBusy;
 
   // Catalog reads are not mutations: a failed refresh must never turn an
   // accepted write into a retryable write or restore its old discard baseline.
@@ -235,6 +237,7 @@ export function AgentDetails({ selected, onAgentsChanged }: { selected: Agent; o
         {draft.avatar && <button className="avatar-remove" type="button" data-agent-immediate onMouseDown={event => event.preventDefault()} onClick={removeAvatar} disabled={busy}>Remove image</button>}
       </div>
     </div>
+    <AgentReferencePhoto agentId={resourceId} name={selected.name} disabled={state !== 'idle'} onBusyChange={setPhotoBusy} />
     <div className="operator-profile-actions agent-profile-actions">
       <Field label="Displayed name"><input value={draft.name} maxLength={64} disabled={busy} onChange={event => { setDraft({ ...draft, name: event.target.value }); setError(''); setNotice(''); }} onBlur={event => {
         // Immediate actions and the unsaved guard modal must not commit the
@@ -248,7 +251,7 @@ export function AgentDetails({ selected, onAgentsChanged }: { selected: Agent; o
       }} /><span>Enabled</span></label>
     </div>
     {Object.keys(failed).length > 0 && !busy && <button className="secondary" data-agent-immediate onMouseDown={event => event.preventDefault()} onClick={() => void save('failed')}>Retry saving agent</button>}
-    {busy && <p role="status">{state === 'processing' ? 'Processing agent avatar…' : state === 'deleting' ? 'Deleting agent…' : state === 'refreshing' ? 'Refreshing agents…' : 'Saving agent details…'}</p>}
+    {state !== 'idle' && <p role="status">{state === 'processing' ? 'Processing agent avatar…' : state === 'deleting' ? 'Deleting agent…' : state === 'refreshing' ? 'Refreshing agents…' : 'Saving agent details…'}</p>}
     {notice && <p role="status">{notice}</p>}
     {refreshError && <><p className="settings-request-error" role="alert">{refreshError}</p><button className="secondary" data-agent-immediate onMouseDown={event => event.preventDefault()} onClick={() => void retryRefresh()} disabled={busy}>Retry refreshing agents</button></>}
     {error && <p className="settings-request-error" role="alert">{error}</p>}

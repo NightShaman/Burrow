@@ -898,3 +898,6 @@ button:disabled{cursor:not-allowed;opacity:.45}
 
 .minion-native-controls{container-type:inline-size;container-name:minion-thinking}
 @container minion-thinking (max-width:360px){.minion-native-controls>.settings-field-pair{grid-template-columns:minmax(0,1fr)}}
+
+/* Reference photos retain their full composition; avatars remain cropped. */
+.agent-reference-preview img{object-fit:contain}
