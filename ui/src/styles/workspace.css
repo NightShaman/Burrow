@@ -8,20 +8,8 @@
 .group-room-picker{padding:14px 20px 0}.group-room-picker h3,.group-dialog form h3{margin:0 0 8px;color:var(--text-strong);font-size:13px}.group-room-picker p{margin:0;color:var(--muted);font-size:12px}.group-room-picker ul{list-style:none;margin:0;padding:0;max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:6px}.group-room-picker li+li{border-top:1px solid var(--line-soft)}.group-room-picker li button{display:flex;justify-content:space-between;gap:12px;width:100%;padding:10px;border:0;background:var(--panel-2);color:var(--text-strong);text-align:left;cursor:pointer}.group-room-picker li button:hover,.group-room-picker li button:focus-visible{background:var(--accent-subtle)}.group-room-picker li strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.group-room-picker li small{flex:none;color:var(--muted)}
 .group-dialog{max-height:calc(100dvh - 40px);overflow:auto}.group-room-picker li button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
-/* Native mode/effort is a second line of the same toolbar, not another panel.
-   Keep identities and session actions readable instead of crushing one row. */
-.workspace-toolbar.native-model-toolbar{flex-wrap:wrap;overflow:visible;min-width:0}
-.native-model-toolbar>label{min-width:0;max-width:100%}
-.native-model-toolbar select{min-width:0;max-width:100%}
-.native-model-toolbar #chat-model{max-width:24rem}
-.native-model-toolbar .session-controls{flex-wrap:wrap;min-width:0;max-width:100%}
-.native-model-toolbar .model-tuning-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;flex-basis:100%;min-width:0}
-.model-tuning-controls>label{min-width:0;max-width:100%}
-.model-tuning-controls .model-selection-issue{flex-basis:100%;color:var(--warn);font-size:11px;white-space:normal}
+/* Keep native tuning inline with model identity and session actions. */
+.workspace-toolbar.native-model-toolbar{flex-wrap:nowrap;overflow:auto}
+.native-model-toolbar>label,.native-model-toolbar .session-controls{flex-shrink:0}
+.native-model-toolbar .model-tuning-controls{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .native-model-toolbar select[aria-invalid=true]{border-color:var(--warn)}
-@media(max-width:600px){
- .workspace-toolbar.native-model-toolbar .session-controls{flex-wrap:wrap;width:100%;gap:8px}
- .workspace-toolbar.native-model-toolbar .session-controls label{flex:0 1 auto;min-width:0;max-width:100%}
- .workspace-toolbar.native-model-toolbar .session-selector-control{flex-basis:100%}
- .workspace-toolbar.native-model-toolbar .session-selector-control select{width:100%}
-}

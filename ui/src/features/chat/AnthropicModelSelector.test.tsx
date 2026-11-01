@@ -13,7 +13,8 @@ describe('native chat/main selector', () => {
     const select = screen.getByRole('combobox', { name: 'Thinking' }) as HTMLSelectElement;
     expect(select.value).toBe(''); expect(select.selectedOptions[0].text).toBe('Legacy · Off (unsupported)');
     expect(select.disabled).toBe(false); expect(select.getAttribute('aria-invalid')).toBe('true');
-    expect(screen.getByRole('status').textContent).toContain('cannot disable');
+    expect(screen.queryByText(/Saved Off cannot disable/)).toBeNull();
+    expect(select.hasAttribute('aria-describedby')).toBe(false);
     expect(updateAgent).not.toHaveBeenCalled(); expect(onSelectionBlockedChange).toHaveBeenLastCalledWith(true);
     expect(screen.queryByRole('option', { name: 'Disabled' })).toBeNull();
   });
@@ -57,10 +58,12 @@ describe('native chat/main selector', () => {
     expect(screen.queryByRole('button', { name: 'Retry model selection' })).toBeNull();
     expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveProperty('value', 'default');
   });
-  it('places tuning on its own line inside the existing toolbar and preserves session controls', () => {
+  it('keeps tuning before session actions inside the existing toolbar', () => {
     render(<ChatModelSelector {...props} selected={{ ...agent, thinkingMode: 'default' }} />);
     const mode = screen.getByRole('combobox', { name: 'Thinking' });
-    expect(mode.closest('.model-tuning-controls')?.parentElement?.className).toContain('workspace-toolbar');
+    const tuning = mode.closest('.model-tuning-controls')!;
+    expect(tuning.parentElement?.className).toContain('workspace-toolbar');
+    expect(tuning.nextElementSibling?.className).toBe('session-controls');
     expect(screen.getByRole('combobox', { name: 'Model' }).closest('.model-tuning-controls')).toBeNull();
     expect(screen.getByRole('button', { name: 'Group Chat' }).closest('.model-tuning-controls')).toBeNull();
   });
