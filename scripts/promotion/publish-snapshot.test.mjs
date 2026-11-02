@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { executableModes, verifyExecutableModes } from './executable-modes.mjs';
 
 const script = fileURLToPath(new URL('./publish-snapshot.sh', import.meta.url));
 const gitBinary = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
@@ -59,7 +60,7 @@ function fixture(t) {
     fs.writeFileSync(path.join(source, 'snapshot.txt'), content);
     return command('sh', [script, 'Fixture', source, version, 'snapshot publication'], { env: { ...env, ...extraEnv } });
   };
-  return { ref, seedCommit, publish };
+  return { root, bare, source, env, ref, seedCommit, publish };
 }
 
 function successful(result) {
@@ -115,3 +116,37 @@ for (const failedRef of ['main', 'tag']) {
     assert.doesNotMatch(result.stdout + result.stderr, /test-secret-never-print/);
   });
 }
+
+
+test('tar-restored executable and non-executable modes survive publication and the downstream source archive', t => {
+  const f = fixture(t);
+  const staged = path.join(f.root, 'stage/staged/Burrow');
+  fs.mkdirSync(path.join(staged, 'backend/bin'), { recursive: true });
+  for (const [name, mode] of [['install.sh', 0o755], ['backend/bin/worker', 0o755], ['README.md', 0o644]]) {
+    const file = path.join(staged, name);
+    fs.writeFileSync(file, `payload ${name}\n`);
+    fs.chmodSync(file, mode);
+  }
+  const modes = executableModes(path.join(f.root, 'stage/staged'));
+  const tarball = path.join(f.root, 'promotion.tar');
+  assert.equal(command('tar', ['-cpf', tarball, '-C', path.join(f.root, 'stage'), 'staged']).status, 0);
+  fs.chmodSync(tarball, 0o644);
+  const download = path.join(f.root, 'download');
+  fs.mkdirSync(download);
+  assert.equal(command('tar', ['-xpf', tarball, '-C', download]).status, 0);
+  verifyExecutableModes(path.join(download, 'staged'), modes);
+  const result = command('sh', [script, 'Fixture', path.join(download, 'staged/Burrow'), '1', 'mode-preserving promotion'], { env: f.env });
+  successful(result);
+  const tree = git(['--git-dir', f.bare, 'ls-tree', '-r', 'refs/tags/v1']);
+  assert.match(tree, /100755 blob [^\n]+\tinstall\.sh/);
+  assert.match(tree, /100755 blob [^\n]+\tbackend\/bin\/worker/);
+  assert.match(tree, /100644 blob [^\n]+\tREADME\.md/);
+  const publicTar = path.join(f.root, 'public-source.tar');
+  git(['--git-dir', f.bare, 'archive', '--format=tar', `--output=${publicTar}`, 'refs/tags/v1']);
+  const extracted = path.join(f.root, 'installed-source');
+  fs.mkdirSync(extracted);
+  assert.equal(command('tar', ['-xpf', publicTar, '-C', extracted]).status, 0);
+  assert.ok(fs.statSync(path.join(extracted, 'install.sh')).mode & 0o111);
+  assert.ok(fs.statSync(path.join(extracted, 'backend/bin/worker')).mode & 0o111);
+  assert.equal(fs.statSync(path.join(extracted, 'README.md')).mode & 0o111, 0);
+});

@@ -32,6 +32,11 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
 - Public GitHub releases use coordinated notes generated from the NightShaman commit ranges since the previous public manifest, with generated assembly/release commits omitted.
 - Public snapshots use explicit allowlists. Development workflows, audit notes,
   secrets, caches, runtime data, and Git history are not mirrored.
+- Staged trees, manifests and release notes cross the Actions artifact handoff
+  inside a tar archive. Loose artifact files lose executable permissions. A
+  manifest of every staged executable is checked after extraction, before any
+  Git snapshot, release asset or image is published; both installers must also
+  remain executable. Hidden files stay inside the already-allowlisted tree.
 - Publication credentials are available only in the environment-gated publish
   job, after staging and verification succeed.
 - Published tags and assets are immutable. A partially completed run resumes

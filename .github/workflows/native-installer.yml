@@ -1,10 +1,10 @@
 name: Native installer
 on:
   pull_request:
-    paths: ['install.sh', 'scripts/install/**', '.github/workflows/native-installer.yml']
+    paths: ['install.sh', 'scripts/install/**', 'scripts/promotion/**', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
   push:
     branches: [main]
-    paths: ['install.sh', 'scripts/install/**', '.github/workflows/native-installer.yml']
+    paths: ['install.sh', 'scripts/install/**', 'scripts/promotion/**', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
 permissions:
   contents: read
 jobs:
@@ -17,5 +17,5 @@ jobs:
           node-version: '24'
       - name: Check shell syntax
         run: sh -n install.sh
-      - name: Test isolated installer and assembly contracts
-        run: node --test scripts/install/*.test.mjs scripts/assembly/*.test.mjs
+      - name: Test isolated installer, assembly and promotion contracts
+        run: node --test scripts/install/*.test.mjs scripts/assembly/*.test.mjs scripts/promotion/*.test.mjs

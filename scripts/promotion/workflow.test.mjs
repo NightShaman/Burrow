@@ -24,3 +24,24 @@ test('complete validation has a deadline rather than hanging indefinitely', () =
   assert.match(workflow, /timeout-minutes: 45/);
   assert.match(workflow, /timeout --kill-after=15s 10m npm test/);
 });
+
+test('artifact handoff wraps the validated tree and checks restored executable modes before any publication', () => {
+  const bundle = workflow.indexOf('tar -cpf public-promotion.tar staged sources.json plan.json release-notes executable-modes.json');
+  const upload = workflow.indexOf('uses: actions/upload-artifact@v4');
+  const download = workflow.indexOf('uses: actions/download-artifact@v4');
+  const extract = workflow.indexOf('tar -xpf public-promotion.tar');
+  const verify = workflow.indexOf('executable-modes.mjs verify staged executable-modes.json');
+  const publish = workflow.indexOf('- name: Publish immutable Git snapshots');
+  assert.ok(bundle > 0 && bundle < upload && upload < download && download < extract && extract < verify && verify < publish);
+  assert.match(workflow.slice(bundle, download), /path: public-promotion\.tar\s+if-no-files-found: error/);
+  assert.match(workflow.slice(0, bundle), /executable-modes\.mjs record staged executable-modes\.json/);
+  assert.match(workflow.slice(verify, publish), /test -x staged\/Burrow\/install\.sh/);
+  assert.match(workflow.slice(verify, publish), /test -x staged\/Node-Goblin\/install\.sh/);
+});
+
+test('promotion changes run installer, assembly and promotion regressions on push and PR', () => {
+  const installerWorkflow = readFileSync(new URL('../../.github/workflows/native-installer.yml', import.meta.url), 'utf8');
+  assert.equal(installerWorkflow.match(/'scripts\/promotion\/\*\*'/g)?.length, 2);
+  assert.equal(installerWorkflow.match(/'\.github\/workflows\/daily-public-promotion\.yml'/g)?.length, 2);
+  assert.match(installerWorkflow, /node --test scripts\/install\/\*\.test\.mjs scripts\/assembly\/\*\.test\.mjs scripts\/promotion\/\*\.test\.mjs/);
+});

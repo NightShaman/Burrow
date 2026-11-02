@@ -266,15 +266,21 @@ jobs:
             test ! -d "staged/$target/.git"
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
+      - name: Bundle validated snapshots with executable permissions
+        if: steps.plan.outputs.validation_required == 'true'
+        run: |
+          set -eu
+          test -x staged/Burrow/install.sh
+          test -x staged/Node-Goblin/install.sh
+          node orchestrator/scripts/promotion/executable-modes.mjs record staged executable-modes.json
+          # Uploading loose files strips modes (and can omit hidden files).
+          # Tar preserves the entire already-allowlisted tree across that boundary.
+          tar -cpf public-promotion.tar staged sources.json plan.json release-notes executable-modes.json
       - uses: actions/upload-artifact@v4
         if: steps.plan.outputs.validation_required == 'true'
         with:
           name: public-promotion-${{ steps.plan.outputs.release_date }}
-          path: |
-            staged
-            sources.json
-            plan.json
-            release-notes
+          path: public-promotion.tar
           if-no-files-found: error
           retention-days: 7
 
@@ -295,6 +301,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Restore snapshots and verify executable permissions before publishing
+        run: |
+          set -eu
+          tar -xpf public-promotion.tar
+          node orchestrator/scripts/promotion/executable-modes.mjs verify staged executable-modes.json
+          test -x staged/Burrow/install.sh
+          test -x staged/Node-Goblin/install.sh
       - name: Publish immutable Git snapshots
         env:
           PUBLIC_GITHUB_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
