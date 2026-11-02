@@ -5,7 +5,6 @@ import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { ApiTokensSettings } from './ApiTokensSettings';
-import { BrowserOriginSettings } from './BrowserOriginSettings';
 
 vi.mock('../../app/api', async (original) => ({
   ...(await original<typeof import('../../app/api')>()),
@@ -43,34 +42,6 @@ function deferred<T>() {
     resolve,
   };
 }
-
-it('browser origin stays on failed save, then discards to the accepted preference', async () => {
-  vi.mocked(api).mockImplementation(async (_, init) => {
-    if (init?.method === 'PUT') throw new Error('write failed');
-    return {
-      ok: true,
-      settings: { checkOrigin: false },
-      effective: { checkOrigin: false, source: 'database' },
-    };
-  });
-  mount(<BrowserOriginSettings />);
-  const input = await screen.findByRole('checkbox', { name: 'Check browser origin' });
-  fireEvent.click(input);
-  await screen.findByText('Could not save browser origin settings. Try saving again.');
-  expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await screen.findByText('Could not save browser origin settings. Try saving again.');
-  expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2);
-  expect(screen.getByRole('checkbox', { name: 'Check browser origin' })).toHaveProperty(
-    'checked',
-    true,
-  );
-  expect(screen.queryByText('Destination')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-  expect(await screen.findByText('Destination')).toBeTruthy();
-});
 
 it('navigation requested during token creation does not unmount the one-time reveal', async () => {
   const creation = deferred<{

@@ -4,17 +4,11 @@ import { api } from '../../app/api';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { MinionDepthSettings } from './MinionDepthSettings';
 import { DreamPromotionSettings } from './DreamPromotionSettings';
-import { BrowserOriginSettings } from './BrowserOriginSettings';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
-const origin = {
-  ok: true,
-  settings: { checkOrigin: true },
-  effective: { checkOrigin: true, source: 'database', allowedOrigins: [] },
-};
 const scopes = [
   {
     name: 'depth',
@@ -32,15 +26,6 @@ const scopes = [
     label: 'Promote Dreams to memory',
     initial: { promoteDreamsToMemory: true },
     accepted: { promoteDreamsToMemory: false },
-    change: (node: HTMLElement) => fireEvent.click(node),
-  },
-  {
-    name: 'origin',
-    element: <BrowserOriginSettings />,
-    role: 'checkbox',
-    label: 'Check browser origin',
-    initial: origin,
-    accepted: { ...origin, settings: { checkOrigin: false } },
     change: (node: HTMLElement) => fireEvent.click(node),
   },
 ];

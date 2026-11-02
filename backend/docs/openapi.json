@@ -3968,7 +3968,7 @@
         "tags": [
           "Settings"
         ],
-        "summary": "Read operator-managed retention policy and cleanup preview",
+        "summary": "Read retention policy and scheduler state without scanning trace storage",
         "operationId": "getRetentionPolicy",
         "responses": {
           "200": {
@@ -7195,65 +7195,6 @@
         }
       }
     },
-    "/api/settings/browser-origin": {
-      "get": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "Read saved and effective browser Origin checking",
-        "operationId": "getBrowserOriginSettings",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/SettingsResponse"
-          },
-          "400": {
-            "$ref": "#/components/responses/ErrorResponse"
-          },
-          "404": {
-            "$ref": "#/components/responses/ErrorResponse"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "Save browser Origin checking and apply immediately",
-        "operationId": "updateBrowserOriginSettings",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "checkOrigin"
-                ],
-                "properties": {
-                  "checkOrigin": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/SettingsResponse"
-          },
-          "400": {
-            "$ref": "#/components/responses/ErrorResponse"
-          },
-          "404": {
-            "$ref": "#/components/responses/ErrorResponse"
-          }
-        }
-      }
-    },
     "/api/settings/skills/{id}/source": {
       "get": {
         "tags": [
@@ -9903,7 +9844,7 @@
         }
       },
       "RetentionPolicyResponse": {
-        "description": "Persisted retention policy, scheduler state, and dry-run cleanup plan.",
+        "description": "Persisted retention policy and scheduler state; no filesystem scan. Request cleanup plans explicitly through POST /api/settings/retention/preview.",
         "content": {
           "application/json": {
             "schema": {
@@ -13384,8 +13325,7 @@
         "required": [
           "ok",
           "policy",
-          "state",
-          "plan"
+          "state"
         ],
         "properties": {
           "ok": {
@@ -13396,9 +13336,6 @@
           },
           "state": {
             "$ref": "#/components/schemas/RetentionPolicyState"
-          },
-          "plan": {
-            "$ref": "#/components/schemas/RetentionPlan"
           }
         },
         "additionalProperties": false

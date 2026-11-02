@@ -34,7 +34,7 @@ import { createGroupChannelMessageStarter } from '../src/group-channel-message.m
 import { buildIdentity } from './build-identity.mjs';
 import { releaseProvenance } from './release-provenance.mjs';
 import { httpAuthorityConfig, hostAuthorityPolicy } from '../src/http-authority.mjs';
-import { browserOriginConfig, browserOriginSettings, saveBrowserOriginSettings, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
+import { browserOriginConfig, browserRequestPolicy } from '../src/browser-origin-policy.mjs';
 import { browserTabSettings, saveBrowserTabSettings } from '../src/browser-tab-settings.mjs';
 import { otelSettings, readOtelRuntimeConfig, saveOtelSettings } from '../src/otel-settings.mjs';
 import { createReconfigurableOtelRuntime } from '../src/otel-runtime.mjs';
@@ -80,7 +80,7 @@ import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIn
 import { workingContextFromSession } from '../src/working-context.mjs';
 import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
 import { resolveGroupMentionTargets } from '../src/group-channel-routing.mjs';
-import { planRetentionCleanup, runRetentionCleanup } from '../src/retention.mjs';
+import { runRetentionCleanup } from '../src/retention.mjs';
 import { normalizeRetentionPolicy, readRetentionPolicy, readRetentionPolicyState, retentionPolicyFailureState, retentionPolicySuccessState, saveRetentionPolicy, writeRetentionPolicyState } from '../src/retention-settings.mjs';
 import { createRetentionScheduler } from '../src/retention-scheduler.mjs';
 import { createInstallStagingCleanupScheduler } from '../src/install-staging-cleanup.mjs';
@@ -1444,8 +1444,7 @@ function sendJson(res, status, body) {
 
 async function applyApiCors(req, res, url) {
   if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/')) return false;
-  const { effective } = await browserOriginSettings({ metadata: metadataStore() });
-  const policy = browserRequestPolicy(req, url, effective);
+  const policy = browserRequestPolicy(req, url, browserOriginConfig());
   if (policy.error) { sendJson(res, policy.status, { ok: false, error: policy.error }); return true; }
   if (policy.origin) {
     res.setHeader('access-control-allow-origin', policy.origin);
@@ -1573,11 +1572,7 @@ async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
       await write('settings:working-memory-retention', () => postgresApplication.stores.workingMemoryRetention.save(categories.settings.workingMemoryRetention));
       imported.push('settings:working-memory-retention');
     }
-    if (categories.settings.browserOrigin !== undefined) {
-      const result = await write('settings:browser-origin', () => saveBrowserOriginSettings(categories.settings.browserOrigin, { metadata: metadataStore() }));
-      if (!result.ok) return failure(result);
-      imported.push('settings:browser-origin');
-    }
+    // Legacy browserOrigin exports are ignored; only deployment environment controls it.
     if (categories.settings.executionBoundaries) {
       const result = await write('settings:execution-boundaries', () => saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, }));
       if (!result.ok) return failure(result);
@@ -1742,7 +1737,6 @@ async function exportSnapshot(categories = []) {
       workingMemoryRetention: await postgresApplication.stores.workingMemoryRetention.read(),
       brainMemory: await readDreamPromotion(metadataStore()),
       brainEmbeddings: await postgresApplication.stores.brainEmbeddings.settings().then(s => ({ enabled: s.enabled, connectionId: s.connection_id, model: s.model })),
-      browserOrigin: (await browserOriginSettings({ metadata: metadataStore() })).settings,
       executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
       curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
       ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],
@@ -2274,16 +2268,16 @@ async function updateBrainPromotionCandidate(body = {}) {
 }
 
 async function retentionPolicySettings() {
-  const runtime = await runtimeConfig();
-  const policy = await readRetentionPolicy({ store: postgresApplication.stores.retentionSettings });
-  const state = await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
-  const plan = await planRetentionCleanup({ taskStore: postgresApplication.stores.tasks, conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: policy });
-  return { ok: true, policy, state, plan };
+  // Loading a form must not resolve execution context or scan trace storage.
+  const store = postgresApplication.stores.retentionSettings;
+  const [policy, state] = await Promise.all([
+    readRetentionPolicy({ store }), readRetentionPolicyState({ store }),
+  ]);
+  return { ok: true, policy, state };
 }
 
 async function saveRetentionPolicySettings(body = {}) {
   try {
-    const runtime = await runtimeConfig();
     const policy = await saveRetentionPolicy(body.policy || body, { store: postgresApplication.stores.retentionSettings });
     const state = await readRetentionPolicyState({ store: postgresApplication.stores.retentionSettings });
     return { ok: true, policy, state };
@@ -3141,7 +3135,7 @@ const archiveReadProcess = createArchiveReadProcess({ poolConfig: runtimePostgre
 });
 const sessionRoute = createSessionRoutes({ resolveArchiveAgentRuntime: archiveAgentContext.resolveAgentRuntime, rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserOriginSettings: () => browserOriginSettings({ metadata: metadataStore() }), saveBrowserOriginSettings: body => saveBrowserOriginSettings(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ providerPoolMetrics: () => postgresApplication.stores.models.providerPoolMetrics.summary(), readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ serverLogger, runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });

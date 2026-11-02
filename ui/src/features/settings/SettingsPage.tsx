@@ -22,7 +22,6 @@ import { SettingSection } from './SettingsPrimitives';
 import { McpConnections } from './McpConnections';
 import { ApiTokensSettings } from './ApiTokensSettings';
 import { AuthenticationSettings } from './AuthenticationSettings';
-import { BrowserOriginSettings } from './BrowserOriginSettings';
 import { BrainEmbeddingSettings } from './BrainEmbeddingSettings';
 import { CuratorSettings } from './CuratorSettings';
 import { RetentionSettings } from './RetentionSettings';
@@ -139,7 +138,6 @@ export function Settings({
   const [connectionSection, setConnectionSection] = useState<
     | 'opentelemetry'
     | 'authentication'
-    | 'browser-origin'
     | 'model-providers'
     | 'load-balancing'
     | 'mcp-servers'
@@ -417,7 +415,6 @@ export function Settings({
                 [
                   ['authentication', 'Authentication'],
                   ['opentelemetry', 'OpenTelemetry'],
-                  ['browser-origin', 'Browser origin'],
                   ['model-providers', 'Models'],
                   ['load-balancing', 'Load Balancing'],
                   ['mcp-servers', 'MCP servers'],
@@ -601,9 +598,6 @@ export function Settings({
           )}
           {tab === 'connections' && connectionSection === 'authentication' && (
             <AuthenticationSettings />
-          )}
-          {tab === 'connections' && connectionSection === 'browser-origin' && (
-            <BrowserOriginSettings />
           )}
           {tab === 'connections' && connectionSection === 'model-providers' && (
             <ModelConnections

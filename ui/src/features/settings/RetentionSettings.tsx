@@ -54,7 +54,8 @@ const storageValue = (bytes: number | null, unit: StorageUnit) =>
 const formatDate = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
 // Validate endpoint ACKs before advancing a baseline or authorizing cleanup.
-// GET includes a plan; the actual PUT response is { ok, policy, state }.
+// GET/PUT acknowledge policy and scheduler state without scanning trace files.
+// Cleanup estimates are fetched only by the explicit Preview action.
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const integerIn = (value: unknown, min: number, max = Number.MAX_SAFE_INTEGER) =>
@@ -105,13 +106,13 @@ const policyIdentity = (value: RetentionPolicy) =>
     value.traceMaxBytes,
     value.intervalMinutes,
   ]);
-function retentionAck(value: unknown, requirePlan = false): RetentionResponse {
+function retentionAck(value: unknown): RetentionResponse {
   if (
     !isObject(value) ||
     value.ok !== true ||
     !isPolicy(value.policy) ||
     !isState(value.state) ||
-    (requirePlan ? !isPlan(value.plan) : value.plan !== undefined && !isPlan(value.plan))
+    (value.plan !== undefined && !isPlan(value.plan))
   ) {
     throw new Error('Invalid retention response. Reload settings to verify the applied policy.');
   }
@@ -165,7 +166,7 @@ export function RetentionSettings() {
     setStatus('loading');
     setError('');
     try {
-      const result = retentionAck(await api<unknown>('/api/settings/retention'), true);
+      const result = retentionAck(await api<unknown>('/api/settings/retention'));
       if (!mounted.current) return;
       const nextPolicy = result.policy;
       const unit = (nextPolicy.traceMaxBytes ?? 0) >= storageUnits.GiB ? 'GiB' : 'MiB';

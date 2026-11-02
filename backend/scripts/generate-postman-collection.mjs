@@ -216,7 +216,7 @@ const collection = {
       req('Albdruck knowledge', 'GET', '/api/albdruck/knowledge', { query: [['agentId', '{{agentId}}'], ['state', 'active']] }),
       req('Purge conversation', 'POST', '/api/albdruck/purge-conversation', { body: { agentId: '{{agentId}}', sessionId: '{{sessionId}}', reason: 'Explicit operator purge' } }),
       req('Albdruck retention', 'GET', '/api/albdruck/retention'),
-      req('Retention dry run', 'GET', '/api/retention'),
+      req('Retention policy and state (legacy alias)', 'GET', '/api/retention'),
       req('Run retention cleanup', 'POST', '/api/retention/cleanup', { body: { confirm: false } }),
     ]),
     folder('GitHub Completion Events', [

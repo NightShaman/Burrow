@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
@@ -29,7 +29,6 @@ const response = (policy = initialPolicy()) => ({
   ok: true,
   policy,
   state: { lastResult: { counts: { deleteTraceBytes: 10240 } } },
-  plan: { ok: true, dryRun: true, retention: {}, counts },
 });
 const cleanupResponse = (policy = initialPolicy(10240, true), dryRun = true) => ({
   ok: true,
@@ -124,7 +123,7 @@ it('keeps empty limits empty on toggles and clears a limit explicitly', async ()
 it('renders cleanup sizes in binary human-readable units including preview notice', async () => {
   await mount(10240);
   expect(screen.getByText('10.0 KiB')).toBeTruthy();
-  expect(screen.getByText(/1.5 GiB/)).toBeTruthy();
+  expect(screen.getByText('Preview to estimate')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Preview cleanup' }));
   expect(await screen.findByText('Preview: 3 traces, 1.5 GiB reclaimable.')).toBeTruthy();
 });
@@ -436,8 +435,8 @@ it('accepts real zero-count cleanup responses and requires the endpoint dryRun m
   });
 });
 
-it.each([undefined, {}, { ...response().plan, counts: {} }])(
-  'rejects a missing or malformed GET plan',
+it.each([{}, { ok: true, dryRun: true, retention: {}, counts: {} }])(
+  'rejects a malformed optional legacy GET plan',
   async (plan) => {
     vi.mocked(api).mockResolvedValueOnce({ ...response(), plan });
     renderSettings();
@@ -447,3 +446,57 @@ it.each([undefined, {}, { ...response().plan, counts: {} }])(
     ).toBe(true);
   },
 );
+
+it('loads policy and enables editing without requesting a filesystem preview', async () => {
+  await mount(10240, true);
+  expect(api).toHaveBeenCalledTimes(1);
+  expect(api).toHaveBeenCalledWith('/api/settings/retention');
+  expect(screen.getByText('Preview to estimate')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Preview cleanup' })).toHaveProperty('disabled', false);
+  expect(screen.getByRole('button', { name: 'Run now' })).toHaveProperty('disabled', true);
+  fireEvent.change(screen.getByLabelText('Run every (minutes)'), { target: { value: '60' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply policy' }));
+  await screen.findByText(
+    'Retention policy applied. Scheduled deletion is active; preview is not required for automatic cleanup.',
+  );
+  expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+    '/api/settings/retention',
+    '/api/settings/retention',
+  ]);
+});
+
+it('fetches the expensive preview only on demand and keeps Run locked until it succeeds', async () => {
+  await mount(10240, true);
+  let resolve!: (value: unknown) => void;
+  vi.mocked(api).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Preview cleanup' }));
+  expect(screen.getByRole('button', { name: 'Previewing…' })).toHaveProperty('disabled', true);
+  expect(screen.getByRole('button', { name: 'Run now' })).toHaveProperty('disabled', true);
+  expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
+    '/api/settings/retention',
+    '/api/settings/retention/preview',
+  ]);
+  await act(async () => resolve(cleanupResponse()));
+  await screen.findByText('Preview: 3 traces, 1.5 GiB reclaimable.');
+  expect(screen.getByRole('button', { name: 'Run now' })).toHaveProperty('disabled', false);
+  expect(writes()).toHaveLength(0);
+});
+
+it('accepts a valid legacy GET plan without authorizing manual cleanup', async () => {
+  vi.mocked(api).mockResolvedValueOnce({
+    ...response(initialPolicy(10240, true)),
+    plan: { ok: true, dryRun: true, retention: {}, counts },
+  });
+  renderSettings();
+  await waitFor(() =>
+    expect(screen.getByLabelText('Maximum storage')).toHaveProperty('disabled', false),
+  );
+  expect(screen.getByText('3 traces · 1.5 GiB')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Run now' })).toHaveProperty('disabled', true);
+  expect(api).toHaveBeenCalledTimes(1);
+});

@@ -42,10 +42,11 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
     if (path === '/api/settings/browser-tab') return { suffix: '' };
     if (path === '/api/settings/timezone') return { timezone: 'America/Chicago' };
     if (path === '/api/settings/ui-auth') return { auth: { mode: 'none' } };
-    if (path === '/api/settings/browser-origin')
+    if (path === '/api/settings/opentelemetry')
       return {
-        settings: { checkOrigin: false },
-        effective: { checkOrigin: false, source: 'database' },
+        settings: { enabled: false, destinations: [] },
+        effective: { enabled: false },
+        providers: [],
       };
     return { wizardStep: 'ready' };
   });
@@ -107,27 +108,16 @@ it('mounts only the selected configuration, with no hidden duplicate reads', asy
   expect(paths).not.toContain('/api/settings/model-connections');
   expect(paths).not.toContain('/api/settings/browser-origin');
   expect(screen.queryByRole('button', { name: 'Save browser origin' })).toBeNull();
-  const originButton = screen.getByRole('button', { name: 'Browser origin' });
-  expect(originButton.closest('.settings-prototype-sections')).toBeTruthy();
-  fireEvent.click(originButton);
-  await waitFor(() =>
-    expect(
-      screen.getByRole('checkbox', { name: 'Check browser origin' }).hasAttribute('disabled'),
-    ).toBe(false),
-  );
-  expect(originButton.getAttribute('aria-current')).toBe('page');
-  expect(
-    screen
-      .getByRole('heading', { name: 'Browser origin' })
-      .closest('.settings-prototype-configuration'),
-  ).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Save authentication' })).toBeNull();
-  expect(
-    vi.mocked(api).mock.calls.filter(([path]) => path === '/api/settings/browser-origin'),
-  ).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Browser origin' })).toBeNull();
+  expect(screen.queryByRole('checkbox', { name: 'Check browser origin' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Browser origin' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'OpenTelemetry' }));
+  await screen.findByRole('heading', { name: 'OpenTelemetry' });
   fireEvent.click(screen.getByRole('button', { name: /^Authentication$/ }));
   await screen.findByRole('button', { name: 'Save authentication' });
-  expect(screen.queryByRole('button', { name: 'Save browser origin' })).toBeNull();
+  expect(vi.mocked(api).mock.calls.map(([path]) => path)).not.toContain(
+    '/api/settings/browser-origin',
+  );
 });
 it('shows agent options from active rail selections without focusing a dropdown', () => {
   vi.mocked(api).mockImplementation(async (path) =>

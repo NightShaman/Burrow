@@ -46,11 +46,6 @@ beforeEach(() => {
     if (path === '/api/settings/identities') return { operator: profile };
     if (path === '/api/settings/mcp-connections') return { connections: [alpha] };
     if (path === '/api/settings/ui-auth') return { auth: { mode: 'none' } };
-    if (path === '/api/settings/browser-origin')
-      return {
-        settings: { checkOrigin: false },
-        effective: { checkOrigin: false, source: 'database' },
-      };
     throw new Error(`Unexpected settings read: ${path}`);
   });
 });
@@ -138,7 +133,7 @@ const destinations = {
     category: { button: 'Connections', heading: 'Authentication' },
   },
   MCP: {
-    subsection: { button: 'Browser origin', heading: 'Browser origin' },
+    subsection: { button: 'Authentication', heading: 'Authentication' },
     category: { button: 'General', heading: 'Operator profile' },
   },
 } as const;
