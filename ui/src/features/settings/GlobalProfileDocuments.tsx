@@ -143,7 +143,6 @@ export function GlobalProfileDocuments({
   return (
     <>
       <SettingSection title="Global documents">
-        <p className="settings-description">Choose a Global document to edit.</p>
         {state === 'error' && (
           <button type="button" onClick={() => setRetry((value) => value + 1)}>
             Retry loading

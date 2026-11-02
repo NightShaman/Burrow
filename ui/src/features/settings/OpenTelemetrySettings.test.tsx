@@ -258,6 +258,11 @@ it('adds, reloads, and removes a destination using a stable unique caller-create
     added.id,
   );
   selectDestination('Local renamed');
+  expect(
+    screen
+      .getByRole('button', { name: /Remove destination/i })
+      .classList.contains('settings-action'),
+  ).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: /Remove destination/i }));
   await save();
   expect(lastUpdate().destinations.map((item) => item.id)).toEqual(['archive', 'tempo']);

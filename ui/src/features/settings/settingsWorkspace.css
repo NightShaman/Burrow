@@ -1,0 +1,638 @@
+/* Burrow-Fidgit: stable navigation, task-sized working surfaces. */
+.settings-blank-slate.settings-fidgit,
+.settings-blank-slate.settings-fidgit.has-agent-selector,
+.settings-blank-slate.settings-fidgit.has-utility-panel {
+  --settings-nav-width: 208px;
+  display: grid;
+  grid-template-columns: 180px var(--settings-nav-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  padding: 0;
+  overflow: hidden;
+  transition: none;
+}
+.settings-blank-slate.settings-fidgit.has-top-navigation {
+  grid-template-columns: var(--settings-nav-width) minmax(0, 1fr);
+}
+.settings-blank-slate.settings-fidgit.has-utility-panel {
+  grid-template-columns: 180px var(--settings-nav-width) minmax(0, 1fr) 280px;
+}
+.settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel {
+  grid-template-columns: var(--settings-nav-width) minmax(0, 1fr) 280px;
+}
+.settings-blank-slate.settings-fidgit.has-agent-selector {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.settings-blank-slate.settings-fidgit > .settings-prototype-menu {
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
+.settings-blank-slate.settings-fidgit > .settings-prototype-sections {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 8px;
+  overflow-y: auto;
+  border: 0;
+  border-right: 1px solid var(--line-soft);
+  border-radius: 0;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--panel) 30%, transparent);
+}
+.settings-blank-slate.settings-fidgit.has-top-navigation > .settings-prototype-sections {
+  grid-column: 1;
+}
+.settings-blank-slate.settings-fidgit.has-agent-selector > .settings-prototype-sections {
+  grid-row: 2;
+}
+.settings-blank-slate.settings-fidgit > .settings-prototype-agent-selector,
+.settings-blank-slate.settings-fidgit.has-utility-panel > .settings-prototype-agent-selector {
+  grid-column: 2 / 4;
+  grid-row: 1;
+}
+.settings-blank-slate.settings-fidgit.has-top-navigation > .settings-prototype-agent-selector,
+.settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel
+  > .settings-prototype-agent-selector {
+  grid-column: 1 / 3;
+}
+.settings-blank-slate.settings-fidgit.has-utility-panel > .settings-utility-panel {
+  grid-column: -2;
+}
+.settings-fidgit .settings-content-workspace {
+  grid-column: 3;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 24px 16px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  overflow: hidden;
+}
+.settings-fidgit.has-top-navigation > .settings-content-workspace {
+  grid-column: 2;
+}
+.settings-fidgit.has-agent-selector > .settings-content-workspace {
+  grid-row: 2;
+}
+.settings-fidgit .settings-content-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-fidgit .settings-content-workspace > .settings-blank-column,
+.settings-fidgit
+  .settings-content-workspace
+  > .settings-prototype-overflow:has(.settings-overflow-content) {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0 4px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-fidgit .settings-content-inventory > .settings-prototype-overflow,
+.settings-fidgit .settings-content-document > .settings-prototype-configuration {
+  padding-right: 16px;
+  border-right: 1px solid var(--line-soft);
+}
+.settings-fidgit .settings-content-inventory .field-pair {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+}
+.settings-fidgit .settings-content-document > .settings-prototype-overflow {
+  align-content: stretch;
+}
+.settings-fidgit .settings-content-document .profile-document-overflow textarea {
+  min-height: 18rem;
+  resize: none;
+  font: 13px/1.55 var(--mono, ui-monospace, monospace);
+}
+.settings-fidgit .settings-content-document .profile-global-controls {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-fidgit .settings-profile-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+  align-items: start;
+  gap: 32px;
+  max-width: 1120px;
+}
+.settings-fidgit .settings-profile-workspace .setting-section,
+.settings-fidgit .settings-profile-preferences > .setting-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-fidgit .settings-profile-preferences {
+  display: grid;
+  gap: 28px;
+}
+.settings-fidgit .settings-profile-workspace .setting-section > h2 {
+  margin: 0 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 14px;
+}
+.settings-fidgit .settings-content-workspace .saved-providers {
+  min-height: 0;
+}
+@media (max-width: 1200px) {
+  .settings-blank-slate.settings-fidgit,
+  .settings-blank-slate.settings-fidgit.has-agent-selector,
+  .settings-blank-slate.settings-fidgit.has-utility-panel {
+    --settings-nav-width: 172px;
+  }
+  .settings-fidgit .settings-content-workspace {
+    gap: 16px;
+    padding: 12px 20px 12px 8px;
+  }
+
+  .settings-fidgit .settings-profile-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .settings-fidgit .settings-profile-preferences {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 850px) {
+  .settings-blank-slate.settings-fidgit,
+  .settings-blank-slate.settings-fidgit.has-agent-selector,
+  .settings-blank-slate.settings-fidgit.has-top-navigation,
+  .settings-blank-slate.settings-fidgit.has-utility-panel,
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 8px;
+  }
+  .settings-blank-slate.settings-fidgit > .settings-prototype-menu,
+  .settings-blank-slate.settings-fidgit > .settings-prototype-sections,
+  .settings-blank-slate.settings-fidgit.has-top-navigation > .settings-prototype-sections {
+    grid-column: 1;
+    grid-row: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .settings-fidgit .settings-prototype-section-items {
+    display: flex;
+    overflow-x: auto;
+  }
+  .settings-fidgit .settings-prototype-section-items button {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+  .settings-blank-slate.settings-fidgit .settings-content-workspace {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .settings-blank-slate.settings-fidgit > .settings-prototype-agent-selector,
+  .settings-blank-slate.settings-fidgit.has-utility-panel > .settings-prototype-agent-selector,
+  .settings-blank-slate.settings-fidgit.has-top-navigation > .settings-prototype-agent-selector,
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel
+    > .settings-prototype-agent-selector {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .settings-blank-slate.settings-fidgit.has-agent-selector {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .settings-blank-slate.settings-fidgit.has-top-navigation:not(.has-agent-selector) {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-fidgit .settings-content-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .settings-fidgit .settings-content-workspace > .settings-blank-column,
+  .settings-fidgit
+    .settings-content-workspace
+    > .settings-prototype-overflow:has(.settings-overflow-content) {
+    overflow: visible;
+    border-right: 0;
+    padding: 0 0 16px;
+  }
+  .settings-fidgit .settings-content-document > .settings-prototype-configuration,
+  .settings-fidgit .settings-content-inventory > .settings-prototype-overflow {
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .settings-blank-slate.settings-fidgit.has-utility-panel > .settings-utility-panel {
+    position: absolute;
+    z-index: 8;
+    width: min(320px, 90%);
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+@media (max-width: 560px) {
+  .settings-fidgit .settings-profile-preferences {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.settings-fidgit .settings-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px 24px;
+  margin: 0 0 20px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.settings-fidgit .settings-metadata dt {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.settings-fidgit .settings-metadata dd {
+  margin: 0;
+  color: var(--text-strong);
+  font: 13px var(--mono, monospace);
+  overflow-wrap: anywhere;
+}
+
+/* Action rows remain usable in narrow editor surfaces, including mod facts. */
+.settings-fidgit .settings-content-workspace .model-actions {
+  flex-wrap: wrap;
+}
+
+/* The generic tablet cockpit reserves a chat right-rail row and fixes the
+   header to 72px. Settings instead has a two-band navigation stack. Outrank
+   that generic breakpoint so neither the workspace nor footer shares its row. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .cockpit.settings-mode.settings-top-navigation {
+    grid-template-rows: auto minmax(0, 1fr) 30px;
+  }
+  .cockpit.settings-mode.settings-top-navigation > .app-navigation-stack {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .cockpit.settings-mode.settings-top-navigation > .settings-workspace {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .cockpit.settings-mode.settings-top-navigation > .status-bar {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+}
+
+/* A single non-Models composition: compact selection band, then editor.
+   Portalled controls remain mounted and scrollable; no selector changes the
+   editing surface's left edge or steals a permanent side column. */
+.settings-fidgit .settings-content-standard {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
+  align-content: start;
+  overflow-y: auto;
+  gap: 20px;
+}
+.settings-fidgit .settings-content-standard > .settings-blank-column,
+.settings-fidgit
+  .settings-content-standard
+  > .settings-prototype-overflow:has(.settings-overflow-content) {
+  overflow: visible;
+  border: 0;
+  padding: 0 4px;
+  scrollbar-gutter: auto;
+}
+.settings-fidgit .settings-content-standard .setting-section {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-fidgit .settings-content-standard .setting-section > h2 {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  font-size: 18px;
+}
+.settings-fidgit
+  .settings-content-standard.settings-content-inventory
+  > .settings-prototype-overflow,
+.settings-fidgit
+  .settings-content-standard.settings-content-document
+  > .settings-prototype-configuration {
+  max-height: 210px;
+  overflow-y: auto;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.settings-fidgit
+  .settings-content-standard.settings-content-document
+  > .settings-prototype-configuration:has(.profile-document-selector) {
+  max-height: 180px;
+}
+.settings-fidgit .settings-content-standard.settings-content-inventory .memory-connection-list,
+.settings-fidgit .settings-content-standard.settings-content-inventory .provider-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 8px;
+}
+.settings-fidgit .settings-content-standard .memory-connection,
+.settings-fidgit .settings-content-standard .provider-card {
+  margin: 0;
+}
+.settings-fidgit .settings-content-standard .profile-document-selector {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.settings-fidgit .settings-content-standard .profile-document-selector button {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 34px;
+  padding: 6px 12px;
+}
+.settings-fidgit .settings-content-standard .profile-global-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+.settings-fidgit .settings-content-standard .profile-global-controls legend {
+  margin-bottom: 6px;
+}
+.settings-fidgit .settings-content-standard .profile-document-overflow textarea {
+  height: clamp(240px, 44vh, 540px);
+  min-height: 240px;
+}
+.settings-fidgit .settings-content-standard.settings-content-split > .settings-prototype-overflow {
+  padding-top: 20px;
+  border-top: 1px solid var(--line-soft);
+}
+.settings-fidgit .settings-content-standard .card-actions,
+.settings-fidgit .settings-content-standard .model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.settings-fidgit .settings-content-standard .settings-profile-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: none;
+  gap: 24px;
+}
+.settings-fidgit .settings-content-standard .settings-profile-preferences {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* Statistics is a reserved layout column, never an overlay. */
+.settings-blank-slate.settings-fidgit.has-utility-panel > .settings-utility-panel {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  grid-column: -2;
+  grid-row: 1 / -1;
+  width: auto;
+  min-width: 0;
+  box-shadow: none;
+}
+@media (max-width: 560px) {
+  .settings-fidgit .settings-content-standard .settings-profile-preferences {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Stacked controls must contribute their complete height, not shrink into the
+   next portalled surface when the working area is shorter than its contents. */
+.settings-fidgit .settings-content-standard {
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
+}
+
+/* Skills shares the bounded selection band: filters occupy one compact row
+   on desktop and two rows on phones, leaving the first saved skill visible. */
+.settings-fidgit .settings-content-standard .memory-saved:has(input[type='search']) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.settings-fidgit .settings-content-standard .memory-saved:has(input[type='search']) > .field,
+.settings-fidgit
+  .settings-content-standard
+  .memory-saved:has(input[type='search'])
+  > .field-pair
+  > .field {
+  margin: 0;
+}
+.settings-fidgit
+  .settings-content-standard
+  .memory-saved:has(input[type='search'])
+  > .memory-connection-list,
+.settings-fidgit
+  .settings-content-standard
+  .memory-saved:has(input[type='search'])
+  > .settings-empty {
+  grid-column: 1 / -1;
+}
+@media (max-width: 560px) {
+  .settings-fidgit .settings-content-standard .memory-saved:has(input[type='search']) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Collection-heavy families retain a bounded picker/editor split. Adding
+   documents, tools or agents grows an internal scroll area, never the page. */
+.settings-fidgit .settings-content-standard.settings-content-bounded {
+  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  align-content: stretch;
+  overflow: hidden;
+}
+.settings-fidgit .settings-content-standard.settings-family-rails {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.settings-fidgit .settings-content-standard.settings-content-bounded > .settings-blank-column,
+.settings-fidgit
+  .settings-content-standard.settings-content-bounded
+  > .settings-prototype-overflow:has(.settings-overflow-content),
+.settings-fidgit
+  .settings-content-standard.settings-content-bounded
+  > .settings-prototype-configuration:has(.profile-document-selector) {
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px 8px;
+  border: 0;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+.settings-fidgit
+  .settings-content-standard.settings-content-bounded
+  > .settings-prototype-configuration {
+  padding-right: 16px;
+  border-right: 1px solid var(--line-soft);
+}
+.settings-fidgit .settings-family-documents .profile-document-selector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: visible;
+}
+.settings-fidgit .settings-family-documents .profile-global-controls {
+  display: grid;
+}
+.settings-fidgit .settings-content-standard.settings-family-documents .profile-document-overflow,
+.settings-fidgit
+  .settings-content-standard.settings-family-documents
+  .profile-document-overflow
+  > .setting-section {
+  height: 100%;
+  min-height: 0;
+}
+.settings-fidgit
+  .settings-content-standard.settings-family-documents
+  .profile-document-overflow
+  textarea {
+  height: 100%;
+  min-height: 180px;
+}
+.settings-fidgit .settings-family-rails .agent-sidebar-order-list {
+  max-height: clamp(180px, 40dvh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .settings-fidgit .settings-content-standard.settings-content-bounded:not(.settings-family-rails) {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .settings-fidgit .settings-content-standard.settings-content-bounded {
+    height: min(740px, 80dvh);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 180px) minmax(0, 1fr);
+    gap: 16px;
+  }
+  .settings-fidgit
+    .settings-content-standard.settings-content-bounded
+    > .settings-prototype-configuration {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+    padding-right: 4px;
+    padding-bottom: 12px;
+  }
+  .settings-fidgit .settings-family-documents .profile-document-selector {
+    display: flex;
+    overflow-x: auto;
+  }
+  .settings-fidgit .settings-family-documents .profile-document-selector button {
+    flex: 0 0 auto;
+  }
+  .settings-fidgit .settings-content-standard.settings-family-rails {
+    grid-template-rows: minmax(0, 240px) minmax(0, 1fr);
+  }
+  .settings-fidgit .settings-family-rails .agent-sidebar-order-list {
+    max-height: 32dvh;
+  }
+}
+
+/* With the statistics column open, bounded editors use rows before their
+   content becomes too narrow. Each surface still owns its own scroll. */
+@media (min-width: 851px) and (max-width: 1400px) {
+  .settings-fidgit.has-utility-panel .settings-content-standard.settings-content-bounded {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 180px) minmax(0, 1fr);
+  }
+  .settings-fidgit.has-utility-panel .settings-content-standard.settings-family-rails {
+    grid-template-rows: minmax(0, 240px) minmax(0, 1fr);
+  }
+  .settings-fidgit.has-utility-panel
+    .settings-content-standard.settings-content-bounded
+    > .settings-prototype-configuration {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+    padding-right: 4px;
+    padding-bottom: 12px;
+  }
+  .settings-fidgit.has-utility-panel .settings-family-documents .profile-document-selector {
+    display: flex;
+    overflow-x: auto;
+  }
+}
+@media (max-width: 850px) {
+  .settings-blank-slate.settings-fidgit.has-utility-panel,
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(180px, 32dvh);
+  }
+  .settings-blank-slate.settings-fidgit.has-agent-selector.has-utility-panel {
+    grid-template-rows: auto auto minmax(0, 1fr) minmax(180px, 32dvh);
+  }
+  .settings-blank-slate.settings-fidgit.has-utility-panel > .settings-utility-panel {
+    position: relative;
+    inset: auto;
+    grid-column: 1;
+    grid-row: auto;
+    width: 100%;
+    height: 100%;
+    max-height: 32dvh;
+  }
+}
+@media (max-width: 850px) {
+  .settings-fidgit.has-utility-panel .settings-content-standard.settings-content-bounded {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+}
+/* The phone shell is intrinsically sized, unlike the tablet viewport grid.
+   Give its content a bounded track before adding statistics below it. */
+@media (max-width: 600px) {
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel {
+    height: auto;
+    grid-template-rows: auto minmax(400px, 60dvh) minmax(180px, 28dvh);
+  }
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-agent-selector.has-utility-panel {
+    grid-template-rows: auto auto minmax(400px, 60dvh) minmax(180px, 28dvh);
+  }
+}
+
+/* Tablet statistics stays useful without consuming the document editor's
+   minimum working height. The panel itself scrolls its metric cards. */
+@media (min-width: 601px) and (max-width: 850px) {
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-utility-panel {
+    grid-template-rows: auto minmax(300px, 1fr) clamp(180px, 22dvh, 240px);
+    overflow-y: auto;
+  }
+  .settings-blank-slate.settings-fidgit.has-top-navigation.has-agent-selector.has-utility-panel {
+    grid-template-rows: auto auto minmax(300px, 1fr) clamp(180px, 22dvh, 240px);
+  }
+  .settings-blank-slate.settings-fidgit.has-utility-panel > .settings-utility-panel {
+    max-height: 240px;
+  }
+}
+/* Allocate the label separately from the textarea. A 100%-height textarea
+   must not add its label height on top and paint beneath the Save row. */
+.settings-fidgit
+  .settings-content-standard.settings-family-documents
+  .profile-document-overflow
+  .field {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.settings-fidgit
+  .settings-content-standard.settings-family-documents
+  .profile-document-overflow
+  textarea {
+  min-height: 0;
+}

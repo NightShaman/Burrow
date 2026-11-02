@@ -1,0 +1,25 @@
+/* Endpoint metadata needs the full inventory width; actions form a separate row.
+   Deliberately scoped to MCP servers and mod sources, not API token cards. */
+.settings-fidgit :is(.mcp-server-inventory, .mod-source-inventory) .memory-connection {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.settings-fidgit :is(.mcp-server-inventory, .mod-source-inventory) .memory-connection-select {
+  min-width: 0;
+  width: 100%;
+}
+.settings-fidgit
+  :is(.mcp-server-inventory, .mod-source-inventory)
+  .memory-connection-select
+  :is(strong, small) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.settings-fidgit :is(.mcp-server-inventory, .mod-source-inventory) .memory-connection-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}

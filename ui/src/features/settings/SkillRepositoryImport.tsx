@@ -217,7 +217,12 @@ export function SkillRepositoryImport({
             </p>
           </div>
         </details>
-        <button type="button" disabled={!valid} onClick={() => void run(false)}>
+        <button
+          type="button"
+          className="settings-action"
+          disabled={!valid}
+          onClick={() => void run(false)}
+        >
           {busy === 'preview' ? 'Fetching preview…' : preview ? 'Refresh preview' : 'Preview skill'}
         </button>
       </fieldset>
@@ -298,7 +303,12 @@ export function SkillRepositoryImport({
               Install as <strong>{id || '—'}</strong>.{' '}
               {global ? 'Available to every agent.' : 'Assign to agents after installation.'}
             </p>
-            <button type="button" disabled={!id.trim()} onClick={() => void run(true)}>
+            <button
+              type="button"
+              className="settings-action"
+              disabled={!id.trim()}
+              onClick={() => void run(true)}
+            >
               {busy === 'install' ? 'Installing…' : 'Install skill'}
             </button>
           </fieldset>

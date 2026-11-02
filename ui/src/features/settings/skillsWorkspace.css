@@ -1,0 +1,102 @@
+/* Skills keeps its existing editor/source lifetimes and mutation handlers.
+   Group by task, using actual space remaining after inventory and statistics. */
+.skills-selected-workspace {
+  container: skills-workspace / inline-size;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
+  min-width: 0;
+}
+.skills-selected-workspace > div {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.skills-supporting-groups {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.skills-selected-workspace .field {
+  margin: 0;
+}
+.skills-selected-workspace .skill-source-fields {
+  gap: 10px;
+}
+.skills-selected-workspace .skill-source-fields textarea {
+  box-sizing: border-box;
+  height: clamp(180px, 24dvh, 280px);
+  min-height: 180px;
+}
+.skills-assignment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 110px), 1fr));
+  gap: 4px 12px;
+  max-height: min(50dvh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 2px;
+}
+.skills-assignment-grid .skill-check {
+  min-width: 0;
+  margin: 0;
+  min-height: 30px;
+  overflow-wrap: anywhere;
+}
+.skills-assignment-grid input {
+  flex: 0 0 auto;
+}
+.skills-agent-assignment-grid {
+  max-height: none;
+}
+.skills-source-group {
+  min-width: 0;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+.skills-source-group > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 4px 0;
+}
+.skills-source-group > summary small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.skills-source-group > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.skills-source-group[open] > summary {
+  margin-bottom: 16px;
+}
+.skills-source-group > .setting-section + .setting-section {
+  margin-top: 20px;
+}
+@container skills-workspace (min-width: 560px) {
+  .skills-selected-workspace > .skills-instructions-group {
+    grid-column: 1 / 8;
+    grid-row: 1;
+  }
+  .skills-selected-workspace > .skills-supporting-groups {
+    grid-column: 8 / -1;
+    grid-row: 1;
+    border-left: 1px solid var(--line-soft);
+    padding-left: 16px;
+  }
+}
+/* Sidebar search gets the full line; its two compact filters share the next.
+   This replaces the former horizontal inventory-band arrangement. */
+.settings-fidgit
+  .settings-content-standard
+  .skills-inventory.memory-saved:has(input[type='search']) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-fidgit .settings-content-standard .skills-inventory > .field-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}

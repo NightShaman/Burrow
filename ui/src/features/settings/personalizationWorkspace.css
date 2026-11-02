@@ -1,0 +1,8 @@
+/* Personal identity and environment appearance share one paired workspace.
+   The common 640px content-width rule handles stacking and reserved statistics. */
+.settings-fidgit .settings-personalization-profile,
+.settings-fidgit .settings-personalization-appearance {
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+}

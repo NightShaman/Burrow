@@ -1,0 +1,47 @@
+/* Model sources are radio choices, not large action tiles. */
+.settings-fidgit .curator-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.settings-fidgit .curator-mode label {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-fidgit .curator-mode input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Genuine actions remain buttons even when prerequisites disable them. */
+.settings-fidgit .continuity-embedding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.settings-fidgit .continuity-embedding-actions > button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.settings-fidgit .continuity-embedding-actions > button.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.settings-fidgit .continuity-embedding-actions > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.settings-fidgit .continuity-embedding-actions > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

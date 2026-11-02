@@ -76,6 +76,20 @@ describe('Model connection views', () => {
       />,
     );
     expect(screen.getByText('Discovered: text, image')).toBeTruthy();
+    for (const name of ['Context window', 'Input', 'Output']) {
+      const group = screen.getByRole('group', { name });
+      expect(group.tagName).toBe('FIELDSET');
+      expect(group.querySelector('legend')).toBeNull();
+      const title = group.querySelector('.model-capability-title');
+      expect(title?.textContent).toBe(name);
+      expect(group.getAttribute('aria-labelledby')).toBe(title?.id);
+    }
+    expect(
+      screen
+        .getByLabelText('Output token limit')
+        .closest('.model-output-limit')
+        ?.querySelector('.model-capability-title')?.textContent,
+    ).toBe('Output token limit');
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(
       screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026'),
@@ -106,6 +120,12 @@ describe('Model connection views', () => {
     fireEvent.click(screen.getAllByRole('radio', { name: 'Manual' })[0]);
     expect(onAuto).toHaveBeenCalledWith('context-model', false);
     const input = screen.getByLabelText('Manual token limit') as HTMLInputElement;
+    expect(input.parentElement?.classList.contains('settings-quantity-field')).toBe(true);
+    expect(
+      screen
+        .getByLabelText('Output token limit')
+        .parentElement?.classList.contains('settings-quantity-field'),
+    ).toBe(true);
     fireEvent.change(input, { target: { value: '64000' } });
     expect(onOverride).toHaveBeenCalledWith('context-model', 64000);
   });
@@ -295,4 +315,42 @@ describe('Google Developer API model metadata', () => {
     expect(screen.getByText('Discovered: 1,234 tokens')).toBeTruthy();
     expect((screen.getByLabelText('Output token limit') as HTMLInputElement).value).toBe('321');
   });
+});
+
+it('renders ten two-line model rows without repeated modalities and preserves independent controls', () => {
+  const onSelectModel = vi.fn(),
+    onToggleModel = vi.fn(),
+    onDeleteManualModel = vi.fn();
+  const models: RuntimeModel[] = Array.from({ length: 10 }, (_, index) => ({
+    id: `model-${index}`,
+    displayName: `Model ${index}`,
+    selected: index === 0,
+    manual: index === 9,
+    discoveredInput: ['text'],
+    discoveredOutput: ['text'],
+  }));
+  const { container } = render(
+    <ModelResults
+      compact
+      models={models}
+      manualModel=""
+      selectedModelId="model-0"
+      onSelectModel={onSelectModel}
+      onToggleModel={onToggleModel}
+      onDeleteManualModel={onDeleteManualModel}
+      onManualModelChange={vi.fn()}
+      onAddManualModel={vi.fn()}
+    />,
+  );
+  expect(container.querySelectorAll('.model-option-compact')).toHaveLength(10);
+  expect(container.querySelector('.model-option-summary')).toBeNull();
+  expect(container.querySelectorAll('.model-option-select small')).toHaveLength(10);
+  expect(container.querySelector('.model-option-select small')?.textContent).toBe('model-0');
+  fireEvent.click(screen.getByRole('button', { name: 'Select Model 9 (model-9)' }));
+  expect(onSelectModel).toHaveBeenCalledWith('model-9');
+  expect(onToggleModel).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Use Model 9' }));
+  expect(onToggleModel).toHaveBeenCalledWith('model-9');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete manually added model model-9' }));
+  expect(onDeleteManualModel).toHaveBeenCalledWith('model-9');
 });

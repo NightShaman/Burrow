@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import './telemetryWorkspace.css';
 import { createPortal } from 'react-dom';
 import { api, jsonMutation } from '../../app/api';
 import { useUnsavedChanges } from '../../app/UnsavedChanges';
@@ -445,30 +446,34 @@ export function OpenTelemetrySettings({
           {!overflowTarget && inventory}
           {current && (
             <div className="telemetry-mode-fields">
-              <Field label="Name">
-                <input
-                  aria-label="Name"
-                  maxLength={160}
-                  value={current.name}
-                  onChange={(e) => edit({ name: e.target.value })}
-                />
-              </Field>
-              <Field label="Provider">
-                <select
-                  aria-label="Provider"
-                  value={current.provider}
-                  onChange={(e) => switchProvider(e.target.value)}
-                >
-                  {!saved?.providers?.some((p) => p.id === current.provider) && (
-                    <option value={current.provider}>Unknown provider ({current.provider})</option>
-                  )}
-                  {saved?.providers?.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {current.legacy && p.id === current.provider ? 'Custom OTLP' : p.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <div className="telemetry-identity-fields">
+                <Field label="Name">
+                  <input
+                    aria-label="Name"
+                    maxLength={160}
+                    value={current.name}
+                    onChange={(e) => edit({ name: e.target.value })}
+                  />
+                </Field>
+                <Field label="Provider">
+                  <select
+                    aria-label="Provider"
+                    value={current.provider}
+                    onChange={(e) => switchProvider(e.target.value)}
+                  >
+                    {!saved?.providers?.some((p) => p.id === current.provider) && (
+                      <option value={current.provider}>
+                        Unknown provider ({current.provider})
+                      </option>
+                    )}
+                    {saved?.providers?.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {current.legacy && p.id === current.provider ? 'Custom OTLP' : p.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
               {provider?.description && (
                 <small className="telemetry-field-help">{provider.description}</small>
               )}
@@ -767,7 +772,7 @@ export function OpenTelemetrySettings({
               </details>
               <button
                 type="button"
-                className="secondary"
+                className="secondary settings-action"
                 onClick={() => {
                   const remaining = destinations.filter((d) => d.id !== current.id);
                   setDestinations(remaining);

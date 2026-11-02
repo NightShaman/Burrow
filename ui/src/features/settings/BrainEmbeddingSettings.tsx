@@ -1,3 +1,4 @@
+import './continuitySettings.css';
 import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { DreamPromotionSettings } from './DreamPromotionSettings';
 import { providerOptionLabel } from './ProviderModelFields';
@@ -289,25 +290,27 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
             }}
           />
         </Field>
-        <button type="button" disabled={locked || !selected} onClick={() => void request('test')}>
-          Test embedding model
-        </button>
+        <div className="continuity-embedding-actions">
+          <button type="button" disabled={locked || !selected} onClick={() => void request('test')}>
+            Test embedding model
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={locked || !status || (enabled && (!selected || (manual && !tested)))}
+            onClick={() => void request('save')}
+          >
+            Save embedding settings
+          </button>
+          <button
+            type="button"
+            disabled={locked || !status?.enabled}
+            onClick={() => void request('reindex')}
+          >
+            Reindex all memories asynchronously
+          </button>
+        </div>
         {tested && <p role="status">{tested}</p>}
-        <button
-          type="button"
-          className="primary"
-          disabled={locked || !status || (enabled && (!selected || (manual && !tested)))}
-          onClick={() => void request('save')}
-        >
-          Save embedding settings
-        </button>
-        <button
-          type="button"
-          disabled={locked || !status?.enabled}
-          onClick={() => void request('reindex')}
-        >
-          Reindex all memories asynchronously
-        </button>
         {busy && (
           <p role="status">
             {busy === 'load' ? 'Loading settings…' : `${busy} request in progress…`}

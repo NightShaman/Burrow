@@ -1,3 +1,4 @@
+import './inventoryCardDensity.css';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -387,9 +388,11 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
       </div>
     );
   const inventory = overflowTarget ? (
-    <div className="settings-overflow-content memory-saved">{inventoryContents}</div>
+    <div className="settings-overflow-content memory-saved mcp-server-inventory">
+      {inventoryContents}
+    </div>
   ) : (
-    <details className="memory-saved saved-accordion">
+    <details className="memory-saved saved-accordion mcp-server-inventory">
       <summary>
         <h3>Saved MCP servers</h3>
         <span>{connections.length}</span>

@@ -1,3 +1,4 @@
+import './authenticationWorkspace.css';
 import { useEffect, useState } from 'react';
 import { api } from '../../app/api';
 import { useUnsavedChanges } from '../../app/UnsavedChanges';

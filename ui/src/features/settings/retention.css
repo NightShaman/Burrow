@@ -72,3 +72,22 @@
 .retention-storage-field {
   grid-column: 1/-1;
 }
+
+/* Keep the editable limit usable beside its compact unit selector. Shared
+   field select widths must not consume the entire storage control row. */
+.settings-fidgit .retention-storage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--settings-unit-width, 88px);
+  align-items: stretch;
+}
+.settings-fidgit .retention-storage input,
+.settings-fidgit .retention-storage select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Follow the allocated pane width, including a single form's half track. */
+.settings-fidgit .retention-actions {
+  flex-wrap: wrap;
+}

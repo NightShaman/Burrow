@@ -74,6 +74,8 @@ export function useModelConnectionEditor({
   const [savedProvidersOpen, setSavedProvidersOpen] = useState(false);
   const [requestState, setRequestState] = useState<'idle' | 'connecting' | 'saving'>('idle');
   const [requestError, setRequestError] = useState('');
+  // Disclosure state belongs to the current editor, not to generic save/delete errors.
+  const [connectionRecoveryRequired, setConnectionRecoveryRequired] = useState(false);
   const [oauthModal, setOauthModal] = useState<'openai' | 'anthropic' | null>(null);
   const draft = JSON.stringify([
     editingId,
@@ -113,6 +115,7 @@ export function useModelConnectionEditor({
     savedFingerprint.current = null;
     writePending.current = false;
     setEditingId(null);
+    setConnectionRecoveryRequired(false);
     setPoolEnabled(true);
     setMemberConnectionIds([]);
     setProvider(loadBalancing ? 'OpenAI LB' : '');
@@ -187,10 +190,14 @@ export function useModelConnectionEditor({
       setAvailableModels(models);
       setSelectedModelId(models[0]?.id ?? null);
       setConnected(true);
+      setConnectionRecoveryRequired(false);
       return models;
     } catch (error) {
       if (!current()) return [];
       setConnected(true);
+      // Network and discovery-envelope errors may also need URL/credential repair.
+      // Keep recovery open through retries without guessing from error messages.
+      setConnectionRecoveryRequired(true);
       setRequestError(
         error instanceof Error
           ? `Could not discover models: ${error.message}. Add model IDs manually.`
@@ -312,6 +319,7 @@ export function useModelConnectionEditor({
     savedFingerprint.current = null;
     writePending.current = false;
     setEditingId(connection.id);
+    setConnectionRecoveryRequired(false);
     setProvider(connection.provider ?? 'OpenAI');
     setApiType(connection.apiType ?? 'openai-responses');
     setUrl(connection.baseUrl ?? 'https://chatgpt.com/backend-api');
@@ -488,6 +496,7 @@ export function useModelConnectionEditor({
     writePending.current = false;
     setRequestState('idle');
     setEditingId(item.id);
+    setConnectionRecoveryRequired(false);
     setProvider(item.provider);
     setApiType(item.apiType);
     setPoolEnabled(item.pool?.enabled ?? true);
@@ -594,6 +603,7 @@ export function useModelConnectionEditor({
       ];
       editorGeneration.current += 1;
       setEditingId(id);
+      setConnectionRecoveryRequired(false);
       setProvider(name);
       setApiType(type);
       setPoolEnabled(enabled);
@@ -687,6 +697,7 @@ export function useModelConnectionEditor({
     setSavedProvidersOpen,
     requestState,
     requestError,
+    connectionRecoveryRequired,
     oauthModal,
     setOauthModal,
     openAiFlow,

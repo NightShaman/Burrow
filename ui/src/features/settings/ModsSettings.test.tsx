@@ -52,9 +52,7 @@ describe('ModsSettings layout contract', () => {
     const overflow = document.createElement('section');
     document.body.appendChild(overflow);
     const { container } = render(<ModsSettings section="installed" overflowTarget={overflow} />);
-    await waitFor(() =>
-      expect(container.textContent).toContain('Manage installation, version, and availability'),
-    );
+    await waitFor(() => expect(container.querySelector('.settings-metadata')).not.toBeNull());
     expect(container.querySelector('.mod-configuration')).toBeTruthy();
     expect(container.querySelector('.mod-configuration.setting-section')).toBeTruthy();
     expect(overflow.textContent).toContain('Alpha');
@@ -142,12 +140,12 @@ describe('ModsSettings version and lifecycle truth', () => {
       vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
       render(<ModsSettings />);
       await screen.findByRole('button', { name: label });
-      const current = screen.getByLabelText('Installed version') as HTMLInputElement;
-      const latest = screen.getByLabelText('Latest source version') as HTMLInputElement;
+      const current = screen.getByLabelText('Installed version') as HTMLOutputElement;
+      const latest = screen.getByLabelText('Latest source version') as HTMLOutputElement;
       expect(current.value).toBe(versions.version || 'Unknown');
       expect(latest.value).toBe(versions.latestVersion || 'Unknown');
-      expect(current.readOnly).toBe(true);
-      expect(latest.readOnly).toBe(true);
+      expect(current.tagName).toBe('OUTPUT');
+      expect(latest.tagName).toBe('OUTPUT');
       expect(screen.queryByText('Up to date')).toBeNull();
       expect(screen.queryByLabelText('Install version')).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: label }));
@@ -176,7 +174,7 @@ describe('ModsSettings version and lifecycle truth', () => {
         name: status === 'installed' ? 'Reinstall' : 'Install',
       });
       expect((button as HTMLButtonElement).disabled).toBe(true);
-      expect((screen.getByLabelText('Installed version') as HTMLInputElement).value).toBe(
+      expect((screen.getByLabelText('Installed version') as HTMLOutputElement).value).toBe(
         status === 'installed' ? 'Unknown' : 'Not installed',
       );
       fireEvent.click(button);
@@ -227,7 +225,7 @@ describe('explicit mod activation', () => {
     ]);
     expect(overflow.textContent).toContain('Installed · Disabled');
     expect(container.textContent).toContain('Choose Enable to activate it');
-    expect((screen.getByLabelText('Running version') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Running version') as HTMLOutputElement).value).toBe(
       'Not running',
     );
     expect(overflow.querySelector('.model-actions')).toBeNull();
@@ -240,7 +238,7 @@ describe('explicit mod activation', () => {
       { method: 'POST' },
     );
     expect(overflow.textContent).toContain('Installed · Enabled');
-    expect((screen.getByLabelText('Running version') as HTMLInputElement).value).toBe('1.0.0');
+    expect((screen.getByLabelText('Running version') as HTMLOutputElement).value).toBe('1.0.0');
     expect(screen.queryByText(/Choose Enable to activate it/)).toBeNull();
     fireEvent.click(disable);
     await screen.findByRole('button', { name: 'Enable' });

@@ -1,0 +1,104 @@
+/* Width belongs to the layout pane, not to a page-specific form cap.
+   See docs/SETTINGS_UI_CONTRACT.md for semantic exceptions. */
+.settings-fidgit {
+  --settings-pane-gap: 20px;
+  --settings-pane-inset: 16px;
+  --settings-workspace-inset: 16px;
+  --settings-section-gap: 24px;
+  --settings-field-pair-gap: 12px;
+  --settings-control-gap: 8px;
+  --settings-quantity-width: 220px;
+  --settings-unit-width: 88px;
+}
+.settings-fidgit
+  :is(
+    .settings-content-standard,
+    .settings-content-models,
+    .settings-content-extension:has(.mod-settings-mount:not([data-settings-layout='imperative']))
+  )
+  :is(.setting-section, .settings-form) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+.settings-fidgit
+  :is(
+    .settings-content-standard,
+    .settings-content-models,
+    .settings-content-extension:has(.mod-settings-mount:not([data-settings-layout='imperative']))
+  )
+  .field {
+  min-width: 0;
+  max-width: none;
+}
+.settings-fidgit
+  :is(
+    .settings-content-standard,
+    .settings-content-models,
+    .settings-content-extension:has(.mod-settings-mount:not([data-settings-layout='imperative']))
+  )
+  .field:not(.settings-quantity-field)
+  > :is(
+    input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']),
+    select,
+    textarea
+  ) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace:is(.settings-content-standard, .settings-content-models)
+  :is(.field-pair, .settings-field-pair) {
+  gap: var(--settings-field-pair-gap);
+}
+.settings-fidgit .settings-content-standard :is(.skill-compact-field, .avatar-file-control) {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+/* Explicit quantity fields are compact consistently, never whole-form caps. */
+.settings-fidgit
+  :is(.settings-content-standard, .settings-content-models)
+  .settings-quantity-field
+  > input {
+  box-sizing: border-box;
+  width: min(100%, var(--settings-quantity-width));
+  min-width: 0;
+  max-width: var(--settings-quantity-width);
+}
+/* A lone temperature range is a full row; provider/model controls retain their
+   intentional two-field layout above it. Also applies to the local GGUF mode. */
+.settings-fidgit .settings-content-standard .curator-model-row > .field:has(> input[type='range']) {
+  grid-column: 1 / -1;
+}
+
+/* Every family uses the same outer breathing room at a given viewport. */
+.settings-blank-slate.settings-fidgit > .settings-content-workspace {
+  padding: var(--settings-workspace-inset);
+}
+@media (max-width: 1200px) {
+  .settings-fidgit {
+    --settings-workspace-inset: 12px;
+  }
+}
+@media (max-width: 850px) {
+  .settings-fidgit {
+    --settings-workspace-inset: 8px;
+  }
+}
+
+/* Autosaved operator name has no adjacent action; do not reserve its old
+   empty button track and gap beside an otherwise full-width field. */
+.settings-fidgit .settings-content-standard .operator-profile-actions:has(> .field:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* Explicit actions size to their label rather than inheriting grid stretch.
+   Selection tiles and other intentional full-width controls are not actions. */
+.settings-fidgit .settings-content-standard .settings-action {
+  width: auto;
+  max-width: 100%;
+  justify-self: end;
+}

@@ -1,0 +1,190 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
+import { ModSettingsHost } from './ModSettingsHost';
+const { createSettingsContribution, mountSettings } = vi.hoisted(() => ({
+  createSettingsContribution: vi.fn(),
+  mountSettings: vi.fn(),
+}));
+vi.mock('./ModSettingsHostFixture', () => ({
+  createSettingsContribution,
+  mountSettings,
+  settingsContribution: undefined,
+  settingsSections: [{ id: 'main', label: 'Main' }],
+}));
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+it.each(['form', 'activity', 'form-inventory', 'list-detail'])(
+  'advertises the validated %s layout without replacing portal targets',
+  async (layout) => {
+    createSettingsContribution.mockResolvedValue({
+      sections: [
+        {
+          id: 'main',
+          label: 'Main',
+          layout,
+          fields: [{ id: 'name', label: 'Name', value: 'Example' }],
+          items: [{ id: 'one', label: 'Item one' }],
+        },
+        {
+          id: 'other',
+          label: 'Other',
+          layout: 'form',
+          fields: [{ id: 'other', label: 'Other field' }],
+        },
+      ],
+    });
+    const navigation = document.createElement('div');
+    const overflow = document.createElement('div');
+    document.body.append(navigation, overflow);
+    try {
+      const { container } = render(
+        <ConfirmProvider>
+          <ModSettingsHost
+            modId="fixture"
+            settingsUrl="./ModSettingsHostFixture"
+            agents={[]}
+            onAgentsChanged={async () => {}}
+            navigationTarget={navigation}
+            overflowTarget={overflow}
+          />
+        </ConfirmProvider>,
+      );
+      await waitFor(() =>
+        expect(
+          container.querySelector('.mod-settings-mount')?.getAttribute('data-settings-layout'),
+        ).toBe(layout),
+      );
+      const host = container.querySelector('.mod-settings-mount');
+      expect(mountSettings).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Other' }));
+      await screen.findByLabelText('Other field');
+      expect(container.querySelector('.mod-settings-mount')).toBe(host);
+      expect(host?.getAttribute('data-settings-layout')).toBe('form');
+      expect(overflow.isConnected).toBe(true);
+    } finally {
+      navigation.remove();
+      overflow.remove();
+    }
+  },
+);
+it('does not misclassify an imperative module with empty declarative metadata', async () => {
+  createSettingsContribution.mockResolvedValue({
+    sections: [{ id: 'main', label: 'Main', layout: 'form', fields: [] }],
+  });
+  const { container } = render(
+    <ConfirmProvider>
+      <ModSettingsHost
+        modId="fixture"
+        settingsUrl="./ModSettingsHostFixture"
+        agents={[]}
+        onAgentsChanged={async () => {}}
+        navigationTarget={null}
+        overflowTarget={null}
+      />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(mountSettings).toHaveBeenCalled());
+  expect(container.querySelector('.mod-settings-mount')?.getAttribute('data-settings-layout')).toBe(
+    'imperative',
+  );
+});
+
+it('switches mixed imperative and declarative sections without competing DOM ownership', async () => {
+  createSettingsContribution.mockResolvedValue({
+    sections: [
+      { id: 'overview', label: 'Overview', layout: 'form', fields: [] },
+      { id: 'advanced', label: 'Advanced', layout: 'form', fields: [] },
+      {
+        id: 'form',
+        label: 'Declarative form',
+        layout: 'form',
+        fields: [{ id: 'name', label: 'Declared name', value: 'Kept' }],
+      },
+      {
+        id: 'inventory',
+        label: 'Declarative inventory',
+        layout: 'form-inventory',
+        items: [
+          {
+            id: 'one',
+            label: 'Declared item',
+            fields: [{ id: 'value', label: 'Item value', value: 'Kept' }],
+          },
+        ],
+      },
+    ],
+  });
+  const disposed = vi.fn();
+  mountSettings.mockImplementation(
+    ({
+      section,
+      primary,
+      overflow,
+    }: {
+      section: string;
+      primary: { replace: (node: Node) => void };
+      overflow: { replace: (node: Node) => void } | null;
+    }) => {
+      const heading = document.createElement('h2');
+      heading.textContent = `Imperative ${section}`;
+      primary.replace(heading);
+      const detail = document.createElement('p');
+      detail.textContent = `Support ${section}`;
+      overflow?.replace(detail);
+      return () => disposed(section);
+    },
+  );
+  const navigation = document.createElement('div');
+  const overflow = document.createElement('div');
+  document.body.append(navigation, overflow);
+  try {
+    const { container, unmount } = render(
+      <ConfirmProvider>
+        <ModSettingsHost
+          modId="fixture"
+          settingsUrl="./ModSettingsHostFixture"
+          agents={[]}
+          onAgentsChanged={async () => {}}
+          navigationTarget={navigation}
+          overflowTarget={overflow}
+        />
+      </ConfirmProvider>,
+    );
+    await screen.findByRole('heading', { name: 'Imperative overview' });
+    const host = container.querySelector('.mod-settings-mount');
+    for (const label of [
+      'Advanced',
+      'Declarative form',
+      'Overview',
+      'Declarative inventory',
+      'Advanced',
+    ]) {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      if (label === 'Declarative form') await screen.findByLabelText('Declared name');
+      else if (label === 'Declarative inventory')
+        await screen.findByRole('button', { name: 'Declared item' });
+      else await screen.findByRole('heading', { name: `Imperative ${label.toLowerCase()}` });
+      expect(container.querySelector('.mod-settings-mount')).toBe(host);
+      expect(overflow.isConnected).toBe(true);
+    }
+    expect(mountSettings.mock.calls.map(([context]) => context.section)).toEqual([
+      'overview',
+      'advanced',
+      'overview',
+      'advanced',
+    ]);
+    unmount();
+    expect(disposed.mock.calls.map(([section]) => section)).toEqual([
+      'overview',
+      'advanced',
+      'overview',
+      'advanced',
+    ]);
+  } finally {
+    navigation.remove();
+    overflow.remove();
+  }
+});

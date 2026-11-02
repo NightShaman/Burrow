@@ -27,6 +27,7 @@ it('shows masked replacement tokens only for an edited OAuth Responses connectio
   expect(screen.queryByLabelText('OpenAI ID token')).toBeNull();
   fireEvent.click(screen.getByText('Saved providers'));
   fireEvent.click(screen.getByRole('button', { name: /OAuth account.*1 model/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
   for (const label of ['OpenAI ID token', 'OpenAI access token', 'OpenAI refresh token']) {
     const input = screen.getByLabelText(label) as HTMLInputElement;
     expect(input.type).toBe('password');
@@ -39,6 +40,7 @@ it('shows masked replacement tokens only for an edited OAuth Responses connectio
   fireEvent.click(screen.getByRole('button', { name: /Key account.*1 model/ }));
   expect(screen.queryByLabelText('OpenAI ID token')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /OAuth account.*1 model/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
   expect((screen.getByLabelText('OpenAI access token') as HTMLInputElement).value).toBe('');
   fireEvent.change(screen.getByLabelText('OpenAI ID token'), {
     target: { value: 'cancel-secret' },
@@ -46,5 +48,6 @@ it('shows masked replacement tokens only for an edited OAuth Responses connectio
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(screen.queryByLabelText('OpenAI ID token')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /OAuth account.*1 model/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
   expect((screen.getByLabelText('OpenAI ID token') as HTMLInputElement).value).toBe('');
 });

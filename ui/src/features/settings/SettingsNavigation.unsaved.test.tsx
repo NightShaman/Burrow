@@ -1,5 +1,5 @@
 import { useState, type ComponentProps } from 'react';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
@@ -43,6 +43,26 @@ beforeEach(() => {
       return { sourceRefresh: { enabled: false, intervalMs: 3_600_000, staleMs: 60_000 } };
     if (path.startsWith('/api/mod-management/secret-references')) return { references: [] };
     if (path === '/api/setup/status') return { wizardStep: 'ready' };
+    if (path === '/api/settings/retention')
+      return {
+        ok: true,
+        policy: {
+          version: 1,
+          enabled: false,
+          traceMaxAgeDays: null,
+          traceMaxBytes: null,
+          intervalMinutes: 1440,
+        },
+        state: {},
+        plan: {
+          ok: true,
+          dryRun: true,
+          retention: {},
+          counts: { deleteTraces: 0, deleteTraceBytes: 0 },
+        },
+      };
+    if (path === '/api/settings/browser-tab') return { suffix: '' };
+    if (path === '/api/settings/timezone') return { timezone: 'UTC' };
     if (path === '/api/settings/identities') return { operator: profile };
     if (path === '/api/settings/mcp-connections') return { connections: [alpha] };
     if (path === '/api/settings/ui-auth') return { auth: { mode: 'none' } };
@@ -129,7 +149,7 @@ async function dirty(form: 'profile' | 'MCP') {
 }
 const destinations = {
   profile: {
-    subsection: { button: 'Appearance', heading: 'Appearance' },
+    subsection: { button: 'Trace retention', heading: 'Managed trace retention' },
     category: { button: 'Connections', heading: 'Authentication' },
   },
   MCP: {
@@ -150,7 +170,7 @@ it.each(cases)(
     await dirty(form);
     const destination = destinations[form][kind];
     const originalCategory = form === 'profile' ? 'General' : 'Connections';
-    const originalSection = form === 'profile' ? 'Operator profile' : 'MCP servers';
+    const originalSection = form === 'profile' ? 'Personalization' : 'MCP servers';
     if (target) fireEvent.click(within(target).getByRole('button', { name: destination.button }));
     else click(destination.button);
 
@@ -188,6 +208,10 @@ it.each(cases)(
       await screen.findByRole('heading', { name: destination.heading });
       expect(screen.queryByRole('alertdialog')).toBeNull();
       expect(mutations()).toHaveLength(0);
+      if (destination.heading === 'Managed trace retention')
+        await waitFor(() =>
+          expect(screen.getByLabelText('Maximum storage')).toHaveProperty('disabled', false),
+        );
       // Returning mounts the saved baseline, not the discarded in-memory draft.
       if (kind === 'category') click(originalCategory);
       click(originalSection);
@@ -251,7 +275,7 @@ it.each(['profile', 'MCP'] as const)(
   async (form) => {
     const target = mount(form, true)!;
     await dirty(form);
-    click(form === 'profile' ? 'Operator profile' : 'MCP servers');
+    click(form === 'profile' ? 'Personalization' : 'MCP servers');
     fireEvent.click(
       within(target).getByRole('button', { name: form === 'profile' ? 'General' : 'Connections' }),
     );
@@ -291,7 +315,7 @@ function blurDestination(form: 'profile' | 'Mods', kind: 'subsection' | 'categor
   return kind === 'category'
     ? { button: 'Connections', heading: 'Authentication' }
     : form === 'profile'
-      ? { button: 'Appearance', heading: 'Appearance' }
+      ? { button: 'Trace retention', heading: 'Managed trace retention' }
       : { button: 'Mod sources', heading: 'Mod sources' };
 }
 function deferMutation() {

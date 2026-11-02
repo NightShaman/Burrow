@@ -50,9 +50,18 @@ it('previews without creating a placeholder, derives metadata and installs the e
   );
   render(<SkillRepositoryImport onInstalled={onInstalled} />);
   expect(screen.getByRole('button', { name: 'Preview skill' })).toHaveProperty('disabled', true);
+  expect(
+    screen.getByRole('button', { name: 'Preview skill' }).classList.contains('settings-action'),
+  ).toBe(true);
   expect(screen.queryByRole('textbox', { name: 'Install ID' })).toBeNull();
   enterSource();
   await screen.findByRole('button', { name: 'Install skill' });
+  expect(
+    screen.getByRole('button', { name: 'Install skill' }).classList.contains('settings-action'),
+  ).toBe(true);
+  expect(
+    screen.getByRole('button', { name: 'Refresh preview' }).classList.contains('settings-action'),
+  ).toBe(true);
   expect(mocked).toHaveBeenCalledTimes(1);
   expect(JSON.parse(String(mocked.mock.calls[0][1]?.body))).toMatchObject({
     repository: '/repo',

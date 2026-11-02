@@ -1,3 +1,4 @@
+import './inventoryCardDensity.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -549,35 +550,42 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       <h2 id="selected-mod-heading">{selectedMod ? selectedMod.name : 'Mod details'}</h2>
       {selectedMod ? (
         <>
-          <p className="settings-description">
-            Manage installation, version, and availability for this mod.
-          </p>
-          <Field label="Mod ID">
-            <input value={selectedMod.id} readOnly />
-          </Field>
-          <div className="field-pair">
-            <Field label="Installed version">
-              <input
-                value={
-                  selectedMod.status === 'installed'
+          <dl className="settings-metadata">
+            <div>
+              <dt>Mod ID</dt>
+              <dd>
+                <output aria-label="Mod ID">{selectedMod.id}</output>
+              </dd>
+            </div>
+            <div>
+              <dt>Installed version</dt>
+              <dd>
+                <output aria-label="Installed version">
+                  {selectedMod.status === 'installed'
                     ? selectedMod.version || 'Unknown'
-                    : 'Not installed'
-                }
-                readOnly
-              />
-            </Field>
-            <Field label="Running version">
-              <input
-                value={
-                  selectedMod.enabled ? selectedMod.runningVersion || 'Unavailable' : 'Not running'
-                }
-                readOnly
-              />
-            </Field>
-          </div>
-          <Field label="Latest source version">
-            <input value={selectedMod.latestVersion || 'Unknown'} readOnly />
-          </Field>
+                    : 'Not installed'}
+                </output>
+              </dd>
+            </div>
+            <div>
+              <dt>Running version</dt>
+              <dd>
+                <output aria-label="Running version">
+                  {selectedMod.enabled
+                    ? selectedMod.runningVersion || 'Unavailable'
+                    : 'Not running'}
+                </output>
+              </dd>
+            </div>
+            <div>
+              <dt>Latest source version</dt>
+              <dd>
+                <output aria-label="Latest source version">
+                  {selectedMod.latestVersion || 'Unknown'}
+                </output>
+              </dd>
+            </div>
+          </dl>
           <p className="settings-description">
             {selectedMod.status === 'installed'
               ? `Installed · ${selectedMod.enabled ? 'Enabled' : 'Disabled'}`
@@ -693,11 +701,14 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
       </div>
     );
   const sourceInventory = overflowTarget ? (
-    <div className="settings-overflow-content memory-saved" aria-label="Configured mod sources">
+    <div
+      className="settings-overflow-content memory-saved mod-source-inventory"
+      aria-label="Configured mod sources"
+    >
       {sourceInventoryContents}
     </div>
   ) : (
-    <details className="memory-saved saved-accordion" open>
+    <details className="memory-saved saved-accordion mod-source-inventory" open>
       <summary>
         <h3>Configured sources</h3>
         <span>{state.sources.length}</span>

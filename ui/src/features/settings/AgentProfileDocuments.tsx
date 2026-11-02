@@ -222,12 +222,10 @@ export function AgentProfileDocuments({
               Retry loading
             </button>
           )}
-          <p className="settings-description">Choose a local profile document to edit.</p>
           {state === 'loading' ? (
             <p className="settings-empty">Loading profile documents…</p>
           ) : (
             <>
-              {globalControls}
               <div className="profile-document-selector">
                 {documents.map((document) => (
                   <button
@@ -244,6 +242,7 @@ export function AgentProfileDocuments({
                   </button>
                 ))}
               </div>
+              {globalControls}
             </>
           )}
           {error && (

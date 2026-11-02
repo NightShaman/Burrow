@@ -48,7 +48,7 @@ it('offers Halloween separately from Midnight and persists the selected palette 
   }
   render(<Parent />);
   await screen.findByDisplayValue('Test');
-  fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Personalization' }));
   const midnight = screen.getByRole('button', { name: /^Midnight/ });
   const halloween = screen.getByRole('button', { name: /^Halloween/ });
   expect(midnight.getAttribute('aria-pressed')).toBe('true');

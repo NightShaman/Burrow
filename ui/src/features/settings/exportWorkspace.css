@@ -1,0 +1,16 @@
+/* Real export catalogs contain several categories. Keep their descriptions
+   visible while using the width of the export pane, not the whole screen. */
+.settings-fidgit .setting-section:has(> .export-options) {
+  container: export-form / inline-size;
+}
+@container export-form (min-width: 500px) {
+  .settings-fidgit .export-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.settings-fidgit .export-option {
+  min-width: 0;
+}
+.settings-fidgit .export-option input {
+  flex: 0 0 auto;
+}

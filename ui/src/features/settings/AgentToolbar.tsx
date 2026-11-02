@@ -1,3 +1,4 @@
+import './agentToolbarPicker.css';
 import { useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { useEffect, useState } from 'react';
 import type { Agent } from '../../app/types';
@@ -53,25 +54,49 @@ export function AgentToolbar(props: AgentToolbarProps) {
               Global
             </button>
           )}
-          {agents.map((agent) => (
-            <button
-              className={[
-                !props.globalSelected && agent.id === selectedId ? 'active' : '',
-                !isAgentEnabled(agent) ? 'agent-disabled' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              type="button"
-              onClick={() => {
-                if (props.globalSelected || agent.id !== selectedId)
-                  navigate(() => onSelect(agent.id));
-              }}
-              key={agent.id}
-              aria-pressed={!props.globalSelected && agent.id === selectedId}
-            >
-              {agent.name}
-            </button>
-          ))}
+          {agents.length > 8 ? (
+            <label className="agent-toolbar-picker">
+              Agent
+              <select
+                aria-label="Agent to configure"
+                value={props.globalSelected ? '' : selectedId}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  if (id && (props.globalSelected || id !== selectedId))
+                    navigate(() => onSelect(id));
+                }}
+              >
+                {props.globalSelected && <option value="">Choose an agent</option>}
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                    {!isAgentEnabled(agent) ? ' (disabled)' : ''}
+                  </option>
+                ))}
+              </select>
+              <span>{agents.length} agents</span>
+            </label>
+          ) : (
+            agents.map((agent) => (
+              <button
+                className={[
+                  !props.globalSelected && agent.id === selectedId ? 'active' : '',
+                  !isAgentEnabled(agent) ? 'agent-disabled' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                type="button"
+                onClick={() => {
+                  if (props.globalSelected || agent.id !== selectedId)
+                    navigate(() => onSelect(agent.id));
+                }}
+                key={agent.id}
+                aria-pressed={!props.globalSelected && agent.id === selectedId}
+              >
+                {agent.name}
+              </button>
+            ))
+          )}
         </div>
       </div>
       {setupOpen ? (

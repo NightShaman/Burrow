@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import './skillsWorkspace.css';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
@@ -463,17 +464,19 @@ export function SkillsSettings({
           <small>Available to every agent.</small>
         </p>
       ) : agents.length ? (
-        agents.map((agent) => (
-          <label className="skill-check" key={agent.id}>
-            <input
-              type="checkbox"
-              checked={assignments[agent.id]?.assignedSkillIds.includes(selected.id) ?? false}
-              disabled={busy}
-              onChange={() => toggleAssignment(agent, selected.id)}
-            />{' '}
-            {agent.name}
-          </label>
-        ))
+        <div className="skills-assignment-grid">
+          {agents.map((agent) => (
+            <label className="skill-check" key={agent.id}>
+              <input
+                type="checkbox"
+                checked={assignments[agent.id]?.assignedSkillIds.includes(selected.id) ?? false}
+                disabled={busy}
+                onChange={() => toggleAssignment(agent, selected.id)}
+              />{' '}
+              {agent.name}
+            </label>
+          ))}
+        </div>
       ) : (
         <p className="hint">No agents configured.</p>
       )}
@@ -490,18 +493,20 @@ export function SkillsSettings({
         <>
           <h3>Installed skills</h3>
           {skills.length ? (
-            skills.map((skill) => (
-              <label className="skill-check" key={skill.id}>
-                <input
-                  type="checkbox"
-                  checked={selectedGrants.assignedSkillIds.includes(skill.id)}
-                  disabled={busy || selectedGrants.globalSkillIds.includes(skill.id)}
-                  onChange={() => selectedAgent && toggleAssignment(selectedAgent, skill.id)}
-                />{' '}
-                {skill.name}{' '}
-                {selectedGrants.globalSkillIds.includes(skill.id) && <small>(global)</small>}
-              </label>
-            ))
+            <div className="skills-assignment-grid skills-agent-assignment-grid">
+              {skills.map((skill) => (
+                <label className="skill-check" key={skill.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedGrants.assignedSkillIds.includes(skill.id)}
+                    disabled={busy || selectedGrants.globalSkillIds.includes(skill.id)}
+                    onChange={() => selectedAgent && toggleAssignment(selectedAgent, skill.id)}
+                  />{' '}
+                  {skill.name}{' '}
+                  {selectedGrants.globalSkillIds.includes(skill.id) && <small>(global)</small>}
+                </label>
+              ))}
+            </div>
           ) : (
             <p className="hint">No installed skills.</p>
           )}
@@ -524,7 +529,7 @@ export function SkillsSettings({
     );
   });
   const inventory = (
-    <div className="settings-overflow-content memory-saved">
+    <div className="settings-overflow-content memory-saved skills-inventory">
       <Field label="Search skills">
         <input
           type="search"
@@ -611,13 +616,25 @@ export function SkillsSettings({
       )}
       {loaded &&
         (agentView ? (
-          agentAssignments
+          <div className="skills-agent-workspace">{agentAssignments}</div>
         ) : selected ? (
-          <>
-            {editor}
-            <SkillSourceSettings key={selected.id} skill={selected} onRefresh={refreshSkills} />
-            {libraryAssignments}
-          </>
+          <div className="skills-selected-workspace">
+            <div className="skills-instructions-group">{editor}</div>
+            <div className="skills-supporting-groups">
+              {libraryAssignments}
+              <details
+                className="skills-source-group"
+                key={selected.id}
+                open={Boolean(selected.gitSource)}
+              >
+                <summary>
+                  Source and updates
+                  {!selected.gitSource && <small>Optional Git synchronization</small>}
+                </summary>
+                <SkillSourceSettings key={selected.id} skill={selected} onRefresh={refreshSkills} />
+              </details>
+            </div>
+          </div>
         ) : section === 'repo' ? (
           <SkillRepositoryImport
             onInstalled={(skill) => {

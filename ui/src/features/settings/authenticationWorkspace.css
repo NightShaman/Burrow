@@ -1,0 +1,28 @@
+/* Authentication is one form, not an empty two-pane workspace. Pair related
+   fields only when the form's actual available width can support them. */
+.settings-fidgit .setting-section:has(> .auth-mode-fields) {
+  container: authentication-form / inline-size;
+}
+.settings-fidgit .auth-mode-fields > .settings-description,
+.settings-fidgit .auth-mode-fields > .settings-auth-configured {
+  grid-column: 1 / -1;
+}
+@container authentication-form (min-width: 600px) {
+  .settings-fidgit .auth-mode-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Conditional proxy/OIDC textareas use the same themed input surface as
+   their adjacent fields instead of the browser's white default control. */
+.settings-fidgit .auth-mode-fields textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}

@@ -1,0 +1,51 @@
+.agent-toolbar-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.agent-toolbar-picker select {
+  box-sizing: border-box;
+  min-width: 0;
+  width: min(280px, 100%);
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+}
+.agent-toolbar-picker select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.agent-toolbar-selector:has(.agent-toolbar-picker) {
+  flex-wrap: wrap;
+  overflow: visible;
+  align-items: center;
+}
+
+/* Keep the picker a single control row; a percentage-width select inside a
+   wrapping flex label otherwise claims the whole line during intrinsic sizing. */
+.agent-toolbar .agent-toolbar-selector > .agent-toolbar-picker {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  margin: 0;
+}
+.agent-toolbar .agent-toolbar-picker select {
+  flex: 1 1 160px;
+  width: auto;
+  max-width: 280px;
+  min-width: 80px;
+}
+.agent-toolbar .agent-toolbar-picker > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

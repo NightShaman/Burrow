@@ -1,3 +1,7 @@
+import './settingsWorkspace.css';
+import './normalizedWorkspace.css';
+import './personalizationWorkspace.css';
+import './settingsSizing.css';
 import { enabledAgents } from '../../app/agentCatalog';
 import { useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
@@ -128,13 +132,8 @@ export function Settings({
     | 'skills'
   >('details');
   const [generalSection, setGeneralSection] = useState<
-    | 'operator-profile'
-    | 'trace-retention'
-    | 'brain-memory'
-    | 'export'
-    | 'rail-panels'
-    | 'appearance'
-  >('operator-profile');
+    'personalization' | 'trace-retention' | 'brain-memory' | 'export' | 'rail-panels'
+  >('personalization');
   const [connectionSection, setConnectionSection] = useState<
     | 'opentelemetry'
     | 'authentication'
@@ -225,6 +224,108 @@ export function Settings({
   const builtInTabs = ['general', 'agents', 'skills', 'connections', 'mods'] as SettingsTab[];
   const modSettingsTab = (modId: string, settingId: string) =>
     `mod-settings:${modId}:${settingId}` as SettingsTab;
+  // One shared working surface; selection precedes editing without moving its left edge.
+  // Portals retain their existing API contract without reserving an empty pane.
+  const workspaceLayout = (() => {
+    if (tab === 'general') {
+      if (generalSection === 'trace-retention') return 'single';
+      if (generalSection === 'rail-panels' && !hasAgentsPanel) return 'single';
+    }
+    if (tab === 'connections') {
+      if (['authentication', 'model-providers'].includes(connectionSection)) return 'single';
+      if (
+        ['mcp-servers', 'api-tokens', 'load-balancing', 'opentelemetry'].includes(connectionSection)
+      )
+        return 'inventory';
+    }
+    if (tab === 'skills') return skillsSection === 'installed' ? 'inventory' : 'single';
+    if (tab === 'mods') return modsSection === 'automatic-checks' ? 'single' : 'inventory';
+    if (tab === 'agents') {
+      if (agentGlobal && globalSection !== 'global-documents') return 'inventory';
+      if (!agentGlobal && (agents.length === 0 || agentSection === 'skills')) return 'single';
+      if (
+        (agentGlobal && globalSection === 'global-documents') ||
+        (!agentGlobal && ['profile-documents', 'mcp-tools'].includes(agentSection))
+      )
+        return 'document';
+      if (!agentGlobal && ['cron-jobs', 'workflow-events'].includes(agentSection))
+        return 'inventory';
+    }
+    return 'split';
+  })();
+  const boundedFamily =
+    workspaceLayout === 'document'
+      ? tab === 'agents' && !agentGlobal && agentSection === 'mcp-tools'
+        ? 'tools'
+        : 'documents'
+      : tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel
+        ? 'rails'
+        : null;
+  const schedulingFamily =
+    tab === 'agents' && !agentGlobal && agents.length > 0
+      ? (
+          { 'cron-jobs': 'cron', 'workflow-events': 'workflow', dreams: 'dreams' } as Partial<
+            Record<typeof agentSection, string>
+          >
+        )[agentSection]
+      : undefined;
+  const composition = selectedContribution
+    ? 'extension'
+    : workspaceLayout === 'split'
+      ? 'paired'
+      : workspaceLayout;
+  const isModelsWorkspace = tab === 'connections' && connectionSection === 'model-providers';
+  const hasSupporting = workspaceLayout !== 'single';
+  const supporting = hasSupporting ? (
+    <section
+      key="supporting"
+      className="settings-blank-column settings-prototype-overflow"
+      ref={setOverflowColumn}
+      aria-label="Additional settings"
+    >
+      {tab === 'general' && generalSection === 'brain-memory' && (
+        <div className="settings-overflow-content">
+          <CuratorSettings savedProviders={savedProviders} />
+        </div>
+      )}
+      {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && (
+        <div className="settings-overflow-content">
+          <AgentSidebarSettings
+            agents={enabledAgents(agents)}
+            preferences={agentRailPreferences}
+            setPreferences={setAgentRailPreferences}
+          />
+        </div>
+      )}
+      {tab === 'general' && generalSection === 'personalization' && (
+        <div className="settings-personalization-appearance">
+          <SettingSection title="Appearance">
+            <fieldset className="theme-picker">
+              <legend>Theme</legend>
+              <div>
+                {themes.map((option) => (
+                  <button
+                    type="button"
+                    className={theme === option ? 'active' : ''}
+                    onClick={() => setTheme(option)}
+                    aria-pressed={theme === option}
+                    key={option}
+                  >
+                    <i className={`theme-swatch ${option}`} aria-hidden="true" />
+                    <span>
+                      <b>{themeDetails[option].label}</b>
+                      <small>{themeDetails[option].description}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          </SettingSection>
+          <BrowserTabSettings />
+        </div>
+      )}
+    </section>
+  ) : null;
   const settingsNavigation = (
     <nav className="settings-blank-column settings-prototype-menu" aria-label="Settings sections">
       <div className="settings-prototype-menu-items">
@@ -272,8 +373,8 @@ export function Settings({
     <>
       {navigationTarget && createPortal(settingsNavigation, navigationTarget)}
       <main
-        className={`settings-blank-slate${navigationTarget ? ' has-top-navigation' : ''}${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`}
-        aria-label="Settings layout prototype"
+        className={`settings-blank-slate settings-fidgit${navigationTarget ? ' has-top-navigation' : ''}${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`}
+        aria-label="Settings workspace"
       >
         {!navigationTarget && settingsNavigation}
         {tab === 'agents' && (
@@ -332,12 +433,11 @@ export function Settings({
             >
               {(
                 [
-                  ['operator-profile', 'Operator profile'],
+                  ['personalization', 'Personalization'],
                   ['trace-retention', 'Trace retention'],
                   ['brain-memory', 'Continuity'],
                   ['export', 'Export'],
                   ['rail-panels', 'Rail panels'],
-                  ['appearance', 'Appearance'],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -484,190 +584,155 @@ export function Settings({
             selectedContribution && <span>Extension settings</span>
           )}
         </section>
-        <section className="settings-blank-column settings-prototype-configuration">
-          {tab === 'connections' && connectionSection === 'opentelemetry' && (
-            <OpenTelemetrySettings overflowTarget={overflowColumn} />
-          )}
-          {tab === 'general' && generalSection === 'operator-profile' && (
-            <>
-              <OperatorProfile onSaved={onOperatorProfileChanged} />
-              <hr className="operator-profile-divider" />
-              <OperatorTimezone />
-            </>
-          )}
-          {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
-          {tab === 'general' && generalSection === 'brain-memory' && (
-            <BrainEmbeddingSettings savedProviders={savedProviders} />
-          )}
-          {tab === 'general' && generalSection === 'export' && (
-            <ExportSettings overflowTarget={overflowColumn} />
-          )}
-          {tab === 'general' && generalSection === 'rail-panels' && (
-            <SettingSection title="Rail Panels">
-              <div className="field-pair compact-fields">
-                <RailPanelSettings
-                  side="Left"
-                  layout={leftRailLayout}
-                  setLayout={setLeftRailLayout}
-                  singlePanel={leftSinglePanel}
-                  setSinglePanel={setLeftSinglePanel}
-                  topPanel={leftTopPanel}
-                  setTopPanel={setLeftTopPanel}
-                  bottomPanel={leftBottomPanel}
-                  setBottomPanel={setLeftBottomPanel}
-                />
-                <RailPanelSettings
-                  side="Right"
-                  layout={rightRailLayout}
-                  setLayout={setRightRailLayout}
-                  singlePanel={rightSinglePanel}
-                  setSinglePanel={setRightSinglePanel}
-                  topPanel={rightTopPanel}
-                  setTopPanel={setRightTopPanel}
-                  bottomPanel={rightBottomPanel}
-                  setBottomPanel={setRightBottomPanel}
-                />
-              </div>
-            </SettingSection>
-          )}
-          {tab === 'general' && generalSection === 'appearance' && (
-            <SettingSection title="Appearance">
-              <fieldset className="theme-picker">
-                <legend>Theme</legend>
-                <div>
-                  {themes.map((option) => (
-                    <button
-                      type="button"
-                      className={theme === option ? 'active' : ''}
-                      onClick={() => setTheme(option)}
-                      aria-pressed={theme === option}
-                      key={option}
-                    >
-                      <i className={`theme-swatch ${option}`} aria-hidden="true" />
-                      <span>
-                        <b>{themeDetails[option].label}</b>
-                        <small>{themeDetails[option].description}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-            </SettingSection>
-          )}
-          {tab === 'agents' &&
-            (agentGlobal ? (
-              globalSection === 'global-documents' ? (
-                <GlobalProfileDocuments overflowTarget={overflowColumn} />
-              ) : (
-                <ExecutionBoundaries overflowTarget={overflowColumn} />
-              )
-            ) : agents.length === 0 ? (
-              <SettingSection title="Agent setup">
-                <p className="hint">
-                  No agents configured yet. Create your first agent to unlock the rest of the agent
-                  settings.
-                </p>
-              </SettingSection>
-            ) : agentSection === 'skills' ? (
-              <SkillsSettings
-                agentView
-                agents={agents}
-                agentId={settingsSelected.id}
-                overflowTarget={overflowColumn}
-              />
-            ) : agentSection === 'mcp-tools' ? (
-              <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} />
-            ) : (
-              <AgentSettings
-                onOpenChat={onOpenChat}
-                selected={settingsSelected}
-                savedProviders={savedProviders}
-                onAgentsChanged={onAgentsChanged}
-                section={agentSection}
-                overflowTarget={overflowColumn}
-              />
-            ))}
-          {tab === 'skills' && (
-            <SkillsSettings
-              agents={enabledAgents(agents)}
-              agentId={settingsSelected.id}
-              section={skillsSection}
-              onSectionChange={setSkillsSection}
-              overflowTarget={overflowColumn}
-            />
-          )}
-          {tab === 'connections' && connectionSection === 'authentication' && (
-            <AuthenticationSettings />
-          )}
-          {tab === 'connections' && connectionSection === 'model-providers' && (
-            <ModelConnections
-              key="models"
-              savedProviders={savedProviders}
-              onModelConnectionsChanged={onModelConnectionsChanged}
-              mcpConnections={null}
-              overflowTarget={overflowColumn}
-            />
-          )}
-          {tab === 'connections' && connectionSection === 'load-balancing' && (
-            <ModelConnections
-              key="load-balancing"
-              loadBalancing
-              savedProviders={savedProviders}
-              onModelConnectionsChanged={onModelConnectionsChanged}
-              mcpConnections={null}
-              overflowTarget={overflowColumn}
-            />
-          )}
-          {tab === 'connections' && connectionSection === 'mcp-servers' && (
-            <McpConnections overflowTarget={overflowColumn} />
-          )}
-          {tab === 'connections' && connectionSection === 'api-tokens' && (
-            <ApiTokensSettings overflowTarget={overflowColumn} />
-          )}
-          {tab === 'mods' && <ModsSettings section={modsSection} overflowTarget={overflowColumn} />}
-          {selectedContribution?.settingsUrl && (
-            <ModSettingsHost
-              key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`}
-              modId={selectedContribution.modId}
-              settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`}
-              agents={enabledAgents(agents)}
-              onAgentsChanged={onAgentsChanged}
-              navigationTarget={modNavigationColumn}
-              overflowTarget={overflowColumn}
-              selectedSectionId={selectedModSettings?.id}
-              onSectionChange={
-                selectedContribution.settings?.length
-                  ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId))
-                  : undefined
-              }
-            />
-          )}
-        </section>
-        <section
-          className="settings-blank-column settings-prototype-overflow"
-          ref={setOverflowColumn}
-          aria-label="Additional settings"
+        <div
+          className={`settings-content-workspace settings-content-${workspaceLayout}${tab === 'connections' && connectionSection === 'model-providers' ? ' settings-content-models' : selectedContribution ? ' settings-content-extension' : ' settings-content-standard'}${boundedFamily ? ` settings-content-bounded settings-family-${boundedFamily}` : ''}${schedulingFamily ? ` settings-content-scheduling settings-family-${schedulingFamily}` : ''}${!isModelsWorkspace ? ' settings-content-normalized' : ''}`}
+          data-layout={workspaceLayout}
+          data-family={boundedFamily ?? schedulingFamily}
+          data-composition={isModelsWorkspace ? undefined : composition}
         >
-          {tab === 'general' && generalSection === 'operator-profile' && (
-            <div className="settings-overflow-content">
-              <BrowserTabSettings />
-            </div>
-          )}
-          {tab === 'general' && generalSection === 'brain-memory' && (
-            <div className="settings-overflow-content">
-              <CuratorSettings savedProviders={savedProviders} />
-            </div>
-          )}
-          {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && (
-            <div className="settings-overflow-content">
-              <AgentSidebarSettings
+          {workspaceLayout === 'inventory' && supporting}
+          <section
+            key="configuration"
+            className="settings-blank-column settings-prototype-configuration"
+          >
+            {tab === 'connections' && connectionSection === 'opentelemetry' && (
+              <OpenTelemetrySettings overflowTarget={overflowColumn} />
+            )}
+            {tab === 'general' && generalSection === 'personalization' && (
+              <div className="settings-personalization-profile">
+                <OperatorProfile onSaved={onOperatorProfileChanged} />
+                <OperatorTimezone />
+              </div>
+            )}
+            {tab === 'general' && generalSection === 'trace-retention' && <RetentionSettings />}
+            {tab === 'general' && generalSection === 'brain-memory' && (
+              <BrainEmbeddingSettings savedProviders={savedProviders} />
+            )}
+            {tab === 'general' && generalSection === 'export' && (
+              <ExportSettings overflowTarget={overflowColumn} />
+            )}
+            {tab === 'general' && generalSection === 'rail-panels' && (
+              <SettingSection title="Rail Panels">
+                <div className="field-pair compact-fields">
+                  <RailPanelSettings
+                    side="Left"
+                    layout={leftRailLayout}
+                    setLayout={setLeftRailLayout}
+                    singlePanel={leftSinglePanel}
+                    setSinglePanel={setLeftSinglePanel}
+                    topPanel={leftTopPanel}
+                    setTopPanel={setLeftTopPanel}
+                    bottomPanel={leftBottomPanel}
+                    setBottomPanel={setLeftBottomPanel}
+                  />
+                  <RailPanelSettings
+                    side="Right"
+                    layout={rightRailLayout}
+                    setLayout={setRightRailLayout}
+                    singlePanel={rightSinglePanel}
+                    setSinglePanel={setRightSinglePanel}
+                    topPanel={rightTopPanel}
+                    setTopPanel={setRightTopPanel}
+                    bottomPanel={rightBottomPanel}
+                    setBottomPanel={setRightBottomPanel}
+                  />
+                </div>
+              </SettingSection>
+            )}
+
+            {tab === 'agents' &&
+              (agentGlobal ? (
+                globalSection === 'global-documents' ? (
+                  <GlobalProfileDocuments overflowTarget={overflowColumn} />
+                ) : (
+                  <ExecutionBoundaries overflowTarget={overflowColumn} />
+                )
+              ) : agents.length === 0 ? (
+                <SettingSection title="Agent setup">
+                  <p className="hint">
+                    No agents configured yet. Create your first agent to unlock the rest of the
+                    agent settings.
+                  </p>
+                </SettingSection>
+              ) : agentSection === 'skills' ? (
+                <SkillsSettings
+                  agentView
+                  agents={agents}
+                  agentId={settingsSelected.id}
+                  overflowTarget={overflowColumn}
+                />
+              ) : agentSection === 'mcp-tools' ? (
+                <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} />
+              ) : (
+                <AgentSettings
+                  onOpenChat={onOpenChat}
+                  selected={settingsSelected}
+                  savedProviders={savedProviders}
+                  onAgentsChanged={onAgentsChanged}
+                  section={agentSection}
+                  overflowTarget={overflowColumn}
+                />
+              ))}
+            {tab === 'skills' && (
+              <SkillsSettings
                 agents={enabledAgents(agents)}
-                preferences={agentRailPreferences}
-                setPreferences={setAgentRailPreferences}
+                agentId={settingsSelected.id}
+                section={skillsSection}
+                onSectionChange={setSkillsSection}
+                overflowTarget={overflowColumn}
               />
-            </div>
-          )}
-        </section>
+            )}
+            {tab === 'connections' && connectionSection === 'authentication' && (
+              <AuthenticationSettings />
+            )}
+            {tab === 'connections' && connectionSection === 'model-providers' && (
+              <ModelConnections
+                key="models"
+                savedProviders={savedProviders}
+                onModelConnectionsChanged={onModelConnectionsChanged}
+                mcpConnections={null}
+                overflowTarget={overflowColumn}
+              />
+            )}
+            {tab === 'connections' && connectionSection === 'load-balancing' && (
+              <ModelConnections
+                key="load-balancing"
+                loadBalancing
+                savedProviders={savedProviders}
+                onModelConnectionsChanged={onModelConnectionsChanged}
+                mcpConnections={null}
+                overflowTarget={overflowColumn}
+              />
+            )}
+            {tab === 'connections' && connectionSection === 'mcp-servers' && (
+              <McpConnections overflowTarget={overflowColumn} />
+            )}
+            {tab === 'connections' && connectionSection === 'api-tokens' && (
+              <ApiTokensSettings overflowTarget={overflowColumn} />
+            )}
+            {tab === 'mods' && (
+              <ModsSettings section={modsSection} overflowTarget={overflowColumn} />
+            )}
+            {selectedContribution?.settingsUrl && (
+              <ModSettingsHost
+                key={`${selectedContribution.modId}:${selectedContribution.version ?? ''}`}
+                modId={selectedContribution.modId}
+                settingsUrl={`${selectedContribution.settingsUrl}${selectedContribution.version ? `?v=${encodeURIComponent(selectedContribution.version)}` : ''}`}
+                agents={enabledAgents(agents)}
+                onAgentsChanged={onAgentsChanged}
+                navigationTarget={modNavigationColumn}
+                overflowTarget={overflowColumn}
+                selectedSectionId={selectedModSettings?.id}
+                onSectionChange={
+                  selectedContribution.settings?.length
+                    ? (sectionId) => setTab(modSettingsTab(selectedContribution.modId, sectionId))
+                    : undefined
+                }
+              />
+            )}
+          </section>
+          {workspaceLayout !== 'inventory' && supporting}
+        </div>
         <aside
           className="settings-utility-panel"
           aria-label="System statistics"

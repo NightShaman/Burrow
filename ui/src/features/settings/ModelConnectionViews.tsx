@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { RuntimeModel } from '../../app/api';
 import { Field } from './SettingsPrimitives';
 import type { SavedProvider } from '../../app/types';
@@ -13,6 +13,7 @@ export const modelConnectionApiTypes = [
 ];
 
 type ModelResultsProps = {
+  compact?: boolean;
   models: RuntimeModel[];
   manualModel: string;
   selectedModelId?: string | null;
@@ -27,6 +28,7 @@ const capabilityLabel = (values: string[] | undefined) =>
   values?.length ? values.join(', ') : 'Unknown';
 
 export function ModelResults({
+  compact = false,
   models,
   manualModel,
   selectedModelId,
@@ -49,7 +51,7 @@ export function ModelResults({
           const label = model.displayName ?? model.id;
           return (
             <article
-              className={`model-option${selectedModelId === model.id ? ' selected' : ''}`}
+              className={`model-option${compact ? ' model-option-compact' : ''}${selectedModelId === model.id ? ' selected' : ''}`}
               key={model.id}
             >
               <input
@@ -62,16 +64,26 @@ export function ModelResults({
               <button
                 className="model-option-select"
                 type="button"
+                title={compact ? `${label} · ${model.id}` : undefined}
+                aria-label={
+                  compact
+                    ? label === model.id
+                      ? `Select ${label}`
+                      : `Select ${label} (${model.id})`
+                    : undefined
+                }
                 onClick={() => onSelectModel?.(model.id)}
                 aria-pressed={selectedModelId === model.id}
               >
                 <strong>{label}</strong>
                 <small>{model.id}</small>
               </button>
-              <div className="model-option-summary">
-                <span>{capabilityLabel(model.discoveredInput ?? model.acceptedInput)}</span>
-                <span>{capabilityLabel(model.discoveredOutput ?? model.acceptedOutput)}</span>
-              </div>
+              {!compact && (
+                <div className="model-option-summary">
+                  <span>{capabilityLabel(model.discoveredInput ?? model.acceptedInput)}</span>
+                  <span>{capabilityLabel(model.discoveredOutput ?? model.acceptedOutput)}</span>
+                </div>
+              )}
               {model.manual && (
                 <button
                   type="button"
@@ -190,7 +202,8 @@ export function ModelCapabilityEditor({
           </label>
         ))}
       </CapabilityGroup>
-      <Field label="Output token limit">
+      <label className="field settings-quantity-field model-output-limit">
+        <span className="model-capability-title">Output token limit</span>
         <input
           readOnly
           value={
@@ -198,7 +211,7 @@ export function ModelCapabilityEditor({
             'Unknown'
           }
         />
-      </Field>
+      </label>
       {(model.supportedGenerationMethods !== undefined || model.googleMetadata) && (
         <details className="saved-accordion">
           <summary>Provider metadata</summary>
@@ -250,10 +263,13 @@ function ContextWindowEditor({
   onAutoChange: (enabled: boolean) => void;
   onOverrideChange: (value: number | undefined) => void;
 }) {
+  const titleId = useId();
   const auto = model.contextWindowMode !== 'manual' && model.contextWindowOverride == null;
   return (
-    <fieldset className="model-capability-group model-context-window">
-      <legend>Context window</legend>
+    <fieldset className="model-capability-group model-context-window" aria-labelledby={titleId}>
+      <span id={titleId} className="model-capability-title">
+        Context window
+      </span>
       <div className="model-capability-mode">
         <label className="model-capability-auto">
           <input
@@ -279,7 +295,10 @@ function ContextWindowEditor({
             : 'Unknown'}
         </span>
       </div>
-      <label className="context-window-input" htmlFor="context-window-override">
+      <label
+        className="context-window-input settings-quantity-field"
+        htmlFor="context-window-override"
+      >
         Manual token limit
         <input
           id="context-window-override"
@@ -312,9 +331,12 @@ function CapabilityGroup({
   onAutoChange: (enabled: boolean) => void;
   children: ReactNode;
 }) {
+  const titleId = useId();
   return (
-    <fieldset className="model-capability-group">
-      <legend>{title}</legend>
+    <fieldset className="model-capability-group" aria-labelledby={titleId}>
+      <span id={titleId} className="model-capability-title">
+        {title}
+      </span>
       <div className="model-capability-mode">
         <label className="model-capability-auto">
           <input

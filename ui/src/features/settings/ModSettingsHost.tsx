@@ -757,6 +757,19 @@ export function ModSettingsHost({
     };
   }, [module, contribution, section, modId, overflowTarget, confirm, navigate, createDraft]);
 
+  // Semantic layout metadata, not a new surface: imperative portal targets must
+  // keep their identity when sections change or a contribution refreshes.
+  const activeDefinition = contribution?.sections.find((item) => item.id === section);
+  const hasDeclarativeContent = Boolean(
+    activeDefinition &&
+      (activeDefinition.layout === 'form'
+        ? activeDefinition.fields?.length || activeDefinition.actions?.length
+        : activeDefinition.items?.length),
+  );
+  const surfaceLayout =
+    activeDefinition && (hasDeclarativeContent || !module?.mountSettings)
+      ? activeDefinition.layout
+      : 'imperative';
   return (
     <>
       {navigationTarget &&
@@ -787,8 +800,13 @@ export function ModSettingsHost({
           </p>
         </section>
       )}
-      <div ref={primaryRef} className="mod-settings-mount" data-mod-id={modId}>
-        {contribution && (
+      <div
+        ref={primaryRef}
+        className="mod-settings-mount"
+        data-mod-id={modId}
+        data-settings-layout={surfaceLayout}
+      >
+        {contribution && surfaceLayout !== 'imperative' && (
           <DeclarativeSection
             key={section}
             contribution={contribution}

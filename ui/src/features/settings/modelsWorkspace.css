@@ -1,0 +1,427 @@
+/* Fidgit experiment: selection flows from provider → model → capabilities.
+   Scope every rule to this workspace; pool and onboarding editors stay intact. */
+.settings-blank-slate.settings-fidgit .settings-content-models > .settings-prototype-configuration {
+  display: grid;
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  container: models-shell / inline-size;
+}
+.models-workspace {
+  display: grid;
+  grid-template-columns: clamp(220px, 22%, 280px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--settings-pane-gap, 20px);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+.models-provider-column {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: var(--settings-pane-inset, 16px);
+  border-right: 1px solid var(--line-soft);
+}
+.models-editor-column {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  container: models-editor / inline-size;
+}
+.models-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.models-workspace h2,
+.models-workspace h3 {
+  margin: 0;
+  color: var(--text-strong);
+}
+.models-workspace h2 {
+  font-size: 18px;
+}
+.models-workspace h3 {
+  font-size: 13px;
+}
+.models-provider-inventory {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+.models-workspace .models-provider-inventory .model-saved {
+  margin: 0;
+  padding: 0;
+}
+.models-workspace .provider-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.models-workspace .model-saved .provider-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 0;
+  padding: 6px 9px;
+  background: var(--surface-sunken);
+}
+.models-workspace .provider-card:has([aria-pressed='true']) {
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.models-workspace .provider-card > .danger {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+.models-workspace .provider-card > .danger:hover {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-hover);
+}
+/* Connection controls remain mounted; only the credential/setup fields collapse. */
+.models-connection-editor {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.models-connection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.models-connection-heading button {
+  min-height: 28px;
+  padding: 4px 9px;
+}
+.models-connection-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.models-connection-fields[hidden] {
+  display: none;
+}
+.models-connection-fields > .oauth-shortcuts,
+.models-connection-fields > .oauth-token-fields {
+  grid-column: 1 / -1;
+}
+.models-connection-fields > .oauth-shortcuts {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+.models-workspace .field {
+  margin: 0;
+}
+.models-workspace .model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--settings-control-gap, 8px);
+  margin: 0;
+}
+.models-workspace .model-actions button {
+  min-width: 90px;
+}
+.models-workspace .oauth-trigger {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+.models-workspace .oauth-trigger small {
+  font-size: 10px;
+}
+.models-catalog-workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.7fr) minmax(0, 2fr);
+  align-items: start;
+  gap: var(--settings-pane-gap, 20px);
+  min-width: 0;
+}
+.models-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 5px;
+}
+.models-workspace .model-results {
+  margin: 10px 0 0;
+  padding: 0;
+  border: 0;
+}
+.models-workspace .model-options {
+  grid-template-columns: minmax(0, 1fr);
+}
+.models-workspace .model-option {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px 8px;
+}
+.models-workspace .model-option-summary {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+.models-workspace .model-option-compact {
+  min-height: 52px;
+  padding: 7px 8px;
+  border-radius: 4px;
+}
+.models-workspace .model-option-compact .model-option-select {
+  min-height: 36px;
+  align-content: center;
+}
+.models-workspace .model-option-compact .model-option-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.models-workspace .model-delete {
+  grid-column: 3;
+  grid-row: 1;
+}
+.models-workspace .manual-model {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.models-workspace .manual-model > label {
+  grid-column: 1 / -1;
+}
+.models-capabilities-workspace {
+  container: model-capabilities / inline-size;
+  min-width: 0;
+  border-left: 1px solid var(--line-soft);
+  padding-left: var(--settings-pane-inset, 16px);
+}
+.models-workspace .model-capability-editor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.models-workspace .model-detail-heading,
+.models-workspace .model-capability-editor > details,
+.models-workspace .model-capability-provenance {
+  grid-column: 1 / -1;
+}
+.models-workspace .model-context-window {
+  grid-column: 1;
+  grid-row: 2;
+}
+.models-workspace .model-capability-editor > .field {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+}
+.models-workspace .model-capability-group,
+.models-workspace .model-output-limit {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  padding: 8px 0 0;
+  gap: 6px;
+}
+.models-workspace .model-capability-title {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+/* Fieldsets keep their accessible group names via aria-labelledby, while
+   ordinary in-flow titles sit beneath uninterrupted top separators. */
+.models-workspace .model-capability-discovered {
+  margin-left: 0;
+}
+.models-workspace .model-capability-manual {
+  border: 0;
+  padding-top: 3px;
+}
+.models-workspace .model-detail-empty {
+  background: transparent;
+}
+@media (max-width: 1150px) {
+  .models-connection-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-catalog-workspace {
+    grid-template-columns: minmax(210px, 0.8fr) minmax(0, 1.5fr);
+    gap: var(--settings-pane-gap, 20px);
+  }
+  .models-capabilities-workspace {
+    padding-left: var(--settings-pane-inset, 16px);
+  }
+  .models-workspace .model-capability-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-workspace .model-context-window,
+  .models-workspace .model-capability-editor > .field {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+@media (max-width: 700px) {
+  .models-catalog-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-capabilities-workspace {
+    padding: var(--settings-pane-inset, 16px) 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+  .models-workspace .field-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-workspace-header {
+    align-items: flex-start;
+  }
+}
+/* Ten two-line models fit at normal desktop heights; larger catalogs stay bounded. */
+.models-workspace .model-options {
+  gap: 3px;
+  max-height: clamp(560px, 60vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+/* Context overrides use a dedicated label rather than the shared .field wrapper. */
+.models-workspace .context-window-input {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.models-workspace .context-window-input input {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+}
+.models-workspace .context-window-input input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.models-workspace .context-window-input input:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.models-workspace .context-window-input input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.models-workspace .model-capability-group input[type='radio'],
+.models-workspace .model-capability-group input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+/* Respond to the actual editor width when a reserved statistics rail is open,
+   not just the viewport. The ordinary wide Models composition stays intact. */
+@container models-editor (max-width: 600px) {
+  .models-connection-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-catalog-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-capabilities-workspace {
+    padding: var(--settings-pane-inset, 16px) 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+  .models-workspace .model-capability-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-workspace .model-context-window,
+  .models-workspace .model-capability-editor > .field {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+@container models-editor (min-width: 760px) {
+  .models-connection-editor:has(.models-connection-heading [aria-expanded='false']) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .models-connection-editor:has(.models-connection-heading [aria-expanded='false'])
+    > .settings-request-error {
+    grid-column: 1 / -1;
+  }
+}
+.models-connection-heading h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Keep the connection inventory beside the editor while there is usable width.
+   Only genuinely narrow workspaces stack into two independently scrollable areas. */
+@container models-shell (max-width: 700px) {
+  .models-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(100px, 160px) minmax(0, 1fr);
+    gap: var(--settings-pane-gap, 20px);
+  }
+  .models-provider-column {
+    padding: 0 0 var(--settings-pane-inset, 16px);
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+}
+
+.models-workspace .model-detail-heading > div {
+  min-width: 0;
+}
+.models-workspace .model-detail-heading h3 {
+  overflow-wrap: anywhere;
+}
+.models-workspace .provider-card-select {
+  min-width: 0;
+}
+.models-workspace .provider-card-select :is(strong, small) {
+  overflow-wrap: anywhere;
+}
+@container model-capabilities (max-width: 480px) {
+  .models-workspace .model-capability-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .models-workspace .model-context-window,
+  .models-workspace .model-capability-editor > .field {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+/* A normal provider is two lines: name + secondary Delete, then API/count.
+   Reserve only the name's trailing space, so metadata keeps the full width. */
+.models-workspace .provider-card-select strong {
+  width: calc(100% - 54px);
+  min-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

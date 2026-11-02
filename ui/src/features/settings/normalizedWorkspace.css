@@ -1,0 +1,295 @@
+/* Shared Settings grammar: inventory -> editor, related forms beside one
+   another, and single forms occupying the same left half. Models keeps its bespoke workspace.
+   All split decisions measure remaining width AFTER persistent statistics. */
+.settings-blank-slate.settings-fidgit .settings-content-workspace.settings-content-normalized {
+  container: settings-workspace / inline-size;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: none;
+  grid-auto-rows: minmax(0, 1fr);
+  align-content: stretch;
+  gap: var(--settings-pane-gap, 20px);
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized[data-composition='inventory'],
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized[data-composition='document'],
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized:has(
+    .mod-settings-mount:is(
+      [data-settings-layout='form-inventory'],
+      [data-settings-layout='list-detail']
+    )
+  ) {
+  grid-template-columns: clamp(240px, 24%, 320px) minmax(0, 1fr);
+  /* A compact scrolling picker, not half the editor's working height. The
+     percentage cap also leaves usable editing space on short tablets. */
+  grid-template-rows: minmax(0, min(220px, 35%)) minmax(0, 1fr);
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized
+  > .settings-blank-column,
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized
+  > .settings-prototype-overflow:has(.settings-overflow-content),
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized
+  > .settings-prototype-configuration:has(.profile-document-selector) {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  padding: 0 4px 8px;
+  border: 0;
+  overflow: auto;
+  align-content: start;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized
+  > .settings-blank-column:first-child {
+  border-bottom: 1px solid var(--line-soft);
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-workspace.settings-content-normalized[data-composition='single']
+  > .settings-blank-column {
+  border: 0;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .setting-section {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .setting-section
+  + .setting-section {
+  margin-top: var(--settings-section-gap, 24px);
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .setting-section
+  > h2 {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  font-size: 18px;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized[data-composition='inventory']
+  .memory-connection-list,
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized[data-composition='inventory']
+  .provider-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .card-actions,
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .model-actions,
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--settings-control-gap, 8px);
+}
+/* File selectors remain horizontal in narrow workspaces, vertical beside the
+   editor when there is room. This replaces viewport-only statistics rules. */
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-family-documents
+  .profile-document-selector {
+  display: flex;
+  overflow-x: auto;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-family-documents
+  .profile-document-selector
+  button {
+  flex: 0 0 auto;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-family-documents
+  > .settings-prototype-overflow {
+  align-content: stretch;
+}
+/* Declarative extensions advertise their contract on the existing host node.
+   The imperative surfaces stay mounted even when a declarative single form
+   does not use the supporting target. No target ref is replaced. */
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized:has(
+    .mod-settings-mount:is([data-settings-layout='form'], [data-settings-layout='activity'])
+  )
+  > .settings-prototype-overflow {
+  display: none;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized:has(
+    .mod-settings-mount:is([data-settings-layout='form'], [data-settings-layout='activity'])
+  )
+  > .settings-prototype-configuration {
+  border: 0;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized:has(.mod-settings-mount[data-settings-layout='form-inventory'])
+  > .settings-prototype-overflow {
+  grid-row: 1;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized:has(.mod-settings-mount[data-settings-layout='form-inventory'])
+  > .settings-prototype-configuration {
+  grid-row: 2;
+}
+@container settings-workspace (min-width: 640px) {
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized
+    > .settings-blank-column:first-child {
+    grid-column: 1;
+    grid-row: 1;
+    border-bottom: 0;
+    border-right: 1px solid var(--line-soft);
+    padding-right: var(--settings-pane-inset, 16px);
+  }
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized
+    > .settings-blank-column:last-child {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized[data-composition='single']
+    > .settings-blank-column,
+  .settings-blank-slate.settings-fidgit
+    .settings-content-normalized:has(
+      .mod-settings-mount:is([data-settings-layout='form'], [data-settings-layout='activity'])
+    )
+    > .settings-prototype-configuration {
+    /* Reserve the second equal track without an empty interactive surface.
+       Keep the entire form together, using the paired pane's own inset. */
+    grid-column: 1;
+    grid-row: 1;
+    border-bottom: 0;
+    border-right: 1px solid var(--line-soft);
+    padding-right: var(--settings-pane-inset, 16px);
+  }
+  .settings-blank-slate.settings-fidgit
+    .settings-content-normalized.settings-family-documents
+    .profile-document-selector {
+    display: grid;
+    overflow: visible;
+  }
+  .settings-blank-slate.settings-fidgit
+    .settings-content-normalized:has(.mod-settings-mount[data-settings-layout='form-inventory'])
+    > .settings-prototype-overflow {
+    grid-column: 1;
+    grid-row: 1;
+    border-right: 1px solid var(--line-soft);
+    padding-right: var(--settings-pane-inset, 16px);
+  }
+  .settings-blank-slate.settings-fidgit
+    .settings-content-normalized:has(.mod-settings-mount[data-settings-layout='form-inventory'])
+    > .settings-prototype-configuration {
+    grid-column: 2;
+    grid-row: 1;
+    border: 0;
+    padding-right: 4px;
+  }
+  /* Both desktop panes span the narrow-layout tracks; no empty second row. */
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized[data-composition='inventory']
+    > .settings-blank-column,
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized[data-composition='document']
+    > .settings-blank-column,
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized:has(
+      .mod-settings-mount:is(
+        [data-settings-layout='form-inventory'],
+        [data-settings-layout='list-detail']
+      )
+    )
+    > .settings-blank-column {
+    grid-row: 1 / -1;
+  }
+}
+/* On narrow intrinsically-sized phone shells, collection counts must not
+   determine page height. Statistics already allocates a bounded content row. */
+@media (max-width: 600px) {
+  .settings-blank-slate.settings-fidgit
+    .settings-content-workspace.settings-content-normalized:not([data-composition='single']) {
+    height: min(740px, 80dvh);
+  }
+  .settings-blank-slate.settings-fidgit.has-utility-panel
+    .settings-content-workspace.settings-content-normalized {
+    height: 100%;
+  }
+}
+/* Legacy workflow-specific flex navigation must not replace the shared shell. */
+@media (max-width: 700px) {
+  .settings-blank-slate.settings-fidgit:has(
+      > .settings-content-normalized.settings-family-workflow
+    ) {
+    display: grid;
+  }
+  .settings-blank-slate.settings-fidgit:has(> .settings-content-normalized.settings-family-workflow)
+    .settings-prototype-section-items {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-card-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-card-actions
+  button {
+  white-space: normal;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-footer
+  .setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized.settings-content-standard
+  .schedule-footer
+  .setting-actions
+  button {
+  width: auto;
+}
