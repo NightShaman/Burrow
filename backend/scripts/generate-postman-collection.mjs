@@ -108,6 +108,10 @@ const collection = {
     ]),
     folder('Settings / Identities', [
       req('Get identities', 'GET', '/api/settings/identities'),
+      req('Get operator reference photo', 'GET', '/api/operator/reference-image'),
+      req('Upload operator reference photo', 'PUT', '/api/operator/reference-image', { body: { fileName: 'operator.png', content: 'data:image/png;base64,REPLACE_WITH_PNG_BASE64' }, description: 'Original PNG/JPEG/WebP up to20MiB; saves independently of avatar. Replace placeholder bytes before sending.' }),
+      req('Read operator reference photo bytes', 'GET', '/api/operator/reference-image/content'),
+      req('Remove operator reference photo', 'DELETE', '/api/operator/reference-image'),
       req('Update identities', 'PUT', '/api/settings/identities', { body: { operator: { name: 'Operator', avatar: '' }, agents: [] } }),
       req('Get curator settings', 'GET', '/api/settings/curator'),
       req('Update curator settings', 'PUT', '/api/settings/curator', { body: { kind: 'external', connectionId: '{{connectionId}}', model: 'gpt-5.4-mini', temperature: 0.2 } }),

@@ -8694,6 +8694,153 @@
         }
       }
     },
+    "/api/operator/reference-image": {
+      "get": {
+        "operationId": "getOperatorReferenceImage",
+        "summary": "Read the singleton operator canonical reference photo metadata",
+        "tags": [
+          "Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current operator reference photo metadata, or null when absent; actions autosave independently of operator identity/avatar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReferenceImageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "description": "Operator-authenticated. The canonical operator photo is independent of the small chat avatar; missing metadata is null."
+      },
+      "put": {
+        "operationId": "putOperatorReferenceImage",
+        "summary": "Upload or replace the singleton operator canonical reference photo",
+        "tags": [
+          "Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current operator reference photo metadata, or null when absent; actions autosave independently of operator identity/avatar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReferenceImageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentReferenceImageUpload"
+              }
+            }
+          }
+        },
+        "description": "Operator-authenticated. The canonical operator photo is independent of the small chat avatar; missing metadata is null."
+      },
+      "delete": {
+        "operationId": "deleteOperatorReferenceImage",
+        "summary": "Remove the singleton operator canonical reference photo",
+        "tags": [
+          "Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current operator reference photo metadata, or null when absent; actions autosave independently of operator identity/avatar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReferenceImageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "413": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "description": "Operator-authenticated. The canonical operator photo is independent of the small chat avatar; missing metadata is null."
+      }
+    },
+    "/api/operator/reference-image/content": {
+      "get": {
+        "operationId": "getOperatorReferenceImageContent",
+        "summary": "Read the current original operator canonical photo bytes",
+        "description": "Operator-authenticated private no-store inline PNG/JPEG/WebP response. Optional id pins the current revision; missing or stale revisions return 404.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original image bytes",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
     "/api/mod-reference-images/{modId}/{key}/content": {
       "get": {
         "operationId": "getModReferenceImageContent",
@@ -14683,6 +14830,11 @@
           },
           "useAgentReferenceImage": {
             "type": "boolean"
+          },
+          "useOperatorReferenceImage": {
+            "type": "boolean",
+            "const": true,
+            "description": "Only present when the operator photo was selected for this job."
           }
         },
         "required": [
@@ -14739,6 +14891,14 @@
               "null"
             ],
             "description": "True includes the current agent canonical portrait (trusted native agent context only). False/null/omission does not select self unless explicitly listed in referenceAgentIds."
+          },
+          "useOperatorReferenceImage": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": false,
+            "description": "True appends the saved singleton operator photo after selected agent portraits (self/explicit IDs); false/null/omission selects none. Supported image models only; missing selected photo fails before dispatch without fallback. Cannot combine with private Theater Mod references."
           },
           "referenceAgentIds": {
             "anyOf": [
@@ -14916,6 +15076,17 @@
               "$ref": "#/components/schemas/ForgeAgentReferenceImage"
             }
           },
+          "operatorReferenceImage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentReferenceImage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Singleton operator photo metadata or null, with attachmentId operator-reference-image:<uuid>; no agentId. Available to HTTP and native callers."
+          },
           "defaults": {
             "type": "object",
             "additionalProperties": {
@@ -14940,7 +15111,8 @@
           "ok",
           "models",
           "sourceAttachments",
-          "video"
+          "video",
+          "operatorReferenceImage"
         ],
         "additionalProperties": false
       },
@@ -18837,7 +19009,7 @@
           },
           "attachmentId": {
             "type": "string",
-            "description": "Own-agent attachment_view identifier; not a host filesystem path."
+            "description": "Canonical attachment_view identifier (agent-reference-image:<uuid> or operator-reference-image:<uuid>); not a host filesystem path."
           },
           "contentUrl": {
             "type": "string"
@@ -18898,6 +19070,31 @@
         "required": [
           "ok",
           "agentId",
+          "referenceImage"
+        ],
+        "additionalProperties": false
+      },
+      "OperatorReferenceImageResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "referenceImage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentReferenceImage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Singleton operator photo metadata; attachmentId uses operator-reference-image:<uuid>, never an agentId."
+          }
+        },
+        "required": [
+          "ok",
           "referenceImage"
         ],
         "additionalProperties": false

@@ -29,9 +29,21 @@ CREATE TABLE mod_reference_images (
  PRIMARY KEY(mod_id,image_key)
 );
 `;
+export const POSTGRES_OPERATOR_REFERENCE_IMAGE_SQL = `
+CREATE TABLE operator_reference_images (
+ operator_id TEXT PRIMARY KEY CHECK (operator_id = 'default'),
+ id TEXT NOT NULL UNIQUE,
+ storage_reference TEXT NOT NULL UNIQUE,
+ file_name TEXT NOT NULL,
+ mime_type TEXT NOT NULL CHECK (mime_type IN ('image/png','image/jpeg','image/webp')),
+ size_bytes INTEGER NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 20971520),
+ updated_at TIMESTAMPTZ NOT NULL
+);
+`;
 const fail = (message, statusCode = 400) => { throw Object.assign(new Error(message), { statusCode }); };
 const extensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 export const REFERENCE_IMAGE_ATTACHMENT_PREFIX = 'agent-reference-image:';
+export const OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX = 'operator-reference-image:';
 
 export function validateReferenceImageUpload(body) {
   if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).some(key => !['fileName', 'content'].includes(key)) ||
@@ -53,6 +65,14 @@ export function validateReferenceImageUpload(body) {
   return { bytes, mimeType, fileName };
 }
 
+function operatorMetadata(row) {
+  if (!row) return null;
+  return { id: row.id,
+    attachmentId: `${OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX}${row.id}`,
+    contentUrl: `/api/operator/reference-image/content?id=${encodeURIComponent(row.id)}`,
+    mimeType: row.mime_type, fileName: row.file_name, sizeBytes: row.size_bytes,
+    updatedAt: new Date(row.updated_at).toISOString() };
+}
 function modMetadata(row) {
   if (!row) return null;
   return { id: row.id,
@@ -179,6 +199,61 @@ export class PostgresAgentReferenceImageStore {
       }
       return { image, bytes };
     } finally { await handle.close(); }
+  }
+  async operatorLock(client) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('operator-reference-image',0))");
+  }
+  async getOperator() {
+    return operatorMetadata((await this.pool.query("SELECT * FROM operator_reference_images WHERE operator_id='default'")).rows[0]);
+  }
+  async putOperator(body) {
+    const { bytes, mimeType, fileName } = validateReferenceImageUpload(body);
+    let created, previous;
+    try {
+      const image = await withPostgresTransaction(this.pool, async client => {
+        await this.operatorLock(client);
+        previous = (await client.query("SELECT storage_reference FROM operator_reference_images WHERE operator_id='default'")).rows[0]?.storage_reference;
+        created = await persistGeneratedArtifact({ agentWorkspaceRoot: this.runtimeRoot, metadata: { kind: 'image', name: fileName, mimeType }, bytes });
+        const result = await client.query(`INSERT INTO operator_reference_images(operator_id,id,storage_reference,file_name,mime_type,size_bytes,updated_at)
+          VALUES('default',$1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
+          ON CONFLICT(operator_id) DO UPDATE SET id=EXCLUDED.id,storage_reference=EXCLUDED.storage_reference,file_name=EXCLUDED.file_name,mime_type=EXCLUDED.mime_type,size_bytes=EXCLUDED.size_bytes,updated_at=EXCLUDED.updated_at RETURNING *`,
+          [randomUUID(), created.storageReference, fileName, mimeType, bytes.length]);
+        return operatorMetadata(result.rows[0]);
+      });
+      await this.discard(previous);
+      return image;
+    } catch (error) {
+      if (created) {
+        // A failed COMMIT acknowledgement does not prove rollback.
+        try {
+          const retained = await this.pool.query('SELECT 1 FROM operator_reference_images WHERE storage_reference=$1', [created.storageReference]);
+          if (!retained.rowCount) await this.discard(created.storageReference);
+          else await this.discard(previous);
+        } catch { this.logger.warn?.('Operator reference image commit outcome could not be reconciled'); }
+      }
+      throw error;
+    }
+  }
+  async removeOperator() {
+    const previous = await withPostgresTransaction(this.pool, async client => {
+      await this.operatorLock(client);
+      return (await client.query("DELETE FROM operator_reference_images WHERE operator_id='default' RETURNING storage_reference")).rows[0]?.storage_reference;
+    });
+    await this.discard(previous);
+    return null;
+  }
+  async readOperator(id = null) {
+    return withPostgresTransaction(this.pool, async client => {
+      await this.operatorLock(client);
+      const row = (await client.query("SELECT * FROM operator_reference_images WHERE operator_id='default'")).rows[0];
+      if (!row || (id !== null && id !== row.id)) fail('operator_reference_image_not_found', 404);
+      return this.readStored(row, operatorMetadata(row));
+    });
+  }
+  async viewOperator(attachmentId) {
+    if (typeof attachmentId !== 'string' || !attachmentId.startsWith(OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX)) fail('operator_reference_image_not_found', 404);
+    const { image, bytes } = await this.readOperator(attachmentId.slice(OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX.length));
+    return { id: image.attachmentId, name: image.fileName, type: image.mimeType, size: image.sizeBytes, storedAt: image.updatedAt, kind: 'image', dataUrl: `data:${image.mimeType};base64,${bytes.toString('base64')}` };
   }
   async modLock(client, modId, key) {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [JSON.stringify(['mod-reference-image', modId, key])]);

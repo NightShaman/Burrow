@@ -46,3 +46,28 @@ export function createModReferenceImageContentRoute({ store, sendJson }) {
     return true;
   };
 }
+
+/** The operator photo is independent of the small chat identity avatar. */
+export function createOperatorReferenceImageRoutes({ store, readJsonBody, sendJson }) {
+  return async ({ req, res, url }) => {
+    const match = /^\/api\/operator\/reference-image(\/content)?$/.exec(url.pathname);
+    if (!match) return false;
+    try {
+      const images = store();
+      if (match[1] && req.method === 'GET') {
+        const { image, bytes } = await images.readOperator(url.searchParams.get('id'));
+        res.writeHead(200, { 'content-type': image.mimeType, 'content-length': bytes.length,
+          ...artifactResponseHeaders({ name: image.fileName, mimeType: image.mimeType }) });
+        res.end(bytes);
+      } else if (!match[1] && ['GET', 'PUT', 'DELETE'].includes(req.method)) {
+        const referenceImage = req.method === 'GET' ? await images.getOperator()
+          : req.method === 'DELETE' ? await images.removeOperator()
+          : await images.putOperator(await readJsonBody(req, { maxBytes: Math.ceil(REFERENCE_IMAGE_MAX_BYTES / 3) * 4 + 2048 }));
+        sendJson(res, 200, { ok: true, referenceImage });
+      } else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
+    } catch (error) {
+      sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message.replace(/^agent_reference_image_/, 'operator_reference_image_') : 'operator_reference_image_unavailable' });
+    }
+    return true;
+  };
+}

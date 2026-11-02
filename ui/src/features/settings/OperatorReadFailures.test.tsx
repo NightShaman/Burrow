@@ -5,6 +5,8 @@ import { OperatorProfile } from './OperatorProfile';
 import { OperatorTimezone } from './OperatorTimezone';
 import { CuratorSettings } from './CuratorSettings';
 
+// Reference-photo autosave has its own API and navigation tests.
+vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 afterEach(() => {
   cleanup();

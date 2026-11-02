@@ -6,6 +6,8 @@ import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OperatorProfile } from './OperatorProfile';
 import { McpConnections } from './McpConnections';
+// Reference-photo autosave has its own API and navigation tests.
+vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('../../app/api', async (original) => ({
   ...(await original<typeof import('../../app/api')>()),
   api: vi.fn(),

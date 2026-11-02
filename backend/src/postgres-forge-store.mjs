@@ -181,10 +181,11 @@ export class PostgresForgeStore {
       ? this.connections({agentId})
       : this.connections || []);
   }
-  async catalog({agentId = null, includeSavedPortraits = true, includeOwnPortrait = true} = {}) {
+  async catalog({agentId = null, includeSavedPortraits = true, includeOwnPortrait = true, includeOperatorPortrait = true} = {}) {
     const catalog = forgeCatalog(await this.connectionList(agentId));
     const savedPortraits = includeSavedPortraits ? await this.referenceImages?.list?.() ?? [] : [];
     return { ...catalog, defaults: await this.selections(),
+      ...(includeOperatorPortrait ? { operatorReferenceImage: portraitMetadata(await this.referenceImages?.getOperator?.() ?? null) } : {}),
       agentReferenceImages: savedPortraits.map(({ agentId: id, agentName, portraitMetadata: metadata, ...image }) => ({
         agentId: id, agentName, ...portraitMetadata(metadata ?? image),
       })),
@@ -217,7 +218,7 @@ export class PostgresForgeStore {
     }
     return this.snapshotSavedImage(saved, { agentId });
   }
-  async referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, catalog, ownerModId, privateReferences, maxBytes }) {
+  async referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, useOperatorReferenceImage, catalog, ownerModId, privateReferences, maxBytes }) {
     const snapshots = [];
     let totalBytes = 0;
     const add = snapshot => {
@@ -252,6 +253,16 @@ export class PostgresForgeStore {
         const snapshot = await this.referenceImageSnapshot(id);
         add({ ...snapshot, referenceImage: Object.freeze({ ...snapshot.referenceImage,
           name: known.get(id)?.agentName || id }) });
+      }
+      if (useOperatorReferenceImage) {
+        if (!this.referenceImages?.readOperator) fail('operator_reference_image_missing', 409);
+        let saved;
+        try { saved = await this.referenceImages.readOperator(); }
+        catch (error) {
+          if (error?.statusCode === 404) fail('operator_reference_image_missing', 409);
+          throw error;
+        }
+        add(this.snapshotSavedImage(saved, { operatorId: 'default', name: 'Operator' }));
       }
     }
     return snapshots;
@@ -442,6 +453,7 @@ export class PostgresForgeStore {
       "prompt",
       "idempotencyKey",
       "useAgentReferenceImage",
+      "useOperatorReferenceImage",
       "referenceAgentIds",
     ];
     if (
@@ -460,6 +472,8 @@ export class PostgresForgeStore {
     if (body.useAgentReferenceImage !== undefined && body.useAgentReferenceImage !== null && typeof body.useAgentReferenceImage !== 'boolean')
       fail('forge_request_invalid');
     const useAgentReferenceImage = body.useAgentReferenceImage === true;
+    if (body.useOperatorReferenceImage != null && typeof body.useOperatorReferenceImage !== 'boolean') fail('forge_request_invalid');
+    const useOperatorReferenceImage = body.useOperatorReferenceImage === true;
     if (body.referenceAgentIds != null && (!Array.isArray(body.referenceAgentIds) ||
       body.referenceAgentIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()))) fail('forge_request_invalid');
     const referenceAgentIds = body.referenceAgentIds ?? [];
@@ -467,8 +481,8 @@ export class PostgresForgeStore {
       privateReferences.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
         Object.keys(ref).some(key => !['key', 'id', 'name'].includes(key)) ||
         ['key', 'id', 'name'].some(key => typeof ref[key] !== 'string' || !ref[key].trim())))) fail('forge_request_invalid');
-    if (privateReferences && (useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
-    const hasReferences = useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences);
+    if (privateReferences && (useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
+    const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences);
     if (hasReferences && body.mode && body.mode !== 'image') fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
@@ -480,7 +494,7 @@ export class PostgresForgeStore {
     )
       fail("forge_request_invalid");
     if (!explicit && !body.mode) fail("forge_selection_missing", 409);
-    const catalog = await this.catalog({ agentId, includeSavedPortraits: !privateReferences && referenceAgentIds.length > 0, includeOwnPortrait: false });
+    const catalog = await this.catalog({ agentId, includeSavedPortraits: !privateReferences && (referenceAgentIds.length > 0 || (useOperatorReferenceImage && useAgentReferenceImage)), includeOwnPortrait: false, includeOperatorPortrait: false });
     const saved = explicit
       ? { connectionId: body.connectionId, modelId: body.modelId }
       : (await this.selections())[body.mode];
@@ -518,9 +532,9 @@ export class PostgresForgeStore {
     }
     // Preserve the self-only identity/prompt for existing callers. New explicit
     // lists (even one other agent), and Theater-owned refs use ordered snapshots.
-    const legacySelf = useAgentReferenceImage && !referenceAgentIds.length && !privateReferences;
+    const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences;
     const snapshots = legacySelf ? [await this.referenceImageSnapshot(agentId)] : hasReferences
-      ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
+      ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, useOperatorReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
     const referenceImage = legacySelf ? snapshots[0].referenceImage : null;
     const multiReferences = hasReferences && !legacySelf ? snapshots.map(({ referenceImage: ref }) => privateReferences
       ? { key: ref.key, id: ref.id, name: ref.name, mimeType: ref.mimeType, sizeBytes: ref.sizeBytes, sha256: ref.sha256 }
@@ -531,7 +545,7 @@ export class PostgresForgeStore {
       // Only the provider prompt gets this mapping; the job's caller prompt
       // stays unchanged and no single-self exact prompt changes.
       dispatch.prompt = `${body.prompt}\n\nUse the supplied reference images as canonical character identities: preserve each character's face, species, build and distinctive features. Do not blend identities; depict only the characters called for by the scene.\nReference images (in the order supplied):\n${multiReferences.map((ref, index) =>
-        `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ''}.`).join('\n')}`;
+        `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ref.operatorId ? ' (operator)' : ''}.`).join('\n')}`;
     }
     // Config resolution may borrow this same pool. Resolve before holding the
     // claim transaction (including max-one pools), but defer admission errors
@@ -551,6 +565,7 @@ export class PostgresForgeStore {
       ...(referenceImage ? { useAgentReferenceImage: true, referenceImage } : {}),
       ...(multiReferences ? { referenceImages: multiReferences,
         referenceActorAgentId: agentId || null,
+        ...(useOperatorReferenceImage ? { useOperatorReferenceImage: true } : {}),
         ...(useAgentReferenceImage ? { useAgentReferenceImage: true } : {}) } : {}),
     };
     const owner = await this.owner();

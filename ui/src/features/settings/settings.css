@@ -5932,3 +5932,23 @@ button:disabled {
 .agent-reference-preview img {
   object-fit: contain;
 }
+
+/* Reference photos have two actions; leave the avatar's two-column row unchanged. */
+.reference-photo-file-control {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+.reference-photo-paste textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 68px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  resize: vertical;
+}
+.reference-photo-paste > button {
+  justify-self: start;
+}

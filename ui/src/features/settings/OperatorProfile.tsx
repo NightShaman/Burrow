@@ -1,3 +1,4 @@
+import { AgentReferencePhoto } from './AgentReferencePhoto';
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { api } from '../../app/api';
@@ -360,6 +361,7 @@ export function OperatorProfile({ onSaved }: { onSaved: (profile: Profile) => vo
           )}
         </div>
       </div>
+      <AgentReferencePhoto name={name || 'Operator'} disabled={status !== 'idle'} />
       <div className="operator-profile-actions">
         <Field label="Displayed name">
           <input

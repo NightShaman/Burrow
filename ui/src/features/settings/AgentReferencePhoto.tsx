@@ -15,7 +15,7 @@ const types = ['image/png', 'image/jpeg', 'image/webp'];
 const maxBytes = 20 * 1024 * 1024;
 function acknowledgement(
   value: unknown,
-  agentId: string,
+  agentId: string | undefined,
   operation: 'load' | 'upload' | 'remove',
 ): ReferenceImage | null {
   const response = value as {
@@ -26,7 +26,7 @@ function acknowledgement(
   const image = response?.referenceImage;
   if (
     response?.ok !== true ||
-    response.agentId !== agentId ||
+    (agentId !== undefined && response.agentId !== agentId) ||
     image === undefined ||
     (operation === 'upload' && image === null) ||
     (operation === 'remove' && image !== null) ||
@@ -36,7 +36,7 @@ function acknowledgement(
         typeof image.attachmentId !== 'string' ||
         typeof image.contentUrl !== 'string' ||
         !image.contentUrl.startsWith(
-          `/api/agents/${encodeURIComponent(agentId)}/reference-image/content?`,
+          `${agentId === undefined ? '/api/operator' : `/api/agents/${encodeURIComponent(agentId)}`}/reference-image/content?`,
         ) ||
         !types.includes(image.mimeType) ||
         typeof image.fileName !== 'string' ||
@@ -69,11 +69,14 @@ export function AgentReferencePhoto({
   disabled,
   onBusyChange,
 }: {
-  agentId: string;
+  agentId?: string;
   name: string;
   disabled: boolean;
-  onBusyChange: (busy: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
+  const endpoint = `${agentId === undefined ? '/api/operator' : `/api/agents/${encodeURIComponent(agentId)}`}/reference-image`;
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const pasteTarget = useRef<HTMLTextAreaElement>(null);
   const [image, setImage] = useState<ReferenceImage | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -87,6 +90,9 @@ export function AgentReferencePhoto({
   const input = useRef<HTMLInputElement>(null);
   const owner = useRef<object | null>(null);
   const working = useRef(false);
+  const clipboardAttempt = useRef(0);
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
   useEffect(() => {
@@ -104,11 +110,7 @@ export function AgentReferencePhoto({
     setLoading(true);
     setError('');
     try {
-      const result = acknowledgement(
-        await api(`/api/agents/${encodeURIComponent(agentId)}/reference-image`),
-        agentId,
-        'load',
-      );
+      const result = acknowledgement(await api(endpoint), agentId, 'load');
       if (owner.current === ticket) {
         setImage(result);
         setLoaded(true);
@@ -157,14 +159,14 @@ export function AgentReferencePhoto({
     if (!ticket || working.current || disabled || !loaded) return false;
     working.current = true;
     setBusy(true);
-    busyCallback.current(true);
+    busyCallback.current?.(true);
     setPending(file);
     setError('');
     setNotice('');
     try {
       const content = file ? await readFile(file) : undefined;
       if (owner.current !== ticket) return false;
-      const response = await api(`/api/agents/${encodeURIComponent(agentId)}/reference-image`, {
+      const response = await api(endpoint, {
         method: file ? 'PUT' : 'DELETE',
         headers: { 'content-type': 'application/json' },
         ...(file ? { body: JSON.stringify({ fileName: file.name, content }) } : {}),
@@ -183,12 +185,13 @@ export function AgentReferencePhoto({
       if (owner.current === ticket) {
         working.current = false;
         setBusy(false);
-        busyCallback.current(false);
+        busyCallback.current?.(false);
       }
     }
   };
   const choose = (file?: File) => {
-    if (!file || working.current || disabled || !loaded) return;
+    if (!file || working.current || disabledRef.current || !loaded) return;
+    clipboardAttempt.current += 1;
     if (!types.includes(file.type) || file.size === 0 || file.size > maxBytes) {
       setError('Choose a PNG, JPEG or WebP image up to 20 MiB.');
       setNotice('');
@@ -207,9 +210,43 @@ export function AgentReferencePhoto({
       setNotice('');
     },
   });
+  useEffect(() => {
+    if (pasteOpen) pasteTarget.current?.focus();
+  }, [pasteOpen]);
+  const paste = async () => {
+    if (working.current || disabledRef.current || !loaded) return;
+    const attempt = ++clipboardAttempt.current;
+    const stale = () =>
+      attempt !== clipboardAttempt.current || disabledRef.current || working.current;
+    setError('');
+    setNotice('');
+    if (!navigator.clipboard?.read) {
+      setPasteOpen(true);
+      return;
+    }
+    const ticket = owner.current;
+    try {
+      const items = await navigator.clipboard.read();
+      if (owner.current !== ticket || stale()) return;
+      for (const item of items) {
+        const type = item.types.find((value) => types.includes(value));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        if (owner.current !== ticket || stale()) return;
+        choose(new File([blob], `pasted-reference.${type.split('/')[1]}`, { type }));
+        return;
+      }
+      setError('No supported image found on the clipboard.');
+      setPasteOpen(true);
+    } catch {
+      if (owner.current !== ticket || stale()) return;
+      setError('Clipboard access was denied. Paste an image below instead.');
+      setPasteOpen(true);
+    }
+  };
   const locked = disabled || busy || !loaded;
   return (
-    <div data-agent-immediate>
+    <div data-agent-immediate data-operator-immediate>
       <div className="operator-profile agent-profile">
         <div
           className="agent-avatar-preview agent-reference-preview"
@@ -227,7 +264,7 @@ export function AgentReferencePhoto({
         </div>
         <div className="operator-profile-details">
           <div
-            className="avatar-file-control"
+            className="avatar-file-control reference-photo-file-control"
             onPaste={(event) => {
               if (working.current || disabled || !loaded) return;
               const file = Array.from(event.clipboardData.items)
@@ -258,6 +295,15 @@ export function AgentReferencePhoto({
             >
               {image ? 'Replace' : 'Upload'}
             </button>
+            <button
+              className="secondary"
+              type="button"
+              disabled={locked}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void paste()}
+            >
+              Paste
+            </button>
             <input
               ref={input}
               className="avatar-file-input"
@@ -277,13 +323,55 @@ export function AgentReferencePhoto({
               type="button"
               disabled={locked}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => void save(null)}
+              onClick={() => {
+                clipboardAttempt.current += 1;
+                void save(null);
+              }}
             >
               Remove reference photo
             </button>
           )}
         </div>
       </div>
+      {pasteOpen && (
+        <div className="field reference-photo-paste">
+          <label htmlFor="reference-photo-paste">Paste reference photo (Ctrl+V or ⌘V)</label>
+          <textarea
+            id="reference-photo-paste"
+            ref={pasteTarget}
+            aria-label="Paste reference photo"
+            rows={2}
+            disabled={locked}
+            value=""
+            onChange={() => {}}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setPasteOpen(false);
+            }}
+            onPaste={(event) => {
+              event.preventDefault();
+              const file = Array.from(event.clipboardData.items)
+                .find((item) => item.type.startsWith('image/'))
+                ?.getAsFile();
+              if (!file) {
+                setError('No image found on the clipboard.');
+                return;
+              }
+              choose(file);
+              setPasteOpen(false);
+            }}
+          />
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => {
+              clipboardAttempt.current += 1;
+              setPasteOpen(false);
+            }}
+          >
+            Cancel paste
+          </button>
+        </div>
+      )}
       {busy && <p role="status">Saving reference photo…</p>}
       {notice && <p role="status">{notice}</p>}
       {error && (

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute } from './ui/agent-reference-image-routes.mjs';
+import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute, createOperatorReferenceImageRoutes } from './ui/agent-reference-image-routes.mjs';
 import { createBoardTaskExecutor } from '../src/task-execution.mjs';
 import { isDisplayChatMessage } from '../src/session-entry.mjs';
 import { chatResultMetadata } from '../src/chat-result-metadata.mjs';
@@ -3121,6 +3121,7 @@ const skillApi = {
 const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const modReferenceImageRoute = createModReferenceImageContentRoute({ store: () => postgresApplication.stores.referenceImages, sendJson });
 const agentReferenceImageRoute = createAgentReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });
+const operatorReferenceImageRoute = createOperatorReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });
 const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
 const archiveAgentContext = createArchiveAgentContext({ agentsStore, rootDir: projectRoot });
 const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveContinuityCards, archiveContinuityCardDetail } = createArchiveService({
@@ -3499,6 +3500,7 @@ async function handleRequest(req, res) {
     }
     if (await observabilityRoute({ req, res, url })) return;
     if (await modReferenceImageRoute({ req, res, url })) return;
+    if (await operatorReferenceImageRoute({ req, res, url })) return;
     if (await agentReferenceImageRoute({ req, res, url })) return;
     if (await agentRoute({ req, res, url })) return;
     if (await archiveReadProcess.route({ req, res, url })) return;

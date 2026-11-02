@@ -52,7 +52,7 @@ function rawFields(result = {}) {
   if (result.tool === 'spawn_subagent' && result.summary) return [{ label: 'subagent summary', text: result.summary }];
   const fields = {
     mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
-    attachment_view: ['attachment'], forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults', 'agentReferenceImage', 'agentReferenceImages'],
+    attachment_view: ['attachment'], forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults', 'agentReferenceImage', 'agentReferenceImages', 'operatorReferenceImage'],
     forge_create_job: ['job', 'replayed'], forge_list_jobs: ['jobs'],
     forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'], agent_send_message: ['reply'],
   };

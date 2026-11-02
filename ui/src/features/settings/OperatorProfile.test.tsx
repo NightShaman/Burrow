@@ -4,6 +4,7 @@ import { api } from '../../app/api';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OperatorProfile } from './OperatorProfile';
 
+vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
