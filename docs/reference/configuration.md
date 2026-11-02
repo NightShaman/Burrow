@@ -17,7 +17,7 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | Execution hard boundaries | PostgreSQL metadata | Settings → Agents → Global |
 | Operator timezone | PostgreSQL metadata | Settings → General → Operator profile |
 | Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
-| Browser Origin checking | Persisted `checkOrigin`, with environment override | Settings browser-origin control; `/api/settings/browser-origin` |
+| Browser Origin checking | Deployment environment; enabled by default | `BURROW_UI_ORIGIN_CHECK` and `BURROW_UI_ALLOWED_ORIGINS`; no Settings/API editor |
 | OpenTelemetry export | PostgreSQL destination list/master switch and encrypted credentials/headers, with explicit environment overrides | Settings → Connections → OpenTelemetry; `/api/settings/opentelemetry` |
 | System-mod authority | Core-owned capability and agent grants | `/api/operator/mods/{modId}/access`; current Core allows direct UI use in `none` mode; enabled authentication requires operator login; API tokens do not authorize this route |
 | Dream schedule and model selection | PostgreSQL agent Dream settings | Agent Dreams settings |

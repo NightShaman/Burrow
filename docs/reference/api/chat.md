@@ -49,7 +49,7 @@ Each event has `type`, `runId`, `sessionId`, `ts` and `data`. Buffer partial net
 | `run.completed` | Terminal `data.response`; inspect its application outcome |
 | `run.failed`, `run.cancelled`, `run.superseded` | Other terminal outcomes with `data.response` |
 
-The terminal response and persisted transcript are authoritative, not accumulated deltas. A handled unsuccessful result can arrive in `run.completed`, and an HTTP 200 stream can end with failure. Slash-command turns can produce only a terminal event. Early validation failures can be ordinary JSON errors before streaming starts.
+The terminal response and persisted transcript are authoritative, not accumulated deltas. Handled model failures and incomplete turns emit `run.failed`; HTTP 200 still describes the stream transport, not application success. Slash-command turns can produce only a terminal event. Early validation failures can be ordinary JSON errors before streaming starts.
 
 Tool progress is operational evidence, not a content-free telemetry guarantee: projected fields can include command, cwd, paths, query, reason and error. Keep streams private.
 ```mermaid
@@ -148,3 +148,11 @@ Changed behavior above was checked statically against Backend `a04acb16b0eab2a91
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## Structured terminal results
+
+Normal terminal summaries/results include `chatResultVersion: 2` and `terminalStatus` (`completed`, `failed`, `cancelled`, or `superseded`). Transport-error/cancellation envelopes without a result carry these at the response root. The terminal event agrees with the outcome; stop/stale-generation precedence remains unchanged.
+
+`modelFailure` and `modelRecovery` are runtime metadata, not assistant prose. Failed assistant rows contain only genuine partial text from the last physical attempt, or empty content when none exists, and are display-only (`entersPrompt:false`). Empty metadata-bearing failures remain visible in Chat, Archive and recovery reads; abandoned attempts and private thought are not concatenated into answers. Consumers must read structured metadata rather than infer errors from an answer prefix.
+
+Only the backend compatibility projection interprets old `[model_error: …]` text, and only for unversioned assistant rows with producer evidence (`decision:model_failed` or `kind:subagent-model-error`). Literal matching text alone is not failure evidence; raw legacy exports remain unchanged.

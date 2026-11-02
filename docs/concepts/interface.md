@@ -107,7 +107,7 @@ This settings map reflects the development UI reviewed **1 November 2026**, rath
 | **General** | Operator profile (including Operator timezone and Browser tab), Trace retention, Continuity, Export, Rail panels, Appearance |
 | **Agents** | Select **Global** for Global documents and Execution boundaries; select an agent for Agent details, Profile documents, MCP tools, Cron jobs, Workflow events, Dreams, Skills |
 | **Skills** | Text skills, managed Git sources, lifecycle, global use, and assignments |
-| **Connections** | Authentication, OpenTelemetry, Browser origin, Models, Load balancing, MCP servers, API tokens |
+| **Connections** | Authentication, OpenTelemetry, Models, Load balancing, MCP servers, API tokens |
 | **Mods** | Installed mods, Mod sources, Automatic source checks |
 
 - **OpenTelemetry:** add, select, enable or remove destinations, then save the complete draft list. The master **Send telemetry** switch and individual destination switches are separate. Saved and effective environment-controlled destinations are distinguished; see [Observability](../operations/observability.md#opentelemetry).
@@ -344,3 +344,11 @@ Coupled editors retain an explicit save: profile documents, model providers/pool
 Dream history is in **Archive → Dreams**; workflow delivery history is in **Archive → Workflow Events**. Their Settings pages retain configuration. The agent rail discovers visible Minions across that agent's originating sessions and retains their parent/root context; opening one does not change the parent agent's ordinary session selection. Delegated child task turns are labeled from retained source attribution rather than presented as a new operator message.
 
 Source-reviewed on 30 October 2026 against UI `bb78b136e7ceb21858b134c1f8376726d8e18f5d`; historical screenshots were not recaptured.
+
+## Canonical reference photos
+
+**Settings → Agents → Agent details → Reference photo** and **Settings → General → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
+
+Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
+
+Photos belong to Core: database links plus runtime-managed original artifacts, not execution-host workspace files or expiring chat attachments. Back up the database and runtime artifacts together. Selective settings exports do not include these photos.

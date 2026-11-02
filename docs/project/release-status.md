@@ -73,3 +73,7 @@ Compared changes since the successful 30 October baseline: retained Chat occurre
 ## Sunday full reconciliation: 1 November 2026
 
 Existing guides were compared with the current implementation across setup, configuration, routing, APIs, operations, troubleshooting and skills. Corrections include saved board-task scheduling and one-time consumption, independent Anthropic thinking modes and paginated native catalogues, current Settings/task-board behavior, and migration inventory through 85. Historical screenshots and immutable public-source receipts remain explicitly historical. This is static documentation reconciliation, not a runtime installation, provider call, application test run or release promotion.
+
+## 2 November implementation delta
+
+Current inspected assembly **2026.11.02.4**, commit `d25beccce60830cf4159d91cae9a97dec38eefd2`, records Backend `69f644aaf9f0060fac7003c22e77f7a3da7c0471` and UI `1c396911c2f47137f5ea0ba3759a960de31770c4`. It includes canonical agent/operator reference photos for supported Forge image models, separate per-peer A2A inboxes, structured terminal error persistence, explicit opt-in for newly discovered API models, cheaper retention policy reads, and environment-only Origin checking. The database ledger reaches 89. This ordinary delta supplements, rather than repeats, Sunday's full reconciliation. Public mirror and installed-version availability remain separate checks.

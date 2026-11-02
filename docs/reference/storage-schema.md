@@ -5,7 +5,7 @@
     This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
-This reference reviews application storage ownership and records the current migration ledger through **85**, checked against Core on **1 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference reviews application storage ownership and records the current migration ledger through **89**, checked against Core on **2 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -308,3 +308,14 @@ These are application migrations, not a PostgreSQL major upgrade or permission t
 | 85 | `anthropic-thinking-mode-selections` | Adds nullable `thinking_mode` to main and Minion model selections, constrained to the supported mode names. Existing rows remain legacy null, not provider default. |
 
 Task schedules are constrained to the default session and continued context. Cron and once schedules have mutually exclusive cron/run-at fields. One-time consumption, task eligibility and restart reconciliation are application lifecycle contracts; never rearm by editing these rows directly. Read [scheduling](api/work.md#scheduled-jobs) and [model selection](api/settings.md#model-connections-and-provider-login).
+
+## 2 November migration additions
+
+| Version | Migration | Purpose |
+|---|---|---|
+| 86 | `canonical-agent-reference-images` | Agent-owned canonical-photo metadata and managed artifact reference |
+| 87 | `mod-character-reference-images` | Mod/key-owned canonical character-photo metadata |
+| 88 | `structured-chat-result-projection` | Includes future structured terminal rows, including empty display-only failures, in Archive keysets; no rewrite of historical payloads |
+| 89 | `canonical-operator-reference-image` | Singleton operator photo metadata and managed artifact reference |
+
+Original photo bytes are runtime artifacts, not SQL media values. Agent/operator/Mod photos are distinct from avatars and expiring conversation attachments.

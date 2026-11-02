@@ -65,3 +65,11 @@ Changed contracts above were checked statically against Backend `4057b50a5d5a9b1
 ## Agent-wide Minion overview
 
 `POST /api/agents/overview` additionally accepts `minionScope: "session" | "agent"`; default is `session`, invalid values return `400 minion_scope_invalid`. With `agent`, each successful status includes the requested session anchor plus visible Minions across that agent's originating sessions and declares `status.minionScope: "agent"`. It does not include unrelated ordinary chats or other agents. Anchor IDs stay unchanged, including when the anchor itself is a child. Context hydration remains independently capped at the anchor plus 12 distinct children. `/api/agent-status`, recovery and cancellation retain their existing session scopes.
+
+## Reference-photo routes
+
+`GET|PUT|DELETE /api/agents/{agentId}/reference-image` manage an agent photo independently of its avatar; success returns `{ok:true,agentId,referenceImage}`. The operator equivalent `/api/operator/reference-image` returns `{ok:true,referenceImage}` without `agentId`. GET yields metadata or null, PUT uploads/replaces, and DELETE returns null. PUT requires `{fileName,content}`, where `content` is a PNG/JPEG/WebP base64 data URL with at most 20 MiB decoded bytes.
+
+Metadata contains `id`, `attachmentId`, `contentUrl`, `mimeType`, `fileName`, `sizeBytes` and `updatedAt`. The `/content?id=<revision>` child route streams the current original with private/no-store headers; missing, stale or wrong-agent revisions return 404. Ordinary settings authentication/scopes apply. The operator attachment identity is `operator-reference-image:<uuid>`; agent photos use `agent-reference-image:<uuid>`.
+
+PostgreSQL owns links in `agent_reference_images` and singleton `operator_reference_images`; files live in Core's runtime-managed artifacts. Replacement/removal cleans the previous owned file, and agent deletion cleans its photo. These are not chat-retention attachments or selective-export payloads. See [generation selectors](artifacts.md#canonical-reference-image-generation).

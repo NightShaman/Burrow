@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.01.7` | `fe851c4e546c9bf9f53f861e24f918474432c296` |
-| Core / Backend | `8b5889115680bcdbf698f1b93126254e1cf4d2e6` |
-| UI | `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef` |
-| Skills | `1f464f48b651a78c3c90599ffee674a627cf67e3` |
+| Assembled Burrow, build `2026.11.02.4` | `d25beccce60830cf4159d91cae9a97dec38eefd2` |
+| Core / Backend | `69f644aaf9f0060fac7003c22e77f7a3da7c0471` |
+| UI | `1c396911c2f47137f5ea0ba3759a960de31770c4` |
+| Skills | `f0f033fcd5b795bdc0a5dc8ec548ef82488e8f0e` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -87,3 +87,7 @@ Existing guides were compared with the current implementation across setup, conf
 ## Navigation cleanup: 1 November 2026
 
 The misleading earlier-reference navigation group was removed after the Sunday reconciliation. Useful technical pages retain their URLs and source-review qualifications; overlapping setup instructions are consolidated into the user guide, with old setup URLs and section anchors retained as links to the canonical instructions. The illustrated screen reference remains available for detailed UI guidance. This is an editorial and navigation change, not another implementation audit, runtime test or release promotion.
+
+## 2 November ordinary delta review
+
+The current table pins build 2026.11.02.4 and its matching Backend/UI sources. This pass covers canonical agent/operator/Mod photos, Forge reference selection, per-peer A2A inboxes, structured chat terminal failures, explicit API-model opt-in, retention form reads, deployment-only Origin controls and migrations 86–89. Unchanged pages inherit the dated 1 November full review; historical screenshots and pinned public-source links remain historical. No application tests, provider calls or installed-instance upgrades are claimed.

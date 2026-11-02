@@ -53,7 +53,7 @@ Use the paperclip, drag files into the composer, or paste an image. Review the a
 
 ### Current session-routing controls
 
-Checked **24 October 2026**: the chat toolbar includes **A2A in default**, a per-agent toggle for incoming agent-to-agent conversation routing. Enabled is the default; turning it off routes new implicit A2A deliveries to that agent's separate `a2a` session, displayed as **A2A**. Explicit target sessions and runtime-attested replies keep their existing routes; an exchange already in flight is not redirected. This is a routing preference, not a deletion or migration of existing conversations. Refresh/select the intended session to inspect its history.
+Checked **2 November 2026**: the chat toolbar includes **A2A in default**, a per-agent toggle for incoming agent-to-agent conversation routing. Enabled is the default; turning it off routes new implicit deliveries into a reusable `a2a-<canonical-sender-id>` session per peer, labeled **A2A - Peer name**. Explicit target sessions and runtime-attested replies keep their existing routes; an exchange already in flight is not redirected. This is a routing preference, not a deletion or migration of existing conversations. Refresh/select the intended session to inspect its history.
 
 Switchboard sessions receive readable Telegram/Discord labels in the session selector while retaining their actual session IDs. A label alone does not establish that the corresponding transport is configured or healthy; use the mod's own status and mapping controls.
 
@@ -103,7 +103,7 @@ Changing filters or leaving Archive cancels its reads, not durable chat/jobs. A 
 3. Check the job's status. When it succeeds, preview or **Download** the output. **Attach to conversation** adds it to the selected chat session.
 4. Use **Recents** to revisit earlier jobs and **Refresh** if needed.
 
-Model availability depends on your connections. This release has no video provider contract; the Video tab is not a promise of working video generation. Source attachments and provider-specific tuning are also unsupported by the current Forge contract. The animated pressure gauge is decorative, not progress.
+Model availability depends on your connections. This release has no video provider contract; the Video tab is not a promise of working video generation. Arbitrary source attachments and provider-specific tuning remain unsupported; explicitly selected canonical reference photos are the supported exception described below. The animated pressure gauge is decorative, not progress.
 
 [Source: Forge workflow and limitations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/forge/ForgePage.tsx#L240-L266) · [Source: generation contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/forge-agent-tools.mjs#L26-L30)
 
@@ -116,3 +116,15 @@ Terminal Forge jobs (**succeeded**, **failed**, **interrupted**) have a confirme
 If cleanup fails, inspect the job and Archive before retrying: filesystem cleanup and database changes are not one atomic transaction, so some media may already be gone. Legacy records may lack call evidence that was never stored.
 
 Disabled agents disappear from new-work selectors but their retained history remains accessible through Archive. Disabling an agent does not delete its conversations.
+
+## Read failed responses accurately
+
+A failed response can show genuine partial output alongside its structured failure status, or an error-only row when no answer was produced. The same state survives reload and Archive. Do not treat partial text or HTTP transport success as completed work; inspect the terminal outcome before retrying.
+
+## Canonical reference photos
+
+**Settings → Agents → Agent details → Reference photo** and **Settings → General → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
+
+Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
+
+Photos belong to Core: database links plus runtime-managed original artifacts, not execution-host workspace files or expiring chat attachments. Back up the database and runtime artifacts together. Selective settings exports do not include these photos.

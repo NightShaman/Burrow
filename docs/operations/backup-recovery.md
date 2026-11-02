@@ -120,4 +120,6 @@ These exports do not capture complete conversations, original archives, Brain kn
 - Background schedules and operator timezone are correct
 - A low-risk model turn completes without duplicate external actions
 
+## Reference-photo backup scope
 
+Canonical agent, operator and Mod-character reference photos use PostgreSQL links (`agent_reference_images`, `operator_reference_images`, `mod_reference_images`) plus original files in Core's runtime `artifacts/generated` storage. Back up and restore both together, regardless of the selected local/remote execution host. Selective settings exports do not include these photo links/bytes; ordinary chat attachment retention does not manage them.

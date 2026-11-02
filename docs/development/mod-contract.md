@@ -92,7 +92,7 @@ UI is trusted browser ESM. Assets in declared UI directories can be publicly ser
 
 Control exports `mountControl({modId,root,api})` and may return cleanup or `{unmount}`.
 
-Settings exports lowercase-kebab `settingsSections` and `mountSettings({modId,runtimeScope,section,agents,primary,overflow,api,accessApi,refreshAgents,saveAgentExecutionEnvironment,confirm,navigate,setDraft})`. Surfaces expose `replace`, `replaceChildren`, and `clear`. Ordinary mods normally need only `section`, `primary`, and `api`. Declarative `settingsContribution`/`createSettingsContribution` is also supported. Current imperative hosts additionally supply app-owned `confirm`, guarded `navigate`, and `setDraft` lifecycle helpers; use these rather than native browser dialogs or bypassing dirty-form navigation. See the [Tutor UI contribution contract](https://docs.goblin-kingdom.com/burrow-tutor/advanced/ui-contributions/) for exact signatures and disposal behavior.
+Settings exports lowercase-kebab `settingsSections` and `mountSettings({modId,runtimeScope,section,agents,primary,overflow,api,fetchContent,accessApi,refreshAgents,saveAgentExecutionEnvironment,confirm,navigate,setDraft})`. Surfaces expose `replace`, `replaceChildren`, and `clear`. Ordinary mods normally need only `section`, `primary`, and `api`. Declarative `settingsContribution`/`createSettingsContribution` is also supported. Current imperative hosts additionally supply app-owned `confirm`, guarded `navigate`, and `setDraft` lifecycle helpers; use these rather than native browser dialogs or bypassing dirty-form navigation. See the [Tutor UI contribution contract](https://docs.goblin-kingdom.com/burrow-tutor/advanced/ui-contributions/) for exact signatures and disposal behavior.
 
 Archive exports `mountArchive({modId,runtimeScope,root,api,date})`; `date` is `YYYY-MM-DD` or empty. Return cleanup or `{update?,unmount?}`.
 
@@ -105,3 +105,11 @@ Burrow has no manifest `apiVersion` or Core range yet. This page plus the refere
 ## Release checklist
 
 Validate route/tool input; trust only Core identity; never return/log secrets; honor cancellation; clean up; test activation/auth/rejection/repeat/cleanup/UI; integration-test current Core; match manifest version to tag; publish an accepted tag; and verify install/enable/use/disable/update/uninstall in development.
+
+## Canonical Mod reference photos
+
+Where supported by the installed Core, `context.forge.references.get({key})`, `.put({key,body})` and `.remove({key})` manage Core-owned character photos scoped to the caller's manifest ID. Upload `body` uses `{fileName,content}` with PNG/JPEG/WebP base64 data URLs up to 20 MiB decoded. Keys are stable Mod-owned identities, not arbitrary paths; returned metadata identifies the current revision and authenticated content URL.
+
+`context.forge.createImage({prompt,idempotencyKey,referenceImages:[{key,id,name}]})` may select those exact saved revisions. Core binds the owning Mod, validates each revision, snapshots original bytes and ties the ordered identities/digests to idempotency. Missing/stale photos or unsupported models fail without silent text-only fallback. Public agent/operator selectors cannot be mixed into this private Mod context. Omit references for prompt-only behavior. The photos do not authorize paid generation; retain explicit consent and inspect the durable job outcome.
+
+Settings `fetchContent(path, init?)` returns an authenticated `Promise<Response>` for binary content, unlike the scoped JSON `api` helper. It forces GET and requires a `/api/` path, rejecting fragments, backslashes, malformed escapes and decoded dot/dot-dot path segments. Use the returned Core content URL and `response.blob()` for previews; manage object-URL cleanup. This does not create a secret transport or sandbox for trusted Mod UI.

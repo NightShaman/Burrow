@@ -29,7 +29,7 @@ Create a job with `prompt` and a nonblank `idempotencyKey`, plus either:
 - `mode`, using its saved model selection; or
 - A complete explicit `connectionId`/`modelId` pair, optionally with a compatible `mode`
 
-Only those five fields are accepted. `attachments`, `sourceAttachments` and generic `options` are rejected. Generation can be paid. A matching idempotency key/request replays the existing job (200); a new claim returns 202; reusing a key for a different request returns 409. Keep the same key when reconciling an uncertain submission rather than creating another paid job.
+The optional canonical-photo selectors `useAgentReferenceImage`, `referenceAgentIds` and `useOperatorReferenceImage` are also accepted as described below. `attachments`, `sourceAttachments` and generic `options` are rejected. Generation can be paid. A matching idempotency key/request replays the existing job (200); a new claim returns 202; reusing a key for a different request returns 409. Keep the same key when reconciling an uncertain submission rather than creating another paid job.
 
 Poll job detail for a terminal result and inspect `errorDetails` when present. Artifact GET supports `download=1`. There is no general Forge cancellation endpoint in this reference. A successful generation does not prove attachment delivery.
 
@@ -89,3 +89,13 @@ The full page was reconciled on **2026-11-01** against Backend commit `8b5889115
 ## 26 October delta review
 
 Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-26**. This is a focused source comparison since the full review above, not a new application or provider test pass.
+
+## Canonical reference-image generation
+
+Catalog entries expose `agentReferenceImage:{available,reason}` per model. Top-level `agentReferenceImages` lists registered agents with saved photo metadata; `operatorReferenceImage` is metadata or null. Trusted agent callers also receive their own `agentReferenceImage` or null. Catalog reads metadata, not image bytes. Each photo's `attachmentId` can be inspected with `attachment_view`.
+
+HTTP `POST /api/forge/jobs` and native `forge_create_job` accept nullable ordered `referenceAgentIds` and `useOperatorReferenceImage:true`. Native callers may prepend their own photo with `useAgentReferenceImage:true`; direct HTTP has no trusted caller identity, so that self-only flag fails `forge_context_unavailable`. Explicit agent IDs work over HTTP. Agent selections are deduplicated in first-selection order, with the operator photo last. False/null/omission leaves flags off; null/empty IDs select no additional agents. No public request accepts source bytes, URLs or filesystem paths.
+
+Supported image models send actual original PNG/JPEG/WebP bytes: qualifying OpenAI-compatible image-only models with declared image input use multipart `images/edits`; supported native Google image models use GenerateContent `inlineData`. Explicit capability overrides remain authoritative. Missing photos, non-image modes or unsupported models fail before paid dispatch, not silently as text-only generation. A selected absent operator photo yields `operator_reference_image_missing`; other reference errors include `agent_reference_image_missing`, `agent_reference_image_unsupported`, `agent_reference_image_image_only` and `agent_reference_image_invalid`. Aggregate originals are bounded by the existing media allocation budget (256 MiB default); overflow yields `reference_images_too_large`.
+
+Admission snapshots selected bytes privately before its SQL transaction. Revision, owner, ordering and byte digests bind the idempotency claim; changing a photo conflicts with a reused key. Replacing/removing a saved photo cannot change admitted bytes. SQL stores metadata/digests, not the image bytes. Restart still interrupts queued/running work without redispatch. Generation authorization, operator-wide job ownership and the independently trusted attachment destination are unchanged.

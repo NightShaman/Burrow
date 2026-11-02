@@ -120,3 +120,7 @@ Use the operator [API reference](../reference/api.md) and [procedures](../operat
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## Failed turns remain evidence
+
+Chat and Archive retain structured terminal status and safe model-failure/recovery metadata, including empty failed rows. A genuine partial answer can remain visible, but failure diagnostics are not invented assistant text and failed rows do not enter future prompts. Historical error-looking text alone does not establish failure. See [terminal result contract](../reference/api/chat.md#structured-terminal-results).

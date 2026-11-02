@@ -16,7 +16,7 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
 
-Current inspected development source includes PostgreSQL migrations through **85**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+Current inspected development source includes PostgreSQL migrations through **89**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
 
 If startup appears to wait on PostgreSQL, use [long-migration checks](troubleshooting.md#upgrade-waits-on-a-database-migration) to distinguish elapsed time, CPU activity and lock waits before taking action.
 

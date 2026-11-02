@@ -125,3 +125,7 @@ Source reviewed on **31 October 2026** against Core `8275b6bedf1fcd969fb5289cf0b
 - Interactive Archive GETs own a **15-second total budget**, including queue/pool wait. Disconnect or timeout cancels owned read work; a database statement/lock timeout returns `504 { "ok": false, "error": "archive_query_timeout" }`, not an empty collection. Durable runs/jobs are not canceled by page navigation. A failed isolated reader returns `503 archive_reader_unavailable` rather than fabricated history.
 
 Chat calendar discovery uses one isolated reader lane; Chat list/detail and Proof share another. Each uses one connection to the same canonical database. A slow calendar therefore does not occupy the foreground lane, but queued reads retain their original deadline. Other Archive collections keep their existing service paths. Large retained transcripts and cold/backfilling discovery can still be expensive; isolation is not a promise of constant-time reads.
+
+## Dedicated peer inbox metadata
+
+Dedicated peer inboxes are created on first implicit contact, not when toggling the preference. Each peer has its own reply lane, continuity family and rotation lifecycle; requests from that same peer stay ordered across source sessions. Labels refresh on later contact after a rename, but the canonical session ID does not change. Existing shared `a2a` history is retained and remains explicitly addressable; new implicit traffic does not migrate, rename or rotate it. `/api/sessions` exposes `label` and `a2aPeerAgentId`; session detail retains them in `metadata`.

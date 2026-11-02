@@ -82,7 +82,7 @@ Skills have central PostgreSQL records and per-agent assignments. Current source
 
 Timezone GET/PUT manages the operator's IANA timezone. Scheduled jobs, Dreams and Git-skill sync schedules all use that zone; per-schedule timezone overrides are retired and reconciliation recalculates upcoming occurrences. Execution-boundary GET/PUT manages concrete configured blockers; see [enforcement limits](../../security/permissions.md).
 
-Browser-origin settings read/save a boolean `checkOrigin`; the environment can override it. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save a destination list, export enablement and write-only protected transport values; enabling a destination shares curated telemetry with it. See [destination contract](#opentelemetry-destinations).
+Browser Origin checking is deployment-only via `BURROW_UI_ORIGIN_CHECK` and `BURROW_UI_ALLOWED_ORIGINS`. The old `/api/settings/browser-origin` route returns 404; stored/imported `browserOrigin` preferences are ignored and new exports omit them. Keep checking enabled unless the deployment has an independent reason to disable it. OpenTelemetry settings read/save a destination list, export enablement and write-only protected transport values; enabling a destination shares curated telemetry with it. See [destination contract](#opentelemetry-destinations).
 
 Trace retention supports read/save, a non-deleting preview and an explicit run. `/api/retention` and `/api/retention/cleanup` are compatibility aliases; new clients use `/api/settings/retention/*`. Preview and run require the exact current `policy` object; a missing or changed policy returns 409 `retention_policy_changed`. The explicit run uses that supplied current policy without requiring the background enabled flag. This is trace retention, not a per-conversation purge API. Retired Albdruck routes are not a supported cleanup path; see [memory boundaries](memory.md).
 ## Endpoint inventory
@@ -129,7 +129,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/settings/model-connections/claude-code-login/{id}/import` | Import Claude Code OAuth credential |
 | `GET` | `/api/agents/{agentId}/archive-summary-model-selection` | Read optional archive-summary model selection |
 | `PUT` | `/api/agents/{agentId}/archive-summary-model-selection` | Set or clear optional archive-summary model selection |
-| `GET` | `/api/settings/retention` | Read operator-managed retention policy and cleanup preview |
+| `GET` | `/api/settings/retention` | Read saved retention policy and state only; no cleanup scan |
 | `PUT` | `/api/settings/retention` | Save operator-managed retention policy |
 | `POST` | `/api/settings/retention/preview` | Preview retention cleanup without deleting traces |
 | `POST` | `/api/settings/retention/run` | Run cleanup with the exact current policy |
@@ -146,7 +146,6 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `PUT` | `/api/agents/{agentId}/skills` | Replace an agent skill assignment |
 | `GET` | `/api/settings/timezone` | Read operator timezone for agent context and schedules |
 | `PUT` | `/api/settings/timezone` | Save operator timezone; schedule reconciliation uses the new zone |
-| `GET`, `PUT` | `/api/settings/browser-origin` | Read/save browser Origin checking |
 | `GET`, `PUT` | `/api/settings/browser-tab` | Read/save browser tab settings |
 | `GET`, `PUT` | `/api/settings/opentelemetry` | Read/save destination list and export settings |
 | `POST` | `/api/settings/skills/git/preview` | Preview a Git skill package |
@@ -173,3 +172,7 @@ Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## Retention form reads
+
+`GET /api/settings/retention` (and compatibility alias `GET /api/retention`) returns `{ok:true,policy,state}` from PostgreSQL, without scanning trace directories, resolving an execution context or computing a cleanup preview. PUT saves the policy and returns that same shape. Only the explicit `/preview` action computes deletion candidates. `/preview` and `/run` require the exact current policy snapshot; a stale or missing snapshot returns 409 `retention_policy_changed`. Opening Settings does not run cleanup.

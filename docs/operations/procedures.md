@@ -145,3 +145,7 @@ The full page was reconciled statically on **1 November 2026** against the curre
 
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
 - [backend/src/retention.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/retention.mjs)
+
+## Loading the retention editor
+
+Opening Trace retention reads only saved policy/state; it does not scan trace directories or preview deletion. Use **Preview cleanup** explicitly for a dry-run plan. Applying an enabled policy still authorizes its scheduled cleanup; the cheaper form read does not change deletion eligibility or confirmation requirements.

@@ -47,7 +47,7 @@ Settings-first configuration does not require this override. Changing a deployme
 
 | Variable | Default / meaning |
 |---|---|
-| `BURROW_UI_ORIGIN_CHECK` | `true` by default; `true`/`false` overrides saved browser `checkOrigin`; keep enabled for browser-facing deployments |
+| `BURROW_UI_ORIGIN_CHECK` | `true` by default; deployment-only `true`/`false` control, not a saved preference; keep enabled for browser-facing deployments |
 | `BURROW_UI_ALLOWED_ORIGINS` | Empty; comma-separated exact additional origins |
 | `BURROW_UI_ALLOWED_HOSTS` | Empty disables Host allowlist enforcement; otherwise exact host/port authorities, no wildcards |
 | `BURROW_UI_TRUSTED_PROXIES` | Empty; exact peer IPs trusted for forwarded host/protocol, separate from authentication proxies |
