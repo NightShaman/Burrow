@@ -2,7 +2,7 @@ import './settingsWorkspace.css';
 import './normalizedWorkspace.css';
 import './personalizationWorkspace.css';
 import './settingsSizing.css';
-import { enabledAgents } from '../../app/agentCatalog';
+import { enabledAgents, settingsAgents, chatAgents } from '../../app/agentCatalog';
 import { useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { OpenTelemetrySettings } from './OpenTelemetrySettings';
 import { BrowserTabSettings } from './BrowserTabSettings';
@@ -51,7 +51,7 @@ export function Settings({
   navigationTarget,
   tab,
   setTab,
-  agents,
+  agents: catalog,
   selected,
   savedProviders,
   onModelConnectionsChanged,
@@ -165,6 +165,7 @@ export function Settings({
       decodeLegacy: (raw) => (raw === 'true' ? true : raw === 'false' ? false : undefined),
     }),
   );
+  const agents = settingsAgents(catalog);
   const settingsSelected =
     agents.find((agent) => agent.id === settingsAgentId) ?? agents[0] ?? selected;
 
@@ -291,7 +292,7 @@ export function Settings({
       {tab === 'general' && generalSection === 'rail-panels' && hasAgentsPanel && (
         <div className="settings-overflow-content">
           <AgentSidebarSettings
-            agents={enabledAgents(agents)}
+            agents={chatAgents(catalog)}
             preferences={agentRailPreferences}
             setPreferences={setAgentRailPreferences}
           />

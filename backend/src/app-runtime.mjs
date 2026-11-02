@@ -12,6 +12,7 @@ import { postgresContinuity } from './postgres-continuity.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
+import { activeModAgentProvider, resolveModAgentContext } from './mod-agent-runtime.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
@@ -194,11 +195,6 @@ async function runAskChatUnserialized({
     filesystemBoundaries: agentRuntime.filesystemBoundaries.map((item) => path.resolve(item)),
   } : loadedRuntimeState;
   normalizedArgs.abort_signal?.throwIfAborted();
-  const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
-  const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
-  const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;
-  const promptAttachments = promptTextAttachments(turnAttachments);
-  const attachmentManifest = attachmentSummary(turnAttachments);
   // Planner/router observability must receive the selected agent's resolved
   // skill context too; otherwise it can describe Hatchet's default root while
   // execution correctly uses another agent's catalog.
@@ -222,6 +218,24 @@ async function runAskChatUnserialized({
   const resolvedSessionId = contextBoundary
     ? contextSessionId({ agentId: runtimeState.agentId, historySessionId, key: contextBoundary.key })
     : historySessionId;
+  // Providers receive the logical conversation, not an internal fresh-execution
+  // session ID: scheduled/transport context selection must survive isolation.
+  // Resolve exactly once at the native-turn boundary, before any planner/model
+  // request, reset or continuity claim. Missing owners never fall back to Core.
+  const modAgent = agentRuntime?.agent?.modAgent || null;
+  const ownerProvider = modAgent ? activeModAgentProvider(agentRuntime.agent) : null;
+  const assertOwnerStillCurrent = () => {
+    if (!ownerProvider || activeModAgentProvider(agentRuntime.agent) !== ownerProvider) {
+      throw Object.assign(new Error('mod_agent_unavailable'), { code: 'mod_agent_unavailable' });
+    }
+  };
+  const modAgentContext = modAgent ? { ownerModId: modAgent.ownerModId, ...await resolveModAgentContext(agentRuntime, { sessionId: historySessionId, signal: normalizedArgs.abort_signal }) } : null;
+  if (modAgent) assertOwnerStillCurrent();
+  const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
+  const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
+  const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;
+  const promptAttachments = promptTextAttachments(turnAttachments);
+  const attachmentManifest = attachmentSummary(turnAttachments);
   if (contextBoundary) {
     stores = { ...stores, conversations: withContextHistory(stores.conversations, { agentId: runtimeState.agentId, sessionId: resolvedSessionId, historySessionId }) };
     await stores.conversations.updateMetadata({ agentId: runtimeState.agentId, sessionId: resolvedSessionId, update: metadata => ({ ...metadata, contextIsolation: { ...metadata.contextIsolation, historySessionId } }) });
@@ -262,6 +276,8 @@ async function runAskChatUnserialized({
     telemetryEnded = true;
     try { telemetry.endRun?.(resolvedRunId, telemetryTerminalResult || { ok: false, status: 'failed' }); } catch {}
   };
+  let modContinuityAuthority = null;
+  let modContinuity = null;
   try {
   const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
   const continuity = await continuityAuthority.claim({
@@ -277,6 +293,7 @@ async function runAskChatUnserialized({
     // an ambiguous interrupted foreign turn.
     acceptedLatestRunIds: incomingAgentMessage?.sourceRunId ? [incomingAgentMessage.sourceRunId] : [],
   });
+  if (modAgent && continuity.current) { modContinuityAuthority = continuityAuthority; modContinuity = continuity; }
   if (!continuity.current) {
     const result = { ok: false, mode: 'ask', command, decision: 'continuity_uncertain', runId: resolvedRunId, sessionId: resolvedSessionId, answerText: 'I found session state that is newer than the last completed continuity head. I will not guess which history is current.', blockers: ['continuity_uncertain'], continuity };
     return json ? result : compactAskChatResult(result);
@@ -285,7 +302,7 @@ async function runAskChatUnserialized({
   const targetRequest = normalizedArgs.target && typeof normalizedArgs.target === 'object' ? normalizedArgs.target : null;
   let resolvedTarget = null;
   let targetResolutionError = null;
-  if (targetRequest) {
+  if (targetRequest && !modAgent) {
     try {
       resolvedTarget = await resolveRuntimeTurnTarget(targetRequest, { agentRuntime, filesystemBoundaries: runtimeState.filesystemBoundaries, runId: resolvedRunId });
     } catch (error) {
@@ -377,13 +394,13 @@ async function runAskChatUnserialized({
       lifecycle?.finish?.();
     }
   };
-  const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores });
+  const { mcpTools, mcpConnections } = await loadRuntimeMcpCapabilities({ agentId: runtimeState.agentId, stores, agentRuntime });
   const agentMessageReplyTo = incomingAgentMessage?.senderAgentId && incomingAgentMessage?.sourceSessionId
     ? { recipientAgentId: incomingAgentMessage.senderAgentId, sessionId: incomingAgentMessage.sourceSessionId }
     : null;
   const minionDepth = await resolveTurnMinionDepth({ metadata: stores?.metadata, conversations: stores?.conversations, agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId });
   const executionContext = createRuntimeExecutionContext({ minionDepth, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
-  const effectiveSkillCatalog = await loadEffectiveSkillCatalog({
+  const effectiveSkillCatalog = modAgent && modAgent.capabilities?.skills !== true ? { skills: [] } : await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,
     agentRuntime,
@@ -401,7 +418,7 @@ async function runAskChatUnserialized({
     skillConfig: scopedSkillsConfig,
     skillIndex: { skills: effectiveSkillCatalog.skills },
     // Keep provider metadata available for no-call control paths; model remains null when no PostgreSQL selection was made.
-    modelConfig,
+    modelConfig: modAgent ? null : modelConfig,
     traceLogger: logger,
   });
   const route = await routeRequest({
@@ -440,7 +457,9 @@ async function runAskChatUnserialized({
     },
   });
   const plannerObservability = compactPlannerObservability(turnPlan);
-  const workItemContext = await prepareRuntimeWorkItemContext({ dataRoot, legacyDataRoot, compatibilityObserver, resolvedSessionId, resolvedRunId, normalizedArgs: { ...normalizedArgs, message }, resolvedWorkingRoot, route, session });
+  const workItemContext = modAgent
+    ? { shouldAutoTrack: false, requestedItemId: null, explicitContinue: false, activeWorkItem: null, trackedWorkItem: null, trackedWorkCreated: false, trackedBackgroundWork: null, intent: { intent: 'chat', confidence: 1, reason: 'model_owned_chat' } }
+    : await prepareRuntimeWorkItemContext({ dataRoot, legacyDataRoot, compatibilityObserver, resolvedSessionId, resolvedRunId, normalizedArgs: { ...normalizedArgs, message }, resolvedWorkingRoot, route, session });
   const { shouldAutoTrack, requestedItemId, explicitContinue, activeWorkItem, trackedWorkItem, trackedWorkCreated, trackedBackgroundWork, intent } = workItemContext;
   const explicitContinuityRequested = Boolean(compatibilityScope || normalizedArgs.continuity_scope || normalizedArgs.continuityScope || normalizedArgs.working_project || normalizedArgs.workingProject);
   const supportContext = await prepareRuntimeSupportContext({ stores, rootDir, sessionRoot, dataRoot, runtimeState, agentRuntime, resolvedSessionId, message, priorSession, continuityScope, explicitContinuityRequested, route, runtimeConfig, logger });
@@ -476,7 +495,7 @@ async function runAskChatUnserialized({
   // runtime/tool action with explicit structural input.
   const structuredSubagents = null;
   const extraEyesReview = null;
-  const subagentState = await subagentDebugSnapshot({ dataRoot, legacyDataRoot, sessionId: resolvedSessionId, compatibilityObserver });
+  const subagentState = modAgent ? { snapshot: { items: [], activeCount: 0, finalCount: 0 }, records: [] } : await subagentDebugSnapshot({ dataRoot, legacyDataRoot, sessionId: resolvedSessionId, compatibilityObserver });
   // Completed child records remain available through receipts, traces, and
   // explicit inspection. They do not become ambient evidence on later turns.
   const childEvidence = [];
@@ -513,7 +532,7 @@ async function runAskChatUnserialized({
     await testHooks?.afterUserTurnPersisted?.({ sessionId: resolvedSessionId, runId: resolvedRunId });
   }
 
-  const continuationResult = await runContinuationBranch({ rootDir, stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, conversationId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), intent, session, activeWorkItem, requestedItemId, explicitContinue, normalizedArgs, workspaceFiles, resolvedWorkingRoot, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subagents, verifiedSubjectScope, commitTerminalResult, compatibilityObserver, runWorkbenchStepOverride: testHooks?.runWorkbenchStep });
+  const continuationResult = modAgent ? null : await runContinuationBranch({ rootDir, stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, conversationId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), intent, session, activeWorkItem, requestedItemId, explicitContinue, normalizedArgs, workspaceFiles, resolvedWorkingRoot, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, executionContext, subagents, verifiedSubjectScope, commitTerminalResult, compatibilityObserver, runWorkbenchStepOverride: testHooks?.runWorkbenchStep });
   if (continuationResult) return continuationResult;
 
   const shouldCallModel = normalizedArgs.call_model || !normalizedArgs.no_call_model;
@@ -528,7 +547,7 @@ async function runAskChatUnserialized({
     : message;
   let promptContext;
   try {
-    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
   } catch (error) {
     // Context preparation can reject before returning its final inspection.
     // Route that exact budget failure through the same durable blocked owner,
@@ -568,7 +587,8 @@ async function runAskChatUnserialized({
     });
   }
 
-  const modelExecution = await runRuntimeModelExecution({ continuityAuthority, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json });
+  if (modAgent) assertOwnerStillCurrent();
+  const modelExecution = await runRuntimeModelExecution({ continuityAuthority, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments: turnAttachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta: onModelTextDelta, onThoughtDelta: onModelThoughtDelta, onContextUsage: onModelContextUsage, command, json, beforeProviderAttempt: modAgent ? assertOwnerStillCurrent : null });
   if (modelExecution.superseded) {
     rememberTelemetryTerminal(modelExecution.result);
     await continuityAuthority.interrupt({
@@ -580,11 +600,12 @@ async function runAskChatUnserialized({
     await logger.terminal();
     return modelExecution.result;
   }
+  if (modAgent) assertOwnerStillCurrent();
   const { modelTurn, finalWorkingContext } = modelExecution;
   const result = await persistPlainChatResult({
     stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, artifactWorkspaceRoot: runtimeState.agentWorkspaceRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult,
     afterCommitBeforeTraceTerminal: async (committedResult) => {
-      if (!committedResult?.ok || committedResult.decision !== 'answered' || !committedResult.answerText) return;
+      if (modAgent || !committedResult?.ok || committedResult.decision !== 'answered' || !committedResult.answerText) return;
       // Tiddle residue is advisory and must never turn a completed chat response
       // into a failure. Record it before terminal.json so the marker remains the
       // final trace write and completed traces stay retention-eligible.
@@ -598,6 +619,12 @@ async function runAskChatUnserialized({
   });
   return result;
   } catch (error) {
+    // If the owning host vanishes after admission, fence this generation and
+    // require an explicit retry; do not strand a live continuity head or infer
+    // that already completed owner-tool mutations should be replayed.
+    if (error?.code === 'mod_agent_unavailable' && modContinuityAuthority && modContinuity) {
+      try { await modContinuityAuthority.retire({ sessionId: resolvedSessionId, runId: resolvedRunId, generation: modContinuity.generation, reason: 'mod_agent_unavailable', objective: message }); } catch { /* preserve the original provider error */ }
+    }
     rememberTelemetryTerminal({ ok: false, status: normalizedArgs.abort_signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : 'failed' });
     throw error;
   } finally {

@@ -9,3 +9,21 @@ export function isAgentEnabled(agent: Pick<Agent, 'enabled' | 'activity'>): bool
 export function enabledAgents<T extends Pick<Agent, 'enabled' | 'activity'>>(agents: T[]): T[] {
   return agents.filter(isAgentEnabled);
 }
+
+// Surface-specific projections leave the source catalog intact for Archive.
+export function settingsAgents<T extends Pick<Agent, 'modAgent'>>(agents: T[]): T[] {
+  return agents.filter((agent) => agent.modAgent?.visibility.agents !== false);
+}
+export function chatAgents<T extends Pick<Agent, 'enabled' | 'activity' | 'modAgent'>>(
+  agents: T[],
+): T[] {
+  return enabledAgents(agents).filter((agent) => agent.modAgent?.visibility.chat !== false);
+}
+export function capabilityAgents<T extends Pick<Agent, 'enabled' | 'activity' | 'modAgent'>>(
+  agents: T[],
+  capability: 'brains' | 'forge',
+): T[] {
+  return enabledAgents(agents).filter(
+    (agent) => !agent.modAgent || agent.modAgent.capabilities[capability] === true,
+  );
+}

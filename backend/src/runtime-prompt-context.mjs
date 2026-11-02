@@ -46,10 +46,10 @@ export async function runtimeHostContext(executionContext = {}) {
   return context;
 }
 
-export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, signal = null } = {}) {
+export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, signal = null, modAgentContext = null } = {}) {
   signal?.throwIfAborted();
   const groupSupport = groupChannelContext?.channelId && Array.isArray(groupChannelContext.turns) ? { groupChannel: groupChannelContext } : {};
-  const hostContext = await runtimeHostContext(executionContext);
+  const hostContext = modAgentContext ? null : await runtimeHostContext(executionContext);
   signal?.throwIfAborted();
   const contextBuild = await buildContextForTurn({
     rootDir,
@@ -57,11 +57,12 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     sessionId: resolvedSessionId,
     preparedContext,
     contextOptions: { stores, agentId: runtimeState.agentId },
+    modAgentContext,
     kernel: plainChatKernel({ agentName: agentRuntime?.agent?.name || agentRuntime?.agentId || runtimeState.agentId }),
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
     availableSkills: route.skills.catalog,
-    supportContext: { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: hostContext, temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
+    supportContext: modAgentContext ? { temporalContext, ...groupSupport } : { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: hostContext, temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
     modelProfile: null,
     task: modelTask,
     attachments: promptAttachments,

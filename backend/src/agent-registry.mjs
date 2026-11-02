@@ -36,6 +36,26 @@ function executionEnvironment(value) {
 }
 function bootstrapSampleIdentitiesEnabled(value = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES) { return ['1', 'true', 'yes', 'on'].includes(String(value ?? '0').trim().toLowerCase()); }
 
+// Mod-owned identities are a separate, deliberately closed capability contract.
+// Unknown groups (notably native engineering tools) must never be inferred.
+const MOD_AGENT_CAPABILITIES = Object.freeze(['a2a', 'forge', 'brains', 'mcp', 'skills']);
+const MOD_AGENT_VISIBILITY = Object.freeze(['agents', 'chat']);
+function normalizeModAgent(value, { ownerModId = null, partial = false, current = null } = {}) {
+  const invalid = () => { throw new Error('mod_agent_metadata_invalid'); };
+  const object = input => input && typeof input === 'object' && !Array.isArray(input);
+  if (!object(value) || Object.keys(value).some(key => !['ownerModId', 'capabilities', 'visibility'].includes(key))) invalid();
+  const owner = ownerModId ?? value.ownerModId;
+  if (typeof owner !== 'string' || owner.length > 120 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(owner)) invalid();
+  if (value.ownerModId !== undefined && value.ownerModId !== owner) invalid();
+  if (current && current.ownerModId !== owner) invalid();
+  const flags = (name, allowed) => {
+    const input = value[name];
+    if (input !== undefined && (!object(input) || Object.keys(input).some(key => !allowed.includes(key)) || Object.values(input).some(flag => typeof flag !== 'boolean'))) invalid();
+    return Object.fromEntries(allowed.map(key => [key, input?.[key] ?? (partial ? current?.[name]?.[key] : false) ?? false]));
+  };
+  return { ownerModId: owner, capabilities: flags('capabilities', MOD_AGENT_CAPABILITIES), visibility: flags('visibility', MOD_AGENT_VISIBILITY) };
+}
+
 function assertAgent(input = {}, { requireName = true } = {}) {
   const id = text(input.id);
   const name = input.name === undefined ? undefined : text(input.name);
@@ -92,5 +112,5 @@ export function agentRuntimeContext({ runtimeState, agent } = {}) {
   };
 }
 
-export { assertAgent, executionEnvironment };
+export { assertAgent, executionEnvironment, normalizeModAgent, MOD_AGENT_CAPABILITIES, MOD_AGENT_VISIBILITY };
 export const __agentRegistry = Object.freeze({ DEFAULT_CAPABILITIES, assertAgent, bootstrapSampleIdentitiesEnabled });

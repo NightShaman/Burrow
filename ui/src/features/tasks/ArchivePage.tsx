@@ -1,7 +1,7 @@
+import { enabledAgents } from '../../app/agentCatalog';
 import { ForgeArchiveShelf } from '../forge/ForgeArchiveShelf';
 import { api } from '../../app/api';
 import type { BoardTask, Project } from './TasksPage';
-import { enabledAgents } from '../../app/agentCatalog';
 import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useState } from 'react';

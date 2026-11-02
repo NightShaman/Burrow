@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
+import { activeModAgentProvider } from './mod-agent-runtime.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const PAGE_SIZE = 20;
 
-// Core owns peer discovery. A2A must not depend on a diagnostic mod, its grants,
-// execution-host availability, or access to another agent's conversations.
+// Core owns peer discovery without a diagnostic mod or access to conversations.
+// Only an A2A-enabled mod agent with a live owning provider is discoverable;
+// visibility.agents controls the ordinary Agents UI, not A2A discovery.
 export async function listAgentPeers({ store, query = null, includeDisabled = false, cursor = null, limit = PAGE_SIZE } = {}) {
   if (!store?.list) throw new Error('agent_directory_unavailable');
   if (query !== null && (typeof query !== 'string' || query.length > 96)) throw new Error('agent_directory_query_invalid');
@@ -14,6 +16,7 @@ export async function listAgentPeers({ store, query = null, includeDisabled = fa
   const needle = requestedQuery?.toLowerCase();
   const agents = (await store.list({ includeDisabled }))
     .filter(agent => (includeDisabled || agent.enabled === true)
+      && (!agent.modAgent || (agent.modAgent.capabilities?.a2a === true && activeModAgentProvider(agent)))
       && (!needle || agent.id.toLowerCase().includes(needle) || agent.name.toLowerCase().includes(needle)))
     .map(({ id, name, enabled }) => ({ id, name, enabled }))
     .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { enabledAgents, isAgentEnabled } from './agentCatalog';
+import {
+  enabledAgents,
+  isAgentEnabled,
+  settingsAgents,
+  chatAgents,
+  capabilityAgents,
+} from './agentCatalog';
 
 describe('operational agent catalog', () => {
   it('uses registry enabled state rather than transient activity', () => {
@@ -14,4 +20,23 @@ describe('operational agent catalog', () => {
     expect(isAgentEnabled({ activity: 'Disabled' })).toBe(false);
     expect(enabledAgents([])).toEqual([]);
   });
+});
+
+it('projects mod surfaces without dropping historical identities', () => {
+  const ordinary = { activity: 'Idle', modAgent: null };
+  const hidden = {
+    activity: 'Idle',
+    modAgent: {
+      ownerModId: 'example',
+      visibility: { agents: false, chat: false },
+      capabilities: { brains: false, forge: true },
+    },
+  };
+  const catalog = [ordinary, hidden];
+  expect(settingsAgents(catalog)).toEqual([ordinary]);
+  expect(chatAgents(catalog)).toEqual([ordinary]);
+  expect(capabilityAgents(catalog, 'brains')).toEqual([ordinary]);
+  expect(capabilityAgents(catalog, 'forge')).toEqual(catalog);
+  expect(enabledAgents(catalog)).toEqual(catalog);
+  expect(catalog).toHaveLength(2);
 });

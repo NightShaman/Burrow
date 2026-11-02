@@ -86,7 +86,9 @@ export async function buildTurnContext({
     // excluded here; explicit history/search paths own that data.
     : await conversationAuthority({ store: stores?.conversations || null, agentId }).entriesAll(sessionId);
   let profileFiles = null;
-  if (includeProfileFiles && agentRuntime?.agentId) {
+  // A mod-owned agent never borrows the ordinary agent/global profile, even
+  // during inspection or a compression rebuild. Its owner supplies it per turn.
+  if (includeProfileFiles && agentRuntime?.agentId && !agentRuntime?.agent?.modAgent) {
     const store = stores?.profiles;
     if (!store) throw new Error('agent_profile_store_required');
     try {

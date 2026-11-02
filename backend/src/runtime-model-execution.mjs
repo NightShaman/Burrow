@@ -8,7 +8,7 @@ async function supersededModelExecutionResult({ continuityAuthority = null, comm
   return { superseded: true, result: json ? superseded : compactAskChatResult(superseded) };
 }
 
-export async function runRuntimeModelExecution({ continuityAuthority = null, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta, onThoughtDelta, onContextUsage, command = 'chat', json = false } = {}) {
+export async function runRuntimeModelExecution({ continuityAuthority = null, runtimeTurn, prompt, message, shouldCallModel, modelConfig, logger, resolvedWorkingRoot, rootDir, dataRoot, resolvedSessionId, conversationId, runtimeConfig, executionPolicy, executionContext, normalizedArgs, attachments, sessionRoot, resolvedRunId, continuity, initialWorkingContext, onTextDelta, onThoughtDelta, onContextUsage, command = 'chat', json = false, beforeProviderAttempt = null } = {}) {
   if (!continuityAuthority?.current || !continuityAuthority?.read) throw new Error('runtime_continuity_authority_required');
   // Planning and prompt preparation can be substantial. Do not begin model/tool
   // execution if a newer turn already owns this session; this is particularly
@@ -26,6 +26,7 @@ export async function runRuntimeModelExecution({ continuityAuthority = null, run
       shouldCallModel,
       modelConfig,
       beforeModelAttempt: async () => {
+        await beforeProviderAttempt?.();
         const current = await continuityAuthority.current({ rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation });
         if (!current) throw new Error('superseded_by_newer_session_run');
       },

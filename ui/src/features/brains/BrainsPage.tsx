@@ -1,4 +1,4 @@
-import { enabledAgents } from '../../app/agentCatalog';
+import { capabilityAgents } from '../../app/agentCatalog';
 import { useEffect, useRef, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
 import type { Agent } from '../../app/types';
@@ -48,7 +48,7 @@ const originLabel = (brain: Brain) => {
 };
 
 export function Brains({ agents: catalog }: { agents: Agent[] }) {
-  const agents = enabledAgents(catalog);
+  const agents = capabilityAgents(catalog, 'brains');
   const urlOwner = new URLSearchParams(window.location.search).get('agentId') ?? '';
   const [agentId, setAgentId] = useState(() =>
     agents.some((agent) => ownerId(agent) === urlOwner)

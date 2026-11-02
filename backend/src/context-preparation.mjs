@@ -68,12 +68,13 @@ export function activeConversationLimits({ modelConfig = null, contextConfig = {
   };
 }
 
-function turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }) {
+function turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId, includeProfileFiles = true }) {
   return {
     rootDir,
     ...(Array.isArray(transcript) ? { transcript } : {}),
     dataRoot,
     agentRuntime,
+    includeProfileFiles,
     sessionId,
     limits: activeConversationLimits({ modelConfig, contextConfig }),
     support,
@@ -188,6 +189,7 @@ export async function compressContextForPromptPressure({
   stores = null,
   agentId = agentRuntime?.agentId || 'hatchet',
   signal = null,
+  includeProfileFiles = true,
 } = {}) {
   signal?.throwIfAborted();
   const promptInspection = inspectAssembledPromptBudget({ prompt, modelConfig, tools });
@@ -208,7 +210,7 @@ export async function compressContextForPromptPressure({
   if (!compressionResult.compressed) return { ...compressionResult, promptInspection };
   const refreshed = await conversationAuthority({ store: stores?.conversations || null, agentId }).sessionSnapshot(sessionId, { signal });
   signal?.throwIfAborted();
-  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: refreshed.entries, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId }));
+  const turnContext = await buildTurnContext(turnContextOptions({ rootDir, dataRoot, agentRuntime, sessionId, contextConfig, modelConfig, support, transcript: refreshed.entries, agentWorkspaceRoot, agentDataRoot, cacheRoot, stores, agentId, includeProfileFiles }));
   signal?.throwIfAborted();
   return { ...compressionResult, promptInspection, turnContext, conversationContext: conversationContextFromEngine(turnContext) };
 }

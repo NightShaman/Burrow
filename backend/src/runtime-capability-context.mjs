@@ -2,9 +2,11 @@ import { modToolConnections } from './mod-agent-tools.mjs';
 import { nativeToolSchemas } from './action-proposal.mjs';
 import { createExecutionContext } from './execution-context.mjs';
 
-export async function loadRuntimeMcpCapabilities({ agentId, stores } = {}) {
+export async function loadRuntimeMcpCapabilities({ agentId, stores, agentRuntime = null } = {}) {
   const mcpTools = new Map();
   const mcpConnections = new Map();
+  // Avoid even reading MCP connection secrets or catalogs without opt-in.
+  if (agentRuntime?.agent?.modAgent && agentRuntime.agent.modAgent.capabilities?.mcp !== true) return { mcpTools, mcpConnections };
   const mcpStore = stores?.mcp;
   if (!mcpStore) throw new Error('runtime_mcp_store_required');
   try {

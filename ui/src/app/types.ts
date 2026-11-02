@@ -39,7 +39,19 @@ export type Subagent = import('./api').MinionAncestry & {
   targetId?: string;
   resourceId?: string;
 };
+export type ModAgentMetadata = {
+  ownerModId: string;
+  capabilities: {
+    a2a?: boolean;
+    forge?: boolean;
+    brains?: boolean;
+    mcp?: boolean;
+    skills?: boolean;
+  };
+  visibility: { agents?: boolean; chat?: boolean };
+};
 export type Agent = {
+  modAgent?: ModAgentMetadata | null;
   enabled?: boolean;
   id: string;
   name: string;

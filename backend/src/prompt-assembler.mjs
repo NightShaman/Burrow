@@ -28,6 +28,8 @@ function sourceForSection(name) {
     kernel: 'runtime-kernel',
     'prompt-boundary': 'runtime-prompt-boundary',
     'profile-files': 'agent-profile-provider',
+    'mod-profile-files': 'mod-agent-profile-provider',
+    'mod-context': 'mod-agent-context-provider',
     profile: 'model-profile-provider',
     'action-output-contract': 'runtime-output-contract',
     conversation: 'conversation-provider',
@@ -69,6 +71,7 @@ export function createContextBuildReceipt({ sections = [], text = '', stats = {}
       includedChars: entry.chars,
       omitted: Boolean(entry.omitted || entry.omittedChars || entry.omittedItems?.length || entry.omittedFiles?.length),
       hash: sha256(entry.text),
+      ...(entry.ownerModId ? { ownerModId: entry.ownerModId } : {}),
       ...(entry.omittedChars ? { omittedChars: entry.omittedChars } : {}),
       ...(entry.items ? { includedItems: entry.items } : {}),
       ...(entry.omittedItems?.length ? { omittedItems: entry.omittedItems } : {}),
@@ -84,6 +87,7 @@ export function createContextBuildReceipt({ sections = [], text = '', stats = {}
       retainedAttachmentManifest: stats.retainedAttachmentManifest || [],
       currentAttachmentManifest: stats.currentAttachmentManifest || [],
       conversation: stats.conversation || null,
+      ...(stats.modAgent ? { modAgent: stats.modAgent } : {}),
     },
   };
 }
@@ -111,6 +115,106 @@ function renderProfileFilesBudgeted(profileFiles = null, { totalBudget = 8_000, 
     used += body.length;
   }
   return { text: blocks.join('\n\n---\n\n'), included, omitted, usedChars: used };
+}
+
+// Mod records are supplied by the owning mod, not files in the Burrow
+// workspace. Validate at this public assembly boundary as well as at the mod
+// provider, and snapshot them so a rebuild cannot accidentally change inputs.
+export function normalizeModAgentContext(value = null) {
+  if (value == null) return null;
+  const invalid = () => { throw new Error('mod_agent_context_invalid'); };
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some(key => !['ownerModId', 'profileFiles', 'context'].includes(key))
+    || typeof value.ownerModId !== 'string' || value.ownerModId.length > 120
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.ownerModId)
+    || !Array.isArray(value.profileFiles) || !Array.isArray(value.context)) invalid();
+  let size = 0;
+  const records = (entries) => {
+    if (entries.length > 64) invalid();
+    const names = new Set();
+    return entries.map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || Object.keys(entry).some(key => !['name', 'content'].includes(key))
+        || typeof entry.name !== 'string' || !entry.name.trim()
+        || entry.name === '.' || entry.name === '..' || entry.name.length > 128
+        || /[\x00-\x1f\x7f/\\]/.test(entry.name)
+        || typeof entry.content !== 'string' || names.has(entry.name)) invalid();
+      names.add(entry.name);
+      size += Buffer.byteLength(entry.name) + Buffer.byteLength(entry.content);
+      if (size > 1_000_000) invalid();
+      return { name: entry.name, content: entry.content };
+    });
+  };
+  return { ownerModId: value.ownerModId, profileFiles: records(value.profileFiles), context: records(value.context) };
+}
+
+// Normal names use URI percent encoding. Preserve even lone UTF-16 surrogates
+// (which the provider record contract permits) injectively with an escaped-~
+// convention rather than letting encodeURIComponent throw or merge names.
+function modRecordPath(ownerModId, kind, name) {
+  const encoded = [...name].map(character => {
+    const code = character.charCodeAt(0);
+    return character.length === 1 && code >= 0xd800 && code <= 0xdfff
+      ? `~u${code.toString(16).padStart(4, '0')}`
+      : encodeURIComponent(character).replaceAll('~', '%7E');
+  }).join('');
+  return `mod://${ownerModId}/agent/${kind}/${encoded}`;
+}
+
+function renderModRecords(records, { ownerModId, kind, totalBudget = Infinity, perFileBudget = Infinity } = {}) {
+  if (!records.length) return { text: '', included: [], omitted: [], omittedChars: 0 };
+  const preamble = kind === 'profile'
+    ? 'Mod-supplied agent profile. The paths below identify records supplied by the owning mod, not editable Burrow files.'
+    : 'Current-turn mod-supplied context. The paths below identify records supplied by the owning mod, not local files.';
+  const separator = '\n\n---\n\n';
+  const limit = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : Infinity;
+  const total = limit(totalBudget);
+  const perFile = limit(perFileBudget);
+  const blocks = [];
+  const included = [];
+  const omitted = [];
+  let used = preamble.length;
+  for (const record of records) {
+    const filePath = modRecordPath(ownerModId, kind, record.name);
+    const content = record.content.trim();
+    const header = `## ${record.name}\nPath: ${filePath}${content ? '\n\n' : ''}`;
+    const original = `${header}${content}`;
+    const remaining = Math.max(0, Math.min(perFile, total - used - separator.length));
+    let body = '';
+    let includedContentChars = 0;
+    if (original.length <= remaining) {
+      body = original;
+      includedContentChars = content.length;
+    } else if (header.length < remaining) {
+      // Never emit a partial path/provenance label. If even the truncation
+      // marker will not fit, omit the record and receipt it as such instead.
+      const available = remaining - header.length;
+      const prefix = content.slice(0, Math.max(0, available - 32)).trimEnd();
+      const marker = `[truncated ${content.length - prefix.length} chars]`;
+      const separatorBeforeMarker = prefix ? '\n' : '';
+      if (prefix.length + separatorBeforeMarker.length + marker.length <= available) {
+        body = `${header}${prefix}${separatorBeforeMarker}${marker}`;
+        includedContentChars = prefix.length;
+      }
+    }
+    const provenance = {
+      name: record.name, path: filePath, ownerModId, kind,
+      originalChars: original.length + (record.content.length - content.length), includedChars: body.length,
+      omittedChars: Math.max(0, original.length + record.content.length - content.length - body.length),
+      originalContentChars: record.content.length, includedContentChars,
+      omittedContentChars: record.content.length - includedContentChars, included: Boolean(body),
+    };
+    if (!body) { omitted.push(provenance); continue; }
+    included.push(provenance);
+    blocks.push(body);
+    used += separator.length + body.length;
+  }
+  const omittedChars = [...included, ...omitted].reduce((sum, record) => sum + record.omittedChars, 0);
+  return { text: blocks.length ? [preamble, ...blocks].join(separator) : '', included, omitted, omittedChars };
+}
+
+function renderModPromptBoundary(ownerModId) {
+  return `Burrow tools: Use only tools offered for this turn and follow their schemas. If offered, mod_agent_tool({name, arguments}) calls a tool provided by the owning mod (${ownerModId}). Tool results report actual outcomes; do not invent evidence or effects.\nThe latest current-message is the task. Conversation and earlier support snapshots are history; current mod context supersedes earlier snapshots. mod:// paths identify mod-supplied records, not local files.`;
 }
 
 function renderAttachmentManifest(attachments = [], { artifactRoot = null } = {}) {
@@ -447,6 +551,7 @@ export async function assemblePrompt({
   modelProfile = null,
   modelConfig = null,
   profileFiles = null,
+  modAgentContext = null,
   task = '',
   attachments = [],
   attachmentManifest = [],
@@ -463,6 +568,8 @@ export async function assemblePrompt({
 } = {}) {
   if (!rootDir) throw new Error('rootDir is required');
   if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length && !currentAttachmentManifest.length)) throw new Error('task is required');
+  const modContext = normalizeModAgentContext(modAgentContext);
+  if (modContext && outputMode === 'proposal') throw new Error('mod_agent_native_output_mode_required');
 
   const logger = traceLogger || (persistBuildTrace ? createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId }) : null);
   // Skill instructions are loaded only by an explicit agent choice. The compact
@@ -541,24 +648,38 @@ export async function assemblePrompt({
   const selectedRetainedManifest = retainedSlots > 0 ? retainedManifest.slice(-retainedSlots) : [];
   const selectedAttachmentManifest = [...selectedRetainedManifest, ...selectedCurrentManifest];
   const renderedAttachmentManifest = renderAttachmentManifest(selectedAttachmentManifest, { artifactRoot: attachmentArtifactRoot });
-  const renderedProfileFiles = renderProfileFilesBudgeted(profileFiles, { totalBudget: profileFilesLimit, perFileBudget: profileFilePerFileLimit });
+  const renderedProfileFiles = modContext
+    ? renderModRecords(modContext.profileFiles, { ownerModId: modContext.ownerModId, kind: 'profile', totalBudget: limits.modProfileFilesChars ?? limits.profileFilesChars, perFileBudget: limits.modProfileFileChars ?? limits.profileFileChars })
+    : renderProfileFilesBudgeted(profileFiles, { totalBudget: profileFilesLimit, perFileBudget: profileFilePerFileLimit });
+  const renderedModContext = modContext
+    ? renderModRecords(modContext.context, { ownerModId: modContext.ownerModId, kind: 'context', totalBudget: limits.modContextChars, perFileBudget: limits.modContextFileChars })
+    : null;
 
   const rawSections = [
-    section('kernel', clampText(kernel, kernelLimit)),
-    section('prompt-boundary', renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] })),
-    section('profile-files', renderedProfileFiles.text, {
+    section('kernel', modContext ? '' : clampText(kernel, kernelLimit)),
+    section('prompt-boundary', modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] })),
+    section(modContext ? 'mod-profile-files' : 'profile-files', renderedProfileFiles.text, {
       items: renderedProfileFiles.included.map((file) => file.name),
       omittedItems: renderedProfileFiles.omitted.map((file) => file.name),
       files: renderedProfileFiles.included,
       omittedFiles: renderedProfileFiles.omitted,
+      ...(modContext ? { ownerModId: modContext.ownerModId, omittedChars: renderedProfileFiles.omittedChars } : {}),
     }),
-    section('profile', clampText(renderModelProfile(modelProfile), profileLimit)),
+    section('profile', modContext ? '' : clampText(renderModelProfile(modelProfile), profileLimit)),
     section('action-output-contract', outputMode === 'proposal' ? renderActionProposalContract() : ''),
     section('conversation', renderedConversation),
     section('prior-conversation-summary', clampText(renderPriorConversationSummary(conversation), limits.priorSummaryChars ?? 4_000)),
     section('support-group-channel', renderGroupChannel(supportContext?.groupChannel || null, limits.groupChannelChars ?? 12_000)),
-    section('support-dream-preload', renderDreamPreload(supportContext?.dreamPreload || null)),
-    section('support-working-context', renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
+    section('support-dream-preload', modContext ? '' : renderDreamPreload(supportContext?.dreamPreload || null)),
+    section('support-working-context', modContext ? '' : renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
+    ...(modContext ? [section('mod-context', renderedModContext.text, {
+      ownerModId: modContext.ownerModId,
+      items: renderedModContext.included.map((file) => file.name),
+      omittedItems: renderedModContext.omitted.map((file) => file.name),
+      files: renderedModContext.included,
+      omittedFiles: renderedModContext.omitted,
+      omittedChars: renderedModContext.omittedChars,
+    })] : []),
     section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),
     section('turn-time-context', renderTurnTimeContext(supportContext?.temporalContext || null)),
     section('active-ui-target', clampText(renderUiTarget(supportContext?.uiTarget || null), limits.uiTargetChars ?? 2_500)),
@@ -579,7 +700,7 @@ export async function assemblePrompt({
   const text = sections.map((item) => `# ${item.name}\n\n${item.text}`).join('\n\n---\n\n');
   // Retain the legacy flattened prompt for receipts and older callers, but
   // expose a provider-ready split whose first message is stable across turns.
-  const staticSectionNames = new Set(['kernel', 'prompt-boundary', 'profile-files', 'profile', 'skills']);
+  const staticSectionNames = new Set(['kernel', 'prompt-boundary', 'profile-files', 'mod-profile-files', 'profile', 'skills']);
   const staticSections = sections.filter((item) => staticSectionNames.has(item.name));
   const volatileSections = sections.filter((item) => !staticSectionNames.has(item.name));
   const renderSections = (items) => items.map((item) => `# ${item.name}\n\n${item.text}`).join('\n\n---\n\n');
@@ -587,7 +708,7 @@ export async function assemblePrompt({
   // may cache or reason over this boundary differently from operating
   // instructions; never make profile documents share a block with volatile
   // prompt guidance merely because both are system-authored.
-  const identitySectionNames = new Set(['profile-files', 'profile']);
+  const identitySectionNames = new Set(['profile-files', 'mod-profile-files', 'profile']);
   const identitySections = staticSections.filter((item) => identitySectionNames.has(item.name));
   const operatingSections = staticSections.filter((item) => !identitySectionNames.has(item.name));
   const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task']);
@@ -610,7 +731,7 @@ export async function assemblePrompt({
   const conversationSection = rawSections.find((item) => item.name === 'conversation');
   const priorSummarySection = rawSections.find((item) => item.name === 'prior-conversation-summary');
   const profileSection = rawSections.find((item) => item.name === 'profile');
-  const profileFilesSection = rawSections.find((item) => item.name === 'profile-files');
+  const profileFilesSection = rawSections.find((item) => item.name === (modContext ? 'mod-profile-files' : 'profile-files'));
   const stats = {
     totalChars: text.length,
     sections: sections.map(({ name, chars }) => ({ name, chars })),
@@ -629,6 +750,11 @@ export async function assemblePrompt({
     omittedProfileFiles: profileFilesSection?.omittedItems || [],
     profileFileProvenance: profileFilesSection?.files || [],
     omittedProfileFileProvenance: profileFilesSection?.omittedFiles || [],
+    ...(modContext ? { modAgent: {
+      ownerModId: modContext.ownerModId,
+      profileFiles: { included: renderedProfileFiles.included, omitted: renderedProfileFiles.omitted },
+      context: { included: renderedModContext.included, omitted: renderedModContext.omitted },
+    } } : {}),
     attachments: renderedAttachments.provenance,
     attachmentManifest: selectedAttachmentManifest.map((item) => ({
       name: String(item?.name || 'attachment'),

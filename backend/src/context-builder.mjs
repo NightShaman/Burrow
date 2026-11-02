@@ -1,5 +1,5 @@
 import { buildTurnContext, conversationContextFromEngine } from './context-engine.mjs';
-import { assemblePrompt } from './prompt-assembler.mjs';
+import { assemblePrompt, normalizeModAgentContext } from './prompt-assembler.mjs';
 import { compressContextForPromptPressure, prepareSessionTurnContext } from './context-preparation.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
@@ -136,6 +136,7 @@ export async function buildContextForTurn({
   promptSkills = selectedSkills,
   availableSkills = [],
   modelProfile = null,
+  modAgentContext = null,
   supportContext = null,
   task = '',
   attachments = [],
@@ -154,12 +155,19 @@ export async function buildContextForTurn({
   if (!rootDir) throw new Error('rootDir is required');
   if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length)) throw new Error('task is required');
 
+  const modContext = normalizeModAgentContext(modAgentContext);
+  // Mod-owned agents do not inherit the engineering working-memory channels.
+  // Keep the receipt and ReadEvidence budget aligned with what can be rendered.
+  const effectiveSupportContext = modContext && supportContext
+    ? { ...supportContext, dreamPreload: null, workingContext: null }
+    : supportContext;
   const normalizedPreparedContext = preparedContext ? normalizePreparedContext(preparedContext) : null;
   let turnContext = normalizedPreparedContext?.turnContext || await buildTurnContext({
     rootDir,
     dataRoot,
     sessionId,
     ...contextOptions,
+    ...(modContext ? { includeProfileFiles: false } : {}),
   });
 
   const assemble = async (context, workingContextChars = 0) => assemblePrompt({
@@ -172,7 +180,8 @@ export async function buildContextForTurn({
     modelProfile,
     modelConfig,
     profileFiles: context.support?.profileFiles || null,
-    supportContext,
+    modAgentContext: modContext,
+    supportContext: effectiveSupportContext,
     task,
     attachments,
     // Keep current uploads distinct from persisted references. The prompt may
@@ -203,7 +212,7 @@ export async function buildContextForTurn({
     phase: 'initial_assembly', budget: baselineBudget, contextThreshold: contextConfig.contextThreshold,
     compression: { attempted: false, compressed: false, reason: 'not_evaluated' },
   }));
-  let prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
+  let prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext: effectiveSupportContext, baselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
   let promptPressureCompression = { compressed: false, reason: 'not_requested' };
   if (promptPressure) {
     promptPressureCompression = await compressContextForPromptPressure({
@@ -216,6 +225,7 @@ export async function buildContextForTurn({
       tools: promptPressure.tools || tools,
       support: promptPressure.support || contextOptions.support || {},
       logger: promptPressure.logger || traceLogger,
+      ...(modContext ? { includeProfileFiles: false } : {}),
     });
     contextEvents.push(contextBuildEvent({
       phase: 'prompt_pressure_decision', budget: baselineBudget, contextThreshold: contextConfig.contextThreshold,
@@ -225,7 +235,7 @@ export async function buildContextForTurn({
       turnContext = promptPressureCompression.turnContext;
       baselinePrompt = await assemble(turnContext, 0);
       const compressedBaselineBudget = inspectAssembledPromptBudget({ prompt: baselinePrompt, modelConfig, tools });
-      prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext, baselineBudget: compressedBaselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
+      prompt = await assembleReadEvidenceWithinBudget({ assemble, context: turnContext, supportContext: effectiveSupportContext, baselineBudget: compressedBaselineBudget, baselinePrompt, modelConfig, tools, contextThreshold: contextConfig.contextThreshold });
       contextEvents.push(contextBuildEvent({
         phase: 'post_compression_rebuild', budget: inspectAssembledPromptBudget({ prompt, modelConfig, tools }), contextThreshold: contextConfig.contextThreshold,
         compression: { ...promptPressureCompression, attempted: true },
@@ -264,12 +274,12 @@ export async function buildContextForTurn({
       omitted: (supportContext?.runEvidence?.omittedDetails || []).slice(0, 64).map((item) => ({ runId: item.runId, sessionId: item.sessionId, reason: item.reason, crossSession: item.crossSession })),
     },
     workingContinuity: {
-      scope: supportContext?.workingContext?.continuity?.scope || null,
-      reason: supportContext?.workingContext?.continuity?.reason || 'unavailable',
-      included: (supportContext?.workingContext?.continuity?.records || []).map((record) => ({ id: record.id, kind: record.kind, state: record.state, sourceRefs: record.sourceRefs || [], selectionReason: record.selectionReason || null, expiresAt: record.expiresAt || null })),
-      omittedCount: Number(supportContext?.workingContext?.continuity?.omittedCount || 0),
-      candidateCount: Number(supportContext?.workingContext?.continuity?.candidateCount || 0),
-      chars: Number(supportContext?.workingContext?.continuity?.chars || 0),
+      scope: effectiveSupportContext?.workingContext?.continuity?.scope || null,
+      reason: effectiveSupportContext?.workingContext?.continuity?.reason || 'unavailable',
+      included: (effectiveSupportContext?.workingContext?.continuity?.records || []).map((record) => ({ id: record.id, kind: record.kind, state: record.state, sourceRefs: record.sourceRefs || [], selectionReason: record.selectionReason || null, expiresAt: record.expiresAt || null })),
+      omittedCount: Number(effectiveSupportContext?.workingContext?.continuity?.omittedCount || 0),
+      candidateCount: Number(effectiveSupportContext?.workingContext?.continuity?.candidateCount || 0),
+      chars: Number(effectiveSupportContext?.workingContext?.continuity?.chars || 0),
     },
   };
   const contextBuildReceipt = {

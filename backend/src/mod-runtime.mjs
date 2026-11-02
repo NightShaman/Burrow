@@ -1,3 +1,4 @@
+import { publishModAgentProvider, unpublishModAgentProvider, revokeModAgentProvider } from './mod-agent-runtime.mjs';
 import { publishModTools, unpublishModTools } from './mod-agent-tools.mjs';
 import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
@@ -197,6 +198,7 @@ async function closeModStore(mod, logger) {
 
 export async function cleanupMods(mods = [], { logger = console } = {}) {
   for (const mod of mods) {
+    unpublishModAgentProvider(mod);
     const cleanup = mod.lifecycleCleanup;
     mod.lifecycleCleanup = null;
     if (cleanup) {
@@ -258,12 +260,14 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
             unregisterController?.();
             unregisterController = null;
             unpublishModTools(mod);
+            unpublishModAgentProvider(mod);
             mod.status = 'failed';
             mod.error = code;
           },
         });
         const activation = await host.activated;
         const descriptions = activation;
+        mod.agentContextSupported = activation.agentContextSupported;
         mod.diagnosticsSupported = activation.diagnosticsSupported;
         mod.secretReferenceSchemes = activation.secretReferenceSchemes || [];
         if (!Array.isArray(activation.tools)) throw new Error(`mod_tool_description_invalid:${mod.id}`);
@@ -290,12 +294,18 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
           return { method, path: routePath, ...compileRoute(routePath), handler: (request) => host.invoke(routeId, request) };
         });
       }
-      Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, commitProviderReplacement, host, status: 'loaded' });
+      Object.assign(mod, { routes, store, lifecycleCleanup: host ? () => host.close() : null, host, status: 'loaded' });
+      // The transition coordinator calls this only after replacement catalog
+      // persistence succeeds; failed staged hosts cannot displace a live owner.
+      mod.commitProviderReplacement = () => { commitProviderReplacement?.(); if (host) publishModAgentProvider(mod); else revokeModAgentProvider(mod.id); };
       if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, modCatalogWriter);
       if (host && !host.commitActivation()) throw Object.assign(new Error('mod_host_unavailable'), { code: 'mod_host_unavailable' });
+      if (host && !replaceExecutionProviders) publishModAgentProvider(mod);
       emitModEvent(logger, 'mod_activation_succeeded', { modId: modLogIdentity(mod), runtime: host ? 'child' : 'static', routeCount: routes.length, toolCount: mod.tools?.length || 0 });
       loaded.push(mod);
     } catch (error) {
+      unpublishModAgentProvider(mod);
+      unpublishModTools(mod);
       if (host) {
         try { await host.close(); }
         catch { emitModEvent(logger, 'mod_cleanup_failed', { modId: modLogIdentity(mod), errorCode: 'mod_cleanup_failed' }, 'warn'); }

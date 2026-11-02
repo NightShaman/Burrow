@@ -1,5 +1,5 @@
 import { isNativeThinkingProvider } from './modelSelectionOptions';
-import { enabledAgents } from './agentCatalog';
+import { chatAgents } from './agentCatalog';
 import { minionOutcome } from './minionOutcome';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AgentStatus, type ContextStatus, type RuntimeAgent } from './api';
@@ -43,10 +43,11 @@ const workspacePathFor = (agentId: string) => `/workspace/${agentId}`;
 
 const asAgent = (entry: AgentOverviewEntry): Agent => ({
   enabled: entry.agent.enabled,
+  modAgent: entry.agent.modAgent,
   id: entry.agent.id,
   resourceId: entry.agent.id,
-  targetId: 'local',
-  targetName: 'Local',
+  targetId: entry.agent.modAgent ? undefined : 'local',
+  targetName: entry.agent.modAgent ? undefined : 'Local',
   name: entry.identity?.name || entry.agent.name,
   avatar: entry.identity?.avatar || avatarFor(entry.agent),
   activity: entry.agent.enabled ? 'Idle' : 'Disabled',
@@ -58,7 +59,7 @@ const asAgent = (entry: AgentOverviewEntry): Agent => ({
   effort: entry.selection?.reasoningEffort ?? 'medium',
   thinkingMode: entry.selection?.thinkingMode ?? null,
   temperature: entry.selection?.temperature ?? 0.2,
-  workspace: workspacePathFor(entry.agent.id),
+  workspace: entry.agent.modAgent ? '' : workspacePathFor(entry.agent.id),
   files: [],
   subagents: [],
   executionEnvironment: entry.agent.executionEnvironment ?? null,
@@ -111,7 +112,7 @@ async function loadLegacyOverview(
   return Promise.all(
     agents.map(async (agent) => {
       const sessionId = parentSessionIdForAgent(agent.id);
-      if (!agent.enabled)
+      if (!agent.enabled || agent.modAgent)
         return {
           agent,
           identity: identitiesByAgentId.get(agent.id),
@@ -245,6 +246,8 @@ export function useRuntimeAgents({
               subagents: oldAgent?.subagents.map((child) => ({ ...child, retained: true })) ?? [],
             };
           const agent = asAgent(entry);
+          // Mod identities have no engineering workspace/profile/provider defaults.
+          if (entry.agent.modAgent) return agent;
           const parentStatus = entry.status.agents.find(
             (item) => item.sessionId === entry.sessionId,
           );
@@ -364,7 +367,7 @@ export function useRuntimeAgents({
         reportError(`Could not load agents: ${loadError.message}`);
         return;
       }
-      const enabled = enabledAgents(hydrated);
+      const enabled = chatAgents(hydrated);
       const fallbackAgentId = enabled[0]?.id ?? '';
       const latestSelectedAgentId = selectedAgentIdRef.current;
       const nextAgentId = enabled.some((agent) => agent.id === latestSelectedAgentId)

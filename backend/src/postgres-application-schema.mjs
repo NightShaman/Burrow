@@ -226,4 +226,5 @@ CREATE INDEX scheduled_job_runs_latest_idx ON scheduled_job_runs(job_id,created_
   { version: 87, name: 'mod-character-reference-images', sql: POSTGRES_MOD_REFERENCE_IMAGE_SQL },
   { version: 88, name: 'structured-chat-result-projection', sql: POSTGRES_CHAT_RESULT_PROJECTION_SQL },
   { version: 89, name: 'canonical-operator-reference-image', sql: POSTGRES_OPERATOR_REFERENCE_IMAGE_SQL },
+  { version: 90, name: 'mod-owned-agents', sql: 'ALTER TABLE agents ADD COLUMN mod_agent_json JSONB;' },
 ]);

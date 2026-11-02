@@ -2,6 +2,8 @@ import { canSpawnMinion, normalizeMinionDepth } from './minion-depth.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { nativeToolSchemas } from './action-proposal.mjs';
+import { modAgentToolAllowed } from './action-safety.mjs';
+import { modAgentToolSchemas } from './mod-agent-runtime.mjs';
 
 const TARGET_KINDS = new Set(['filesystem', 'repository', 'repo', 'directory', 'dir']);
 
@@ -85,6 +87,17 @@ export function createExecutionContext({
   const resolvedAgentWorkspaceRoot = optionalAbsolute(agentWorkspaceRoot, 'agent_workspace_root');
   const resolvedAgentDataRoot = optionalAbsolute(agentDataRoot, 'agent_data_root');
   const resolvedSkillsRoot = optionalAbsolute(skillsRoot, 'skills_root');
+  const modAgent = agentRuntime?.agent?.modAgent;
+  let selectedTools;
+  if (modAgent) {
+    if (!agentRuntime.agent.id || agentRuntime.agentId !== agentRuntime.agent.id || agentId !== agentRuntime.agent.id) throw new Error('mod_agent_identity_mismatch');
+    // Do not inherit the ordinary engineering toolset, even when the caller
+    // supplies it explicitly. The live owner supplies only its bridge schema.
+    const optional = nativeToolSchemas({ includeSpawnSubagent: false, includeForge: true, includeBrainMemory: true, includeAgentChat: true, includeMcpMenu: true });
+    selectedTools = [...modAgentToolSchemas(agentRuntime), ...optional.filter(tool => modAgentToolAllowed(modAgent, tool.function?.name))];
+  } else {
+    selectedTools = (Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 })).filter(tool => canSpawnMinion(minionDepth) || tool.function?.name !== 'spawn_subagent');
+  }
   // These are selected-context roots, not access-control boundaries. A
   // selected agent automatically loads only its configured profile and skills,
   // but ordinary filesystem inspection remains open to every agent.
@@ -108,7 +121,7 @@ export function createExecutionContext({
     filesystemBoundaries: filesystemBoundaries.map((item) => absolute(item, 'filesystem_boundary')).filter(Boolean),
     executionBoundaries: executionBoundaries && typeof executionBoundaries === 'object' ? executionBoundaries : null,
     minionDepth: minionDepth ? normalizeMinionDepth(minionDepth) : null,
-    toolSchemas: (Array.isArray(toolSchemas) ? toolSchemas : nativeToolSchemas({ includeWorkingMemory: Boolean(agentId), includeBrainMemory: Boolean(includeBrainMemory), includeAgentProfile: Boolean(agentId), includeAgentChat: Boolean(includeAgentChat), includeTaskBoard: Boolean(includeTaskBoard), includeMcpMenu: mcpConnections instanceof Map && mcpConnections.size > 0 })).filter(tool => canSpawnMinion(minionDepth) || tool.function?.name !== 'spawn_subagent'),
+    toolSchemas: selectedTools,
     mcpTools: mcpTools instanceof Map ? mcpTools : new Map(),
     mcpConnections: mcpConnections instanceof Map ? mcpConnections : new Map(),
     protectedValues: protectedValues instanceof Map ? protectedValues : new Map(),

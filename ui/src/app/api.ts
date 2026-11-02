@@ -58,6 +58,7 @@ export type RuntimeMetrics = {
 };
 
 export type RuntimeAgent = {
+  modAgent?: import('./types').ModAgentMetadata | null;
   id: string;
   name: string;
   enabled: boolean;

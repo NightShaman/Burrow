@@ -4,6 +4,7 @@ import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { normalizeExternalTurnAttachments } from './mod-external-turn-attachments.mjs';
+import { normalizeModAgent } from './agent-registry.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
@@ -169,6 +170,35 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   function sessionModel(value, metadata) {
     return { agentId: value.agentId, sessionId: value.sessionId, selection: metadata.externalModModel || null };
   }
+  async function projectOwned(agent) {
+    if (!agent || agent.modAgent?.ownerModId !== schedulerOwner()) throw new Error('mod_owned_agent_not_found');
+    const selection = await injected.models.modelSelection(agent.id);
+    return { id: agent.id, name: agent.name, enabled: agent.enabled,
+      modelConnectionId: selection?.connectionId || null, model: selection?.model || null,
+      modAgent: agent.modAgent };
+  }
+  async function validateOwnedSelection(connectionId, model) {
+    bounded(connectionId, 128); bounded(model, 256);
+    if (connectionId !== connectionId.trim() || model !== model.trim()) invalid();
+    if (!(await injected.models.hasAuth(connectionId))) throw new Error('model_connection_auth_required');
+    // Native transactional store revalidates existence, catalogue availability and
+    // selected flag in the same transaction that writes identity + selection.
+  }
+  function validateOwnedPatch(input, create = false) {
+    const value = exactKeys(plain(input), create
+      ? ['id','name','enabled','modelConnectionId','model','capabilities','visibility']
+      : ['name','enabled','modelConnectionId','model','capabilities','visibility']);
+    if (create) bounded(value.id, 96);
+    if (create || value.name !== undefined) {
+      bounded(value.name, 64);
+      if (!value.name.trim()) invalid();
+    }
+    if (value.enabled !== undefined && typeof value.enabled !== 'boolean') invalid();
+    for (const key of ['modelConnectionId', 'model']) if (value[key] !== undefined) bounded(value[key], key === 'model' ? 256 : 128);
+    const metadata = normalizeModAgent({ ...(value.capabilities === undefined ? {} : { capabilities: value.capabilities }),
+      ...(value.visibility === undefined ? {} : { visibility: value.visibility }) }, { ownerModId: schedulerOwner() });
+    return { value, metadata };
+  }
   // Per-installed-mod host instance: opaque cursors cannot cross owners, roots,
   // filters or reloads. Fixed expiry bounds abandoned traversals; disposal clears
   // all inventory on host shutdown. Never evict an active traversal silently.
@@ -293,8 +323,61 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       } });
       return sessionModel(value, metadata);
     },
+    async listOwnedAgents(input) {
+      exactKeys(plain(input), []);
+      return Promise.all((await injected.agents.list()).filter(a => a.modAgent?.ownerModId === schedulerOwner()).map(projectOwned));
+    },
+    async readOwnedAgent(input) {
+      const value = exactKeys(plain(input), ['agentId']);
+      return projectOwned(await injected.agents.get(bounded(value.agentId, 96)));
+    },
+    async createOwnedAgent(input) {
+      const { value, metadata } = validateOwnedPatch(input, true);
+      await validateOwnedSelection(value.modelConnectionId, value.model);
+      if (typeof injected.agents.createOwned !== 'function') throw new Error('mod_owned_agents_unavailable');
+      const agent = await injected.agents.createOwned({ id: value.id, name: value.name, enabled: value.enabled, modAgent: metadata },
+        { ownerModId: schedulerOwner(), modelConnectionId: value.modelConnectionId, model: value.model });
+      return projectOwned(agent);
+    },
+    async updateOwnedAgent(input) {
+      const value = exactKeys(plain(input), ['agentId','patch']);
+      const id = bounded(value.agentId, 96);
+      const { value: patch } = validateOwnedPatch(value.patch);
+      const current = await projectOwned(await injected.agents.get(id));
+      const changingModel = patch.modelConnectionId !== undefined || patch.model !== undefined;
+      const connectionId = patch.modelConnectionId ?? current.modelConnectionId;
+      const selectedModel = patch.model ?? current.model;
+      if (changingModel) await validateOwnedSelection(connectionId, selectedModel);
+      if (typeof injected.agents.updateOwned !== 'function') throw new Error('mod_owned_agents_unavailable');
+      const metadata = { ...(patch.capabilities === undefined ? {} : { capabilities: patch.capabilities }),
+        ...(patch.visibility === undefined ? {} : { visibility: patch.visibility }) };
+      const agent = await injected.agents.updateOwned(id, { name: patch.name, enabled: patch.enabled, modAgent: metadata },
+        { ownerModId: schedulerOwner(), modelConnectionId: changingModel ? connectionId : undefined, model: changingModel ? selectedModel : undefined });
+      return projectOwned(agent);
+    },
+    async getOwnedAgentReferenceImage(input) {
+      const value = exactKeys(plain(input), ['agentId']);
+      const id = bounded(value.agentId, 96);
+      await projectOwned(await injected.agents.get(id));
+      if (!injected.referenceImages) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.get(id);
+    },
+    async putOwnedAgentReferenceImage(input) {
+      const value = exactKeys(plain(input), ['agentId', 'body']);
+      const id = bounded(value.agentId, 96);
+      await projectOwned(await injected.agents.get(id));
+      if (!injected.referenceImages) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.put(id, value.body);
+    },
+    async removeOwnedAgentReferenceImage(input) {
+      const value = exactKeys(plain(input), ['agentId']);
+      const id = bounded(value.agentId, 96);
+      await projectOwned(await injected.agents.get(id));
+      if (!injected.referenceImages) throw new Error('reference_images_unavailable');
+      return injected.referenceImages.remove(id);
+    },
     async listAgents() {
-      return await withStore('agents', async (store) => (await store.list()).map(({ id, name, enabled }) => ({ id, name, enabled })));
+      return await withStore('agents', async (store) => (await store.list()).filter(agent => !agent.modAgent || agent.modAgent.visibility.agents).map(({ id, name, enabled }) => ({ id, name, enabled })));
     },
     async getOperatorIdentity() {
       // Deliberately project only public display identity. Avatars and the rest of

@@ -1006,3 +1006,41 @@ it.each(['adaptive', null])(
     runtimeProviders.current = [];
   },
 );
+
+it('retains hidden mod attribution without engineering hydration or provider fallback', async () => {
+  const modAgent = {
+    ownerModId: 'example',
+    visibility: { agents: false, chat: false },
+    capabilities: { forge: true },
+  };
+  const agent = { id: 'resident', name: 'Resident', enabled: true, modAgent };
+  apiMock.mockImplementation(async (path) => {
+    if (path === '/api/agents') return { agents: [agent] };
+    if (path === '/api/agents/overview')
+      return {
+        agents: [
+          { agent, sessionId: 'default', selection: null, status: { agents: [] }, contexts: {} },
+        ],
+      };
+    throw new Error(`Unexpected path: ${path}`);
+  });
+  const { result } = renderRuntimeAgents('resident');
+  await waitFor(() => expect(result.current.registryState).toBe('ready'));
+  const hydrated = result.current.agents[0];
+  expect(hydrated).toMatchObject({
+    modAgent,
+    workspace: '',
+    provider: '',
+    model: '',
+    files: [],
+    subagents: [],
+  });
+  expect(hydrated.targetId).toBeUndefined();
+  expect(setSelectedAgentId).toHaveBeenLastCalledWith('');
+  expect(
+    reconcileModelCatalog(
+      [hydrated],
+      [{ id: 'fallback', provider: 'Fallback', models: ['fallback'] } as SavedProvider],
+    ),
+  ).toEqual([hydrated]);
+});

@@ -8,7 +8,7 @@ import {
   mergeAgentContextConfig,
   normalizeAgentContextConfig,
 } from "./agent-context-config.mjs";
-import { assertAgent, executionEnvironment } from "./agent-registry.mjs";
+import { assertAgent, executionEnvironment, normalizeModAgent } from "./agent-registry.mjs";
 
 const DEFAULT_CAPABILITIES = Object.freeze(["chat", "files", "skills"]);
 const text = (v) => String(v ?? "").trim();
@@ -38,6 +38,7 @@ function row(r) {
       executionEnvironment: r.execution_environment_json
         ? executionEnvironment(parse(r.execution_environment_json, null))
         : null,
+      ...(r.mod_agent_json ? { modAgent: normalizeModAgent(parse(r.mod_agent_json, null)) } : {}),
       createdAt:
         r.created_at instanceof Date
           ? r.created_at.toISOString()
@@ -222,6 +223,109 @@ export class PostgresAgentRegistryStore {
       );
       return row(r.rows[0]);
     });
+  }
+  // Operator portable imports alone may restore ownership metadata. Ordinary
+  // create/update and the mod-owned lifecycle must not adopt existing IDs.
+  // All identity fields are written together, with the ownership comparison
+  // under the same row lock (including a concurrent insert of a missing ID).
+  async restorePortable(input = {}, { conflictPolicy = 'replace' } = {}) {
+    const a = assertAgent(input, { requireName: false });
+    const metadata = input.modAgent == null ? null : normalizeModAgent(input.modAgent);
+    // Keep regular import's existing bootstrap behavior, but never create a
+    // sample identity as a fallback for a missing mod or reserve its ID.
+    if (!metadata && this.bootstrapSampleIdentities && !await this.get(a.id)) await this.bootstrap();
+    return withPostgresTransaction(this.pool, async c => {
+      let locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [a.id]);
+      let current = row(locked.rows[0]);
+      if (!current) {
+        assertAgent(input); // A newly restored identity must have a name.
+        const at = now();
+        const inserted = await c.query(`INSERT INTO agents
+          (id,name,enabled,available_capabilities,context_config_json,execution_environment_json,mod_agent_json,created_at,updated_at)
+          VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8,$8)
+          ON CONFLICT (id) DO NOTHING RETURNING *`,
+          [a.id, a.name, a.enabled !== false, json(a.availableCapabilities || (metadata ? ['chat'] : DEFAULT_CAPABILITIES)),
+            json(normalizeAgentContextConfig(a.contextConfig || {})), a.executionEnvironment ? json(a.executionEnvironment) : null,
+            metadata ? json(metadata) : null, at]);
+        if (inserted.rows[0]) return row(inserted.rows[0]);
+        // SELECT FOR UPDATE cannot lock an absent row. If another writer won
+        // the insert, inspect and lock its committed identity before deciding.
+        locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [a.id]);
+        current = row(locked.rows[0]);
+        if (!current) throw Error('agent_id_exists');
+      }
+      if ((current.modAgent?.ownerModId || null) !== (metadata?.ownerModId || null)) {
+        throw Object.assign(new Error('import_agent_ownership_conflict'), { statusCode: 409 });
+      }
+      // A conflict can arise after the import's preflight; never overwrite it
+      // under error/skip policies even when the owner happens to match.
+      if (conflictPolicy !== 'replace') throw Object.assign(new Error('agent_id_exists'), { statusCode: 409 });
+      const result = await c.query(`UPDATE agents SET name=$1,enabled=$2,available_capabilities=$3::jsonb,
+        context_config_json=$4::jsonb,execution_environment_json=$5::jsonb,mod_agent_json=$6::jsonb,updated_at=$7
+        WHERE id=$8 RETURNING *`, [
+        a.name === undefined ? current.name : a.name,
+        a.enabled === undefined ? current.enabled : a.enabled,
+        json(a.availableCapabilities === undefined ? current.availableCapabilities : a.availableCapabilities),
+        json(a.contextConfig === undefined ? current.contextConfig : mergeAgentContextConfig(current.contextConfig, a.contextConfig)),
+        a.executionEnvironment === undefined ? (current.executionEnvironment ? json(current.executionEnvironment) : null)
+          : (a.executionEnvironment ? json(a.executionEnvironment) : null),
+        metadata ? json(metadata) : null, now(), current.id,
+      ]);
+      return row(result.rows[0]);
+    });
+  }
+  // These operations are intentionally distinct from the ordinary create/update
+  // interface. Ownership is supplied by Core and checked under the row lock;
+  // neither regular identities nor another mod's identities can be adopted.
+  async createOwned(input, { ownerModId, modelConnectionId, model } = {}) {
+    await this.bootstrap();
+    const a = assertAgent(input);
+    const metadata = normalizeModAgent(input.modAgent, { ownerModId });
+    return withPostgresTransaction(this.pool, async c => {
+      await this.assertOwnedModel(c, modelConnectionId, model);
+      const at = now();
+      const r = await c.query(`INSERT INTO agents
+        (id,name,enabled,available_capabilities,context_config_json,execution_environment_json,mod_agent_json,created_at,updated_at)
+        VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,NULL,$6::jsonb,$7,$7)
+        ON CONFLICT (id) DO NOTHING RETURNING *`,
+        [a.id, a.name, a.enabled !== false, json(['chat']), json(normalizeAgentContextConfig({})), json(metadata), at]);
+      if (!r.rows[0]) throw Error('agent_id_exists');
+      await this.saveOwnedModel(c, a.id, modelConnectionId, model, at);
+      return row(r.rows[0]);
+    });
+  }
+  async updateOwned(id, input, { ownerModId, modelConnectionId, model } = {}) {
+    return withPostgresTransaction(this.pool, async c => {
+      const locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [text(id)]);
+      const current = row(locked.rows[0]);
+      if (!current || current.modAgent?.ownerModId !== ownerModId) throw Error('mod_owned_agent_not_found');
+      const a = assertAgent({ ...input, id: current.id }, { requireName: false });
+      const metadata = normalizeModAgent(input.modAgent || {}, { ownerModId, partial: true, current: current.modAgent });
+      const at = now();
+      if (modelConnectionId !== undefined || model !== undefined) {
+        const prior = await c.query('SELECT connection_id,model_id FROM agent_model_selections WHERE agent_id=$1 FOR UPDATE', [current.id]);
+        const connection = modelConnectionId ?? prior.rows[0]?.connection_id;
+        const selectedModel = model ?? prior.rows[0]?.model_id;
+        await this.assertOwnedModel(c, connection, selectedModel);
+        await this.saveOwnedModel(c, current.id, connection, selectedModel, at);
+      }
+      const result = await c.query('UPDATE agents SET name=$1,enabled=$2,mod_agent_json=$3::jsonb,updated_at=$4 WHERE id=$5 RETURNING *',
+        [a.name === undefined ? current.name : a.name, a.enabled === undefined ? current.enabled : a.enabled, json(metadata), at, current.id]);
+      return row(result.rows[0]);
+    });
+  }
+  async assertOwnedModel(c, connectionId, model) {
+    if (typeof connectionId !== 'string' || !connectionId.trim() || typeof model !== 'string' || !model.trim()) throw Error('model_selection_required');
+    const connection = await c.query('SELECT id FROM model_connections WHERE id=$1 FOR SHARE', [connectionId]);
+    if (!connection.rows[0]) throw Error('model_connection_not_found');
+    const result = await c.query('SELECT metadata FROM model_catalog WHERE connection_id=$1 AND model_id=$2 AND available FOR SHARE', [connectionId, model]);
+    if (!result.rows[0] || result.rows[0].metadata?.selected === false) throw Error('model_not_enabled_for_connection');
+  }
+  async saveOwnedModel(c, id, connectionId, model, at) {
+    await c.query(`INSERT INTO agent_model_selections(agent_id,connection_id,model_id,reasoning_effort,thinking_mode,temperature,updated_at)
+      VALUES($1,$2,$3,'off',NULL,0.2,$4) ON CONFLICT(agent_id) DO UPDATE SET
+      connection_id=EXCLUDED.connection_id, model_id=EXCLUDED.model_id, reasoning_effort='off', thinking_mode=NULL, temperature=0.2, updated_at=EXCLUDED.updated_at`,
+      [id, connectionId, model, at]);
   }
   async delete(id) {
     let storageReference;

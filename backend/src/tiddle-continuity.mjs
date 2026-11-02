@@ -379,7 +379,8 @@ function* listDueTiddlePassesOperation({ stores = null, at = iso() } = {}) {
   if (!stores?.agents) throw new Error('tiddle_agent_store_required');
   const agents = stores.agents;
   const db = tiddlePersistence({ stores });
-  try { const ids = new Set(yield () => db.dueIds(at)); return (yield () => agents.list({ includeDisabled: false })).filter(agent => ids.has(agent.id)); }
+  // Native Tiddle is not inherited by mod agents, including those with Brains.
+  try { const ids = new Set(yield () => db.dueIds(at)); return (yield () => agents.list({ includeDisabled: false })).filter(agent => !agent.modAgent && ids.has(agent.id)); }
   finally { db.close(); if (!stores?.agents) agents.close(); }
 }
 

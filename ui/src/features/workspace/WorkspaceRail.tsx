@@ -1,4 +1,4 @@
-import { enabledAgents } from '../../app/agentCatalog';
+import { chatAgents } from '../../app/agentCatalog';
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
@@ -152,7 +152,7 @@ export function AgentsPanel({
   | 'onSelectAgent'
   | 'onSelectSubagent'
 > & { view?: AgentRailView; order?: string[] }) {
-  const orderedAgents = orderAgents(enabledAgents(agents), order);
+  const orderedAgents = orderAgents(chatAgents(agents), order);
   return (
     <section className={`agent-pane ${view === 'compact' ? 'compact' : ''}`}>
       {orderedAgents.map((agent) => (

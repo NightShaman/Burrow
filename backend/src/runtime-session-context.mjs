@@ -34,6 +34,19 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   };
   const conversationId = priorSession.metadata?.conversationId || null;
   const isFreshConversation = !(priorSession?.turnCount > 0);
+  if (agentRuntime?.agent?.modAgent) {
+    // Native mod agents own their continuity (e.g. notebooks). Do not load
+    // engineering handoffs, working memory, read evidence or task projects.
+    const configuredWorkingRoot = agentExecutionWorkspaceRoot(agentRuntime) || runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot;
+    const resolvedWorkingRoot = resolvedTarget?.root || workspaceRoot || normalizedArgs.workspace_root || configuredWorkingRoot || null;
+    const continuityScope = `conversation:${conversationId || resolvedSessionId}`;
+    const initialWorkingContext = applyWorkingContextEvents({ continuityScope }, []);
+    return { turnStartedAt, lastOperatorMessageAt, priorSession, sessionSnapshot, conversationId,
+      resolvedWorkingRoot, continuityHandoffs: [], compatibilityScope: null, continuityScope,
+      generatedContinuityScope: true, verifiedSubjectScope: null,
+      deicticFiles: { files: [], summary: null, applied: false, ambiguous: false, question: null },
+      workspaceFiles: [], initialWorkingContext, ambientWorkingContext: null, dreamPreload: null };
+  }
   const continuityHandoffs = isFreshConversation && !metadata?.contextIsolation
     ? await stores.continuity.list({ agentId: agentId, limit: 1 })
     : [];

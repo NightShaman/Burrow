@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { contextSessionId } from './model-context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
+import { assertModAgentAvailable } from './mod-agent-runtime.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const MAX_MESSAGE = 20_000;
@@ -49,6 +50,26 @@ function agentId(value, field) {
   const id = text(value);
   if (!id || id === '.' || id === '..' || !ID.test(id)) throw new Error(`${field}_invalid`);
   return id;
+}
+// Both participants must opt in, including direct sends that bypass discovery.
+function assertA2AParticipant(agent) {
+  if (!agent?.modAgent) return;
+  if (agent.enabled === false) throw new Error('mod_agent_unavailable');
+  if (agent.modAgent.capabilities?.a2a !== true) throw new Error('agent_message_a2a_disabled');
+  assertModAgentAvailable(agent);
+}
+// A turn can outlive an owner capability update. Re-resolve mod identities
+// before admission/queued ingress instead of trusting a stale turn snapshot.
+async function assertFreshA2AParticipant(runtime, resolveRuntime) {
+  const original = runtime?.agent;
+  assertA2AParticipant(original);
+  if (!original?.modAgent) return runtime;
+  let current;
+  try { current = await resolveRuntime(runtime.agentId); } catch { throw new Error('mod_agent_unavailable'); }
+  if (current?.agentId !== runtime.agentId || current.agent?.id !== runtime.agentId
+      || current.agent?.modAgent?.ownerModId !== original.modAgent.ownerModId) throw new Error('mod_agent_unavailable');
+  assertA2AParticipant(current.agent);
+  return current;
 }
 function recipientReference(value) {
   // References are registry input, not path components. Validate the canonical
@@ -99,16 +120,20 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
+  assertA2AParticipant(senderRuntime?.agent);
   const requestedRecipient = recipientReference(recipientAgentId);
   const body = text(content);
   if (!body) throw new Error('agent_message_content_required');
   if (body.length > MAX_MESSAGE) throw new Error('agent_message_content_too_large');
   const resolvedMode = mode(messageMode);
   if (typeof resolveRecipientRuntime !== 'function') throw new Error('agent_message_delivery_unavailable');
+  await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
   const recipientRuntime = await resolveRecipientRuntime(requestedRecipient);
   if (!recipientRuntime?.agentWorkspaceRoot || !recipientRuntime?.agentId) throw new Error('agent_message_recipient_unavailable');
   const recipient = agentId(recipientRuntime.agentId, 'agent_message_recipient');
   if (sender === recipient) throw new Error('agent_message_self_send_forbidden');
+  await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
+  await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
   // Only runtime-attested exchange context supplies an implicit return address.
   // Resolve agent aliases first, and never infer routes from transcript/prose.
   const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
@@ -128,6 +153,9 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
 
   const deliver = async () => {
+    // A queued request must not enter either transcript if its owner went away.
+    await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
+    await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
     // Only automatic ingress owns peer-inbox metadata. Labels are presentation,
     // never routing keys; a display-name change cannot create another lane.
     // Materialize on contact, not on the preference toggle, and retain unrelated
@@ -200,6 +228,8 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         operation: async () => {
           abortSignal?.throwIfAborted();
           await assertOwner();
+          await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
+          await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
           // Reserve/rotate before ingress, never after the new inbound exists.
           if (executionSession && typeof conversationStore.prepareA2AHistory === 'function') {
             await conversationStore.prepareA2AHistory({ agentId: recipient, sessionId: session, executionSessionId: executionSession, sourceAgentId: sender, sourceSessionId: sourceSessionId || 'default', sourceRunId: runId });
@@ -207,7 +237,9 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           const delivery = await deliver();
           abortSignal?.throwIfAborted();
           await assertOwner();
-          const response = await runRecipientReply({ recipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentTraceContext, parentSignal: abortSignal });
+          await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
+          const currentRecipientRuntime = await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
+          const response = await runRecipientReply({ recipientRuntime: currentRecipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentTraceContext, parentSignal: abortSignal });
           return { ...delivery, reply: response };
         },
       });

@@ -1,4 +1,4 @@
-import { enabledAgents } from './app/agentCatalog';
+import { chatAgents, capabilityAgents } from './app/agentCatalog';
 import { UnsavedChangesProvider, useUnsavedNavigation } from './app/UnsavedChanges';
 import { useBrowserTabTitle } from './app/browserTab';
 import { readAttachment } from './app/readAttachment';
@@ -265,7 +265,7 @@ function AppContent() {
     };
   }, [theme]);
   const [agentRailPreferences, setAgentRailPreferences] = useAgentRailPreferences();
-  const availableAgents = enabledAgents(agents);
+  const availableAgents = chatAgents(agents);
   const loadedSelected =
     availableAgents.find((agent) => agent.id === selectedAgentId) ?? availableAgents[0];
   // Settings must remain reachable when the first agent has not been created yet.
@@ -712,11 +712,20 @@ function AppContent() {
               }}
             />
           ) : page === 'brains' ? (
-            <Brains agents={availableAgents} />
+            <Brains agents={agents} />
           ) : page === 'archive' ? (
             <Archive agents={agents} operatorName={operatorProfile.name} />
           ) : page === 'forge' ? (
-            <Forge agents={agents} selectedAgentId={selectedAgentId} sessionId={sessionId} />
+            <Forge
+              agents={capabilityAgents(agents, 'forge')}
+              selectedAgentId={
+                capabilityAgents(agents, 'forge').find((agent) => agent.id === selectedAgentId)
+                  ?.id ??
+                capabilityAgents(agents, 'forge')[0]?.id ??
+                ''
+              }
+              sessionId={sessionId}
+            />
           ) : page === 'settings' ? (
             <Settings
               key="local"

@@ -1,6 +1,24 @@
 import { grantedMcpTool } from './mcp-menu.mjs';
 import { evaluateExecutionBoundaries } from './execution-boundaries.mjs';
 
+// Closed mod-agent tool contract. Explicit names are shared by advertised
+// schemas and the executor's independent, mandatory safety recheck. Unknown or
+// future tools are denied until a capability group deliberately adds them.
+const MOD_TOOL_CAPABILITIES = new Map([
+  ['mod_agent_tool', null],
+  ...['agents_list', 'agent_send_message'].map(name => [name, 'a2a']),
+  ...['forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'attachment_view'].map(name => [name, 'forge']),
+  ...['brain_search', 'brain_read', 'brain_save', 'brain_update', 'brain_remove'].map(name => [name, 'brains']),
+  ...['list_skills', 'load_skill'].map(name => [name, 'skills']),
+  ...['mcp_providers', 'mcp_capabilities', 'mcp_call'].map(name => [name, 'mcp']),
+]);
+
+export function modAgentToolAllowed(modAgent, tool) {
+  if (!modAgent || !MOD_TOOL_CAPABILITIES.has(tool)) return false;
+  const capability = MOD_TOOL_CAPABILITIES.get(tool);
+  return capability === null || modAgent.capabilities?.[capability] === true;
+}
+
 function validationReview({ action = 'plan', tool = null, targets = [], workspaceRoot = null, errors = [] } = {}) {
   const blockers = [...new Set((errors || []).filter(Boolean))];
   return {
@@ -47,6 +65,26 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
   const boundaries = executionContext?.executionBoundaries || null;
 
   if (action.errors?.length) blockers.push(...action.errors);
+
+  const runtime = executionContext?.agentRuntime;
+  const agent = runtime?.agent;
+  if (agent?.modAgent) {
+    // Never trust an advertised schema or a supplied 'allowed' review as
+    // authority. No engineering, process, task, scheduler, history, continuity,
+    // or minion tool is part of this contract, even if a model hallucinates it.
+    if (!agent.id || runtime.agentId !== agent.id || executionContext?.agentId !== agent.id) blockers.push('mod_agent_identity_mismatch');
+    if (!modAgentToolAllowed(agent.modAgent, action.tool)) blockers.push('mod_agent_tool_not_allowed');
+    if (blockers.length) return { index: action.index, tool: action.tool, status: 'blocked', risk: ['mod-agent-policy'], blockers: [...new Set(blockers)], warnings };
+  } else if (action.tool === 'mod_agent_tool') {
+    return { index: action.index, tool: action.tool, status: 'blocked', risk: ['mod-agent-policy'], blockers: [...new Set([...blockers, 'mod_agent_required'])], warnings };
+  }
+
+  if (action.tool === 'mod_agent_tool') {
+    // A mod owns the operation: it is not a filesystem mutation and must not
+    // trigger workspace-verification/approval machinery.
+    risk.push('mutation', 'mod-tool');
+    return { index: action.index, tool: action.tool, status: 'allowed', risk, blockers, warnings };
+  }
 
   if (['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'git_status', 'git_diff'].includes(action.tool)) {
     risk.push('read-only');

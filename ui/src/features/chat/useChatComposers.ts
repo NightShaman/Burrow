@@ -1,4 +1,4 @@
-import { enabledAgents } from '../../app/agentCatalog';
+import { chatAgents } from '../../app/agentCatalog';
 import { secureUuid } from '../../app/secureUuid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
@@ -218,7 +218,7 @@ export function useChatComposers({
     const name = groupName.trim();
     if (!name) return setGroupError('Give the group chat a name.');
     const participantAgentIds = agents
-      ? groupAgentIds.filter((id) => enabledAgents(agents).some((agent) => agent.id === id))
+      ? groupAgentIds.filter((id) => chatAgents(agents).some((agent) => agent.id === id))
       : groupAgentIds;
     if (participantAgentIds.length < 2) return setGroupError('Select at least two agents.');
     setIsCreatingGroup(true);

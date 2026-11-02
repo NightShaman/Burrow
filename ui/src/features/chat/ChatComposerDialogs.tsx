@@ -1,4 +1,4 @@
-import { enabledAgents } from '../../app/agentCatalog';
+import { chatAgents } from '../../app/agentCatalog';
 import { AccessibleModal } from '../../app/AccessibleModal';
 import type { Agent } from '../../app/types';
 
@@ -106,7 +106,7 @@ export function ChatComposerDialogs({
               <fieldset className="group-participants">
                 <legend>Participants</legend>
                 <div className="group-participant-grid">
-                  {enabledAgents(agents).map((agent) => (
+                  {chatAgents(agents).map((agent) => (
                     <label className="group-participant" key={agent.id}>
                       <input
                         type="checkbox"

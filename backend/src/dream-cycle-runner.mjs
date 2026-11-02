@@ -983,7 +983,9 @@ export function createDreamCycleScheduler({ intervalMs = 30_000, clock = now, re
       const results = [];
       const due = (await Promise.all((await stores.agents.list({ includeDisabled: false })).map(async (agent) => {
           try {
-          if (lifecycle.stopped) return null;
+          // Brains opt-in is not permission to inherit Core's heavy Dream cycle.
+          // The owning mod schedules any reflection it wants independently.
+          if (lifecycle.stopped || agent.modAgent) return null;
           const settings = await stores.dreamSettings.get(agent.id);
           if (lifecycle.stopped) return null;
           const state = await stores.dreamCycles.ensureState({ agentId: agent.id, settings, at });
