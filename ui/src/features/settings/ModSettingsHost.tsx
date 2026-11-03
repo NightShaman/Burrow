@@ -539,7 +539,9 @@ function validSections(value: unknown): ModSettingsSection[] {
       {
         id: item.id,
         label: item.label.trim(),
-        ...(item.layout === 'form-inventory' ? { layout: 'form-inventory' as const } : {}),
+        ...(item.layout === 'form' || item.layout === 'form-inventory'
+          ? { layout: item.layout as 'form' | 'form-inventory' }
+          : {}),
       },
     ];
   });

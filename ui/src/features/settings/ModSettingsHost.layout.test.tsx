@@ -10,7 +10,12 @@ vi.mock('./ModSettingsHostFixture', () => ({
   createSettingsContribution,
   mountSettings,
   settingsContribution: undefined,
-  settingsSections: [{ id: 'main', label: 'Main', layout: 'form-inventory' }],
+  settingsSections: [
+    { id: 'main', label: 'Main', layout: 'form-inventory' },
+    { id: 'overview', label: 'Overview', layout: 'form' },
+    { id: 'advanced', label: 'Advanced', layout: 'form-inventory' },
+    { id: 'legacy', label: 'Legacy', layout: 'unsupported' },
+  ],
 }));
 afterEach(() => {
   cleanup();
@@ -97,6 +102,7 @@ it('switches mixed imperative and declarative sections without competing DOM own
     sections: [
       { id: 'overview', label: 'Overview', layout: 'form', fields: [] },
       { id: 'advanced', label: 'Advanced', layout: 'form', fields: [] },
+      { id: 'legacy', label: 'Legacy', layout: 'form', fields: [] },
       {
         id: 'form',
         label: 'Declarative form',
@@ -157,6 +163,7 @@ it('switches mixed imperative and declarative sections without competing DOM own
     const host = container.querySelector('.mod-settings-mount');
     for (const label of [
       'Advanced',
+      'Legacy',
       'Declarative form',
       'Overview',
       'Declarative inventory',
@@ -168,11 +175,19 @@ it('switches mixed imperative and declarative sections without competing DOM own
         await screen.findByRole('button', { name: 'Declared item' });
       else await screen.findByRole('heading', { name: `Imperative ${label.toLowerCase()}` });
       expect(container.querySelector('.mod-settings-mount')).toBe(host);
+      expect(host?.getAttribute('data-settings-layout')).toBe(
+        label === 'Legacy'
+          ? 'imperative'
+          : label === 'Advanced' || label === 'Declarative inventory'
+            ? 'form-inventory'
+            : 'form',
+      );
       expect(overflow.isConnected).toBe(true);
     }
     expect(mountSettings.mock.calls.map(([context]) => context.section)).toEqual([
       'overview',
       'advanced',
+      'legacy',
       'overview',
       'advanced',
     ]);
@@ -180,6 +195,7 @@ it('switches mixed imperative and declarative sections without competing DOM own
     expect(disposed.mock.calls.map(([section]) => section)).toEqual([
       'overview',
       'advanced',
+      'legacy',
       'overview',
       'advanced',
     ]);
