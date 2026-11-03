@@ -5,8 +5,8 @@ export const settingsSections = [
 ];
 
 const ADMIN_CAPABILITIES = [
-  { id: 'mod-management-v1', label: 'Approve Backdoor mod management', help: 'Required before assigned administrators can install, update, enable, disable, or uninstall mods.' },
-  { id: 'core-api-v1', label: 'Approve Backdoor Core API access', help: 'Allows assigned administrators to use the Core API through Backdoor.' },
+  { id: 'mod-management-v1', key: 'modManagementAgentIds', title: 'Mod management', ariaLabel: 'Agents with mod management access', label: 'Approve Backdoor mod management', help: 'Required before assigned administrators can install, update, enable, disable, or uninstall mods.' },
+  { id: 'core-api-v1', key: 'coreApiAgentIds', title: 'Core API access', ariaLabel: 'Agents with Core API access', label: 'Approve Backdoor Core API access', help: 'Allows assigned administrators to use the Core API through Backdoor.' },
 ];
 const sectionConfig = {
   'global-access': {
@@ -19,11 +19,9 @@ const sectionConfig = {
     savedMessage: 'Global access saved.',
   },
   'admin-access': {
-    key: 'adminAgentIds',
     title: 'Burrow administrative access',
-    description: 'Select agents that may use Burrow administrative capabilities exposed through Backdoor.',
+    description: 'Assign mod management and Core API access independently.',
     independence: 'This assignment does not grant or imply global diagnostic access.',
-    ariaLabel: 'Agents with Burrow administrative access',
     saveLabel: 'Save admin access',
     savedMessage: 'Admin access saved.',
     capabilities: ADMIN_CAPABILITIES,
@@ -47,12 +45,13 @@ function readStrings(result, key) {
 function readAccess(result) {
   const access = {
     grants: readStrings(result, 'grants'),
-    adminAgentIds: readStrings(result, 'adminAgentIds'),
+    modManagementAgentIds: readStrings(result, 'modManagementAgentIds'),
+    coreApiAgentIds: readStrings(result, 'coreApiAgentIds'),
     diagnosticAgentIds: readStrings(result, 'diagnosticAgentIds'),
     declaredCapabilities: readStrings(result, 'declaredCapabilities'),
     restartRequired: result?.restartRequired,
   };
-  for (const key of ['grants', 'adminAgentIds', 'diagnosticAgentIds', 'declaredCapabilities']) {
+  for (const key of ['grants', 'modManagementAgentIds', 'coreApiAgentIds', 'diagnosticAgentIds', 'declaredCapabilities']) {
     if (new Set(access[key]).size !== access[key].length) throw new Error('Core returned an invalid Backdoor access response.');
   }
   if (typeof access.restartRequired !== 'boolean') throw new Error('Core returned an invalid Backdoor access response.');
@@ -62,7 +61,8 @@ function readAccess(result) {
 function replacement(access) {
   return {
     grants: [...access.grants],
-    adminAgentIds: [...access.adminAgentIds],
+    modManagementAgentIds: [...access.modManagementAgentIds],
+    coreApiAgentIds: [...access.coreApiAgentIds],
     diagnosticAgentIds: [...access.diagnosticAgentIds],
   };
 }
@@ -84,16 +84,14 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
   body.append(el('p', config.independence, 'settings-help'));
 
   const capabilityInputs = new Map();
-  const capabilityBox = el('div', null, 'settings-stack');
-  if (config.capabilities) body.append(capabilityBox);
-
-  const list = el('div', null, 'settings-stack backdoor-agent-list');
-  list.setAttribute('aria-label', config.ariaLabel);
-  list.setAttribute('role', 'group');
-  list.style.maxHeight = 'min(360px, 45dvh)';
-  list.style.overflowY = 'auto';
-  list.style.overflowWrap = 'anywhere';
-  body.append(list);
+  const groups = config.capabilities ?? [config];
+  const groupBoxes = new Map();
+  for (const group of groups) {
+    const box = el('section', null, 'settings-stack');
+    box.setAttribute('aria-label', group.title);
+    body.append(box);
+    groupBoxes.set(group.key, box);
+  }
 
   const actions = el('div', null, 'model-actions');
   const save = el('button', config.saveLabel, 'primary');
@@ -120,37 +118,22 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
     saving = next;
     save.disabled = next || !isDirty();
     save.textContent = next ? 'Saving…' : config.saveLabel;
-    for (const input of inputs.values()) input.disabled = next;
+    for (const group of inputs.values()) for (const input of group.values()) input.disabled = next;
     for (const input of capabilityInputs.values()) input.disabled = next;
     publishDraft();
   };
 
-  function renderCapability(nextAccess) {
-    capabilityBox.replaceChildren();
-    capabilityInputs.clear();
-    for (const capability of config.capabilities ?? []) {
-      if (!nextAccess.declaredCapabilities.includes(capability.id)) {
-        capabilityBox.append(el('p', `Backdoor does not currently declare ${capability.id}.`, 'settings-request-error'));
-        continue;
-      }
-      const input = el('input');
-      input.type = 'checkbox';
-      input.checked = nextAccess.grants.includes(capability.id);
-      capabilityInputs.set(capability.id, input);
-      const copy = el('span', capability.label);
-      copy.append(el('br'), el('span', capability.help, 'settings-help'));
-      const label = el('label', null, 'settings-checkbox-row');
-      label.append(input, copy);
-      capabilityBox.append(label);
-    }
-  }
-
-  function render(nextAccess) {
-    access = nextAccess;
-    inputs.clear();
-    list.replaceChildren();
-    renderCapability(nextAccess);
-    const selectedIds = access[config.key];
+  function renderAgents(group, nextAccess, box) {
+    const list = el('div', null, 'settings-stack backdoor-agent-list');
+    list.setAttribute('aria-label', group.ariaLabel);
+    list.setAttribute('role', 'group');
+    list.style.maxHeight = 'min(360px, 45dvh)';
+    list.style.overflowY = 'auto';
+    list.style.overflowWrap = 'anywhere';
+    box.append(list);
+    const groupInputs = new Map();
+    inputs.set(group.key, groupInputs);
+    const selectedIds = nextAccess[group.key];
     const selected = new Set(selectedIds);
     const availableIds = new Set(agents.map(agent => agent.id));
     const rows = [
@@ -169,7 +152,34 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
       const label = el('label', null, 'settings-checkbox-row');
       label.append(input, copy);
       list.append(label);
-      inputs.set(agent.id, input);
+      groupInputs.set(agent.id, input);
+    }
+  }
+
+  function render(nextAccess) {
+    access = nextAccess;
+    inputs.clear();
+    capabilityInputs.clear();
+    for (const group of groups) {
+      const box = groupBoxes.get(group.key);
+      box.replaceChildren();
+      if (group.id) {
+        box.append(el('h3', group.title));
+        if (nextAccess.declaredCapabilities.includes(group.id)) {
+          const input = el('input');
+          input.type = 'checkbox';
+          input.checked = nextAccess.grants.includes(group.id);
+          capabilityInputs.set(group.id, input);
+          const copy = el('span', group.label);
+          copy.append(el('br'), el('span', group.help, 'settings-help'));
+          const label = el('label', null, 'settings-checkbox-row');
+          label.append(input, copy);
+          box.append(label);
+        } else {
+          box.append(el('p', `Backdoor does not currently declare ${group.id}.`, 'settings-request-error'));
+        }
+      }
+      renderAgents(group, nextAccess, box);
     }
     save.disabled = true;
     publishDraft();
@@ -195,17 +205,19 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
     }
   }
 
-  function selectedIds() {
-    return [...inputs]
+  function selectedIds(key) {
+    return [...inputs.get(key)]
       .filter(([, input]) => input.checked)
       .map(([id]) => id);
   }
 
   function isDirty() {
     if (!access) return false;
-    const selected = selectedIds();
-    return selected.length !== access[config.key].length
-      || selected.some(id => !access[config.key].includes(id))
+    return groups.some(group => {
+      const selected = selectedIds(group.key);
+      return selected.length !== access[group.key].length
+        || selected.some(id => !access[group.key].includes(id));
+    })
       || [...capabilityInputs].some(([id, input]) => input.checked !== access.grants.includes(id));
   }
 
@@ -233,7 +245,8 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
       // this panel preserves fields owned by the other panel and any unknown grants.
       const current = await readCurrent();
       if (!active) return false;
-      const nextAccess = { ...current, [config.key]: selectedIds() };
+      const nextAccess = { ...current };
+      for (const group of groups) nextAccess[group.key] = selectedIds(group.key);
       for (const [id, input] of capabilityInputs) {
         nextAccess.grants = input.checked
           ? [...new Set([...nextAccess.grants, id])]

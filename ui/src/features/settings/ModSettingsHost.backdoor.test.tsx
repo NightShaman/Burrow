@@ -14,7 +14,8 @@ afterEach(() => {
 const initial = {
   grants: ['mod-management-v1', 'future-capability'],
   diagnosticAgentIds: ['agent-1'],
-  adminAgentIds: ['agent-2'],
+  modManagementAgentIds: ['agent-2'],
+  coreApiAgentIds: ['agent-3'],
   declaredCapabilities: ['mod-management-v1', 'core-api-v1'],
   restartRequired: false,
 };
@@ -64,7 +65,7 @@ it('loads actual Backdoor through the host and keeps imperative form metadata an
     await screen.findByRole('button', {
       name: section === 'Admin Access' ? 'Save admin access' : 'Save global access',
     });
-    await screen.findByRole('checkbox', { name: 'Agent 17' });
+    await screen.findAllByRole('checkbox', { name: 'Agent 17' });
     expect(container.querySelector('.mod-settings-mount')).toBe(host);
     expect(host?.getAttribute('data-settings-layout')).toBe('form');
     expect(overflow.isConnected).toBe(true);
@@ -139,11 +140,108 @@ it('commits actual Backdoor through guard Save before navigating and preserves o
   click('Save');
   await screen.findByRole('button', { name: 'Save admin access' });
   expect(accepted.diagnosticAgentIds).toEqual(['agent-1', 'agent-17']);
-  expect(accepted.adminAgentIds).toEqual(initial.adminAgentIds);
+  expect(accepted.modManagementAgentIds).toEqual(initial.modManagementAgentIds);
+  expect(accepted.coreApiAgentIds).toEqual(initial.coreApiAgentIds);
   expect(accepted.grants).toEqual(initial.grants);
   expect(
     fetcher.mock.calls.every(([url]) => url === '/api/operator/mods/burrow-backdoor/access'),
   ).toBe(true);
   expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   expect(screen.queryByRole('alertdialog')).toBeNull();
+});
+
+it('guards each independent admin list and saves the exact four-array contract', async () => {
+  let accepted = structuredClone(initial);
+  const payloads: Record<string, unknown>[] = [];
+  const fetcher = vi.fn(async (_url?: unknown, init?: RequestInit) => {
+    if (init?.method === 'PUT') {
+      const payload = JSON.parse(String(init.body));
+      payloads.push(payload);
+      accepted = { ...accepted, ...payload };
+    }
+    return response(accepted);
+  });
+  mountHost(fetcher);
+  await screen.findByRole('checkbox', { name: 'Agent 17' });
+  click('Admin Access');
+  const management = await screen.findByRole('group', {
+    name: 'Agents with mod management access',
+  });
+  fireEvent.click(within(management).getByRole('checkbox', { name: 'Agent 17' }));
+  click('Global Access');
+  click('Stay');
+  expect(within(management).getByRole('checkbox', { name: 'Agent 17' })).toHaveProperty(
+    'checked',
+    true,
+  );
+  click('Save admin access');
+  await waitFor(() => expect(payloads).toHaveLength(1));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Save admin access' })).toHaveProperty(
+      'disabled',
+      true,
+    ),
+  );
+  expect(accepted.modManagementAgentIds).toEqual(['agent-2', 'agent-17']);
+  expect(accepted.coreApiAgentIds).toEqual(['agent-3']);
+  fireEvent.click(
+    within(screen.getByRole('group', { name: 'Agents with Core API access' })).getByRole(
+      'checkbox',
+      { name: 'Agent 17' },
+    ),
+  );
+  click('Global Access');
+  click('Save');
+  await screen.findByRole('button', { name: 'Save global access' });
+  expect(accepted.coreApiAgentIds).toEqual(['agent-3', 'agent-17']);
+  expect(accepted.modManagementAgentIds).toEqual(['agent-2', 'agent-17']);
+  expect(accepted.diagnosticAgentIds).toEqual(initial.diagnosticAgentIds);
+  expect(accepted.grants).toEqual(initial.grants);
+  for (const payload of payloads) {
+    expect(Object.keys(payload).sort()).toEqual([
+      'coreApiAgentIds',
+      'diagnosticAgentIds',
+      'grants',
+      'modManagementAgentIds',
+    ]);
+  }
+});
+
+it('retains failed admin drafts and discards both independent lists without writing', async () => {
+  const fetcher = vi.fn(async (_url?: unknown, init?: RequestInit) =>
+    init?.method === 'PUT' ? response(initial, 503) : response(),
+  );
+  mountHost(fetcher);
+  await screen.findByRole('checkbox', { name: 'Agent 17' });
+  click('Admin Access');
+  const management = await screen.findByRole('group', {
+    name: 'Agents with mod management access',
+  });
+  const api = screen.getByRole('group', { name: 'Agents with Core API access' });
+  fireEvent.click(within(management).getByRole('checkbox', { name: 'Agent 17' }));
+  fireEvent.click(within(api).getByRole('checkbox', { name: 'Agent 16' }));
+  click('Global Access');
+  click('Save');
+  await screen.findByRole('alert');
+  expect(within(management).getByRole('checkbox', { name: 'Agent 17' })).toHaveProperty(
+    'checked',
+    true,
+  );
+  expect(within(api).getByRole('checkbox', { name: 'Agent 16' })).toHaveProperty('checked', true);
+  click('Global Access');
+  click('Discard');
+  await screen.findByRole('button', { name: 'Save global access' });
+  click('Admin Access');
+  const reset = await screen.findByRole('group', { name: 'Agents with mod management access' });
+  expect(within(reset).getByRole('checkbox', { name: 'Agent 17' })).toHaveProperty(
+    'checked',
+    false,
+  );
+  expect(
+    within(screen.getByRole('group', { name: 'Agents with Core API access' })).getByRole(
+      'checkbox',
+      { name: 'Agent 16' },
+    ),
+  ).toHaveProperty('checked', false);
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
 });
