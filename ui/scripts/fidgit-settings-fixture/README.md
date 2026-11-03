@@ -22,7 +22,27 @@ Iteration-two matrix visits every built-in subsection at desktop, checks the com
 
 Regression geometry verifies the first installed skill card is entirely inside its selection band (not hidden below filters), and the Dreams prompt textarea ends before the secondary memory controls begin. Dreams also has four-width screenshots and statistics-layout checks.
 
-Density coverage: 17 named agents with compact selection, GitHub MCP with 45 grantable tools with varied descriptions plus a second server, first/last/all tool toggles with validated synthetic save ACKs, independent server/tool scrolling, and 17-agent rail reorder/internal scrolling. Bounded families use explicit desktop split or mobile/medium-with-statistics stacked contracts. Statistics must reserve a column above 850px or stack without overlap below; 2560px persistent statistics is checked across Continuity/documents/MCP/rails, including the 17th agent and 45th tool. Models 900/1000 stats-open nested overflow is checked.
+Density coverage: 17 named agent buttons with horizontal arrow scrolling, GitHub MCP with 45 grantable tools with varied descriptions plus a second server, first/last/all tool toggles with validated synthetic save ACKs, independent server/tool scrolling, and 17-agent rail reorder/internal scrolling. Bounded families use explicit desktop split or mobile/medium-with-statistics stacked contracts. Statistics must reserve a column above 850px or stack without overlap below; 2560px persistent statistics is checked across Continuity/documents/MCP/rails, including the 17th agent and 45th tool. Models 900/1000 stats-open nested overflow is checked.
+
+Agent selection never changes to a dropdown. The focused toolbar audit checks
+1, 8, 9 and 17 agents at 390, 1000 and 1910 px, each with Statistics closed/open.
+All 24 combinations assert one nonwrapping button row, fixed New Agent/Global,
+arrows only for measured overflow, disabled endpoint controls and no page
+overflow. Native browser mouse events click the arrows to reach the first/last
+agents and select their buttons. Opening Statistics also uses native mouse
+input; closed-state checkpoints require its opener's center to pass hit testing,
+so neither the opener nor the agent arrow may cover the other's click target.
+Native keyboard input verifies ArrowLeft/Right,
+Home/End focus movement and Enter/Space activation. Selection remains revealed
+after resizing and toggling Statistics. Dirty Profile documents verify Stay and
+Discard for agent, Global and New Agent navigation, while scrolling alone never
+opens the guard. Four representative screenshots cover one agent, the old
+8/9-agent boundary and 17 agents; the existing MCP density captures remain.
+The synthetic count hook restores 17 agents before the wider Settings audits.
+The component fixture checks all four counts without launching a browser.
+A two-agent long-label case separately checks stable arrow visibility over
+twelve animation frames when resizing narrow/wide/narrow, plus selection and
+both scrolling endpoints. Names and counts are restored afterward.
 
 Layout assertions are collected per checkpoint so a single bad breakpoint does
 not hide later screenshots. Any collected layout failure still fails the run

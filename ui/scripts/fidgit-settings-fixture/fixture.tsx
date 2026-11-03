@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Settings } from '../../src/features/settings/SettingsPage';
 import { ConfirmProvider } from '../../src/app/ConfirmDialog';
@@ -470,7 +470,8 @@ window.fetch = (async (input, init) => {
       load: { oneMinute: 0.1, fiveMinutes: 0.1, fifteenMinutes: 0.1 },
       filesystem: { usedBytes: 1000000, totalBytes: 100000000, availableBytes: 99000000 },
     };
-  else if (path.match(/\/api\/agents\/[^/]+$/)) data = { agent: agents[0] };
+  else if (path.match(/\/api\/agents\/[^/]+$/))
+    data = { agent: agents.find((agent) => agent.id === decodeURIComponent(path.split('/')[3])) };
   else if (path.endsWith('/minion-settings')) data = { ok: true, maxDepth: 1 };
   else if (path.endsWith('/minion-model-selection')) data = { ok: true, selection: null };
   else if (path === '/api/settings/curator')
@@ -664,12 +665,36 @@ Object.assign(window, {
 });
 function Fixture() {
   const [tab, setTab] = useState<SettingsTab>('connections');
+  const [agentCount, setAgentCount] = useState(agents.length);
+  const [agentNames, setAgentNames] = useState<Record<string, string>>({});
+  const fixtureAgents = useMemo(
+    () =>
+      agents
+        .slice(0, agentCount)
+        .map((agent) => ({ ...agent, name: agentNames[agent.id] ?? agent.name })),
+    [agentCount, agentNames],
+  );
   const [savedProviders, setProviders] = useState(providers);
   const [nav, setNav] = useState<HTMLDivElement | null>(null);
   const [theme, setTheme] = useState<Theme>('smatchet');
   const [prefs, setPrefs] = useState<any>({ view: 'regular', order: [] });
   Object.assign(window, {
     fixtureSetTab: setTab,
+    fixtureSetAgentCount: (count: number) => {
+      if (!Number.isInteger(count) || count < 1 || count > agents.length)
+        throw new Error('Synthetic agent count must be between 1 and 17');
+      setAgentCount(count);
+    },
+    fixtureSetAgentNames: (names: Record<string, string>) => {
+      if (
+        Object.entries(names).some(
+          ([id, name]) =>
+            !agents.some((agent) => agent.id === id) || typeof name !== 'string' || !name.trim(),
+        )
+      )
+        throw new Error('Synthetic agent names must identify existing agents');
+      setAgentNames({ ...names });
+    },
     fixtureExpandProviders: () => {
       let count = providers.filter((p) => !p.pool).length;
       while (count < 8) {
@@ -718,7 +743,7 @@ function Fixture() {
           navigationTarget={nav}
           tab={tab}
           setTab={setTab}
-          agents={agents}
+          agents={fixtureAgents}
           selected={agents[0]}
           savedProviders={savedProviders}
           onModelConnectionsChanged={async () => setProviders([...providers])}

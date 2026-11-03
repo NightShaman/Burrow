@@ -34,6 +34,19 @@ it('loads every built-in subsection against isolated realistic fixture data', as
     });
   };
   await waitFor(() => expect(document.querySelector('.settings-blank-slate')).toBeTruthy());
+  await click('Agents', '.settings-prototype-menu button');
+  const setAgentCount = (window as unknown as { fixtureSetAgentCount: (count: number) => void })
+    .fixtureSetAgentCount;
+  for (const count of [1, 8, 9, 17]) {
+    await act(async () => setAgentCount(count));
+    const toolbar = document.querySelector('.agent-toolbar')!;
+    expect(toolbar.querySelector('select'), `${count} agents must stay buttons`).toBeNull();
+    expect(toolbar.querySelectorAll('[data-agent-id]')).toHaveLength(count);
+    expect(within(toolbar as HTMLElement).getByRole('button', { name: 'New Agent' })).toBeTruthy();
+    expect(within(toolbar as HTMLElement).getByRole('button', { name: 'Global' })).toBeTruthy();
+  }
+  expect(() => setAgentCount(0)).toThrow('Synthetic agent count');
+  expect(() => setAgentCount(18)).toThrow('Synthetic agent count');
   const matrix: Record<string, string[]> = {
     General: ['Personalization', 'Trace retention', 'Continuity', 'Export', 'Rail panels'],
     Agents: [

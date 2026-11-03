@@ -1,6 +1,7 @@
 // Isolated real-component browser acceptance. No live backend or user data.
 import { clientClipBox } from './client-clip.mjs';
 import { browserPipe } from './browser-pipe.mjs';
+import { auditAgentToolbar } from './agent-toolbar-audit.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -78,7 +79,7 @@ try {
   };
   const chooseAgent = async (name) => {
     await evaluate(
-      `(()=>{const select=document.querySelector('select[aria-label="Agent to configure"]');if(select){const option=[...select.options].find(o=>o.textContent===${JSON.stringify(name)});if(!option)throw new Error('Missing agent');select.value=option.value;select.dispatchEvent(new Event('change',{bubbles:true}));}else{const button=[...document.querySelectorAll('.agent-toolbar-selector button')].find(e=>e.textContent===${JSON.stringify(name)});if(!button)throw new Error('Missing agent');button.click();}})()`,
+      `(()=>{if(document.querySelector('.agent-toolbar select'))throw new Error('Agent dropdown is forbidden');const button=[...document.querySelectorAll('.agent-toolbar [data-agent-id]')].find(e=>e.textContent.trim()===${JSON.stringify(name)});if(!button)throw new Error('Missing agent button '+${JSON.stringify(name)});button.click();})()`,
     );
     await pause();
   };
@@ -605,6 +606,7 @@ try {
   });
   await c('Page.navigate', { url: `http://127.0.0.1:${port}` });
   await wait("!!document.querySelector('.settings-blank-slate')");
+  await auditAgentToolbar({ c, evaluate, wait, pause, click, screenshot, results });
   await categoryBand();
   if (
     await evaluate(
@@ -1176,17 +1178,19 @@ try {
     await chooseAgent('Thistle');
     await wait("!document.querySelector('.mcp-tool-options input').disabled");
     const toolbar = await evaluate(
-      "(()=>{const e=document.querySelector('.agent-toolbar-selector'),r=e.getBoundingClientRect(),select=e.querySelector('select');return {height:r.height,count:select.options.length,selected:select.value,width:select.getBoundingClientRect().width}})()",
+      "(()=>{const e=document.querySelector('.agent-toolbar-agent-list'),r=e.getBoundingClientRect(),selected=e.querySelector('[data-agent-id][aria-pressed=true]'),b=selected?.getBoundingClientRect();return {height:r.height,count:e.querySelectorAll('[data-agent-id]').length,selected:selected?.dataset.agentId,width:e.clientWidth,hasSelect:!!document.querySelector('.agent-toolbar select'),selectedVisible:!!b&&b.left>=r.left+e.clientLeft-2&&b.right<=r.left+e.clientLeft+e.clientWidth+2}})()",
     );
     results.push({ agentToolbar: { width, ...toolbar } });
     if (
       toolbar.height > 70 ||
       toolbar.count < 17 ||
       toolbar.selected !== 'thistle' ||
-      toolbar.width < 80
+      toolbar.width < 40 ||
+      toolbar.hasSelect ||
+      !toolbar.selectedVisible
     )
       throw new Error('17agent selector unreachable ' + JSON.stringify(toolbar));
-    await revealAndCheck('select[aria-label="Agent to configure"]', 'last-agent-selector', width);
+    await revealAndCheck('[data-agent-id="thistle"]', 'last-agent-button', width);
     await screenshot('last-agent-' + width);
     await chooseAgent('Hatchet');
   }
