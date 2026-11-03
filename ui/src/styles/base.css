@@ -75,7 +75,7 @@
   --overlay: rgb(0 0 0 / 0.72);
   --shadow: rgb(0 0 0 / 0.55);
 }
-/* Midnight surfaces with violet accents and bright green status highlights. */
+/* Midnight surfaces with electric violet accents and softened green indicators. */
 [data-theme='violet-grove'] {
   --surface: #000;
   --surface-sunken: #000;
@@ -85,20 +85,20 @@
   --surface-raised: #141820;
   --surface-hover: #1c2431;
   --surface-input: #080b10;
-  --line: #62429a;
-  --line-soft: #392a58;
+  --line: #7543c2;
+  --line-soft: #402865;
   --muted: #a7b8cc;
   --text: #d5deea;
   --text-strong: #e6eaf1;
-  --accent: #bb86fc;
-  --accent-strong: #d9baff;
-  --accent-muted: #302142;
-  --accent-subtle: #170f22;
-  --accent-border: #8053b6;
-  --accent-banner-border: #634489;
-  --accent-text: #f1e4ff;
-  --accent-glow-strong: rgb(187 134 252 / 25%);
-  --ok: #a3e635;
+  --accent: #b366ff;
+  --accent-strong: #c084fc;
+  --accent-muted: #30164b;
+  --accent-subtle: #180c29;
+  --accent-border: #9349df;
+  --accent-banner-border: #6d36a4;
+  --accent-text: #eedcff;
+  --accent-glow-strong: rgb(179 102 255 / 25%);
+  --ok: #91cf50;
   --warn: #edc26d;
   --danger: #f48291;
   --danger-subtle: #351c26;

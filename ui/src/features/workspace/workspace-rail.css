@@ -224,6 +224,13 @@
   color: var(--muted);
   font-size: 10px;
 }
+/* Healthy Grove meters share the account green; pressure states stay amber/red. */
+[data-theme='violet-grove']
+  .context-usage:not(.pressure-watch, .pressure-compress, .pressure-blocked)
+  i
+  b {
+  background: var(--ok);
+}
 .context-usage.pressure-watch i b {
   background: var(--warn);
 }

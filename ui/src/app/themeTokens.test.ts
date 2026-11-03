@@ -117,3 +117,77 @@ it('limits the Halloween operator bubble adjustment to a readable plum fill and 
   expect(contrast(declarations.color, declarations.background)).toBeGreaterThanOrEqual(7);
   expect(palette('halloween')['--accent-border']).toBe('#8653a3');
 });
+
+it('keeps Violet Grove on Midnight surfaces with electric violet and softened green', () => {
+  const grove = palette('violet-grove');
+  const midnight = palette('midnight');
+  for (const role of [
+    '--surface',
+    '--surface-sunken',
+    '--panel',
+    '--panel-2',
+    '--panel-3',
+    '--surface-raised',
+    '--surface-input',
+  ]) {
+    expect(grove[role], role).toBe(midnight[role]);
+  }
+  expect(grove['--accent']).toBe('#b366ff');
+  expect(grove['--accent-strong']).toBe('#c084fc');
+  expect(grove['--ok']).toBe('#91cf50');
+  for (const surface of [
+    '--surface',
+    '--panel',
+    '--panel-2',
+    '--surface-raised',
+    '--surface-hover',
+  ]) {
+    for (const text of ['--accent', '--accent-strong', '--ok']) {
+      expect(contrast(grove[text], grove[surface]), `${text} on ${surface}`).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  }
+  expect(palette('halloween')['--ok']).toBe('#a3e635');
+  expect(midnight['--accent']).toBe('#ba35ce');
+});
+
+it('uses the shared green for Grove account and healthy Agent meters without masking pressure', () => {
+  const workspace = Object.entries(sheets).find(([path]) =>
+    path.endsWith('/workspace-rail.css'),
+  )![1];
+  const panels = Object.entries(sheets).find(([path]) => path.endsWith('/panels.css'))![1];
+  const settings = Object.entries(sheets).find(([path]) => path.endsWith('/settings.css'))![1];
+  const backgrounds = (css: string, selector: string) => {
+    const rule = postcss
+      .parse(css)
+      .nodes.find(
+        (node): node is postcss.Rule =>
+          node.type === 'rule' && node.selector.replace(/\s+/g, ' ') === selector,
+      );
+    expect(rule, selector).toBeDefined();
+    return Object.fromEntries(
+      rule!.nodes
+        .filter((node): node is postcss.Declaration => node.type === 'decl')
+        .map((node) => [node.prop, node.value]),
+    );
+  };
+  expect(
+    backgrounds(
+      workspace,
+      "[data-theme='violet-grove'] .context-usage:not(.pressure-watch, .pressure-compress, .pressure-blocked) i b",
+    ).background,
+  ).toBe('var(--ok)');
+  expect(
+    backgrounds(panels, "[data-theme='violet-grove'] .account-status .account-meter .usage i")
+      .background,
+  ).toBe('var(--ok)');
+  for (const state of ['watch', 'compress', 'blocked']) {
+    expect(backgrounds(workspace, `.context-usage.pressure-${state} i b`).background).toBe(
+      state === 'blocked' ? 'var(--danger)' : 'var(--warn)',
+    );
+  }
+  const swatch = backgrounds(settings, '.theme-swatch.violet-grove');
+  expect(swatch['--swatch-accent']).toBe(palette('violet-grove')['--accent']);
+  expect(swatch['--swatch-panel']).toBe(palette('violet-grove')['--ok']);
+});

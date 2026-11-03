@@ -388,5 +388,5 @@
 }
 
 [data-theme='violet-grove'] .account-status .account-meter .usage i {
-  background: #a3e635;
+  background: var(--ok);
 }
