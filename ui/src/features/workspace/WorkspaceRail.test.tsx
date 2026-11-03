@@ -511,3 +511,51 @@ it.each([
     if (minionCoverage === 'stale') expect(screen.getByText('Last seen · Working')).toBeTruthy();
   },
 );
+
+it('keeps hidden residents in their distinct owner panel with native callbacks', () => {
+  const resident: Agent = {
+    ...agent,
+    id: 'resident',
+    name: 'Resident',
+    modAgent: {
+      ownerModId: 'example',
+      visibility: { agents: false, chat: false },
+      capabilities: { brains: false, forge: false },
+    },
+  };
+  const visible: Agent = {
+    ...resident,
+    id: 'visible',
+    name: 'Visible',
+    modAgent: { ...resident.modAgent!, visibility: { agents: true, chat: false } },
+  };
+  const select = vi.fn();
+  render(
+    <AgentsPanel
+      agents={[agent, resident, visible]}
+      selectedStreamId="resident"
+      expandedAgents={new Set()}
+      onSelectAgent={select}
+      onToggleAgent={vi.fn()}
+      onSelectSubagent={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('button', { name: 'Select Resident' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Select Visible' })).toBeTruthy();
+  cleanup();
+  render(
+    <AgentsPanel
+      ownerModId="example"
+      agents={[agent, resident, visible]}
+      selectedStreamId="resident"
+      expandedAgents={new Set()}
+      onSelectAgent={select}
+      onToggleAgent={vi.fn()}
+      onSelectSubagent={vi.fn()}
+    />,
+  );
+  expect(screen.getAllByRole('button', { name: 'Select Resident' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Select Visible' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Select Resident' }));
+  expect(select).toHaveBeenCalledWith(resident);
+});

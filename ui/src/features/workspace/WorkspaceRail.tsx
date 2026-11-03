@@ -5,7 +5,7 @@ import type { Agent, FileNode, PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
 import { api, type RuntimeHealth, type RuntimeMetrics } from '../../app/api';
 import type { ProviderConnectionStatus } from '../../app/useRuntimeDashboard';
-import { getPanelTitle } from '../../app/panelRegistry';
+import { getPanelTitle, type PanelDefinition } from '../../app/panelRegistry';
 import { orderAgents, type AgentRailView } from '../../app/useAgentRailPreferences';
 import { minionTree, type MinionNode } from './minionTree';
 import { childStreamId } from '../../app/useRuntimeSelection';
@@ -48,6 +48,7 @@ export type WorkspacePanelContext = {
 
 export function WorkspaceRail({
   collapsed,
+  panels,
   topPanel,
   bottomPanel,
   singlePanel,
@@ -60,6 +61,7 @@ export function WorkspaceRail({
   onSplitChange,
 }: {
   collapsed: boolean;
+  panels?: readonly PanelDefinition[];
   topPanel: PanelId;
   bottomPanel: PanelId;
   singlePanel?: PanelId;
@@ -83,7 +85,7 @@ export function WorkspaceRail({
       ) : (
         <>
           <div className="rail-head">
-            <span>{getPanelTitle(fullPanel)}</span>
+            <span>{getPanelTitle(fullPanel, panels)}</span>
             <button onClick={onCollapse} aria-label="Collapse left rail">
               <Chevron direction="left" />
             </button>
@@ -122,7 +124,7 @@ export function WorkspaceRail({
                 />
                 <section className="rail-panel bottom">
                   <div className="rail-head">
-                    <span>{getPanelTitle(bottomPanel)}</span>
+                    <span>{getPanelTitle(bottomPanel, panels)}</span>
                   </div>
                   {renderPanel(bottomPanel)}
                 </section>
@@ -136,6 +138,7 @@ export function WorkspaceRail({
 }
 
 export function AgentsPanel({
+  ownerModId,
   agents,
   view = 'regular',
   order = [],
@@ -152,11 +155,16 @@ export function AgentsPanel({
   | 'onToggleAgent'
   | 'onSelectAgent'
   | 'onSelectSubagent'
-> & { view?: AgentRailView; order?: string[] }) {
+> & { ownerModId?: string; view?: AgentRailView; order?: string[] }) {
   const orderedAgents = orderAgents(chatAgents(agents), order);
+  const members = orderedAgents.filter((agent) =>
+    ownerModId
+      ? agent.modAgent?.ownerModId === ownerModId && agent.modAgent.visibility.agents === false
+      : agent.modAgent?.visibility.agents !== false,
+  );
   return (
     <section className={`agent-pane ${view === 'compact' ? 'compact' : ''}`}>
-      {orderedAgents.map((agent) => (
+      {members.map((agent) => (
         <AgentCard
           key={agent.id}
           agent={agent}

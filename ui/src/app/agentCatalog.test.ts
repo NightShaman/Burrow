@@ -34,7 +34,12 @@ it('projects mod surfaces without dropping historical identities', () => {
   };
   const catalog = [ordinary, hidden];
   expect(settingsAgents(catalog)).toEqual([ordinary]);
-  expect(chatAgents(catalog)).toEqual([ordinary]);
+  expect(chatAgents(catalog)).toEqual(catalog);
+  expect(
+    settingsAgents([
+      { ...hidden, modAgent: { ...hidden.modAgent, visibility: { agents: true, chat: true } } },
+    ]),
+  ).toEqual([]);
   expect(capabilityAgents(catalog, 'brains')).toEqual([ordinary]);
   expect(capabilityAgents(catalog, 'forge')).toEqual(catalog);
   expect(enabledAgents(catalog)).toEqual(catalog);

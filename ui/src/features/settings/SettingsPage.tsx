@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Agent, PanelId, SavedProvider, SettingsTab } from '../../app/types';
 import { api, type SetupStatus } from '../../app/api';
 import { railLayouts, themes, themeDetails } from '../../app/usePersistedLayout';
+import type { PanelDefinition } from '../../app/panelRegistry';
 import { RailPanelSettings } from './RailPanelSettings';
 import type { Theme } from '../../app/usePersistedLayout';
 import type { AgentRailPreferences } from '../../app/useAgentRailPreferences';
@@ -49,6 +50,7 @@ const isBoolean = (value: unknown): value is boolean => typeof value === 'boolea
 
 export function Settings({
   navigationTarget,
+  selectedAgentId,
   tab,
   setTab,
   agents: catalog,
@@ -59,6 +61,7 @@ export function Settings({
   onOperatorProfileChanged,
   onFirstRunComplete,
   onOpenChat,
+  availablePanels,
   leftTopPanel,
   setLeftTopPanel,
   leftBottomPanel,
@@ -81,6 +84,7 @@ export function Settings({
   setAgentRailPreferences,
   previewFirstRun = false,
 }: {
+  selectedAgentId?: string;
   navigationTarget?: HTMLElement | null;
   tab: SettingsTab;
   setTab: (t: SettingsTab) => void;
@@ -92,6 +96,7 @@ export function Settings({
   onOperatorProfileChanged: (profile: { name: string; avatar: string }) => void;
   onFirstRunComplete: () => void;
   onOpenChat?: (sessionId: string, agentId: string) => void;
+  availablePanels?: readonly PanelDefinition[];
   leftTopPanel: PanelId;
   setLeftTopPanel: (id: PanelId) => void;
   leftBottomPanel: PanelId;
@@ -166,12 +171,11 @@ export function Settings({
     }),
   );
   const agents = settingsAgents(catalog);
-  const settingsSelected =
-    agents.find((agent) => agent.id === settingsAgentId) ?? agents[0] ?? selected;
+  const settingsSelected = agents.find((agent) => agent.id === settingsAgentId) ?? agents[0];
 
   useEffect(() => {
     if (!agents.some((agent) => agent.id === settingsAgentId))
-      setSettingsAgentId(agents[0]?.id ?? selected.id);
+      setSettingsAgentId(agents[0]?.id ?? '');
   }, [agents, selected.id, settingsAgentId]);
   useEffect(() => {
     let cancelled = false;
@@ -382,7 +386,7 @@ export function Settings({
           <div className="settings-prototype-agent-selector">
             <AgentToolbar
               agents={agents}
-              selectedId={settingsSelected.id}
+              selectedId={settingsSelected?.id ?? ''}
               onSelect={(id) => {
                 setAgentGlobal(false);
                 setSettingsAgentId(id);
@@ -480,7 +484,7 @@ export function Settings({
           {tab === 'agents' && !agentGlobal && (
             <nav
               className="settings-prototype-section-items"
-              aria-label={`${settingsSelected.name} settings sections`}
+              aria-label={`${settingsSelected?.name ?? 'Agent'} settings sections`}
             >
               {(
                 [
@@ -616,6 +620,7 @@ export function Settings({
               <SettingSection title="Rail Panels">
                 <div className="field-pair compact-fields">
                   <RailPanelSettings
+                    availablePanels={availablePanels}
                     side="Left"
                     layout={leftRailLayout}
                     setLayout={setLeftRailLayout}
@@ -627,6 +632,7 @@ export function Settings({
                     setBottomPanel={setLeftBottomPanel}
                   />
                   <RailPanelSettings
+                    availablePanels={availablePanels}
                     side="Right"
                     layout={rightRailLayout}
                     setLayout={setRightRailLayout}
@@ -648,7 +654,7 @@ export function Settings({
                 ) : (
                   <ExecutionBoundaries overflowTarget={overflowColumn} />
                 )
-              ) : agents.length === 0 ? (
+              ) : !settingsSelected ? (
                 <SettingSection title="Agent setup">
                   <p className="hint">
                     No agents configured yet. Create your first agent to unlock the rest of the
@@ -659,11 +665,14 @@ export function Settings({
                 <SkillsSettings
                   agentView
                   agents={agents}
-                  agentId={settingsSelected.id}
+                  agentId={settingsSelected?.id ?? ''}
                   overflowTarget={overflowColumn}
                 />
               ) : agentSection === 'mcp-tools' ? (
-                <AgentMcpTools agentId={settingsSelected.id} overflowTarget={overflowColumn} />
+                <AgentMcpTools
+                  agentId={settingsSelected?.id ?? ''}
+                  overflowTarget={overflowColumn}
+                />
               ) : (
                 <AgentSettings
                   onOpenChat={onOpenChat}
@@ -677,7 +686,7 @@ export function Settings({
             {tab === 'skills' && (
               <SkillsSettings
                 agents={enabledAgents(agents)}
-                agentId={settingsSelected.id}
+                agentId={settingsSelected?.id ?? ''}
                 section={skillsSection}
                 onSectionChange={setSkillsSection}
                 overflowTarget={overflowColumn}
@@ -723,6 +732,7 @@ export function Settings({
                 onAgentsChanged={onAgentsChanged}
                 navigationTarget={modNavigationColumn}
                 overflowTarget={overflowColumn}
+                selectedAgentId={selectedAgentId}
                 selectedSectionId={selectedModSettings?.id}
                 onSectionChange={
                   selectedContribution.settings?.length

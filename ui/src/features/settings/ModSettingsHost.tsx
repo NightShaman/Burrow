@@ -33,6 +33,7 @@ export type SettingsSurface = {
   clear: () => void;
 };
 type ModSettingsContext = {
+  selectedAgentId?: string;
   modId: string;
   runtimeScope: 'local';
   section: string;
@@ -572,6 +573,7 @@ function settingsFactoryContext(modId: string, agents: readonly Agent[]) {
 }
 
 export function ModSettingsHost({
+  selectedAgentId,
   modId,
   settingsUrl,
   agents,
@@ -581,6 +583,7 @@ export function ModSettingsHost({
   selectedSectionId,
   onSectionChange,
 }: {
+  selectedAgentId?: string;
   modId: string;
   settingsUrl: string;
   agents: Agent[];
@@ -691,6 +694,7 @@ export function ModSettingsHost({
     const navigationCancellations = new Set<() => void>();
     const context: ModSettingsContext = {
       modId,
+      selectedAgentId,
       runtimeScope: 'local',
       section,
       agents: agentsRef.current,
@@ -765,7 +769,17 @@ export function ModSettingsHost({
       node.replaceChildren();
       overflowNode?.replaceChildren();
     };
-  }, [module, contribution, section, modId, overflowTarget, confirm, navigate, createDraft]);
+  }, [
+    module,
+    contribution,
+    section,
+    selectedAgentId,
+    modId,
+    overflowTarget,
+    confirm,
+    navigate,
+    createDraft,
+  ]);
 
   // Semantic layout metadata, not a new surface: imperative portal targets must
   // keep their identity when sections change or a contribution refreshes.

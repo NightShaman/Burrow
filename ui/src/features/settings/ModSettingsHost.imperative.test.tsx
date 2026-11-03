@@ -47,6 +47,7 @@ function mountHost(done = vi.fn(), strict = false) {
   const overflow = target('settings-prototype-overflow');
   const props = {
     modId: 'fixture',
+    selectedAgentId: 'resident-resource',
     settingsUrl: './ModSettingsImperativeFixture',
     agents: [],
     onAgentsChanged: async () => {},
@@ -471,4 +472,11 @@ it('does not resume an external destination when a host unmounts mid-save under 
   expect(screen.queryByRole('alertdialog')).toBeNull();
   click('App destination');
   expect(done).toHaveBeenCalledOnce();
+});
+
+it('forwards the optional resource selection to the native owner mount context', async () => {
+  mountSettings.mockImplementation(() => {});
+  mountHost();
+  await waitFor(() => expect(mountSettings).toHaveBeenCalled());
+  expect(mountSettings.mock.calls[0][0].selectedAgentId).toBe('resident-resource');
 });

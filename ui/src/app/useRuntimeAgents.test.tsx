@@ -1036,7 +1036,7 @@ it('retains hidden mod attribution without engineering hydration or provider fal
     subagents: [],
   });
   expect(hydrated.targetId).toBeUndefined();
-  expect(setSelectedAgentId).toHaveBeenLastCalledWith('');
+  expect(setSelectedAgentId).toHaveBeenLastCalledWith('resident');
   expect(
     reconcileModelCatalog(
       [hydrated],

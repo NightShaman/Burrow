@@ -37,6 +37,7 @@ export function ChatModelSelector({
   onNewSession,
   onNewNamedSession,
   onCreateGroup,
+  ownerEditor,
   locked = false,
   isResettingSession = false,
   savingSelection = false,
@@ -51,6 +52,7 @@ export function ChatModelSelector({
   onNewSession: () => void;
   onNewNamedSession: () => void;
   onCreateGroup: () => void;
+  ownerEditor?: { label: string; onOpen: () => void };
   locked?: boolean;
   isResettingSession?: boolean;
   savingSelection?: boolean;
@@ -214,7 +216,9 @@ export function ChatModelSelector({
     </label>
   );
   return (
-    <div className={`workspace-toolbar${native ? ' native-model-toolbar' : ''}`}>
+    <div
+      className={`workspace-toolbar${native || ownerEditor ? ' native-model-toolbar' : ''}${ownerEditor ? ' owner-editor-toolbar' : ''}`}
+    >
       <label htmlFor="chat-provider">
         Provider{' '}
         <select
@@ -331,6 +335,11 @@ export function ChatModelSelector({
           </select>
         </label>
       </div>
+      {ownerEditor && (
+        <button className="new-session" type="button" onClick={ownerEditor.onOpen}>
+          {ownerEditor.label}
+        </button>
+      )}
       {savingNative && (
         <span className="model-selection-save-status" role="status">
           Saving model selection…

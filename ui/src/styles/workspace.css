@@ -415,6 +415,10 @@
   flex-wrap: nowrap;
   overflow: auto;
 }
+.workspace-toolbar.owner-editor-toolbar {
+  flex-wrap: wrap;
+  overflow: visible;
+}
 .native-model-toolbar > label,
 .native-model-toolbar .session-controls {
   flex-shrink: 0;

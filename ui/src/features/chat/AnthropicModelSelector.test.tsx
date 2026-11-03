@@ -164,7 +164,8 @@ describe('native chat/main selector', () => {
     render(<ChatModelSelector {...props} selected={{ ...agent, thinkingMode: 'default' }} />);
     const mode = screen.getByRole('combobox', { name: 'Thinking' });
     const tuning = mode.closest('.model-tuning-controls')!;
-    expect(tuning.parentElement?.className).toContain('workspace-toolbar');
+    expect(tuning.parentElement?.classList.contains('workspace-toolbar')).toBe(true);
+    expect(tuning.parentElement?.className).toBe('workspace-toolbar native-model-toolbar');
     expect(tuning.nextElementSibling?.className).toBe('session-controls');
     expect(
       screen.getByRole('combobox', { name: 'Model' }).closest('.model-tuning-controls'),
@@ -197,6 +198,31 @@ describe('native chat/main selector', () => {
     );
     expect(screen.queryByRole('combobox', { name: 'Thinking' })).toBeNull();
     expect(screen.getByRole('option', { name: 'off' })).toBeTruthy();
+    const toolbar = screen.getByRole('combobox', { name: 'Model' }).closest('.workspace-toolbar');
+    expect(toolbar?.className).toBe('workspace-toolbar');
+    expect(screen.getByRole('combobox', { name: 'Effort' }).closest('.workspace-toolbar')).toBe(
+      toolbar,
+    );
+    expect(screen.getByRole('slider').closest('.workspace-toolbar')).toBe(toolbar);
+  });
+  it('adds owner-only wrapping to the existing OpenAI toolbar when its editor is available', () => {
+    const onOpen = vi.fn();
+    render(
+      <ChatModelSelector
+        {...props}
+        selected={{ ...agent, provider: 'Other' }}
+        savedProviders={[{ ...provider, provider: 'Other', apiType: 'openai-responses' }]}
+        ownerEditor={{ label: 'Edit in Menagerie', onOpen }}
+      />,
+    );
+    const toolbar = screen.getByRole('combobox', { name: 'Model' }).closest('.workspace-toolbar');
+    expect(toolbar?.className).toBe('workspace-toolbar native-model-toolbar owner-editor-toolbar');
+    expect(screen.getByRole('combobox', { name: 'Effort' }).closest('.workspace-toolbar')).toBe(
+      toolbar,
+    );
+    expect(screen.getByRole('slider').closest('.workspace-toolbar')).toBe(toolbar);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit in Menagerie' }));
+    expect(onOpen).toHaveBeenCalledOnce();
   });
   it('does not send a draft while its displayed model choice is unaccepted', () => {
     const onSend = vi.fn();

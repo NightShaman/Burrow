@@ -120,7 +120,13 @@ export type Tab = {
   workspaceAgentId?: string;
   targetId?: string;
 };
-export type PanelId = 'none' | 'agents' | 'workspace' | 'accounts' | 'system';
+export type PanelId =
+  | 'none'
+  | 'agents'
+  | 'workspace'
+  | 'accounts'
+  | 'system'
+  | `owner-agents:${string}`;
 export type PanelSlot = 'top' | 'bottom';
 export type SavedProvider = {
   pool?: import('./api').ProviderPool;

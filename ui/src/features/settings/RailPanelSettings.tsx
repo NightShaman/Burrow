@@ -1,10 +1,11 @@
 import type { PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
-import { panelRegistry } from '../../app/panelRegistry';
+import { panelRegistry, type PanelDefinition } from '../../app/panelRegistry';
 import { Field } from './SettingsPrimitives';
 
 export function RailPanelSettings({
   side,
+  availablePanels = panelRegistry,
   layout,
   setLayout,
   singlePanel,
@@ -15,6 +16,7 @@ export function RailPanelSettings({
   setBottomPanel,
 }: {
   side: 'Left' | 'Right';
+  availablePanels?: readonly PanelDefinition[];
   layout: RailLayout;
   setLayout: (layout: RailLayout) => void;
   singlePanel: PanelId;
@@ -33,7 +35,7 @@ export function RailPanelSettings({
           onChange(panel);
         }}
       >
-        {panelRegistry.map((panel) => (
+        {availablePanels.map((panel) => (
           <option key={panel.id} value={panel.id}>
             {panel.label}
           </option>

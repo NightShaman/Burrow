@@ -704,3 +704,29 @@ it('keeps the empty agent setup in one left-track configuration without an empty
   ).toHaveLength(1);
   expect(container.querySelector('.settings-prototype-overflow')).toBeNull();
 });
+
+it('uses the empty native agent editor for an only-resident catalog', async () => {
+  vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+  const resident = {
+    id: 'resident-only',
+    name: 'Resident Only',
+    modAgent: { ownerModId: 'habitat', visibility: { agents: true, chat: true }, capabilities: {} },
+  };
+  render(
+    <Settings
+      {...({
+        tab: 'agents',
+        setTab: vi.fn(),
+        agents: [resident],
+        selected: resident,
+        savedProviders: [],
+        agentRailPreferences: { view: 'list', order: [] },
+      } as unknown as ComponentProps<typeof Settings>)}
+    />,
+  );
+  expect(await screen.findByText(/No agents configured yet/)).toBeTruthy();
+  expect(screen.queryByLabelText('Resident Only settings sections')).toBeNull();
+  expect(vi.mocked(api).mock.calls.some(([path]) => String(path).includes('/resident-only/'))).toBe(
+    false,
+  );
+});

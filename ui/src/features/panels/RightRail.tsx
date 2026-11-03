@@ -2,9 +2,10 @@ import { type PointerEvent, type ReactNode } from 'react';
 import type { PanelId } from '../../app/types';
 import type { RailLayout } from '../../app/usePersistedLayout';
 import { Chevron, RailExpander } from '../workspace/WorkspaceRail';
-import { getPanelTitle } from '../../app/panelRegistry';
+import { getPanelTitle, type PanelDefinition } from '../../app/panelRegistry';
 export function RightRail({
   collapsed,
+  panels,
   topPanel,
   bottomPanel,
   singlePanel,
@@ -17,6 +18,7 @@ export function RightRail({
   onSplitChange,
 }: {
   collapsed: boolean;
+  panels?: readonly PanelDefinition[];
   topPanel: PanelId;
   bottomPanel: PanelId;
   singlePanel?: PanelId;
@@ -40,7 +42,7 @@ export function RightRail({
       ) : (
         <>
           <div className="rail-head">
-            <span>{getPanelTitle(fullPanel)}</span>
+            <span>{getPanelTitle(fullPanel, panels)}</span>
             <button onClick={onCollapse} aria-label="Collapse right rail">
               <Chevron direction="right" />
             </button>
@@ -79,7 +81,7 @@ export function RightRail({
                 />
                 <section className="rail-panel bottom">
                   <div className="rail-head">
-                    <span>{getPanelTitle(bottomPanel)}</span>
+                    <span>{getPanelTitle(bottomPanel, panels)}</span>
                   </div>
                   {renderPanel(bottomPanel)}
                 </section>
