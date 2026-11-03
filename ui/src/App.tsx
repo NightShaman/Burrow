@@ -801,6 +801,19 @@ function AppContent() {
               />
               <ChatModelSelector
                 ownerEditor={(() => {
+                  if (!selected.modAgent) {
+                    return loadedSelected
+                      ? {
+                          label: 'Edit Agent',
+                          onOpen: () =>
+                            navigate(() => {
+                              setActiveModId(null);
+                              setSettingsTab('agents');
+                              setPage('settings');
+                            }),
+                        }
+                      : undefined;
+                  }
                   const owner = ownerContributions.find(
                     (item) => item.modId === selected.modAgent?.ownerModId,
                   );
