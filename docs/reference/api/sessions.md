@@ -4,7 +4,6 @@
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
-
 A session's canonical conversation evidence is in PostgreSQL. The current prompt tail, human-facing transcript, original export, trace proof and reset/archive snapshots are distinct views. See [conversation history](../../concepts/conversation-history.md) before choosing an export or deleting data.
 
 ## Discovery and transcript operations
@@ -27,6 +26,16 @@ Reset and archive retain original evidence. Current reset captures a handoff, bl
 `/api/session/context` and `/api/context` inspect context; `/api/session/context-status` includes current limits and live usage where available. Defaults use session `default`. These responses may expose private conversational material.
 
 Session search accepts `q`, `role`, `limit` (default 50), `sourceId`, `since`, `until`, `agentId`, `sessionId`, `scope` and `archived`. Scope defaults to `session` when an agent/session/source selector is present, otherwise `burrow`. Explicit `scope=session` targets one selected session; broader search gathers enabled-agent evidence and includes archives unless `archived=false`.
+
+### Latest-request context status
+
+`GET /api/session/context-status` returns `{ ok: true, status }`. `status.context` includes `estimatedTokens`, `capacityTokens`, `usageRatio`, `percent`, `pressure` and `source`. Its `scope` distinguishes `latest-request`, legacy `historical` evidence and `reconstructed` estimates.
+
+For a correlated request, `estimatedTokens` uses its matching `providerInputTokens` when reported, otherwise the request estimate. `requestEstimatedTokens` preserves that original estimate. A smaller continuation replaces the previous run peak; this projection does not relax preparation budgets.
+
+Optional nullable evidence includes local physical `requestId`, `runId`, `modelCall`, `lastTurnAt`, `stage` (`request-estimate` or `response`), `provider`, `providerName`, actual serving `connectionId`, pool `logicalConnectionId`, requested `model`, returned `responseModel`/`responseId`, `responseStatus` and `responseOk`. New requests clear prior response evidence. Missing returned-model data stays unknown rather than copying the requested model. Pressure is a budget-ratio classification, not dispatch, acceptance or execution status.
+
+`status.compaction` contains `active`, `next`, `last` and newest-first `history` capped at 10 records. An actual persisted compression summary invalidates predecessor-context measurements; reconstructed usage remains an estimate until successor evidence arrives. A no-op compression does not invalidate current usage.
 
 ### Agent recall is a separate tool contract
 
@@ -129,3 +138,7 @@ Chat calendar discovery uses one isolated reader lane; Chat list/detail and Proo
 ## Dedicated peer inbox metadata
 
 Dedicated peer inboxes are created on first implicit contact, not when toggling the preference. Each peer has its own reply lane, continuity family and rotation lifecycle; requests from that same peer stay ordered across source sessions. Labels refresh on later contact after a rename, but the canonical session ID does not change. Existing shared `a2a` history is retained and remains explicitly addressable; new implicit traffic does not migrate, rename or rotate it. `/api/sessions` exposes `label` and `a2aPeerAgentId`; session detail retains them in `metadata`.
+
+## 3 November development delta
+
+The changed context and host contracts above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../../project/source-map.md).

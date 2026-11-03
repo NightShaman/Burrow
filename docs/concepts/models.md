@@ -4,7 +4,6 @@
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
-
 Model selection is explicit configuration. A connection describes the provider endpoint and credential source; a model identifies the configured capability to use through that connection. The connection ID is durable identity. A display label is presentation.
 
 Configure and enable the connection/model, then select it for an agent. Do not put application model settings in a new `burrow.json` file or edit an immutable release to change an agent's selection. See [Initial setup](../getting-started/initial-setup.md) and [Configuration](../reference/configuration.md).
@@ -103,9 +102,12 @@ OpenAI Responses continuations replay prepared context rather than relying on `p
 The runtime selects and compresses context before calling a model. The current message is kept intact; lower-priority material is reduced, or a request that still cannot fit is rejected.
 
 
-!!! note "The meter is an estimate"
-    Character-based estimates and image allowances are not a provider tokenizer. Some schema and wire fields are not fully represented in the current adapter estimate. Provider telemetry can refine the display, and a run keeps its high-water mark. Do not use the meter as an exact billing count or a guarantee that a provider will accept a request at the advertised limit.
+!!! note "Request estimates and measured input"
+    The meter follows the latest physical model request, not the largest request in a run. A smaller continuation or final synthesis replaces the earlier value. Matching provider-reported input tokens take precedence over that request's estimate, even when lower; the original estimate remains separately available. A new request clears the previous response's usage, outcome and identifiers.
 
+    Character-based estimates and image allowances are not a provider tokenizer. Some schema and wire fields are not fully represented in the current adapter estimate. Conservative request-preparation limits still apply independently. Pressure describes the token/budget ratio, not whether the request was dispatched, accepted or rejected. Do not use the meter as an exact billing count or a guarantee of provider acceptance.
+
+Legacy usage without request correlation is labeled historical. After actual semantic compaction, stale measurements are replaced by a reconstructed estimate until successor-context usage is available. Requested model and provider-returned model are separate facts; a missing returned model stays unknown. See the [context-status fields](../reference/api/sessions.md#latest-request-context-status).
 
 Inspect the current session with `/context` and the redacted provider-ready request with `/context full` where supported by the chat transport. See [Observability](../operations/observability.md), [Runtime architecture](../architecture/runtime.md), and [Known limitations](../project/known-limitations.md). 
 
@@ -120,3 +122,7 @@ Streaming completeness checks differ by adapter, and bounded transport handling 
 For ordinary API-key connections, newly discovered model IDs start unchecked. Select at least one before saving; rediscovery preserves existing selections and leaves newly found IDs unchecked. OAuth and Load Balancing discovery retain their existing behavior. This editor opt-in does not redefine pool catalog intersections or disable pool routing through an account checkbox.
 
 Provider quota indicators and their polling were removed from the bottom status bar. OpenAI LB aggregate request/token statistics remain a separate feature; this UI removal does not disable provider-pool capacity routing.
+
+## 3 November development delta
+
+The changed context and host contracts above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).

@@ -7,12 +7,14 @@ An agent needs a saved model connection and a selected model to answer. A connec
 ## Add an API connection
 
 1. Open **Settings → Connections → Models**.
-2. In the **Models** form, give the **Provider** a recognizable name.
+2. Choose **Add provider** beside the saved-provider inventory, then give the **Provider** a recognizable name.
 3. Choose the API contract your endpoint actually supports: **OpenAI Chat Completions**, **OpenAI Responses**, **Anthropic Messages**, or **Google Gemini (Developer API)**.
 4. Enter the provider's **URL** and **API key**. Use the endpoint supplied by that provider; an OpenAI-compatible service is not necessarily the OpenAI service.
 5. Select **Connect** to discover models. Review the results and select the models you want available.
 6. Select **Save**. Connecting and saving are separate steps.
 7. Return to **Chat**, select the intended agent, then choose its **Provider** and **Model**. Send a small text-only test before trying tools or media generation.
+
+Checked **3 November 2026**: the Models workspace keeps saved providers on the left, with the selected connection, compact model list and model capabilities in the remaining space. Selecting a model row opens its details; its checkbox independently controls whether that model is enabled for direct selection.
 
 If discovery fails, read the displayed error. The editor allows adding model IDs manually; use the provider's exact ID. A manual entry makes a model selectable but does not prove the endpoint or your account can run it. A saved connection needs at least one selected model.
 
@@ -83,7 +85,7 @@ Selecting a model opens its details. The editor distinguishes discovered capabil
 
 Keep **Auto** unless you have reliable information for the exact model and endpoint. Turning on an output checkbox does not add an adapter, enable a provider feature, or grant access to a model. Similarly, a larger manual context limit does not increase the provider's actual limit.
 
-In Chat, **Effort** and **Temp** adjust the selected agent's model settings where supported. Available effort choices depend on the connection/model; controls are locked while the displayed run is active. The context display is an estimate, not an exact tokenizer or billing statement.
+In Chat, **Effort** and **Temp** adjust the selected agent's model settings where supported. Available effort choices depend on the connection/model; controls are locked while the displayed run is active. The context tooltip distinguishes request estimates from provider-reported response input; see [context meter labels](../concepts/interface.md#read-the-context-meter). It is not a billing statement or proof that execution succeeded.
 
 [Source: model capabilities and context controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModelConnectionViews.tsx) · [Chat controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatPage.tsx).
 
@@ -103,7 +105,7 @@ Anthropic discovery follows all catalog pages. Advertised native capabilities ta
 
 ## Change or remove a connection
 
-Open the saved provider in Connections, edit its settings, and save again. The API-key field indicates when a key is already configured. Follow its replacement prompt rather than pasting secrets into unrelated fields.
+Open the saved provider in **Settings → Connections → Models**, choose **Edit connection** to reveal its setup fields, edit its settings, and save again. New providers keep those fields visible. A failed Connect keeps recovery fields open until Connect succeeds or you switch providers; inspect the error rather than treating Save or a visible catalog as proof of a recovered connection. The API-key field indicates when a key is already configured. Follow its replacement prompt rather than pasting secrets into unrelated fields.
 
 Deleting a provider removes its saved connection. Check which agents use it first; they may need a replacement provider/model selection. If a model disappears after a change, recheck the connection's selected models and the agent's selection before creating a duplicate connection.
 

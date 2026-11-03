@@ -4,7 +4,6 @@
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-
 BURROW stores operator-managed configuration in PostgreSQL. The service environment supplies deployment paths, database connectivity, encryption keys and optional overrides. The retained `loadBurrowConfig()` function is inert: it does not read or write `burrow.json`.
 ## Choose the right configuration surface
 
@@ -15,7 +14,7 @@ BURROW stores operator-managed configuration in PostgreSQL. The service environm
 | MCP connections, discovered catalog and per-agent tool grants | PostgreSQL MCP settings | Settings → Connections → MCP servers; agent MCP tools |
 | UI authentication | PostgreSQL settings and secret store, with explicit environment overrides | Settings → Connections → Authentication |
 | Execution hard boundaries | PostgreSQL metadata | Settings → Agents → Global |
-| Operator timezone | PostgreSQL metadata | Settings → General → Operator profile |
+| Operator timezone | PostgreSQL metadata | Settings → General → Personalization → Operator profile |
 | Skills, Git sources and per-agent assignments | PostgreSQL skill/source records; installed package files on disk | Settings → Skills; per-agent assignments under Agents |
 | Browser Origin checking | Deployment environment; enabled by default | `BURROW_UI_ORIGIN_CHECK` and `BURROW_UI_ALLOWED_ORIGINS`; no Settings/API editor |
 | OpenTelemetry export | PostgreSQL destination list/master switch and encrypted credentials/headers, with explicit environment overrides | Settings → Connections → OpenTelemetry; `/api/settings/opentelemetry` |

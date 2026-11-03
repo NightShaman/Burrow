@@ -2,9 +2,7 @@
 
 
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Start with the installed version, exact error, expected deployment shape, and relevant agent/session/run ID. Avoid changing several settings at once or retrying an operation that may still be running.
 
@@ -20,6 +18,12 @@ cat "$HOME/.burrow/app/SOURCE_VERSIONS"
 ```
 
 For containers, use `docker compose ps` and `docker compose logs --tail=200 burrow`. Inspect JSON `ok` and version, not only the HTTP status. Keep credentials and full environment files out of diagnostic bundles.
+
+## Downloaded installer is not executable
+
+An older public-promotion artifact handoff could strip executable permissions from the source snapshot even when the development `install.sh` was executable. The outer installer checks the downloaded source installer before later installation steps, so running the outer script with `bash` alone does not repair that snapshot.
+
+Check the downloaded tree with `ls -l install.sh` and `test -x install.sh`, and record its release or commit. Current promotion preserves modes inside a tar archive and verifies them after extraction before publication. Obtain a corrected release snapshot and verify its provenance; the source fix does not change previously downloaded files or immutable historical tags. Do not disable the installer's validation to hide a packaging failure. See [release packaging](../development/releases.md#executable-permissions-in-promoted-source).
 
 ## Service fails to start
 

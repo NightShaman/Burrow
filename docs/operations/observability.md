@@ -2,9 +2,7 @@
 
 
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Use runtime receipts, persisted history, logs, and provider-request evidence to answer different questions. A green process or successful HTTP response is not proof that the requested work completed.
 
@@ -76,7 +74,7 @@ Current development places OpenTelemetry under **Settings → Connections → Op
 
 ### Configure destinations
 
-1. Choose **Add destination** in the **Destinations** inventory, or select an existing entry. The inventory is in the additional-settings column; the selected editor is in the main column.
+1. Choose **Add destination** in the **Destinations** inventory, or select an existing entry. At wide widths, the inventory is on the left and the selected editor is on the right; narrow layouts stack them in that order.
 2. Set a descriptive **Name**, **Provider**, endpoint and the provider's connection/authentication fields. Review the receiving service and its data handling before enabling export.
 3. Under **Advanced transport**, check enabled signals, protocol, metric temporality and exact signal URLs. A base endpoint receives `/v1/traces` or `/v1/metrics`; exact signal URLs are used unchanged. Keep TLS certificate verification enabled; use a trusted CA certificate where required.
 4. Enable the intended destinations and the master **Send telemetry** switch, then **Save changes**. The master requires at least one enabled destination. Additions, removals and edits are drafts until the complete list is saved; a rejected list does not partially replace the saved configuration.
@@ -158,10 +156,14 @@ Current Core exports additional observations to the existing enabled destination
 
 - `burrow.model.requests` / `duration` describe physical provider requests, including retries. `burrow.model.ttft` measures fetch invocation to first parsed nonempty streaming thought, text or tool content; `burrow.model.first_delta` distinguishes those kinds. Headers, heartbeats and terminal-only snapshots are not first content. Non-streaming or missing-delta responses have no TTFT sample, not zero.
 - `burrow.provider_pool.request.ttft` covers a logical invocation including earlier failed attempts; `burrow.provider_pool.ttft` and `attempt.duration` cover one physical account attempt. Retry/failover counts and persisted cooldown-window observations retain that distinction. A successful later account does not rewrite the earlier failure. Cooldown expiry is not continuously polled or claimed as recovery.
-- Context usage/budget/pressure and compaction counts/durations retain measured-versus-estimated provenance. Compaction before/after values are conversation estimates, not measured provider-token savings; failed or stale rotations do not claim after values.
+- Context usage/budget/pressure and compaction counts/durations retain measured-versus-estimated provenance. Usage follows the latest physical request, using matching response input tokens when available and its request estimate otherwise, not a run high-water mark. A new request clears old response evidence; uncorrelated legacy readings remain historical. Pressure classifies the token/budget ratio, not run health or provider acceptance. Compaction before/after values are conversation estimates, not measured provider-token savings; failed or stale rotations do not claim after values.
 - Queue pending/oldest-age/wait and recovery transitions/outcomes expose observed durable work. A failed queue read is unavailable, not an empty queue. Only an actual cancellation grace deadline establishes overdue drain; elapsed run age alone never means stuck.
 - Database pool-wait/query-duration, event-loop lag, process/filesystem dispatch timing, explicit execution/MCP disconnect-reconnect evidence, and fixed authentication outcome categories distinguish dependencies. Dispatch observations are not an idle host monitor. Ordinary session-cookie checks are not new logins.
 
 Pool and generic token counters are views of the same usage, not additive totals. Cached input is already included in normalized input. Unknown values remain absent; explicit measured zero remains zero. Run/request IDs and readable names are trace-only; curated metric dimensions exclude prompts, commands, SQL, arguments/results, secret-bearing URLs and raw errors.
 
 These are source-backed instrument contracts, not proof of collector ingestion. Check the exact installed build and receiving-service samples. Source: Core `bea2171508d1821440ed5c554a688768848699c9`, operational/provider exporters and producer call sites; no application/provider tests were run for this documentation pass.
+
+## 3 November development delta
+
+The changed context observations and destination layout above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` and UI `4a17a8c73c588a7582835ca6ff50dcabe409c33c` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).

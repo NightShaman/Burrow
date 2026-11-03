@@ -39,6 +39,16 @@ A server module exports `activate(context)`, registers only its own routes/tools
 
 The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](https://docs.goblin-kingdom.com/burrow-tutor/install/#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
 
+## Mod-owned native agents
+
+Current development Core provides a generic host contract for a mod to own native agent identities and supply their per-turn context. Register `context.agents.context.register(provider)` during activation. The provider receives `{ agentId, sessionId }` plus `{ signal }`, and returns only `profileFiles` and `context`, each an array of `{ name, content }` string records. Names are bounded non-path identifiers, unique within each collection; each collection accepts at most 64 records and the combined UTF-8 name/content budget is 1,000,000 bytes. Invalid or excess provider output is rejected, not silently trimmed.
+
+`context.agents.owned.create`, `.list`, `.read` and `.update` are scoped to the installed owner. Core assigns ownership. Creation requires an authenticated, existing enabled native model and stores identity/model selection atomically. Supported capability flags are `a2a`, `forge`, `brains`, `mcp`, `skills`; visibility flags are `agents`, `chat`. Omitted flags default false; update patches preserve omitted flags. These records do not imply engineering/tool access, profile documents or a Dream cycle.
+
+The live owner provider is required for dependent turns. Disablement, host failure/replacement, a missing provider, timeout or invalid output fails with `mod_agent_unavailable`. Context is selected by logical conversation session ID, including fresh scheduled turns. The native bridge reaches only the owner's current published tools, independently of external MCP. See [runtime context construction](../architecture/runtime.md#mod-owned-native-context).
+
+Owned `referenceImages.get`, `.put` and `.remove` use the canonical agent reference store. Portable settings preserve ownership/capability/visibility records; restoring an unavailable owner leaves its agent unavailable, and conflicting regular/mod or different-owner identities are rejected. This host contract is not a separate public HTTP endpoint or a guarantee that every declared flag is exposed by every route.
+
 ## Extend a model adapter
 
 Provider wire protocols belong in Core's model-adapter layer. Test request construction, supported options, streaming, tool continuations, error handling and credential boundaries against that provider's contract. A model name alone does not establish support for every endpoint or capability.
@@ -60,3 +70,7 @@ Current Core supports the independently declared and operator-granted `core-api-
 Requests accept a local `/api` path and optional method, headers, and exactly one of JSON `body`, UTF-8 `bodyText` or `bodyBase64`. Responses preserve status, headers, encoding, original byte length and complete finite body; HTTP errors remain response data. Finite NDJSON is aggregated, not delivered incrementally. The default 96 MiB response allocation ceiling fails explicitly rather than returning truncated success. Response failure does not roll back an already executed mutation; reconcile before retrying.
 
 This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://docs.goblin-kingdom.com/burrow-backdoor/operator-api/) for the shipped tool surface; a skill itself grants none of these capabilities.
+
+## 3 November development delta
+
+The changed context and host contracts above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).

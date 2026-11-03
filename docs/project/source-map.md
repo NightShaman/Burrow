@@ -6,9 +6,9 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.02.4` | `d25beccce60830cf4159d91cae9a97dec38eefd2` |
-| Core / Backend | `69f644aaf9f0060fac7003c22e77f7a3da7c0471` |
-| UI | `1c396911c2f47137f5ea0ba3759a960de31770c4` |
+| Assembled Burrow, build `2026.11.03.8` | `400ec8f2d0b24478ca2185bf8c38aee2ede4c445` |
+| Core / Backend | `32dde3266a231777ddfec6dba141d6b9972a21fd` |
+| UI | `4a17a8c73c588a7582835ca6ff50dcabe409c33c` |
 | Skills | `f0f033fcd5b795bdc0a5dc8ec548ef82488e8f0e` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -91,3 +91,9 @@ The misleading earlier-reference navigation group was removed after the Sunday r
 ## 2 November ordinary delta review
 
 The current table pins build 2026.11.02.4 and its matching Backend/UI sources. This pass covers canonical agent/operator/Mod photos, Forge reference selection, per-peer A2A inboxes, structured chat terminal failures, explicit API-model opt-in, retention form reads, deployment-only Origin controls and migrations 86–89. Unchanged pages inherit the dated 1 November full review; historical screenshots and pinned public-source links remain historical. No application tests, provider calls or installed-instance upgrades are claimed.
+
+## 3 November implementation delta
+
+Current inspected assembly **2026.11.03.8**, commit `400ec8f2d0b24478ca2185bf8c38aee2ede4c445`, records Core `32dde3266a231777ddfec6dba141d6b9972a21fd` and UI `4a17a8c73c588a7582835ca6ff50dcabe409c33c`. This ordinary pass follows the merged Settings layout contract, horizontal agent-button overflow, latest-request context measurement and correlated provider usage, generic mod-owned native agent isolation, and preserved executable permissions in the release artifact handoff. The application schema reaches migration 90 for mod-owned agent metadata. The separately documented mod and skill repositories have no newer source commits than the previous documentation baseline; their cross-component compatibility is still checked.
+
+The full review remains dated **1 November**. This is static source reconciliation and safe documentation validation, not application/provider testing, a runtime deployment or proof that public releases and installed versions already include these changes.

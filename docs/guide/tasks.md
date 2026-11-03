@@ -60,7 +60,7 @@ In a chat session, type `$project` to open the project picker and select a proje
 
 ## Schedule a recurring prompt
 
-1. Check **Settings → General → Operator profile → Operator timezone** first.
+1. Check **Settings → General → Personalization → Operator profile → Operator timezone** first.
 2. Open **Settings → Agents**, select an agent, and choose **Cron jobs**.
 3. Select **Run → Prompt** and **Schedule → Recurring**. Enter **Name**, **Prompt**, and a five-field **Cron** expression in the order `minute hour day month weekday`. For example, `0 9 * * *` means daily at 09:00 in the operator timezone.
 4. Keep **Use agent chat model**, or choose a model override for this job only.

@@ -4,7 +4,6 @@
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
-
 A normal chat turn is coordinated by `runAskChat`. Its contract requires a root, a message, and composed PostgreSQL application stores. Transport adapters supply trusted agent context separately from serialized request arguments.
 
 ## Turn lifecycle
@@ -74,6 +73,14 @@ The current message is atomic. Context handling may reduce older dialogue and lo
 
 The final request is inspected against configured model capacity. The estimate is not an exact tokenizer and does not account equally for every transport field. Treat it as a pressure signal; see [Models](../concepts/models.md#context-capacity-and-the-meter).
 
+### Mod-owned native context
+
+A mod-owned native agent uses the owning mod's live per-turn context provider, rather than the ordinary Core profile/engineering context path. The provider receives the logical conversation session ID even when execution uses an isolated internal session. Its `profileFiles` become identity/system material; its `context` records become current support material. `mod://<owner>/agent/profile/...` and `mod://<owner>/agent/context/...` are provenance labels, not editable filesystem paths.
+
+The runtime does not preload ordinary global profile/rules, engineering working continuity, Dream context or host metadata into this path. Current mod context supersedes earlier support snapshots retained as history. The provider result is snapshotted for prompt-pressure rebuilds; normal conversation continuity, compression and whole-request budget checks still apply. An unavailable, replaced or invalid owner provider blocks the dependent turn instead of falling back to ordinary agent context.
+
+The native `mod_agent_tool` bridge exposes only the owning mod's currently published tools. Other supported capabilities must be explicitly enabled; this path does not implicitly grant engineering, shell, file, git, task or minion tools. Ordinary non-mod agents retain their existing context path. See [extension contracts](../development/extensions.md#mod-owned-native-agents).
+
 ## How evidence returns to later turns
 
 ```mermaid
@@ -140,3 +147,7 @@ Changed behavior above was checked statically against Backend `a04acb16b0eab2a91
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## 3 November development delta
+
+The changed context and host contracts above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).

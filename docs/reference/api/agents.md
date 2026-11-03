@@ -4,7 +4,6 @@
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
-
 The agent registry is PostgreSQL-backed. An empty registry is valid; a fallback agent label in code does not establish that a real agent exists. Start with `GET /api/setup/status` and `GET /api/agents`.
 
 ## Initial setup
@@ -21,7 +20,7 @@ Create requires `name`; an optional `id` must be a string and pass registry vali
 `GET /api/agents` includes disabled agents unless `includeDisabled=false`. `POST /api/agents/overview` is a bulk UI projection with normalized request selection; it does not launch agents. `GET /api/agent-status` is listed under [diagnostics](diagnostics.md).
 ## Native peer discovery
 
-The agent-facing `agents_list` tool is separate from this operator registry API: it lists enabled peers by default, with optional substring query, disabled inclusion and pages of up to 20 exact identity cards. Known peers can be addressed directly by `agent_send_message` using canonical ID or unique full display name; discovery does not require Backdoor or MCP. See [peer messaging](../../concepts/agents-minions.md#peer-agent-messages). Registry listing is not a runtime health or peer-data permission check.
+The agent-facing `agents_list` tool is separate from this operator registry API: it lists enabled peers by default, with optional substring query, disabled inclusion and pages of up to 20 exact identity cards. Known peers can be addressed directly by `agent_send_message` using canonical ID or unique full display name; discovery does not require Backdoor or MCP. See [peer messaging](../../concepts/agents-minions.md#peer-agent-messages). Registry listing is not a runtime health or peer-data permission check. For a mod-owned peer, native discovery additionally requires the `a2a` capability and a live owning context provider. Direct native sends recheck caller and target eligibility; a known identity or earlier discovery result does not bypass those checks. See [mod-owned native agents](../../development/extensions.md#mod-owned-native-agents).
 
 Overview/status now retain root, immediate-parent and depth ancestry. Context hydration is bounded separately from the descendant tree; see [status projections](diagnostics.md#descendant-status).
 

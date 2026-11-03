@@ -4,7 +4,6 @@
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-
 This reference reviews application storage ownership and records the current migration ledger through **89**, checked against Core on **2 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
@@ -319,3 +318,7 @@ Task schedules are constrained to the default session and continued context. Cro
 | 89 | `canonical-operator-reference-image` | Singleton operator photo metadata and managed artifact reference |
 
 Original photo bytes are runtime artifacts, not SQL media values. Agent/operator/Mod photos are distinct from avatars and expiring conversation attachments.
+
+## 3 November migration addition
+
+Migration **90**, `mod-owned-agents`, adds the nullable `agents.mod_agent_json` JSONB column for mod ownership, capability and visibility metadata. Ordinary agent records retain their existing path; owner-scoped identities are managed through the Core mod host contract. See [mod-owned native agents](../development/extensions.md#mod-owned-native-agents). This is an application migration, not a PostgreSQL major-version upgrade or an instruction to edit the migration ledger. Statically checked against Core `32dde3266a231777ddfec6dba141d6b9972a21fd`; no database migration was executed by this documentation review.

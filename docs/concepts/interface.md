@@ -73,7 +73,7 @@ The composer suggests `/help`, `/context [full]`, `/status`, `/new`, and `/stop`
 
 Chat submits `POST /api/chat` and requests newline-delimited JSON events. Progress, tool activity, and streamed answer text are displayed separately. The terminal result supplies the authoritative final answer; materially different streamed text can remain in a separate disclosure. A connection error does not prove that the runtime stopped.
 **Stop response** (square icon) aborts the browser's stream read and requests cancellation through `POST /api/chat/{runId}/cancel`. The interface also reconciles activity with `GET /api/chat/runs/active` and reloads session records. It does not resume a disconnected stream from an event offset. If work seems stuck, inspect current runtime activity and [Troubleshooting](../operations/troubleshooting.md) before resubmitting a potentially consequential instruction.
-Expand an agent to inspect its Minion tree, then select a child or nested child to view its stream. Work whose parent is no longer retained remains visible at the top of the displayed subtree rather than disappearing. Selecting a Minion changes the displayed child conversation while preserving its parent agent's identity for workspace ownership. See [Agents and Minions](agents-minions.md). MCP activity cards show provider and tool identity without exposing MCP argument and output payloads in the transcript. Use the relevant evidence views when investigating execution.
+Expand an agent to inspect its Minion tree, then select a child or nested child to view its stream. A Minion with nested children has its own Expand/Collapse control; collapsing that subtree does not select it. The selected conversation row is highlighted independently of its parent. Work whose parent is no longer retained remains visible at the top of the displayed subtree rather than disappearing. Selecting a Minion changes the displayed child conversation while preserving its parent agent's identity for workspace ownership. See [Agents and Minions](agents-minions.md). MCP activity cards show provider and tool identity without exposing MCP argument and output payloads in the transcript. Use the relevant evidence views when investigating execution.
 <figure markdown="span">
 [![Synthetic Chat conversation with an expanded runtime activity card beneath an assistant message.](../assets/screenshots/04-chat-runtime-actions.webp){ loading=lazy }](../assets/screenshots/04-chat-runtime-actions.webp)
 <figcaption>Expanded runtime activity in a synthetic conversation. Visible fixture entries do not verify that an operation ran.</figcaption>
@@ -95,20 +95,42 @@ Choose **Group Chat** to create or reopen a room. A new room needs a name and at
 The **Workspace** panel shows the selected parent agent's files, including while a Minion conversation is displayed. Open a file to create a document tab, choose **Edit**, then **Save**. The tab retains its owning agent for the save request. The editor provides text editing, not a terminal or a file creation, rename, deletion, or upload workflow.
 The file tree uses `GET /api/workspace/files?agentId=…&scope=agent`; reads and saves use `/api/workspace/file`. Automatic tree refresh runs while Workspace is visible in the left rail and keeps the last tree on a transient failure. The backend remains responsible for file access checks.
 
-Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Accounts**, or **System** for each rail. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **Appearance** offers Smatchet Dark, Midnight, Blue Hour, Nexus, Hatchet, Chaos, and Terminal. These layout preferences are stored in the browser.
+Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Accounts**, or **System** for each rail. Enabled mod-owned agents can also make an owner-named agent panel available; its content follows that mod's visibility settings. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **General → Personalization → Appearance** offers Smatchet Dark, Midnight, Violet Grove, Halloween, Blue Hour, Nexus, Hatchet, Chaos, and Terminal. Violet Grove uses Midnight's dark surfaces with violet accents and green healthy/account indicators; warning and blocked-context colors retain their distinct meanings. These layout preferences are stored in the browser.
 On viewports at or below 600 pixels wide, controls reflow into a stacked layout, rails remain available, and page tabs can scroll horizontally. Scroll the page or expand a collapsed rail to reach its controls.
+
+### Read the context meter
+
+Checked **3 November 2026**: hover over the context meter to distinguish the available evidence:
+
+- **Latest request input (provider reported):** input tokens reported by a correlated latest-request response. When available, **Matching request estimate** shows the earlier estimate separately.
+- **Latest request estimate:** a current request estimate without matching provider-reported input.
+- **Reconstructed dialogue estimate** or **Historical estimate:** reconstructed or older context, not a measurement of the current API response. Missing evidence is shown as unavailable rather than zero.
+
+For a correlated latest request, the tooltip can identify the serving provider and requested model. A returned model is shown only for response-stage evidence. **Budget pressure** classifies context size; it is not execution status. Compaction information is separate from proof that a run completed successfully.
 
 ## Settings map
 
-This settings map reflects the development UI reviewed **1 November 2026**, rather than the older screenshots below. Settings separates category navigation, subsection navigation, the main editor, and supporting inventory or details. The agent selected inside Settings can differ from the agent selected in Chat; check the agent selector before saving.
+This settings map reflects the development UI checked **3 November 2026**, rather than the older screenshots below. Settings separates top-level category navigation, left subsection navigation and a task-specific work area. The agent selected inside Settings can differ from the agent selected in Chat; check the agent selector before saving.
 
 | Category | Built-in sections |
 | --- | --- |
-| **General** | Operator profile (including Operator timezone and Browser tab), Trace retention, Continuity, Export, Rail panels, Appearance |
+| **General** | Personalization (Operator profile, reference photo, Operator timezone, Appearance and Browser tab), Trace retention, Continuity, Export, Rail panels |
 | **Agents** | Select **Global** for Global documents and Execution boundaries; select an agent for Agent details, Profile documents, MCP tools, Cron jobs, Workflow events, Dreams, Skills |
-| **Skills** | Text skills, managed Git sources, lifecycle, global use, and assignments |
+| **Skills** | Installed skills, Import from repository, New text skill |
 | **Connections** | Authentication, OpenTelemetry, Models, Load balancing, MCP servers, API tokens |
 | **Mods** | Installed mods, Mod sources, Automatic source checks |
+
+Settings uses these workspace arrangements:
+
+- **Single forms:** one complete form occupies the left half on wider work areas, with the other half intentionally empty. Examples include Trace retention, Authentication, skill import/creation and Automatic source checks. Below 640px of available work-area width, the form fills that width.
+- **Paired forms:** Personalization, Continuity, Export/Import, Agent details/Minion settings and Dreams keep their related groups beside each other, with their existing independent save scopes.
+- **Inventory/editor:** a bounded list sits left of the selected item's full editor and actions. MCP servers, model pools, tokens, installed skills/mods, sources, boundaries, Cron and Workflow events use this arrangement.
+- **Documents/tools:** compact selectors remain beside their useful editing or tool controls.
+- **Models:** a dedicated provider list stays on the left, with connection controls, model rows and capability details in the remaining area.
+
+**System statistics** occupies its own desktop track, reducing the available work area. It stays open across subsection changes and remains in flow on narrow screens. Layout responds to available work-area width, not just monitor width.
+
+The **Agents** selector is a horizontal, non-wrapping row of named buttons at every agent count, with **New Agent** and **Global**. Scroll arrows appear only when needed and disable at the reached end. Arrow Left/Right and Home/End move focus; Enter/Space selects through the unsaved-change guard. Selection and keyboard focus remain visible as the row scrolls.
 
 - **OpenTelemetry:** add, select, enable or remove destinations, then save the complete draft list. The master **Send telemetry** switch and individual destination switches are separate. Saved and effective environment-controlled destinations are distinguished; see [Observability](../operations/observability.md#opentelemetry).
 - **Models:** configure connections, discover or enter models, and select the models exposed to agents. See [Models and providers](models.md).
@@ -119,7 +141,7 @@ This settings map reflects the development UI reviewed **1 November 2026**, rath
 - **Authentication, API tokens, and Execution boundaries:** review the relevant [authentication](../security/authentication.md) and [trust-boundary](../security/trust-boundaries.md) guidance before changing access or execution policy.
 - **Export and Trace retention:** use [Backup and recovery](../operations/backup-recovery.md) and [Operator procedures](../operations/procedures.md). Trace retention uses **Apply policy**. Applying an enabled policy can start scheduled deletion without Preview or Run now. For a manual cleanup, apply the intended policy, inspect **Preview cleanup**, then choose **Run now** with unchanged inputs. Any policy edit requires applying and previewing again.
 
-**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agent details** places **Minion settings** in that additional column, with the default Minion model and **Maximum minion depth** (0: none; 1: direct children, the default; 2: one further nested level). Depth saves when slider adjustment ends; existing Minion trees cannot gain extra depth. **OpenTelemetry** keeps the selected destination editor in the main column and the **Destinations** inventory in the additional column; **Dreams** uses it for **Dream memory**, with retained history in **Archive → Dreams**. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
+**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agent details** places **Minion settings** in that additional column, with the default Minion model and **Maximum minion depth** (0: none; 1: direct children, the default; 2: one further nested level). Depth saves when slider adjustment ends; existing Minion trees cannot gain extra depth. **OpenTelemetry** keeps the **Destinations** inventory left of the selected destination editor; **Dreams** pairs its configuration with **Dream memory**, with retained history in **Archive → Dreams**. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
 
 Under **Mods**, source checks discover available versions; they do not automatically install updates. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization.
 
@@ -329,7 +351,7 @@ The immutable links below record earlier public evidence. Current contracts were
 
 ## Current chat and appearance additions
 
-The chat composer distinguishes Send, Queue next, Steer and Side question; [everyday use](../guide/everyday-use.md#send-queue-next-steer-or-side-question) explains their different effects and held queues. Compaction has visible started/completed/failed feedback and retained completion receipts. The current **Settings → General → Appearance** choices include **Midnight** (black with blue outlines and magenta accents) and **Blue Hour** (black and blue with purple accents); Paper and High Contrast are no longer listed. Theme changes do not alter model or runtime policy.
+The chat composer distinguishes Send, Queue next, Steer and Side question; [everyday use](../guide/everyday-use.md#send-queue-next-steer-or-side-question) explains their different effects and held queues. Compaction has visible started/completed/failed feedback and retained completion receipts. The current **Settings → General → Personalization → Appearance** choices include **Midnight** (black with blue outlines and magenta accents) and **Blue Hour** (black and blue with purple accents); Paper and High Contrast are no longer listed. Theme changes do not alter model or runtime policy.
 
 ## 29 October development delta
 
@@ -347,7 +369,7 @@ Source-reviewed on 30 October 2026 against UI `bb78b136e7ceb21858b134c1f8376726d
 
 ## Canonical reference photos
 
-**Settings → Agents → Agent details → Reference photo** and **Settings → General → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
+**Settings → Agents → Agent details → Reference photo** and **Settings → General → Personalization → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
 
 Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
 

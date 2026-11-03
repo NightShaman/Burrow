@@ -23,3 +23,9 @@ Before updating, back up the database, runtime files, and matching encryption ke
 Development assembly builds use a date with an optional same-day counter (for example `2026.10.25.9`), independently of the public daily promotion version. A documented current-source feature is not proof that a public tag or installed runtime already contains it. Consult the source/coverage record and the exact release artifact before relying on it.
 
 Development assembly now also publishes a versioned source archive of the exact assembled commit, its `SOURCE_VERSIONS`, and `SHA256SUMS`. Verify the downloaded archive against those checksums and its recorded source revisions. This development release is independent of public daily promotion; artifact publication does not update a running installation.
+
+## Executable permissions in promoted source
+
+Current promotion packages the validated source trees inside a tar archive before the Actions artifact handoff. Uploading loose files at that boundary loses executable modes. After extraction, promotion verifies the recorded executable-file manifest and checks both Burrow and Node Goblin installers before publishing snapshots, assets or images.
+
+This fixes the packaging boundary for subsequent promotions; it does not repair an already downloaded tree or replace immutable older tags. If a native install fails because the downloaded source's `install.sh` is not executable, record the source version and inspect its file mode. Use a corrected, verified release snapshot rather than assuming that invoking the outer installer with `bash` repairs the downloaded source. See [installation troubleshooting](../operations/troubleshooting.md#downloaded-installer-is-not-executable).

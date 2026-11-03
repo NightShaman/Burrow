@@ -57,6 +57,12 @@ Implementation: `ModsSettings.tsx`, `mod-distribution.mjs` and `secret-reference
 
 [Source: mod actions and lifecycle](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModsSettings.tsx#L198-L266) · [Source: busy handling](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/ModsSettings.tsx#L99-L116)
 
+## Contributed Settings layouts
+
+Checked **3 November 2026**: contributed forms use the shared Settings workspace. Declarative single form/activity sections occupy the left half when space permits; collection/detail sections keep their corresponding inventory/editor arrangement. An imperative section can explicitly declare `layout: 'form-inventory'` in `settingsSections`: its `overflow` surface becomes the bounded left inventory and `primary` remains the complete right editor, stacking below 640px of available work-area width. These surface names describe ownership, not permanently fixed columns. Unknown layout values retain legacy placement.
+
+Layout metadata does not migrate older mod forms or add automatic draft protection. Imperative modules must opt into the shared draft/navigation APIs, keep save actions with their owning editor, clean up mounts, and handle their own pending network work. Do not assume every contributed form offers Save/Discard/Stay because a built-in form does. This generic host support does not establish that any particular mod has adopted or been tested against it.
+
 ## Where Node Goblin fits
 
 Node Goblin is a separately installed execution-provider mod. Core stores an agent's execution assignment as a provider ID, target ID, and absolute workspace root. It routes supported execution through that provider; installing a mod is not itself a remote-agent assignment.
@@ -111,9 +117,7 @@ Both examples currently declare the mod ID `burrow-reference-mod`. Treat them as
 
 
 !!! warning "A workspace is not a sandbox"
-
     Agent workspaces organize files and context. Core explicitly does not create an agent-specific filesystem boundary. Run Burrow and third-party code with appropriate operating-system permissions and only give it access you intend it to have. Mods run JavaScript in a child process; a separate process is not an operating-system sandbox.
-
 
 To configure a hard block, open **Settings → Agents → Global → Execution boundaries**, click **Add hard block**, and fill in its ID, target type, pattern, match mode, operations, and optional reason. Click **Save boundaries**. Removing or toggling a rule also needs **Save boundaries**.
 

@@ -8,10 +8,10 @@ Burrow is assembled from separate source repositories; public promotion publishe
 
 | Artifact | Revision |
 |---|---|
-| Development assembly | `d25beccce60830cf4159d91cae9a97dec38eefd2` |
-| Build | `2026.11.02.4` |
-| Backend source | `69f644aaf9f0060fac7003c22e77f7a3da7c0471` |
-| UI source | `1c396911c2f47137f5ea0ba3759a960de31770c4` |
+| Development assembly | `400ec8f2d0b24478ca2185bf8c38aee2ede4c445` |
+| Build | `2026.11.03.8` |
+| Backend source | `32dde3266a231777ddfec6dba141d6b9972a21fd` |
+| UI source | `4a17a8c73c588a7582835ca6ff50dcabe409c33c` |
 
 These pins describe the documentation's evidence baseline, not a claim about every running installation. Read your installed `SOURCE_VERSIONS` and health version when investigating a deployment.
 

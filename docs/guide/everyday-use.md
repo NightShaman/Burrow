@@ -6,9 +6,15 @@ For a detailed screen inventory, historical illustrations, and browser-cache bou
 
 ## Find your way around
 
-The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **Forge**, and **settings**. Enabled mods can add their own pages. In chat, side panels can show agents, workspace files, account status, or system information. Change those panels under **Settings → General → Rail panels**; change the theme under **Appearance**.
+The main navigation contains **chat**, **tasks**, **archive**, **Brains**, **Forge**, and **settings**. Enabled mods can add their own pages. In chat, side panels can show agents, workspace files, account status, or system information. Change those panels under **Settings → General → Rail panels**; change the theme under **Settings → General → Personalization → Appearance**.
 
 [Source: main navigation](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L192-L223) · [Source: settings sections](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/SettingsPage.tsx#L88-L167)
+
+## Use the Settings workspace
+
+Checked **3 November 2026**: **General → Personalization** brings operator profile, reference photo and timezone together with Appearance and Browser tab. Settings uses a left subsection list and a work area suited to the selected task. Inventories such as MCP servers, installed mods and saved jobs appear left of their selected editor. Single forms use the left half on wider layouts, with the unused half intentionally blank; narrow work areas stack or fill the available width. **System statistics** stays in its own space when open, rather than covering the editor.
+
+Under **Agents**, select a named button in the horizontal row above the work area. Scroll arrows appear when the row overflows; **New Agent** and **Global** remain available. Arrow keys and Home/End move focus without selecting. Enter/Space activates the focused agent through the normal unsaved-change guard.
 
 ## Save settings deliberately
 
@@ -123,7 +129,7 @@ A failed response can show genuine partial output alongside its structured failu
 
 ## Canonical reference photos
 
-**Settings → Agents → Agent details → Reference photo** and **Settings → General → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
+**Settings → Agents → Agent details → Reference photo** and **Settings → General → Personalization → Operator profile → Reference photo** manage separate original photos, not the small chat avatars. Upload, replace, remove, or use **Paste**; focused Ctrl+V image paste also works where direct clipboard access is unavailable, including LAN HTTP. These actions autosave independently of draft display names. PNG, JPEG and WebP originals up to 20 MiB are retained without resizing.
 
 Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
 

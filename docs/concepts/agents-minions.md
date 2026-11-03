@@ -4,7 +4,6 @@
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
-
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
 
 ## Registered agents
@@ -73,7 +72,6 @@ Local minions use a separate Node process. A remote-assigned minion uses the chi
 
 !!! warning "Isolation is about session/process context"
     A minion target is not a filesystem cage. An instruction such as “do not modify files” communicates task scope, but the target directory does not remove mutation tools. Configured execution boundaries are forwarded into child review and execution; they retain the limited enforcement scope described in [Permissions](../security/permissions.md#minion-boundary-propagation).
-
 
 ### Completion and evidence
 
@@ -165,3 +163,7 @@ Live and Archive child turns retain compact source-authored delegation metadata.
 ## Reusable peer inboxes
 
 Dedicated peer inboxes are created on first implicit contact, not when toggling the preference. Each peer has its own reply lane, continuity family and rotation lifecycle; requests from that same peer stay ordered across source sessions. Labels refresh on later contact after a rename, but the canonical session ID does not change. Existing shared `a2a` history is retained and remains explicitly addressable; new implicit traffic does not migrate, rename or rotate it. `/api/sessions` exposes `label` and `a2aPeerAgentId`; session detail retains them in `metadata`.
+
+## Mod-owned native peers
+
+Current Core can expose a mod-owned agent through native A2A only when its `a2a` capability is enabled and its owning context provider is live. `agents_list` filters these peers accordingly; `agent_send_message` rechecks both participants before dispatch. A display name or retained directory result is not proof that a provider is still available. This remains native same-Core routing, independent of Backdoor discovery. See [the host contract](../development/extensions.md#mod-owned-native-agents). Statically reviewed against Core `32dde3266a231777ddfec6dba141d6b9972a21fd` on **3 November 2026**.
