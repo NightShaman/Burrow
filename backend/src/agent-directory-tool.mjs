@@ -26,7 +26,7 @@ export async function listAgentPeers({ store, query = null, includeDisabled = fa
   const scope = digest([needle || null, includeDisabled]);
   const snapshot = digest(agents);
   let start = 0;
-  if (cursor !== null) {
+  if (cursor !== null && cursor !== '') {
     let parsed;
     try {
       if (typeof cursor !== 'string' || cursor.length > 512) throw new Error();
