@@ -323,12 +323,9 @@ function AgentCard({
   onSelectSubagent: (id: string) => void;
 }) {
   const selected = selectedStreamId === agent.id;
-  const childSelected = agent.subagents.some(
-    (child) => selectedStreamId === childStreamId(agent.id, child.resourceId ?? child.id),
-  );
   return (
-    <div className={`agent-group ${selected || childSelected ? 'active' : ''}`}>
-      <div className="agent-card">
+    <div className="agent-group">
+      <div className={`agent-card ${selected ? 'active' : ''}`}>
         <button
           type="button"
           className="agent-select"
@@ -388,6 +385,14 @@ function AgentMinions({
   selectedStreamId: string;
   onSelect: (id: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const coverageNotice =
     agent.minionCoverage === 'stale'
       ? 'Minion status unavailable · showing last seen'
@@ -400,6 +405,8 @@ function AgentMinions({
     <>
       {coverageNotice && <div className="minion-scope-notice">{coverageNotice}</div>}
       <MinionList
+        collapsed={collapsed}
+        onToggle={toggle}
         nodes={minionTree(agent.subagents)}
         agentId={agent.id}
         selectedStreamId={selectedStreamId}
@@ -410,12 +417,16 @@ function AgentMinions({
 }
 
 function MinionList({
+  collapsed,
+  onToggle,
   nodes,
   agentId,
   selectedStreamId,
   onSelect,
   level = 1,
 }: {
+  collapsed: Set<string>;
+  onToggle: (id: string) => void;
   nodes: MinionNode[];
   agentId: string;
   selectedStreamId: string;
@@ -430,28 +441,45 @@ function MinionList({
         const selected = selectedStreamId === selectionId;
         return (
           <li key={minion.id}>
-            <button
-              type="button"
-              className={`subagent-row ${selected ? 'active' : ''}`}
-              onClick={() => onSelect(minion.id)}
-              aria-label={`Select ${minion.name}`}
-              aria-pressed={selected}
-            >
-              <span className="subagent-copy">
-                <b title={minion.name}>{minion.name}</b>
-                <small>
-                  {minion.retained ? 'Last seen · ' : ''}
-                  {minion.activity}
-                </small>
-              </span>
-            </button>
-            <MinionList
-              nodes={children}
-              agentId={agentId}
-              selectedStreamId={selectedStreamId}
-              onSelect={onSelect}
-              level={level + 1}
-            />
+            <div className="subagent-line">
+              <button
+                type="button"
+                className={`subagent-row ${selected ? 'active' : ''}`}
+                onClick={() => onSelect(minion.id)}
+                aria-label={`Select ${minion.name}`}
+                aria-pressed={selected}
+              >
+                <span className="subagent-copy">
+                  <b title={minion.name}>{minion.name}</b>
+                  <small>
+                    {minion.retained ? 'Last seen · ' : ''}
+                    {minion.activity}
+                  </small>
+                </span>
+              </button>
+              {children.length > 0 && (
+                <button
+                  type="button"
+                  className="agent-toggle"
+                  onClick={() => onToggle(minion.id)}
+                  aria-label={`${collapsed.has(minion.id) ? 'Expand' : 'Collapse'} ${minion.name}`}
+                  aria-expanded={!collapsed.has(minion.id)}
+                >
+                  <Chevron direction="right" />
+                </button>
+              )}
+            </div>
+            {!collapsed.has(minion.id) && (
+              <MinionList
+                collapsed={collapsed}
+                onToggle={onToggle}
+                nodes={children}
+                agentId={agentId}
+                selectedStreamId={selectedStreamId}
+                onSelect={onSelect}
+                level={level + 1}
+              />
+            )}
           </li>
         );
       })}
