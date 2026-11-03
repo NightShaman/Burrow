@@ -194,9 +194,9 @@ jobs:
       - name: Run complete frozen-source test suites
         if: steps.plan.outputs.validation_required == 'true'
         env:
-          BURROW_TEST_TIMEOUT_MS: '1800000'
+          BURROW_TEST_TIMEOUT_MS: '3600000'
           BURROW_TEST_DISPOSABLE_POSTGRES: '1'
-        timeout-minutes: 45
+        timeout-minutes: 90
         run: |
           set -eu
           (cd sources/Burrow-Backend && npm ci --no-audit --no-fund && npm test)

@@ -20,9 +20,17 @@ test('Node Goblin documentation validates its mounted site including error pages
   assert.match(workflow, /cd sources\/Node-Goblin && python -m unittest discover -s scripts\/docs -p 'test_\*\.py'/);
   assert.match(workflow, /cd sources\/Node-Goblin[^\n]*python scripts\/docs\/check_site\.py site --base-path \/node-goblin\//);
 });
-test('complete validation has a deadline rather than hanging indefinitely', () => {
-  assert.match(workflow, /timeout-minutes: 45/);
-  assert.match(workflow, /timeout --kill-after=15s 10m npm test/);
+test('complete validation stays bounded and gives serial backend validation room to finish', () => {
+  const validation = workflow.slice(
+    workflow.indexOf('- name: Run complete frozen-source test suites'),
+    workflow.indexOf('- uses: actions/setup-python@v6'),
+  );
+  assert.match(validation, /BURROW_TEST_TIMEOUT_MS: '3600000'/);
+  assert.match(validation, /BURROW_TEST_DISPOSABLE_POSTGRES: '1'/);
+  assert.match(validation, /timeout-minutes: 90/);
+  assert.match(validation, /cd sources\/Burrow-Backend && npm ci --no-audit --no-fund && npm test/);
+  assert.equal(validation.match(/timeout --kill-after=15s 10m npm test/g)?.length, 2);
+  assert.doesNotMatch(validation, /BURROW_TEST_CONCURRENCY|--test-concurrency|--test-name-pattern/);
 });
 
 test('artifact handoff wraps the validated tree and checks restored executable modes before any publication', () => {
