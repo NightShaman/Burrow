@@ -75,6 +75,38 @@
   --overlay: rgb(0 0 0 / 0.72);
   --shadow: rgb(0 0 0 / 0.55);
 }
+/* Midnight surfaces with violet accents and bright green status highlights. */
+[data-theme='violet-grove'] {
+  --surface: #000;
+  --surface-sunken: #000;
+  --panel: #090b0f;
+  --panel-2: #11141a;
+  --panel-3: #1b2029;
+  --surface-raised: #141820;
+  --surface-hover: #1c2431;
+  --surface-input: #080b10;
+  --line: #62429a;
+  --line-soft: #392a58;
+  --muted: #a7b8cc;
+  --text: #d5deea;
+  --text-strong: #e6eaf1;
+  --accent: #bb86fc;
+  --accent-strong: #d9baff;
+  --accent-muted: #302142;
+  --accent-subtle: #170f22;
+  --accent-border: #8053b6;
+  --accent-banner-border: #634489;
+  --accent-text: #f1e4ff;
+  --accent-glow-strong: rgb(187 134 252 / 25%);
+  --ok: #a3e635;
+  --warn: #edc26d;
+  --danger: #f48291;
+  --danger-subtle: #351c26;
+  --danger-border: #8e4355;
+  --danger-hover: #3d2530;
+  --overlay: rgb(0 0 0 / 0.72);
+  --shadow: rgb(0 0 0 / 0.55);
+}
 /* Halloween is independent of Midnight: shared dark surfaces, its own accents. */
 [data-theme='halloween'] {
   --surface: #000;

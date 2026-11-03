@@ -50,8 +50,15 @@ it('offers Halloween separately from Midnight and persists the selected palette 
   await screen.findByDisplayValue('Test');
   fireEvent.click(screen.getByRole('button', { name: 'Personalization' }));
   const midnight = screen.getByRole('button', { name: /^Midnight/ });
+  const violetGrove = screen.getByRole('button', { name: /^Violet Grove/ });
+  expect(violetGrove.getAttribute('aria-pressed')).toBe('false');
+  fireEvent.click(violetGrove);
+  expect(violetGrove.getAttribute('aria-pressed')).toBe('true');
+  await waitFor(() =>
+    expect(JSON.parse(localStorage.getItem('hc.theme') ?? '{}').value).toBe('violet-grove'),
+  );
   const halloween = screen.getByRole('button', { name: /^Halloween/ });
-  expect(midnight.getAttribute('aria-pressed')).toBe('true');
+  expect(midnight.getAttribute('aria-pressed')).toBe('false');
   expect(halloween.getAttribute('aria-pressed')).toBe('false');
   fireEvent.click(halloween);
   expect(halloween.getAttribute('aria-pressed')).toBe('true');

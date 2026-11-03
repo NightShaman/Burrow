@@ -5573,6 +5573,12 @@ button:disabled {
   );
 }
 
+.theme-swatch.violet-grove {
+  --swatch-surface: #000;
+  --swatch-panel: #a3e635;
+  --swatch-accent: #bb86fc;
+}
+
 .theme-swatch.halloween {
   --swatch-surface: #000;
   --swatch-panel: #a855f7;

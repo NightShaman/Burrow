@@ -31,6 +31,7 @@ function migrateRightPanelDefaults() {
 export const themes = [
   'smatchet',
   'midnight',
+  'violet-grove',
   'halloween',
   'blue-hour',
   'nexus',
@@ -45,6 +46,10 @@ export const themeDetails = {
     description: 'Dense dark workspace with a magenta focus color.',
   },
   midnight: { label: 'Midnight', description: 'Black, blue outlines and a touch of magenta.' },
+  'violet-grove': {
+    label: 'Violet Grove',
+    description: 'Midnight with violet and bright green highlights.',
+  },
   halloween: {
     label: 'Halloween',
     description: 'Midnight with orange, green and purple highlights.',

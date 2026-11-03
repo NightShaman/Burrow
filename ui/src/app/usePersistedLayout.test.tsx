@@ -29,7 +29,7 @@ describe('persisted layout state', () => {
     });
   });
 
-  it.each(['midnight', 'halloween'] as const)(
+  it.each(['midnight', 'halloween', 'violet-grove'] as const)(
     'roundtrips %s independently through reload',
     (selected) => {
       const theme = renderHook(() => usePersistedTheme());
