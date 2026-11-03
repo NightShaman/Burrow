@@ -10,7 +10,7 @@ vi.mock('./ModSettingsHostFixture', () => ({
   createSettingsContribution,
   mountSettings,
   settingsContribution: undefined,
-  settingsSections: [{ id: 'main', label: 'Main' }],
+  settingsSections: [{ id: 'main', label: 'Main', layout: 'form-inventory' }],
 }));
 afterEach(() => {
   cleanup();
@@ -70,7 +70,7 @@ it.each(['form', 'activity', 'form-inventory', 'list-detail'])(
     }
   },
 );
-it('does not misclassify an imperative module with empty declarative metadata', async () => {
+it('honors explicit imperative inventory metadata without rendering empty declarative content', async () => {
   createSettingsContribution.mockResolvedValue({
     sections: [{ id: 'main', label: 'Main', layout: 'form', fields: [] }],
   });
@@ -88,7 +88,7 @@ it('does not misclassify an imperative module with empty declarative metadata', 
   );
   await waitFor(() => expect(mountSettings).toHaveBeenCalled());
   expect(container.querySelector('.mod-settings-mount')?.getAttribute('data-settings-layout')).toBe(
-    'imperative',
+    'form-inventory',
   );
 });
 

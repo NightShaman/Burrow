@@ -18,7 +18,11 @@ import {
 } from './SettingsContribution';
 import { Field, SettingSection } from './SettingsPrimitives';
 
-export type ModSettingsSection = { id: string; label: string };
+export type ModSettingsSection = {
+  id: string;
+  label: string;
+  layout?: SettingsContribution['sections'][number]['layout'];
+};
 type MountResult =
   | void
   | (() => void)
@@ -530,7 +534,13 @@ function validSections(value: unknown): ModSettingsSection[] {
     )
       return [];
     seen.add(item.id);
-    return [{ id: item.id, label: item.label.trim() }];
+    return [
+      {
+        id: item.id,
+        label: item.label.trim(),
+        ...(item.layout === 'form-inventory' ? { layout: 'form-inventory' as const } : {}),
+      },
+    ];
   });
 }
 
@@ -770,6 +780,9 @@ export function ModSettingsHost({
     activeDefinition && (hasDeclarativeContent || !module?.mountSettings)
       ? activeDefinition.layout
       : 'imperative';
+  const imperativeLayout = !hasDeclarativeContent
+    ? validSections(module?.settingsSections).find((item) => item.id === section)?.layout
+    : undefined;
   return (
     <>
       {navigationTarget &&
@@ -804,7 +817,7 @@ export function ModSettingsHost({
         ref={primaryRef}
         className="mod-settings-mount"
         data-mod-id={modId}
-        data-settings-layout={surfaceLayout}
+        data-settings-layout={imperativeLayout ?? surfaceLayout}
       >
         {contribution && surfaceLayout !== 'imperative' && (
           <DeclarativeSection
