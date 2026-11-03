@@ -24,12 +24,12 @@ export function createModAuthority({ repositoryFactory }) {
   async function read(id) {
     await ready;
     const row = await db(repository => repository.readModAuthority(id));
-    return { grants: row?.grants || [], adminAgentIds: row?.admin_agent_ids || [], diagnosticAgentIds: row?.diagnostic_agent_ids || [] };
+    return { grants: row?.grants || [], diagnosticAgentIds: row?.diagnostic_agent_ids || [], modManagementAgentIds: row?.mod_management_agent_ids || [], coreApiAgentIds: row?.core_api_agent_ids || [] };
   }
   async function allowed(id, capability, agentId = null) {
     const value = await read(id);
     return capability === 'diagnostics-global' ? value.diagnosticAgentIds.includes(agentId)
-      : value.grants.includes(capability) && (agentId === null || value.adminAgentIds.includes(agentId));
+      : value.grants.includes(capability) && (agentId === null || (capability === 'mod-management-v1' ? value.modManagementAgentIds : capability === 'core-api-v1' ? value.coreApiAgentIds : []).includes(agentId));
   }
   async function assertAllowed(id, capability, agentId = null) {
     if (await allowed(id, capability, agentId)) return;
@@ -41,8 +41,8 @@ export function createModAuthority({ repositoryFactory }) {
     await db(repository => repository.recordModDenial(id, capability, agentId));
   }
   async function replace(id, value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['grants','adminAgentIds','diagnosticAgentIds'].includes(key))) throw invalid();
-    for (const key of ['grants','adminAgentIds','diagnosticAgentIds']) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['grants','diagnosticAgentIds','modManagementAgentIds','coreApiAgentIds'].includes(key))) throw invalid();
+    for (const key of ['grants','diagnosticAgentIds','modManagementAgentIds','coreApiAgentIds']) {
       const list = value[key];
       if (!Array.isArray(list) || list.length > 256 || new Set(list).size !== list.length || list.some(item => typeof item !== 'string' || !item || item.length > 128 || Buffer.byteLength(item, 'utf8') > 256 || /[\x00-\x1f\x7f]/.test(item))) throw invalid();
     }

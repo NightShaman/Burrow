@@ -57,11 +57,11 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
     return {
       async close() {},
       async ensureAuthoritySchema() { await query(POSTGRES_MOD_AUTHORITY_SCHEMA_SQL); },
-      async readModAuthority(id) { return first(await query('SELECT grants,admin_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1', [id])); },
-      async replaceModAuthority(id, value) { await query(`INSERT INTO core_mod_authority(mod_id,grants,admin_agent_ids,diagnostic_agent_ids)
-        VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb) ON CONFLICT(mod_id) DO UPDATE SET grants=EXCLUDED.grants,
-        admin_agent_ids=EXCLUDED.admin_agent_ids,diagnostic_agent_ids=EXCLUDED.diagnostic_agent_ids,updated_at=now()`,
-        [id,JSON.stringify(value.grants),JSON.stringify(value.adminAgentIds),JSON.stringify(value.diagnosticAgentIds)]); },
+      async readModAuthority(id) { return first(await query('SELECT grants,mod_management_agent_ids,core_api_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1', [id])); },
+      async replaceModAuthority(id, value) { await query(`INSERT INTO core_mod_authority(mod_id,grants,diagnostic_agent_ids,mod_management_agent_ids,core_api_agent_ids)
+        VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb) ON CONFLICT(mod_id) DO UPDATE SET grants=EXCLUDED.grants,
+        diagnostic_agent_ids=EXCLUDED.diagnostic_agent_ids,mod_management_agent_ids=EXCLUDED.mod_management_agent_ids,core_api_agent_ids=EXCLUDED.core_api_agent_ids,updated_at=now()`,
+        [id,JSON.stringify(value.grants),JSON.stringify(value.diagnosticAgentIds),JSON.stringify(value.modManagementAgentIds),JSON.stringify(value.coreApiAgentIds)]); },
       async executionProviderInstallation(id) {
         return first(await query(`SELECT i.version,i.archive_sha256,s.url AS source_url
           FROM mod_installations i JOIN mod_sources s ON s.id=i.source_id WHERE i.mod_id=$1`, [id]));
@@ -74,17 +74,16 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
       },
       async grantExecutionProvider(id, { restoreRevoked = false } = {}) {
         if (queryer === pool) return withPostgresTransaction(pool, client => make(client).grantExecutionProvider(id, { restoreRevoked }));
-        const previous = first(await query('SELECT grants,admin_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1 FOR UPDATE', [id]));
+        const previous = first(await query('SELECT grants,mod_management_agent_ids,core_api_agent_ids,diagnostic_agent_ids FROM core_mod_authority WHERE mod_id=$1 FOR UPDATE', [id]));
         if (previous && (!restoreRevoked || previous.grants.includes('execution-provider-v1'))) return null;
         if (previous) {
           const changed = first(await query(`UPDATE core_mod_authority SET grants=$2::jsonb,updated_at=now()
             WHERE mod_id=$1 RETURNING xmin::text AS revision`, [id,JSON.stringify([...previous.grants,'execution-provider-v1'])]));
           return { id, previous, revision: changed.revision };
         }
-        const row = first(await query(`INSERT INTO core_mod_authority(mod_id,grants,admin_agent_ids,diagnostic_agent_ids)
-          VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb)
-          ON CONFLICT(mod_id) DO NOTHING RETURNING xmin::text AS revision`,
-          [id,JSON.stringify([...(previous?.grants || []),'execution-provider-v1']),JSON.stringify(previous?.admin_agent_ids || []),JSON.stringify(previous?.diagnostic_agent_ids || [])]));
+        const row = first(await query(`INSERT INTO core_mod_authority(mod_id,grants)
+          VALUES($1,$2::jsonb) ON CONFLICT(mod_id) DO NOTHING RETURNING xmin::text AS revision`,
+          [id,JSON.stringify(['execution-provider-v1'])]));
         return row ? { id, previous: null, revision: row.revision } : null;
       },
       async restoreExecutionProviderApproval(receipt) {
@@ -93,8 +92,8 @@ export function createPostgresModDistributionRepository({ pool } = {}) {
           await query('DELETE FROM core_mod_authority WHERE mod_id=$1 AND xmin::text=$2', [receipt.id,receipt.revision]);
         } else {
           const previous = receipt.previous;
-          await query(`UPDATE core_mod_authority SET grants=$3::jsonb,admin_agent_ids=$4::jsonb,diagnostic_agent_ids=$5::jsonb,updated_at=now()
-            WHERE mod_id=$1 AND xmin::text=$2`, [receipt.id,receipt.revision,JSON.stringify(previous.grants),JSON.stringify(previous.admin_agent_ids),JSON.stringify(previous.diagnostic_agent_ids)]);
+          await query(`UPDATE core_mod_authority SET grants=$3::jsonb,mod_management_agent_ids=$4::jsonb,core_api_agent_ids=$5::jsonb,diagnostic_agent_ids=$6::jsonb,updated_at=now()
+            WHERE mod_id=$1 AND xmin::text=$2`, [receipt.id,receipt.revision,JSON.stringify(previous.grants),JSON.stringify(previous.mod_management_agent_ids),JSON.stringify(previous.core_api_agent_ids),JSON.stringify(previous.diagnostic_agent_ids)]);
         }
       },
       async recordModDenial(id, capability, agentId) { await query('INSERT INTO core_mod_denials(owner_mod_id,capability,agent_id) VALUES($1,$2,$3)', [id,capability,agentId]); },
