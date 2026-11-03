@@ -105,7 +105,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
       record.phase = 'streaming'; updateActivity({ status: 'streaming' });
     },
     onModelThoughtDelta() { record.phase = record.controller.signal.aborted || record.cancelled === true || record.phase === 'cancelling' ? 'cancelling' : 'streaming'; updateActivity({ status: record.phase }); },
-    onModelContextUsage(usage) { if (usage && typeof usage === 'object') record.contextUsage = usage; },
+    onModelContextUsage(usage) { if (usage && typeof usage === 'object') record.contextUsage = { ...usage, runId: record.runId }; },
     onSteeringReady() { record.steeringReady = !record.controller.signal.aborted && record.cancelled !== true && record.phase !== 'cancelling'; },
     finish() { controller.signal.removeEventListener('abort', onAbort); inheritedSignal?.removeEventListener('abort', abortFromParent); updateActivity({ status: record.controller.signal.aborted ? 'cancelled' : 'replied', completedAt: new Date().toISOString() }); if (activeChatRuns.get(key) === record) activeChatRuns.delete(key); },
   };

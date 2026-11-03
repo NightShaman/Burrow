@@ -284,7 +284,7 @@ export async function runPlainModelTurn({
   let partialAnswerModelCall = null;
   // Defined outside the provider-call setup so failed/no-callback turns still
   // return a harmless null meter value.
-  let peakContextUsage = null;
+  let latestContextUsage = null;
   let modelInput = modelInputForPlainTurn({ promptText: prompt.text, promptMessages: prompt.modelMessages, attachments, modelConfig, modelAdapter });
   const followupBudgetPrompt = (content) => {
     const input = modelInputForFollowupPrompt(content, modelInput);
@@ -372,16 +372,13 @@ export async function runPlainModelTurn({
     // Do not enable provider streaming for a previously nonstreaming request.
     const emitTextDelta = typeof onTextDelta === 'function' ? withModelCall(captureTextDelta) : null;
     const emitThoughtDelta = withModelCall(onThoughtDelta);
-    // A terminal synthesis request is intentionally small. Keep the largest
-    // actual request from this run as the completed-session meter instead of
-    // letting that final answer overwrite the tool-loop high-water mark.
-    const emitContextUsage = typeof onContextUsage === 'function'
-      ? async (event) => {
-          const usage = { ...event, modelCall };
-          if (!peakContextUsage || Number(usage.estimatedTokens) >= Number(peakContextUsage.estimatedTokens)) peakContextUsage = usage;
-          await onContextUsage(usage);
-        }
-      : null;
+    // Capture even without an external callback so the terminal receipt and
+    // the active meter refer to the same latest physical request.
+    const emitContextUsage = async (event) => {
+      const usage = { ...event, modelCall: event.modelCall ?? modelCall };
+      latestContextUsage = usage;
+      await onContextUsage?.(usage);
+    };
     model = await adapter.complete({ sessionId, conversationId, previousModel: model, prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
     nativeTranscript = modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
@@ -690,7 +687,7 @@ export async function runPlainModelTurn({
     metadata: { calledModel: true, modelUsage: model?.usage ?? null, ...(outputArtifacts.length ? { outputArtifacts } : {}), attachments: { images: modelInput.imageCount || 0, visionUsed: Boolean(modelInput.vision), visionFallback: Boolean(modelInput.fallback) }, chatToolLoop: { enabled: chatToolLoop.enabled, iterations: chatToolLoop.iterations.length, toolResults: chatToolLoop.toolResults.length, noProgress: Boolean(chatToolLoop.noProgress), loopWarnings: chatToolLoop.loopWarnings.length, terminal: chatToolLoop.terminal, semanticInspectionStalls: chatToolLoop.semanticInspectionStalls.length, omittedPromptEvidenceResults: chatToolLoop.omittedPromptEvidenceResults || 0 } },
   });
 
-  return { model, proposal, answerText, outputArtifacts, generatedArtifactSources, chatToolLoop, contextUsage: peakContextUsage || model?.contextUsage || null, runtime };
+  return { model, proposal, answerText, outputArtifacts, generatedArtifactSources, chatToolLoop, contextUsage: latestContextUsage || model?.contextUsage || null, runtime };
 }
 
 export const __test__ = Object.freeze({

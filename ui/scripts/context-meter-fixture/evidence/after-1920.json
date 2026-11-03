@@ -1,0 +1,17 @@
+{
+  "evidence": {
+    "title": "Latest request input (provider reported): 320,000 / 500,000 tokens (64%). Matching request estimate: 600,000 tokens. Budget pressure: ok (classification, not execution status). Serving provider: Serving provider. Requested model: requested-model. Returned model: provider-returned-model. Compaction enabled; 2 recent turns kept raw.",
+    "rect": {
+      "x": 285,
+      "y": 123.1875,
+      "width": 242,
+      "height": 14,
+      "top": 123.1875,
+      "right": 527,
+      "bottom": 137.1875,
+      "left": 285
+    },
+    "overflow": false
+  },
+  "exceptions": []
+}

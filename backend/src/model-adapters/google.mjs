@@ -1,7 +1,7 @@
 import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { buildProviderMessageManifest } from './adapter-primitives.mjs';
-import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, contextUsageFromRequest, contextUsageFromResponse, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
+import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
 import { googleNativeBase, googleNativeHeaders, googleModelId } from './google-native-catalog.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
 import { classifyModelFailure, providerFailureResult, markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
@@ -54,7 +54,7 @@ export function googleContents(messages) {
 }
 // Native SSE is GenerateContentResponse per data event, not OpenAI deltas.
 export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta, onThoughtDelta, onToolDelta } = {}) {
-  const parts = []; let carry = '', bytes = 0, finishReason = null, usageMetadata = null, saw = false;
+  const parts = []; let carry = '', bytes = 0, finishReason = null, usageMetadata = null, responseModel = null, responseId = null, saw = false;
   const consume = async (chunk, final = false) => {
     carry += chunk;
     carry = carry.replace(/\r\n/g, '\n');
@@ -66,6 +66,8 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
       if (!payload) continue;
       const data = JSON.parse(payload); saw = true;
       if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), data.error);
+      if (providerResponseModel(data.modelVersion)) responseModel = providerResponseModel(data.modelVersion);
+      if (providerResponseIdentifier(data.responseId)) responseId = providerResponseIdentifier(data.responseId);
       const c = data.candidates?.[0];
       for (const part of c?.content?.parts || []) {
         parts.push(part);
@@ -97,7 +99,8 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
     await consume(text, true);
   }
   if (!saw || !finishReason) throw markProviderStreamTruncated(new Error('google_stream_truncated'));
-  return { candidates: [{ content: { role: 'model', parts }, finishReason }], usageMetadata };
+  return { candidates: [{ content: { role: 'model', parts }, finishReason }], usageMetadata,
+    ...(responseModel ? { modelVersion: responseModel } : {}), ...(responseId ? { responseId } : {}) };
 }
 export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   const base = googleNativeBase(config), headers = googleNativeHeaders(config), model = googleModelId(config.model), api = 'google-generative-language';
@@ -110,14 +113,16 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
     if (tools?.length) body.tools = [{ functionDeclarations: tools.map(t => { const f=t.function || t; return { name: f.name, description: f.description || '', parametersJsonSchema: f.parameters || t.inputSchema || { type: 'object', properties: {} } }; }) }];
     return { body, source };
   };
-  const estimateRequest = options => { const {body}=build(options); const chars=JSON.stringify(body).length; return contextUsageFromRequest({ promptChars:chars, bodyChars:chars, model, api, clock }); };
+  const estimateRequest = options => { const {body}=build(options); const chars=JSON.stringify(body).length; return contextUsageFromRequest({ promptChars:chars, bodyChars:chars, model, api, modelCall:options.modelCall, clock }); };
   const complete = async (options = {}) => {
     const requestId = idFactory(), { traceLogger, signal, onTextDelta, onThoughtDelta, onContextUsage, recoveryContext } = options;
     const modelCall = recoveryContext?.nextModelCall ? await recoveryContext.nextModelCall() : options.modelCall;
-    const timing = providerTiming({ identity: providerIdentity(config), traceLogger, requestId, provider:'google', api, model, modelCall, contextBudgetTokens:config.contextTokens ?? config.contextWindow, clock });
+    const identity = providerIdentity(config);
+    const callbackIdentity = { requestId, modelCall, provider:'google', providerName:identity.accountName, connectionId:identity.accountId };
+    const timing = providerTiming({ identity, traceLogger, requestId, provider:'google', api, model, modelCall, contextBudgetTokens:config.contextTokens ?? config.contextWindow, clock });
     return settleProviderDiagnostics(traceLogger, async (recordResult) => {
-      const {body,source} = build(options), requestContext = estimateRequest(options);
-      await providerCallback(() => onContextUsage?.(requestContext));
+      const {body,source} = build(options), requestContext = estimateRequest({ ...options, modelCall });
+      await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContext, requestContext, { stage:'request-estimate', ...callbackIdentity })));
       const streaming = typeof onTextDelta === 'function' || typeof onThoughtDelta === 'function';
       const diagnosticBody = JSON.parse(JSON.stringify(body, (key,value) => key==='thoughtSignature' ? '[redacted]' : value));
       for (const content of diagnosticBody.contents) for (const part of content.parts) if (part.thought && part.text) part.text='[redacted]';
@@ -137,11 +142,14 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       const ok = response.ok && !data.error && candidate?.finishReason === 'STOP' && (text.length > 0 || calls.length > 0);
       const assistant = { role:'assistant', content:parts.map(part => ({ type:'google_part', part })), ...(calls.length ? { tool_calls:calls.map(c => ({ id:c.id, type:'function', function:{ name:c.name, arguments:c.rawArguments } })) } : {}) };
       const cachedTokens = data.usageMetadata?.cachedContentTokenCount ?? null;
-      const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount, completion_tokens:data.usageMetadata.candidatesTokenCount, total_tokens:data.usageMetadata.totalTokenCount, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
+      const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount ?? null, completion_tokens:data.usageMetadata.candidatesTokenCount ?? null, total_tokens:data.usageMetadata.totalTokenCount ?? null, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
       const normalizedUsage = providerUsageValues(usage, { provider:'google', api });
       const contextUsage = contextUsageFromResponse(requestContext, usage, clock);
-      const result = recordResult(providerFailureResult({ ok, requestId, provider:'google', api, model, status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, normalizedUsage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, data.error)) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
-      await providerCallback(() => onContextUsage?.(contextUsage));
+      const result = recordResult(providerFailureResult({ ok, requestId, modelCall, provider:'google', api, model, responseModel:providerResponseModel(data.modelVersion), responseId:providerResponseIdentifier(data.responseId), status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, normalizedUsage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, data.error)) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
+      await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContext, contextUsage, {
+        stage:'response', ...callbackIdentity, responseModel:result.responseModel, responseId:result.responseId,
+        responseStatus:response.status, responseOk:ok,
+      })));
       await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, normalizedUsage, contextUsage, contextBudgetTokens:config.contextTokens ?? config.contextWindow ?? null, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() }));
       return result;
     }, { timing, signal });

@@ -77,6 +77,7 @@ function contextDetails(status: ContextStatus): ContextDetails {
   const context = status.context ?? {};
   const compaction = status.compaction ?? {};
   return {
+    ...context,
     estimatedTokens: context.estimatedTokens ?? null,
     capacityTokens: context.capacityTokens ?? null,
     pressure: context.pressure ?? null,

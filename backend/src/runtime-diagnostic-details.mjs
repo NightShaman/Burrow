@@ -52,7 +52,7 @@ export async function runtimeDiagnosticSessionDetail(conversationStore, { agentI
 export function runtimeDiagnosticContextSummary(status = {}) {
   return {
     sessionId: text(status.sessionId),
-    context: project(status.context, { estimatedTokens: number, capacityTokens: number, usageRatio: number, percent: number, pressure: text, source: text, provenance: text, lastTurnAt: text, active: boolean, modelCall: number, continuation: boolean, providerInputTokens: number, runId: text }),
+    context: project(status.context, { scope: text, requestId: text, stage: text, requestEstimatedTokens: number, provider: text, providerName: text, connectionId: text, logicalConnectionId: text, model: text, responseModel: text, responseId: text, responseStatus: number, responseOk: boolean, estimatedTokens: number, capacityTokens: number, usageRatio: number, percent: number, pressure: text, source: text, provenance: text, lastTurnAt: text, active: boolean, modelCall: number, continuation: boolean, providerInputTokens: number, runId: text }),
     recall: project(status.recall, { requested: boolean, used: boolean, scope: text, sourceCount: number, searchedSessionCount: number }),
     runEvidence: project(status.runEvidence, { candidateCount: number, selectedCount: number, omittedCount: number, chars: number, reason: text }),
     compaction: {

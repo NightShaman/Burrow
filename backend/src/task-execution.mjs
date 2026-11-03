@@ -30,7 +30,6 @@ export function createBoardTaskExecutor({
   retireCancelledRun = () => {}, registerRuntimeActiveRun = () => ({ finish() {} }),
   publicChatProgress = () => null, observeModelRecovery = () => {},
   serverLogger = null, applyModelRecoveryProgress = () => false,
-  updateContextUsageHighWater = (_previous, value) => value,
   taskExecutionMessage: messageBuilder = taskExecutionMessage,
 } = {}) {
   const taskExecutionMessage = messageBuilder;
@@ -137,7 +136,7 @@ export function createBoardTaskExecutor({
       },
       onModelContextUsage: async (usage) => {
         if (!usage || typeof usage !== 'object') return;
-        record.contextUsage = updateContextUsageHighWater(record.contextUsage, usage);
+        record.contextUsage = { ...usage, runId };
       },
     })).catch(error => ({ ok: false, status: controller.signal.aborted ? 'cancelled' : 'failed', error: String(error?.message || error), blockers: [String(error?.message || error)] })).then(async (result) => {
       options.onFinalizing?.();

@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_RESPONSE_BYTES, MAX_MODEL_TEXT_CHARS, MAX_SSE_CARRY_CHARS, MAX_SSE_EVENT_CHARS, boundedText, normalizeToolCall, jsonText } from './adapter-primitives.mjs';
+import { DEFAULT_MAX_RESPONSE_BYTES, MAX_MODEL_TEXT_CHARS, MAX_SSE_CARRY_CHARS, MAX_SSE_EVENT_CHARS, boundedText, normalizeToolCall, jsonText, providerResponseModel, providerResponseIdentifier } from './adapter-primitives.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
 import { readProviderChunk } from './provider-fetch.mjs';
 import { markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
@@ -246,14 +246,14 @@ function compactUsage(usage) {
   const compact = {};
   const scalarKeys = ['prompt_tokens', 'input_tokens', 'completion_tokens', 'output_tokens', 'total_tokens', 'cached_tokens', 'reasoning_tokens'];
   for (const key of scalarKeys) {
-    if (Number.isFinite(Number(usage[key]))) compact[key] = Number(usage[key]);
+    if (usage[key] !== null && usage[key] !== undefined && usage[key] !== '' && typeof usage[key] !== 'boolean' && Number.isFinite(Number(usage[key]))) compact[key] = Number(usage[key]);
   }
   for (const key of ['prompt_tokens_details', 'input_tokens_details', 'completion_tokens_details', 'output_tokens_details']) {
     const details = usage[key];
     if (!details || typeof details !== 'object' || Array.isArray(details)) continue;
     const compactDetails = {};
     for (const detailKey of ['cached_tokens', 'audio_tokens', 'text_tokens', 'reasoning_tokens']) {
-      if (Number.isFinite(Number(details[detailKey]))) compactDetails[detailKey] = Number(details[detailKey]);
+      if (details[detailKey] !== null && details[detailKey] !== undefined && details[detailKey] !== '' && typeof details[detailKey] !== 'boolean' && Number.isFinite(Number(details[detailKey]))) compactDetails[detailKey] = Number(details[detailKey]);
     }
     if (Object.keys(compactDetails).length) compact[key] = compactDetails;
   }
@@ -270,7 +270,8 @@ function compactResponseCompletion(response = {}) {
     : '';
   const toolOutput = compactResponseToolOutput(response?.output);
   return {
-    ...(typeof response?.id === 'string' ? { id: boundedText(response.id, 256) } : {}),
+    ...(providerResponseIdentifier(response?.id) ? { id: providerResponseIdentifier(response.id) } : {}),
+    ...(providerResponseModel(response?.model) ? { model: providerResponseModel(response.model) } : {}),
     ...(typeof response?.status === 'string' ? { status: boundedText(response.status, 64) } : {}),
     ...(outputText ? { output_text: outputText } : {}),
     ...(toolOutput.length ? { output: toolOutput } : {}),
@@ -301,6 +302,10 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let terminalSeen = false;
   let terminalEventSeen = false;
   let usage = null;
+  let responsesModel = null;
+  let responsesId = null;
+  let chatResponseModel = null;
+  let chatResponseId = null;
   const toolCalls = [];
   const responseToolCalls = [];
   let toolCallFailure = null;
@@ -336,6 +341,10 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     let event;
     try { event = JSON.parse(raw); } catch { streamError = 'model_stream_malformed_event'; return; }
     if (mode === 'openai-responses') {
+      if (event?.type === 'response.created' || event?.type === 'response.in_progress') {
+        if (providerResponseModel(event.response?.model)) responsesModel = providerResponseModel(event.response.model);
+        if (providerResponseIdentifier(event.response?.id)) responsesId = providerResponseIdentifier(event.response.id);
+      }
       if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') await emit(event.delta);
       if ((event?.type === 'response.reasoning.delta' || event?.type === 'response.reasoning_summary_text.delta') && typeof event.delta === 'string') await emitThought(event.delta);
       if ((event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') && (event.item?.type === 'function_call' || event.item?.type === 'tool_call')) {
@@ -357,6 +366,8 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (event?.type === 'response.completed' && event.response && typeof event.response === 'object') {
         terminalSeen = event.response.status === 'completed';
         finalData = compactResponseCompletion(event.response);
+        if (!finalData.model && responsesModel) finalData.model = responsesModel;
+        if (!finalData.id && responsesId) finalData.id = responsesId;
         usage = finalData.usage || usage;
         if (!text && finalData.output_text) await emit(finalData.output_text, true);
         for (const call of (finalData.output || [])) {
@@ -399,7 +410,9 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       return;
     }
     // Providers may send a terminal usage-only event with choices: []. Keep
-    // its bounded telemetry before handling the normal choice path.
+    // its bounded telemetry and returned identifiers before the choice path.
+    if (providerResponseModel(event?.model)) chatResponseModel = providerResponseModel(event.model);
+    if (providerResponseIdentifier(event?.id)) chatResponseId = providerResponseIdentifier(event.id);
     if (event?.usage && typeof event.usage === 'object') usage = compactUsage(event.usage) || usage;
     if (event?.error && typeof event.error === 'object') {
       providerErrorEnvelope = event.error; streamError = boundedText(event.error.message || 'model_stream_failed', 500); return;
@@ -486,7 +499,8 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   }
   const data = mode === 'openai-responses'
     ? (finalData ? { ...finalData, ...(text ? { output_text: text } : {}), ...(responseToolCalls.length ? { output: responseToolCalls.filter(Boolean) } : finalData.output ? { output: finalData.output } : {}) } : { status: streamError ? 'failed' : 'completed', output_text: text, output: responseToolCalls.filter(Boolean) })
-    : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage };
+    : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage,
+      ...(chatResponseModel ? { model: chatResponseModel } : {}), ...(chatResponseId ? { id: chatResponseId } : {}) };
   // Streaming must apply the same terminal semantic contract as one-shot
   // responses. Do this before returning any data so callers cannot execute
   // tool calls or persist a transcript from length/content-filter/refusal,

@@ -388,20 +388,9 @@ async function executeBoardTask(taskId, options = {}) {
     activeChatRuns, sessionContinuityHeads, activeChatRunKey, sessionContinuityHeadKey,
     RUN_CANCELLATION_GRACE_MS, retireCancelledRun, registerRuntimeActiveRun,
     publicChatProgress, observeModelRecovery, serverLogger, applyModelRecoveryProgress,
-    updateContextUsageHighWater,
   })(taskId, options);
 }
 
-function updateContextUsageHighWater(previous, usage) {
-  const previousEstimated = Number.isFinite(Number(previous?.estimatedTokens)) ? Number(previous.estimatedTokens) : null;
-  const currentEstimated = Number.isFinite(Number(usage?.estimatedTokens)) ? Number(usage.estimatedTokens) : null;
-  const previousProvider = Number.isFinite(Number(previous?.providerInputTokens)) ? Number(previous.providerInputTokens) : null;
-  const currentProvider = Number.isFinite(Number(usage?.providerInputTokens)) ? Number(usage.providerInputTokens) : null;
-  const candidates = [previousEstimated, currentEstimated, previousProvider, currentProvider].filter((value) => value !== null);
-  if (!candidates.length) return { ...usage };
-  const highWater = Math.max(...candidates);
-  return { ...usage, estimatedTokens: highWater, highWaterEstimatedTokens: highWater, highWaterProviderInputTokens: Math.max(...[previousProvider, currentProvider].filter((value) => value !== null), 0) || null, provenance: usage.continuation ? 'run-high-water-continuation' : 'run-high-water-initial' };
-}
 
 function registerRuntimeActiveRun(options) {
   const lifecycle = registerActiveAgentRun(activeChatRuns, { ...options, logger: typeof serverLogger === 'undefined' ? null : serverLogger });
@@ -2638,8 +2627,11 @@ function contextFullText({ request, agentRuntime, sessionId, status }) {
 
 function contextMeterLines(context = {}, compaction = {}, memory = {}) {
   return [
-    ['Usage', context.percent === null || context.percent === undefined ? 'unknown' : `${context.percent}% (${context.pressure || 'unknown'})`],
-    ['Estimated tokens', context.estimatedTokens ?? 'unknown'],
+    ['Context scope', context.scope || 'historical'],
+    ['Usage', context.percent === null || context.percent === undefined ? 'unknown' : `${context.percent}%`],
+    ['Budget pressure (classification, not execution status)', context.pressure || 'unknown'],
+    [context.source === 'provider-input-tokens' ? 'Reported input tokens' : 'Estimated tokens', context.estimatedTokens ?? 'unknown'],
+    ...(context.requestId ? [['Request ID', context.requestId], ['Requested model', context.model || 'unknown'], ['Reported model', context.responseModel || 'unknown'], ['Serving provider', context.providerName || context.provider || 'unknown']] : []),
     ...(context.provenance ? [['Context basis', context.provenance]] : []),
     ['Capacity tokens', context.capacityTokens ?? 'unknown'],
     ['Compaction', compaction.active ? 'active' : 'idle'],
@@ -2913,9 +2905,9 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       onSteeringReady: () => { record.steeringReady = !controller.signal.aborted && record.phase !== 'cancelling'; },
       onModelContextUsage: async (usage) => {
         if (!usage || typeof usage !== 'object') return;
-        // Keep every raw measurement in telemetry, while the active card uses
-        // a monotonic per-run high-water mark across initial and continuation requests.
-        record.contextUsage = updateContextUsageHighWater(record.contextUsage, usage);
+        // Each update is scoped to one physical request; never carry a previous
+        // response or run maximum into the next request estimate.
+        record.contextUsage = { ...usage, runId };
         try {
           await postgresApplication.stores.conversations.append({
             agentId: agentRuntime.agentId,
@@ -2924,7 +2916,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
             sessionId,
             type: 'event',
             role: null,
-            content: 'Provider canonical context measurement updated.',
+            content: 'Latest provider request context measurement updated.',
             runId,
             metadata: { contextMeter: record.contextUsage },
             visibility: 'debug',

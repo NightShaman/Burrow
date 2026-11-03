@@ -203,44 +203,51 @@ function latestContextBuildReceiptFromTranscript(transcript = []) {
   };
 }
 
-function latestCanonicalContextMeterFromTranscript(transcript = []) {
-  const entries = Array.isArray(transcript) ? transcript : [];
-  // A native tool continuation transmits only its incremental transport
-  // payload. It is not a complete measure of the provider's active context,
-  // so its smaller size must never replace the run's initial full request.
-  // The newest run wins; within that run, its initial request is canonical.
-  const byRun = new Map();
-  for (const entry of entries) {
+function latestContextMeterFromTranscript(transcript = []) {
+  // Store order is authoritative. A smaller prepared continuation/terminal
+  // request replaces a larger predecessor; this is not a run peak.
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const entry = transcript[index];
     const meter = entry?.metadata?.contextMeter;
-    const estimatedTokens = finiteNumber(meter?.estimatedTokens);
-    if (estimatedTokens === null) continue;
-    const runId = entry?.runId || `entry:${entry?.id || byRun.size}`;
-    const measurement = {
-      estimatedTokens,
-      providerInputTokens: finiteNumber(meter?.providerInputTokens),
-      modelCall: finiteNumber(meter?.modelCall),
-      continuation: Boolean(meter?.continuation),
-      updatedAt: meter?.updatedAt || entry?.ts || null,
-      source: meter?.source || 'provider-request-estimate',
-      runId: entry?.runId || null,
-      provenance: meter?.provenance || (meter?.continuation ? 'continuation-payload' : 'initial-full-request'),
-    };
-    const existing = byRun.get(runId);
-    if (!existing) {
-      byRun.set(runId, measurement);
-    } else {
-      const highWater = Math.max(existing.estimatedTokens, measurement.estimatedTokens, existing.providerInputTokens ?? 0, measurement.providerInputTokens ?? 0);
-      byRun.set(runId, {
-        ...(measurement.estimatedTokens >= existing.estimatedTokens ? measurement : existing),
-        estimatedTokens: highWater,
-        highWaterEstimatedTokens: highWater,
-        highWaterProviderInputTokens: Math.max(existing.providerInputTokens ?? 0, measurement.providerInputTokens ?? 0) || null,
-        continuation: measurement.continuation,
-        provenance: measurement.continuation ? 'run-high-water-continuation' : measurement.provenance,
-      });
-    }
+    if (finiteNumber(meter?.estimatedTokens) === null) continue;
+    return { ...meter, runId: entry.runId || meter.runId || null,
+      updatedAt: meter.updatedAt || entry.ts || null, entryId: entry.id || null, entryIndex: index };
   }
-  return [...byRun.values()].at(-1) || null;
+  return null;
+}
+
+// Public diagnostic projection, never the estimate used by request admission.
+// Missing/legacy correlation is historical, not invented current API usage.
+export function contextUsageProjection(meter = {}, { reconstructed = false } = {}) {
+  const correlated = Boolean(meter.requestId && ['request-estimate', 'response'].includes(meter.stage));
+  const providerInputTokens = correlated && meter.stage === 'response' ? finiteNumber(meter.providerInputTokens) : null;
+  const requestEstimatedTokens = finiteNumber(meter.requestEstimatedTokens) ?? finiteNumber(meter.estimatedTokens);
+  const measured = providerInputTokens !== null && providerInputTokens >= 0;
+  const text = value => typeof value === 'string' && value.length ? value.slice(0, 256) : null;
+  return {
+    estimatedTokens: measured ? providerInputTokens : finiteNumber(meter.estimatedTokens),
+    requestEstimatedTokens,
+    scope: reconstructed ? 'reconstructed' : correlated ? 'latest-request' : 'historical',
+    source: measured ? 'provider-input-tokens' : (meter.source === 'provider-input-tokens' ? 'provider-request-estimate' : meter.source || 'provider-request-estimate'),
+    provenance: correlated ? (meter.stage === 'response' ? 'latest-request-response' : 'latest-request-estimate') : meter.provenance || null,
+    lastTurnAt: meter.updatedAt || null,
+    runId: text(meter.runId),
+    modelCall: finiteNumber(meter.modelCall),
+    continuation: Boolean(meter.continuation),
+    requestId: correlated ? text(meter.requestId) : null,
+    stage: correlated ? meter.stage : null,
+    providerInputTokens,
+    provider: correlated ? text(meter.provider) : null,
+    providerName: correlated ? text(meter.providerName) : null,
+    connectionId: correlated ? text(meter.connectionId) : null,
+    logicalConnectionId: correlated ? text(meter.logicalConnectionId) : null,
+    model: correlated ? text(meter.model) : null,
+    api: correlated ? text(meter.api) : null,
+    responseModel: correlated && meter.stage === 'response' ? text(meter.responseModel) : null,
+    responseId: correlated && meter.stage === 'response' ? text(meter.responseId) : null,
+    responseStatus: correlated && meter.stage === 'response' ? finiteNumber(meter.responseStatus) : null,
+    responseOk: correlated && meter.stage === 'response' && typeof meter.responseOk === 'boolean' ? meter.responseOk : null,
+  };
 }
 
 function estimateTokensFromChars(chars = 0) {
@@ -381,6 +388,7 @@ export async function inspectSessionContext({ rootDir, dataRoot = rootDir, sessi
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -414,44 +422,33 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
   const budget = inspection.contextBudget || {};
   const summaries = compressionSummariesFromTranscript(transcript);
   const next = planContextCompression({ transcript: transcript.filter((entry) => !entry?.metadata?.compressionSummary), config: contextConfig, contextBudget: budget });
-  const usageRatio = finiteNumber(budget.usageRatio);
-  // Older receipts redacted token telemetry. Do not pair their preserved ratio
-  // with a reconstructed estimate and pretend the two describe one prompt.
-  const exactReceiptTokens = finiteNumber(inspection.contextBuildReceipt?.budget?.estimatedTokens);
-  const hasFreshReceipt = exactReceiptTokens !== null;
-  const receiptEstimatedTokens = hasFreshReceipt
-    ? exactReceiptTokens
-    : finiteNumber(budget.estimatedTokens);
-  const rawCapacityTokens = finiteNumber(budget.contextTokens) ?? finiteNumber(budget.contextWindow);
-  // Missing provider metadata is unknown capacity, not a zero-token model.
-  // Never turn that absence into a fake 100% blocked meter.
+  const rawCapacityTokens = finiteNumber(contextTokens) ?? finiteNumber(contextWindow)
+    ?? finiteNumber(budget.contextTokens) ?? finiteNumber(budget.contextWindow);
   const capacityTokens = rawCapacityTokens !== null && rawCapacityTokens > 0 ? rawCapacityTokens : null;
   const measurements = currentContextMeasurements(transcript);
   if (!measurements.acceptsLive(liveContext)) liveContext = null;
   const liveEstimatedTokens = finiteNumber(liveContext?.estimatedTokens);
-  const persistedMeter = latestCanonicalContextMeterFromTranscript(measurements.entries);
-  const liveIsContinuation = liveContext?.continuation === true;
-  const liveCanonicalTokens = liveEstimatedTokens;
-  // The active meter is a run-scoped high-water mark. Continuation payloads
-  // remain transient for compression planning, but their observed pressure may
-  // raise the displayed value without ever lowering it.
-  const meterKind = liveCanonicalTokens !== null ? 'live' : (hasFreshReceipt ? 'receipt' : (persistedMeter ? 'persisted' : 'reconstructed'));
-  const sameRunPersistedTokens = liveIsContinuation && (!liveContext?.runId || !persistedMeter?.runId || persistedMeter.runId === liveContext.runId)
-    ? finiteNumber(persistedMeter?.estimatedTokens)
-    : null;
-  const displayedTokens = liveCanonicalTokens !== null
-    ? Math.max(liveCanonicalTokens, sameRunPersistedTokens ?? 0)
-    : (hasFreshReceipt ? receiptEstimatedTokens : finiteNumber(persistedMeter?.estimatedTokens) ?? receiptEstimatedTokens);
+  const persistedMeter = latestContextMeterFromTranscript(measurements.entries);
+  const receipt = inspection.contextBuildReceipt;
+  const hasReceipt = finiteNumber(receipt?.budget?.estimatedTokens) !== null;
+  const receiptIndex = !hasReceipt ? -1 : receipt.entryId
+    ? measurements.entries.findIndex(entry => entry.id === receipt.entryId)
+    : measurements.entries.findLastIndex(entry => (entry.metadata?.receiptRef || entry.metadata?.receipt)?.contextBuildReceipt);
+  const meterIndex = persistedMeter?.entryIndex ?? -1;
+  const meterKind = liveEstimatedTokens !== null ? 'live'
+    : persistedMeter && meterIndex > receiptIndex ? 'persisted' : hasReceipt ? 'receipt'
+      : persistedMeter ? 'persisted' : 'reconstructed';
+  const meter = meterKind === 'live' ? liveContext : meterKind === 'persisted' ? persistedMeter
+    : meterKind === 'receipt' ? { ...receipt.budget, runId: receipt.runId,
+      updatedAt: receipt.budget.updatedAt || measurements.entries[receiptIndex]?.ts || null } : budget;
+  const projected = contextUsageProjection(meter, { reconstructed: meterKind === 'reconstructed' });
+  const displayedTokens = projected.estimatedTokens;
   const displayedRatio = displayedTokens !== null && capacityTokens !== null ? displayedTokens / capacityTokens : null;
   const displayedPressure = displayedRatio === null ? 'unknown' : contextBudgetPressure(displayedRatio);
-  const meter = meterKind === 'live' ? liveContext : meterKind === 'persisted' ? persistedMeter : inspection.contextBuildReceipt?.budget;
-  // A high-water estimate is only measured when it still equals the measured
-  // count. Never relabel a larger mixed/estimated high-water as provider usage.
-  observeContextPressure({ sessionId, runId: meter?.runId || inspection.contextBuildReceipt?.runId,
-    usageTokens: meterKind === 'receipt' ? meter?.estimatedTokens : displayedTokens,
-    budgetTokens: capacityTokens, usageRatio: displayedRatio, pressure: displayedPressure,
+  observeContextPressure({ sessionId, runId: projected.runId,
+    usageTokens: displayedTokens, budgetTokens: capacityTokens, usageRatio: displayedRatio, pressure: displayedPressure,
     source: meterKind === 'receipt' ? 'runtime_receipt' : meterKind,
-    measured: meter?.source === 'provider-input-tokens' && (meterKind === 'receipt' || displayedTokens === meter?.providerInputTokens || displayedTokens === meter?.highWaterProviderInputTokens) });
+    measured: projected.source === 'provider-input-tokens' });
   const recall = inspection.contextBuildReceipt?.providers?.sessionRecall || {};
   return {
     sessionId: inspection.sessionId,
@@ -466,16 +463,13 @@ export async function inspectSessionContextStatus({ rootDir, dataRoot = rootDir,
       searchedSessionCount: finiteNumber(recall.searchedSessionCount) || 0,
     },
     context: {
-      estimatedTokens: displayedTokens,
+      ...projected,
       capacityTokens,
       usageRatio: displayedRatio,
       percent: displayedRatio === null ? null : Math.round(Math.max(0, Math.min(1, displayedRatio)) * 100),
       pressure: displayedPressure,
-      source: meterKind === 'live' ? (liveContext.source || 'live-provider-request') : ((meterKind === 'persisted') ? (persistedMeter?.source || 'provider-request-estimate') : (budget.source || 'reconstructed')),
-      provenance: meterKind === 'live' ? (liveContext.provenance || (liveIsContinuation ? 'run-high-water-continuation' : 'run-high-water-initial')) : (meterKind === 'persisted' ? persistedMeter?.provenance || null : budget.provenance || null),
-      lastTurnAt: meterKind === 'live' ? (liveContext.updatedAt || null) : ((meterKind === 'persisted') ? persistedMeter?.updatedAt || null : (inspection.contextBuildReceipt?.entryId ? transcript.find((entry) => entry.id === inspection.contextBuildReceipt.entryId)?.ts || null : null)),
-      ...(liveEstimatedTokens !== null ? { active: true, modelCall: finiteNumber(liveContext.modelCall), continuation: liveIsContinuation, providerInputTokens: finiteNumber(liveContext.providerInputTokens) } : {}),
-      ...((meterKind === 'persisted' || meterKind === 'continuation-baseline') ? { modelCall: persistedMeter?.modelCall || null, continuation: meterKind === 'continuation-baseline' ? true : Boolean(persistedMeter?.continuation), providerInputTokens: persistedMeter?.providerInputTokens || null, runId: persistedMeter?.runId || null } : {}),
+      source: meterKind === 'reconstructed' ? budget.source || 'reconstructed' : projected.source,
+      ...(meterKind === 'live' ? { active: true } : {}),
     },
     compaction: {
       active: summaries.length > 0,

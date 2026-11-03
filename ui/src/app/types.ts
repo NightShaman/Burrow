@@ -12,7 +12,30 @@ export type FileNode = {
   type: 'file' | 'directory';
   children?: FileNode[];
 };
-export type ContextDetails = {
+export type ContextEvidence = {
+  scope?: 'latest-request' | 'historical' | 'reconstructed' | null;
+  requestEstimatedTokens?: number | null;
+  provenance?: string | null;
+  requestId?: string | null;
+  runId?: string | null;
+  modelCall?: number | null;
+  lastTurnAt?: string | null;
+  continuation?: boolean;
+  active?: boolean;
+  stage?: string | null;
+  providerInputTokens?: number | null;
+  provider?: string | null;
+  providerName?: string | null;
+  connectionId?: string | null;
+  logicalConnectionId?: string | null;
+  model?: string | null;
+  api?: string | null;
+  responseModel?: string | null;
+  responseId?: string | null;
+  responseStatus?: number | null;
+  responseOk?: boolean | null;
+};
+export type ContextDetails = ContextEvidence & {
   estimatedTokens: number | null;
   capacityTokens: number | null;
   pressure: string | null;

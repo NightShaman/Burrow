@@ -101,7 +101,7 @@ export type ContextStatus = {
     sourceCount?: number;
     searchedSessionCount?: number;
   };
-  context?: {
+  context?: import('./types').ContextEvidence & {
     estimatedTokens?: number | null;
     capacityTokens?: number | null;
     usageRatio?: number | null;

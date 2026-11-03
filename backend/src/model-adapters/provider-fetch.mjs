@@ -128,10 +128,15 @@ export function providerTiming({ traceLogger, requestId, provider, api, model, m
     const normalizedUsage = result?.normalizedUsage
       ? capturedProviderUsage(result.normalizedUsage) : providerUsageValues(result?.usage, { provider, api });
     const completion = providerCompletion(result, { ...options, observedStatus:responseStatus });
-    const context = result?.contextUsage, estimatedTokens = providerTokenCount(context?.estimatedTokens);
+    const context = result?.contextUsage;
+    // This completion is scoped to one physical response. Observe its reported
+    // input count even when the budget-oriented estimate was larger. Never
+    // change result.contextUsage: request preparation owns that safe estimate.
+    const reportedTokens = providerTokenCount(context?.providerInputTokens);
+    const estimatedTokens = reportedTokens ?? providerTokenCount(context?.estimatedTokens);
     const receipt = { ok:result?.ok === true, requestId, ...completion,
       normalizedUsage,
-      ...(estimatedTokens !== null ? { contextUsage:{ estimatedTokens, source:context?.source === 'provider-input-tokens' ? 'provider-input-tokens' : 'provider-request-estimate' }, contextBudgetTokens:providerTokenCount(contextBudgetTokens) } : {}) };
+      ...(estimatedTokens !== null ? { contextUsage:{ estimatedTokens, source:reportedTokens !== null ? 'provider-input-tokens' : 'provider-request-estimate' }, contextBudgetTokens:providerTokenCount(contextBudgetTokens) } : {}) };
     try { route?.complete?.(requestId, receipt, {
       // Keep the older durable pool error/outcome enums independent of the
       // richer physical OTel outcome (for example timeout vs cancellation).

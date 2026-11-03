@@ -1,3 +1,4 @@
+import { contextUsageLabel } from './contextUsageLabel';
 import { chatAgents } from '../../app/agentCatalog';
 import { useEffect, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Agent, FileNode, PanelId } from '../../app/types';
@@ -467,23 +468,7 @@ function ContextUsage({
   details?: Agent['contextDetails'];
   compact?: boolean;
 }) {
-  const capacity = details?.capacityTokens
-    ? ` of ${details.capacityTokens.toLocaleString()} tokens`
-    : '';
-  const estimate =
-    details?.estimatedTokens === null
-      ? 'Estimate unavailable'
-      : details?.estimatedTokens !== undefined
-        ? `${details.estimatedTokens.toLocaleString()} tokens`
-        : '';
-  const pressure = details?.pressure ? `Pressure: ${details.pressure}.` : '';
-  const compaction = details?.compactionActive
-    ? `Compaction enabled${details.rawRecentTurnCount !== null && details.rawRecentTurnCount !== undefined ? `; ${details.rawRecentTurnCount} recent turns kept raw` : ''}.`
-    : '';
-  const label =
-    value === null
-      ? 'Context capacity unavailable.'
-      : `${value}% context used${capacity}. ${estimate}. ${pressure} ${compaction}`.trim();
+  const label = contextUsageLabel(value, details);
   return (
     <span
       className={`context-usage ${compact ? 'compact' : ''} ${details?.pressure ? `pressure-${details.pressure}` : ''}`}

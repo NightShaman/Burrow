@@ -1,3 +1,4 @@
+import { contextUsageProjection } from './context-engine.mjs';
 import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { appendRuntimeSessionContextState } from './runtime-session-writer.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
@@ -209,14 +210,15 @@ export function compactRuntimeReceipt({
         ...(Number.isFinite(Number(contextUsage?.estimatedTokens)) ? {
           budget: {
             ...prompt.contextBuildReceipt.budget,
-            estimatedTokens: Number(contextUsage.estimatedTokens),
+            estimatedTokens: contextUsageProjection(contextUsage).estimatedTokens,
             estimatedChars: Number(contextUsage.estimatedChars) || prompt.contextBuildReceipt.budget?.estimatedChars || null,
             usageRatio: Number(prompt.contextBuildReceipt.budget?.contextTokens ?? prompt.contextBuildReceipt.budget?.contextWindow) > 0
-              ? Number(contextUsage.estimatedTokens) / Number(prompt.contextBuildReceipt.budget.contextTokens || prompt.contextBuildReceipt.budget.contextWindow)
+              ? contextUsageProjection(contextUsage).estimatedTokens / Number(prompt.contextBuildReceipt.budget.contextTokens || prompt.contextBuildReceipt.budget.contextWindow)
               : null,
-            source: contextUsage.source || 'provider-request-estimate',
-            providerInputTokens: Number.isFinite(Number(contextUsage.providerInputTokens)) ? Number(contextUsage.providerInputTokens) : null,
-            modelCall: Number.isFinite(Number(contextUsage.modelCall)) ? Number(contextUsage.modelCall) : null,
+            source: contextUsageProjection(contextUsage).source,
+            ...Object.fromEntries(['requestId', 'requestEstimatedTokens', 'stage', 'provider', 'providerName', 'connectionId', 'logicalConnectionId', 'model', 'api', 'responseModel', 'responseId', 'responseStatus', 'responseOk'].map(key => [key, contextUsage[key] ?? null])),
+            providerInputTokens: contextUsage.providerInputTokens == null ? null : Number.isFinite(Number(contextUsage.providerInputTokens)) ? Number(contextUsage.providerInputTokens) : null,
+            modelCall: contextUsage.modelCall == null ? null : Number.isFinite(Number(contextUsage.modelCall)) ? Number(contextUsage.modelCall) : null,
             continuation: Boolean(contextUsage.continuation),
             updatedAt: contextUsage.updatedAt || null,
           },

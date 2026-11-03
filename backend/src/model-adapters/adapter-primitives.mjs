@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readProviderChunk, readProviderText } from './provider-fetch.mjs';
+import { configuredProviderId, configuredProviderName } from './provider-responsiveness.mjs';
 import { normalizeProviderMessage, normalizeProviderMessages, providerMessageManifest as buildProviderMessageManifest, providerToolRound, pruneProviderToolResults } from '../provider-messages.mjs';
 
 // The model envelope is transient transport data. Keep it comfortably below
@@ -41,28 +42,60 @@ function contextUsageFromRequest({ promptChars = 0, bodyChars = 0, imageCount = 
     model: model || null,
     api: api || null,
     continuation: Boolean(continuation),
-    ...(Number.isFinite(Number(modelCall)) ? { modelCall: Number(modelCall) } : {}),
+    ...(modelCall !== null && modelCall !== undefined && Number.isFinite(Number(modelCall)) ? { modelCall: Number(modelCall) } : {}),
     updatedAt: clock(),
   };
 }
 
 function contextUsageFromResponse(requestUsage = {}, usage = null, clock = () => new Date().toISOString()) {
-  const providerInputTokens = Number(usage?.prompt_tokens ?? usage?.input_tokens);
+  const input = usage?.prompt_tokens ?? usage?.input_tokens;
+  // Missing/null is unknown, never the numeric zero produced by Number(null).
+  const providerInputTokens = input === null || input === undefined || typeof input === 'boolean' || (typeof input === 'string' && !input.trim()) ? NaN : Number(input);
   if (!Number.isFinite(providerInputTokens) || providerInputTokens < 0) return requestUsage;
   const requestEstimatedTokens = Number(requestUsage?.estimatedTokens);
   const providerIsConservative = !Number.isFinite(requestEstimatedTokens) || providerInputTokens >= requestEstimatedTokens;
-  // Provider token telemetry is valuable, but for the context meter a lower
-  // provider-input count can be a narrower accounting ruler than the full
-  // serialized request estimate (for example tool schemas/body overhead). Do
-  // not let a response event make the visible active-context meter shrink
-  // within the same normal request; keep the conservative full-request
-  // baseline and carry providerInputTokens separately.
+  // Keep the conservative request accounting for budget consumers. The public
+  // meter separately displays matching providerInputTokens when reported; it
+  // must not confuse this safety estimate with measured provider usage.
   return {
     ...requestUsage,
     source: providerIsConservative ? 'provider-input-tokens' : (requestUsage.source || 'provider-request-estimate'),
     estimatedTokens: providerIsConservative ? providerInputTokens : requestUsage.estimatedTokens,
     providerInputTokens,
     updatedAt: clock(),
+  };
+}
+
+// Correlation is attached only to the optional callback, never to the
+// estimator/budget receipt. Keep every callback scoped to this physical
+// request, even when a native retry or pool failover makes another fetch.
+function providerResponseIdentifier(value, limit = 256) {
+  return configuredProviderId(value, limit);
+}
+
+function providerResponseModel(value) {
+  return configuredProviderId(value, 256);
+}
+
+function contextUsageCallback(requestUsage, usage, { stage, requestId, modelCall = null, provider,
+  providerName = null, connectionId = null, responseModel = null, responseId = null,
+  responseStatus = null, responseOk = null } = {}) {
+  return {
+    ...usage,
+    stage,
+    requestId,
+    modelCall: modelCall === null || modelCall === undefined ? null : modelCall,
+    requestEstimatedTokens: requestUsage.estimatedTokens,
+    provider: configuredProviderId(provider),
+    providerName: configuredProviderName(providerName),
+    connectionId: configuredProviderId(connectionId),
+    logicalConnectionId: null,
+    model: requestUsage.model,
+    responseModel: stage === 'response' ? providerResponseModel(responseModel) : null,
+    responseId: stage === 'response' ? providerResponseIdentifier(responseId) : null,
+    responseStatus: stage === 'response' && Number.isInteger(responseStatus) && responseStatus >= 100 && responseStatus <= 599 ? responseStatus : null,
+    responseOk: stage === 'response' && typeof responseOk === 'boolean' ? responseOk : null,
+    providerInputTokens: stage === 'response' && usage.providerInputTokens !== undefined ? usage.providerInputTokens : null,
   };
 }
 
@@ -415,6 +448,9 @@ export {
   MAX_SSE_EVENT_CHARS,
   contextUsageFromRequest,
   contextUsageFromResponse,
+  contextUsageCallback,
+  providerResponseModel,
+  providerResponseIdentifier,
   trimSlash,
   serializedMessageHash,
   redactHeaders,

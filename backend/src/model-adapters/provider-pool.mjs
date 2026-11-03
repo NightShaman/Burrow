@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { withProviderRoute, deferProviderDiagnostic, providerObservation } from './provider-fetch.mjs';
-import { providerIdentity, providerCompletion, configuredProviderName, providerUsageValues, capturedProviderUsage } from './provider-responsiveness.mjs';
+import { providerIdentity, providerCompletion, configuredProviderId, configuredProviderName, providerUsageValues, capturedProviderUsage } from './provider-responsiveness.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { classifyModelFailure, markModelInternalError, modelFailureResult, retainModelFailure } from '../model-failure.mjs';
 import { poolAttemptUsage } from '../postgres-provider-pool-metrics.mjs';
@@ -201,7 +201,17 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         callArgs[name] = async (...values) => {
           if (name !== 'onContextUsage') callbackInvoked = true;
           if (name !== 'onContextUsage') visible = true;
-          try { return await args[name](...values); } catch (error) { callbackFailed = true; throw error; }
+          try {
+            if (name === 'onContextUsage') {
+              const usage = values[0];
+              return await args[name]({ ...usage,
+                connectionId: configuredProviderId(selection.memberId),
+                logicalConnectionId: configuredProviderId(pool.connection.id),
+                providerName: identity.accountName ?? null,
+              });
+            }
+            return await args[name](...values);
+          } catch (error) { callbackFailed = true; throw error; }
         };
       }
       const route = { logicalConnectionId: pool.connection.id, servingConnectionId: selection.memberId,

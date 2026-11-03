@@ -14,6 +14,9 @@ import {
   serializedMessageHash,
   contextUsageFromRequest,
   contextUsageFromResponse,
+  contextUsageCallback,
+  providerResponseModel,
+  providerResponseIdentifier,
   redactHeaders,
   boundedText,
   randomUUID,
@@ -132,7 +135,9 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', traceLogger, signal = null, toolContinuation = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {
     if (recoveryContext?.nextModelCall) modelCall = await recoveryContext.nextModelCall();
     const requestId = idFactory();
-    const timing = providerTiming({ identity: providerIdentity(config), traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, contextBudgetTokens: config.contextTokens ?? config.contextWindow, clock });
+    const identity = providerIdentity(config);
+    const callbackIdentity = { requestId, modelCall, provider: 'openai-compatible', providerName: identity.accountName, connectionId: identity.accountId };
+    const timing = providerTiming({ identity, traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, contextBudgetTokens: config.contextTokens ?? config.contextWindow, clock });
     return settleProviderDiagnostics(traceLogger, async (recordResult) => {
       const headers = {
         'content-type': 'application/json',
@@ -165,7 +170,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         modelCall,
         clock,
       });
-      await providerCallback(() => onContextUsage?.(requestContextUsage));
+      await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContextUsage, requestContextUsage, { stage: 'request-estimate', ...callbackIdentity })));
 
       await providerDiagnostic(() => traceLogger?.model?.({
         stage: 'model-request', providerTiming: timing.projected, ...timing.ownership,
@@ -226,7 +231,8 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         model,
         status: response.status,
         choice: ok ? (mode === 'openai-responses' ? normalizeResponseChoice(data) : normalizeChoice(data)) : null,
-        responseId: ok && typeof data?.id === 'string' ? boundedText(data.id, 256) : null,
+        responseId: ok ? providerResponseIdentifier(data?.id) : null,
+        responseModel: providerResponseModel(data?.model),
         usage: data?.usage || null,
         normalizedUsage: providerUsageValues(data?.usage, { provider:'openai-compatible', api:mode }),
         contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock),
@@ -251,7 +257,10 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       if (!ok && signal?.aborted) result.cancelled = true;
       const settledResult = recordResult(providerFailureResult(result));
       if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
-      await providerCallback(() => onContextUsage?.(result.contextUsage));
+      await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContextUsage, result.contextUsage, {
+        stage: 'response', ...callbackIdentity, responseModel: result.responseModel, responseId: result.responseId,
+        responseStatus: response.status, responseOk: ok,
+      })));
       await providerDiagnostic(() => traceLogger?.model?.({
         stage: 'model-response',
         requestId,
