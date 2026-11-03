@@ -480,3 +480,17 @@ it('forwards the optional resource selection to the native owner mount context',
   await waitFor(() => expect(mountSettings).toHaveBeenCalled());
   expect(mountSettings.mock.calls[0][0].selectedAgentId).toBe('resident-resource');
 });
+
+it('exposes the existing avatar optimizer to imperative mods', async () => {
+  let context: { optimizeAvatar: (file: File) => Promise<string> } | undefined;
+  mountSettings.mockImplementation((value) => {
+    context = value;
+  });
+  mountHost();
+  await waitFor(() => expect(context?.optimizeAvatar).toBeTypeOf('function'));
+  const { optimizeAvatar } = await import('./OperatorProfile');
+  expect(context!.optimizeAvatar).toBe(optimizeAvatar);
+  await expect(
+    context!.optimizeAvatar(new File(['text'], 'no.txt', { type: 'text/plain' })),
+  ).rejects.toThrow('Choose or paste an image');
+});

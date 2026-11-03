@@ -559,3 +559,31 @@ it('keeps hidden residents in their distinct owner panel with native callbacks',
   fireEvent.click(screen.getByRole('button', { name: 'Select Resident' }));
   expect(select).toHaveBeenCalledWith(resident);
 });
+
+it('renders Menagerie image portraits on native agent cards', () => {
+  const avatar = 'data:image/webp;base64,cmVzaWRlbnQ=';
+  render(
+    <AgentsPanel
+      agents={[
+        {
+          ...agent,
+          id: 'gerald',
+          name: 'Gerald',
+          modAgent: {
+            ownerModId: 'burrow-menagerie',
+            capabilities: {},
+            visibility: { agents: true },
+          },
+          avatar,
+        },
+      ]}
+      selectedStreamId="gerald"
+      expandedAgents={new Set()}
+      onSelectAgent={vi.fn()}
+      onToggleAgent={vi.fn()}
+      onSelectSubagent={vi.fn()}
+    />,
+  );
+  const select = screen.getByRole('button', { name: 'Select Gerald' });
+  expect(select.querySelector('img')?.getAttribute('src')).toBe(avatar);
+});

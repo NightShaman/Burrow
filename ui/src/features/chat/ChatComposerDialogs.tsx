@@ -114,6 +114,13 @@ export function ChatComposerDialogs({
                         onChange={() => group.toggleAgent(agent.id)}
                         disabled={group.isCreating}
                       />
+                      <span className="group-participant-avatar" aria-hidden="true">
+                        {agent.avatar.startsWith('data:image/') ? (
+                          <img src={agent.avatar} alt="" />
+                        ) : (
+                          agent.name.slice(0, 1).toUpperCase() || '?'
+                        )}
+                      </span>
                       <span>{agent.name}</span>
                     </label>
                   ))}

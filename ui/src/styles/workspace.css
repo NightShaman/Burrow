@@ -325,6 +325,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.group-participant .group-participant-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  font-weight: 800;
+}
+.group-participant-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .group-participant:has(input:checked) {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
   background: var(--accent-subtle);

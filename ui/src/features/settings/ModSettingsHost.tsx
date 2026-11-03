@@ -1,3 +1,4 @@
+import { optimizeAvatar } from './OperatorProfile';
 import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
 import {
@@ -47,6 +48,7 @@ type ModSettingsContext = {
   fetchContent: (path: string, init?: RequestInit) => Promise<Response>;
   accessApi: <T = unknown>(init?: RequestInit) => Promise<T>;
   refreshAgents: () => Promise<void>;
+  optimizeAvatar: typeof optimizeAvatar;
   saveAgentExecutionEnvironment: (
     agentId: string,
     executionEnvironment: Agent['executionEnvironment'],
@@ -740,6 +742,7 @@ export function ModSettingsHost({
       },
       accessApi: modAccessApi(modId),
       refreshAgents: () => onAgentsChangedRef.current(),
+      optimizeAvatar,
       saveAgentExecutionEnvironment: async (agentId, executionEnvironment) => {
         await apiLocal(`/api/agents/${encodeURIComponent(agentId)}`, {
           method: 'PATCH',

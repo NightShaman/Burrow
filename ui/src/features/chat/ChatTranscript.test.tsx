@@ -1218,3 +1218,19 @@ it('does not turn an unknown failure origin into a confident upstream or local d
   expect(screen.getByRole('alert').textContent).not.toContain('not an upstream');
   expect(screen.getByRole('alert').textContent).not.toContain('The chat is fine');
 });
+
+it('renders a Menagerie resident portrait in native chat turns', () => {
+  const avatar = 'data:image/webp;base64,cmVzaWRlbnQ=';
+  const resident = {
+    ...parent,
+    id: 'gerald',
+    name: 'Gerald',
+    avatar,
+    subagents: [],
+    modAgent: { ownerModId: 'burrow-menagerie', capabilities: {}, visibility: { agents: true } },
+  };
+  show([{ type: 'message', role: 'assistant', content: 'Eight arms ready.' }], resident);
+  expect(screen.getByLabelText('Gerald avatar').querySelector('img')?.getAttribute('src')).toBe(
+    avatar,
+  );
+});

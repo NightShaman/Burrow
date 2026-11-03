@@ -1044,3 +1044,57 @@ it('retains hidden mod attribution without engineering hydration or provider fal
     ),
   ).toEqual([hydrated]);
 });
+
+it.each([true, false])(
+  'hydrates Menagerie image avatars from identity (present=%s) and registry',
+  async (identity) => {
+    const avatar = 'data:image/webp;base64,cmVzaWRlbnQ=';
+    apiMock.mockImplementation(async (path) => {
+      if (path === '/api/agents')
+        return {
+          agents: [
+            {
+              id: 'gerald',
+              name: 'Gerald',
+              enabled: true,
+              modAgent: {
+                ownerModId: 'burrow-menagerie',
+                capabilities: {},
+                visibility: { agents: true },
+              },
+              avatar,
+            },
+          ],
+        };
+      if (path === '/api/agents/overview')
+        return {
+          agents: [
+            {
+              agent: {
+                id: 'gerald',
+                name: 'Gerald',
+                enabled: true,
+                modAgent: {
+                  ownerModId: 'burrow-menagerie',
+                  capabilities: {},
+                  visibility: { agents: true },
+                },
+                avatar: identity ? '' : avatar,
+              },
+              ...(identity ? { identity: { id: 'gerald', name: 'Gerald', avatar } } : {}),
+              sessionId: 'default',
+              selection: null,
+              status: { agents: [] },
+              contexts: {},
+            },
+          ],
+        };
+      throw Error(`Unexpected path: ${path}`);
+    });
+    const { result, unmount } = renderRuntimeAgents('gerald');
+    await waitFor(() => expect(result.current.registryState).toBe('ready'));
+    expect(result.current.agents[0].avatar).toBe(avatar);
+    expect(result.current.agents[0].modAgent?.ownerModId).toBe('burrow-menagerie');
+    unmount();
+  },
+);
