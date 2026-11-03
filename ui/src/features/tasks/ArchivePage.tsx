@@ -371,11 +371,13 @@ export function Archive({
               </button>
             </div>
             <div className="sr-only" role="status" aria-live="polite">
-              {calendarAvailabilityState === 'loading'
-                ? 'Loading dates with archived records.'
-                : calendarAvailabilityState === 'error'
-                  ? 'Could not load archive date availability; all dates remain selectable.'
-                  : `${shownDates.length} dates with archived records in ${calendarMonth}.`}
+              {activeMod
+                ? 'Date availability is not provided by this mod; all dates remain selectable.'
+                : calendarAvailabilityState === 'loading'
+                  ? 'Loading dates with archived records.'
+                  : calendarAvailabilityState === 'error'
+                    ? 'Could not load archive date availability; all dates remain selectable.'
+                    : `${shownDates.length} dates with archived records in ${calendarMonth}.`}
             </div>
             <div className="archive-calendar-nav">
               <button
@@ -419,7 +421,7 @@ export function Archive({
                     onClick={() => setSelectedDate(day.key)}
                     aria-label={`Select ${day.key}${availableDates.has(day.key) ? ', has archived records' : ''}`}
                     aria-pressed={selectedDate === day.key}
-                    aria-busy={calendarAvailabilityState === 'loading'}
+                    aria-busy={!activeMod && calendarAvailabilityState === 'loading'}
                   >
                     {day.day}
                   </button>

@@ -41,6 +41,12 @@ it('discovers Archive contributions, passes calendar date and removes disabled d
   render(<Archive repository={archiveRepository} agents={[]} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Fixture archive' }));
   expect(screen.getByTestId('mod-date').textContent).toBe('all dates');
+  expect(
+    screen.getByText('Date availability is not provided by this mod; all dates remain selectable.'),
+  ).toBeTruthy();
+  for (const button of document.querySelectorAll('.archive-calendar-grid button')) {
+    expect(button.getAttribute('aria-busy')).toBe('false');
+  }
   fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
   const day = screen
     .getAllByRole('button')

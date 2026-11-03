@@ -79,3 +79,25 @@ it('delivers the latest date when an asynchronous mount finishes', async () => {
   );
   expect(mountArchive).toHaveBeenCalledTimes(1);
 });
+
+it('delivers explicit timezone on mount and updates timezone without losing the selected date', async () => {
+  const update = vi.fn(),
+    unmount = vi.fn();
+  mountArchive.mockReturnValue({ update, unmount });
+  const view = render(
+    <ModArchiveHost panel={panel} date="2026-11-01" timeZone="America/New_York" />,
+  );
+  await waitFor(() => expect(mountArchive).toHaveBeenCalledTimes(1));
+  expect(mountArchive.mock.calls[0][0]).toMatchObject({
+    date: '2026-11-01',
+    timeZone: 'America/New_York',
+  });
+  view.rerender(<ModArchiveHost panel={panel} date="2026-11-01" timeZone="Pacific/Auckland" />);
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-11-01', timeZone: 'Pacific/Auckland' }),
+    ),
+  );
+  expect(mountArchive).toHaveBeenCalledTimes(1);
+  expect(unmount).not.toHaveBeenCalled();
+});

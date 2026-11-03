@@ -4,6 +4,7 @@ import type { ModArchive } from '../../app/modPanels';
 
 type ArchiveContext = {
   date: string;
+  timeZone: string;
   modId: string;
   runtimeScope: 'local';
   root: HTMLElement;
@@ -15,12 +16,22 @@ type Cleanup =
   | { unmount?: () => void; update?: (context: ArchiveContext) => void };
 type ArchiveModule = { mountArchive?: (context: ArchiveContext) => Cleanup | Promise<Cleanup> };
 
-export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: string }) {
+export function ModArchiveHost({
+  panel,
+  date,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+}: {
+  panel: ModArchive;
+  date: string;
+  timeZone?: string;
+}) {
   const root = useRef<HTMLDivElement>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const dateRef = useRef(date);
   dateRef.current = date;
+  const timeZoneRef = useRef(timeZone);
+  timeZoneRef.current = timeZone;
   const updateRef = useRef<(() => void) | undefined>(undefined);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -49,6 +60,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
           throw new Error('The mod does not export mountArchive.');
         const context: ArchiveContext = {
           date: dateRef.current,
+          timeZone: timeZoneRef.current,
           modId: panel.modId,
           runtimeScope: 'local',
           root: node,
@@ -78,8 +90,13 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
         } else {
           cleanup = dispose;
           updateRef.current = () => {
-            if (disposed || context.date === dateRef.current) return;
+            if (
+              disposed ||
+              (context.date === dateRef.current && context.timeZone === timeZoneRef.current)
+            )
+              return;
             context.date = dateRef.current;
+            context.timeZone = timeZoneRef.current;
             if (result && typeof result !== 'function' && result.update) {
               try {
                 result.update({ ...context });
@@ -117,7 +134,7 @@ export function ModArchiveHost({ panel, date }: { panel: ModArchive; date: strin
   }, [panel.modId, panel.archiveUrl, panel.version, revision]);
   useEffect(() => {
     updateRef.current?.();
-  }, [date]);
+  }, [date, timeZone]);
   return (
     <div className="page-view mod-panel-page" data-mod-id={panel.modId}>
       {loading && !error && <p role="status">Loading {panel.name}…</p>}
