@@ -5,6 +5,7 @@ import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModel
 import { createModelAdapter } from './model-adapter.mjs';
 import { normalizeExternalTurnAttachments } from './mod-external-turn-attachments.mjs';
 import { normalizeModAgent } from './agent-registry.mjs';
+import { assertIdentity } from './model-settings-store.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }
@@ -173,7 +174,9 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   async function projectOwned(agent) {
     if (!agent || agent.modAgent?.ownerModId !== schedulerOwner()) throw new Error('mod_owned_agent_not_found');
     const selection = await injected.models.modelSelection(agent.id);
-    return { id: agent.id, name: agent.name, enabled: agent.enabled,
+    const identities = await injected.models.identities?.();
+    const avatar = identities?.agents?.find(identity => identity.id === agent.id)?.avatar || '';
+    return { id: agent.id, name: agent.name, avatar, enabled: agent.enabled,
       modelConnectionId: selection?.connectionId || null, model: selection?.model || null,
       modAgent: agent.modAgent };
   }
@@ -187,12 +190,13 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   function validateOwnedPatch(input, create = false) {
     const value = exactKeys(plain(input), create
       ? ['id','name','enabled','modelConnectionId','model','capabilities','visibility']
-      : ['name','enabled','modelConnectionId','model','capabilities','visibility']);
+      : ['name','avatar','enabled','modelConnectionId','model','capabilities','visibility']);
     if (create) bounded(value.id, 96);
     if (create || value.name !== undefined) {
       bounded(value.name, 64);
       if (!value.name.trim()) invalid();
     }
+    if (value.avatar !== undefined && typeof value.avatar !== 'string') invalid();
     if (value.enabled !== undefined && typeof value.enabled !== 'boolean') invalid();
     for (const key of ['modelConnectionId', 'model']) if (value[key] !== undefined) bounded(value[key], key === 'model' ? 256 : 128);
     const metadata = normalizeModAgent({ ...(value.capabilities === undefined ? {} : { capabilities: value.capabilities }),
@@ -342,8 +346,9 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     async updateOwnedAgent(input) {
       const value = exactKeys(plain(input), ['agentId','patch']);
       const id = bounded(value.agentId, 96);
-      const { value: patch } = validateOwnedPatch(value.patch);
       const current = await projectOwned(await injected.agents.get(id));
+      const { value: patch } = validateOwnedPatch(value.patch);
+      if (patch.avatar !== undefined) assertIdentity({ kind: 'agent', id, avatar: patch.avatar });
       const changingModel = patch.modelConnectionId !== undefined || patch.model !== undefined;
       const connectionId = patch.modelConnectionId ?? current.modelConnectionId;
       const selectedModel = patch.model ?? current.model;
@@ -353,6 +358,7 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
         ...(patch.visibility === undefined ? {} : { visibility: patch.visibility }) };
       const agent = await injected.agents.updateOwned(id, { name: patch.name, enabled: patch.enabled, modAgent: metadata },
         { ownerModId: schedulerOwner(), modelConnectionId: changingModel ? connectionId : undefined, model: changingModel ? selectedModel : undefined });
+      if (patch.avatar !== undefined) await injected.models.saveIdentity({ kind: 'agent', id, avatar: patch.avatar });
       return projectOwned(agent);
     },
     async getOwnedAgentReferenceImage(input) {
