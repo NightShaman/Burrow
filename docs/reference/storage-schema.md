@@ -322,3 +322,12 @@ Original photo bytes are runtime artifacts, not SQL media values. Agent/operator
 ## 3 November migration addition
 
 Migration **90**, `mod-owned-agents`, adds the nullable `agents.mod_agent_json` JSONB column for mod ownership, capability and visibility metadata. Ordinary agent records retain their existing path; owner-scoped identities are managed through the Core mod host contract. See [mod-owned native agents](../development/extensions.md#mod-owned-native-agents). This is an application migration, not a PostgreSQL major-version upgrade or an instruction to edit the migration ledger. Statically checked against Core `32dde3266a231777ddfec6dba141d6b9972a21fd`; no database migration was executed by this documentation review.
+
+## 4 November migration additions
+
+| Version | Migration | Purpose |
+|---|---|---|
+| 91 | `independent-mod-agent-authority` | Adds `mod_management_agent_ids` and `core_api_agent_ids` to `core_mod_authority`, initially copying legacy assignments into both; subsequent authority checks and edits use the independent lists. |
+| 92 | `reset-archive-projection-copies` | Reuses completed Chat visibility/occurrence projections when reset copies unchanged originals, including a known null occurrence instant; new or changed payloads still require projection. |
+
+Reset now copies existing lexical/occurrence projections rather than reparsing every original in application memory. Unprojected originals retain fallback/backfill handling; these changes do not make an archive summary or a timeout proof of completion. Session metadata atomically records the reset operation receipt with its generation. Neither migration changes PostgreSQL's major version or authorizes manual ledger/SQL edits. Statically checked against Core `b62c57ef5e831bacebf2214a31c04147471c1267`; this documentation review did not execute migrations.

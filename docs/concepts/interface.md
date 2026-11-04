@@ -25,7 +25,7 @@ The runtime owns durable state. The browser presents API responses and live acti
 | **Forge** | Generation catalogs, jobs, artifacts, and recent creations |
 | **Settings** | General preferences, agents, skills, connections, and mods |
 
-Enabled mods can add control pages beside the built-in navigation, settings sections, and Archive readers. These contributions depend on the installed mod catalog. Page changes use in-app state; the built-in pages do not have separate URL routes.
+Enabled mods can add control pages beside the built-in navigation, settings sections, and Archive readers. Opt-in Archive readers share the native heading for search, participant and category controls and receive the host calendar date and timezone. A mod without date-availability reporting keeps every calendar date selectable; native Chat calendar indicators do not prove that mod has records. These contributions depend on the installed mod catalog. Page changes use in-app state; the built-in pages do not have separate URL routes.
 
 ### Sign in and complete setup
 
@@ -67,7 +67,7 @@ Model selection is saved through `PUT /api/agents/{agentId}/model-selection`. Av
 
 ### Session controls and project context
 
-**New session** creates a named conversation. Names are 1–80 characters, begin with a letter or number, and otherwise use letters, numbers, underscores, or hyphens. The regular session picker excludes child, group, artifact, and task-owned sessions. **Reset Session** resets the selected session while retaining that session ID and clearing the displayed conversation; it is different from creating another named session.
+**New session** creates a named conversation. Names are 1–80 characters, begin with a letter or number, and otherwise use letters, numbers, underscores, or hyphens. The regular session picker excludes child, group, artifact, and task-owned sessions. **Reset Session** resets the selected session while retaining that session ID and clearing the displayed conversation; it is different from creating another named session. The current UI gives reset a 120-second request budget and reconciles an uncertain response with the same session's saved operation receipt, without repeating the reset POST. If the outcome cannot be confirmed, refresh before trying again; the conversation/composer stays intact until success is established. See [reset reconciliation](../reference/api/sessions.md#reset-outcome-reconciliation).
 The composer suggests `/help`, `/context [full]`, `/status`, `/new`, and `/stop`; the runtime interprets these commands. Type `$project` to choose a project for the current conversation, or `$project clear` to remove that binding. Project context uses `/api/task-board/conversation-project`; it does not itself execute a task.
 ### Activity, stopping, and reconnecting
 

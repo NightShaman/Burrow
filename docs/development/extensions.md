@@ -47,7 +47,21 @@ Current development Core provides a generic host contract for a mod to own nativ
 
 The live owner provider is required for dependent turns. Disablement, host failure/replacement, a missing provider, timeout or invalid output fails with `mod_agent_unavailable`. Context is selected by logical conversation session ID, including fresh scheduled turns. The native bridge reaches only the owner's current published tools, independently of external MCP. See [runtime context construction](../architecture/runtime.md#mod-owned-native-context).
 
+Owned-agent reads include the canonical chat `avatar`. An owned update may set `avatar` through Core identity validation; creation does not accept that field. This is separate from the original reference photo. The Settings host exposes `optimizeAvatar` for the native small-avatar workflow.
+
 Owned `referenceImages.get`, `.put` and `.remove` use the canonical agent reference store. Portable settings preserve ownership/capability/visibility records; restoring an unavailable owner leaves its agent unavailable, and conflicting regular/mod or different-owner identities are rejected. This host contract is not a separate public HTTP endpoint or a guarantee that every declared flag is exposed by every route.
+
+## Contribute Settings and Archive UI
+
+Imperative Settings sections can opt into `form`, `form-wide`, `form-inventory` or `document` layout metadata. `form` keeps the complete save scope in primary on the left half of a wide workspace; `form-wide` spans both tracks. `form-inventory` uses overflow for the left inventory and primary for its editor. `document` instead uses primary for document choices and overflow for the editor. Below 640px available work-area width, the corresponding panes stack or fill the width. Host surfaces remain stable; metadata does not create declarative content or protect drafts by itself.
+
+Register one current draft with `setDraft` and route editor replacement through `navigate`. `navigateSection(sectionId, beforeNavigate?)` changes to a declared section through the same guard; its optional synchronous callback runs only after acceptance, before the section changes. Invalid destinations and disposed mounts are ignored. Feature-detect these APIs rather than using an unguarded fallback on older hosts.
+
+`setEntitySelector({label, items, selectedId, onSelect, addLabel?, onAdd?})` places an owner-managed selector in the native horizontal row above the sections. Items are `{id,label,disabled?}`. Use guarded navigation inside callbacks. The row and scroll position survive same-owner section remounts, but old callbacks are inert; each new mount must publish fresh selection/callbacks or `null`. Owner, entry-URL or externally selected-resource changes, declarative content and mount failure clear it. This does not preserve the previous section's draft or surfaces.
+
+Archive mounts receive host `date` and `timeZone`; forward them together to date-aware APIs. When available, `configureHeader` opts into native heading controls and `filters: {search, participantId, category}`. Configure categories and a complete authorized participant catalogue as `{id,label}` arrays; disable incomplete participant discovery with `participantsDisabled` and explain it with `participantsStatus`. The host keeps valid selections when labels/options refresh and supplies changes through `update(context)`. Removed selections reset only after a complete roster replacement; changing mod identity/version resets filters. Feature-detect header support and do not render duplicate controls. A mod without date availability leaves all calendar dates selectable; native calendar markers do not certify its records.
+
+This generic host contract does not establish adoption by any particular mod. Mods remain responsible for request cancellation, stale-result handling, filtering before pagination, accurate totals and cleanup; host disposal makes obsolete registration callbacks inert but cannot cancel arbitrary mod network work.
 
 ## Extend a model adapter
 
@@ -65,7 +79,7 @@ Provider wire protocols belong in Core's model-adapter layer. Test request const
 
 ## Full home-Core API capability
 
-Current Core supports the independently declared and operator-granted `core-api-v1` system capability. `context.coreApi.request` requires a live tool invocation, trusted Core-bound caller and membership in the mod's Core-owned `adminAgentIds` on each admission. It is full administrative access to the home Core API, not the managed read-only diagnostics subset, a remote proxy or a GET-only endpoint allowlist. Activations, background work and detached callbacks cannot use a completed invocation's authority. Revocation blocks subsequent admissions; it does not undo already admitted side effects.
+Current Core supports the independently declared and operator-granted `core-api-v1` system capability. `context.coreApi.request` requires a live tool invocation, trusted Core-bound caller and membership in the mod's Core-owned `coreApiAgentIds` on each admission. It is full administrative access to the home Core API, not the managed read-only diagnostics subset, a remote proxy or a GET-only endpoint allowlist. Activations, background work and detached callbacks cannot use a completed invocation's authority. Revocation blocks subsequent admissions; it does not undo already admitted side effects.
 
 Requests accept a local `/api` path and optional method, headers, and exactly one of JSON `body`, UTF-8 `bodyText` or `bodyBase64`. Responses preserve status, headers, encoding, original byte length and complete finite body; HTTP errors remain response data. Finite NDJSON is aggregated, not delivered incrementally. The default 96 MiB response allocation ceiling fails explicitly rather than returning truncated success. Response failure does not roll back an already executed mutation; reconcile before retrying.
 

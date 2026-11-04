@@ -4,7 +4,6 @@
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
 
 The execution-boundary call sites and mod-authority contracts below were checked against current Backend source. Static review does not certify a deployed host's isolation.
@@ -57,7 +56,6 @@ There is no independent native `delete` hard-block evaluation in this review fun
 !!! warning "No default command safety classifier"
     Ordinary mutations are permitted absent applicable configured blockers. A command's display labels, a natural-language instruction, or a selected project do not create a hard deny rule. Shell commands can reach resources permitted by the host account.
 
-
 The execution-policy helper filters for explicit user-configured hard blockers. Its mutation capability is allowed when those blockers are absent, and its commit capability additionally requires structural action `factory` or `commit`. This is the helper's workflow policy, not a guarantee that arbitrary `git` commands inside unrestricted shell are prohibited. Legacy mutation/commit gates use observed tool receipts and verification evidence; they are workflow safeguards, not kernel isolation.
 ## Minion boundary propagation
 
@@ -69,7 +67,7 @@ Saving a connection or discovering its catalog does not grant an agent permissio
 Catalog visibility and invocation permission are distinct: capability discovery can show `granted: false`. Follow [MCP connections and grants](../concepts/mcp.md) to configure the intended set; scope the provider's own credentials to the minimum required access. `mcporter` transports the request and is not the authority for BURROW agent grants.
 
 Mod-provided tools use the same catalog model with a live `mod` transport. A tool marked `mod-authorized` delegates record/agent authorization to its trusted handler; this exception does not apply to arbitrary HTTP or stdio MCP providers. For mod calls, execution re-reads current connection/grant state and checks the live host/tool identity, including when an action was queued earlier in the turn. Ordinary external MCP calls use the resolved execution-context connection/grant data. Do not promise the same database reread for every transport.
-Core system-mod capabilities also require operator-owned authority. `core_mod_authority` stores explicit capability grants, administrative agent IDs and diagnostic agent IDs; a mod manifest does not grant those powers. `GET`/`PUT /api/operator/mods/{modId}/access` manages the full replacement and reports restart requirements. Historical public 2026.10.19 required an authenticated operator even in `none` mode. Current Core permits direct UI access in `none` mode and requires operator login when authentication is enabled; diagnostics/API tokens do not authorize this access-settings route. This is an ordinary contract update, not a security assessment of the deployment.
+Core system-mod capabilities also require operator-owned authority. `core_mod_authority` stores explicit capability grants and independent management, full Core API and diagnostic agent lists. `modManagementAgentIds` authorizes the `mod-management-v1` caller, `coreApiAgentIds` authorizes the `core-api-v1` caller, and `diagnosticAgentIds` controls cross-agent diagnostics. Access replacement requires all four arrays including `grants`; granting one list does not grant another; a mod manifest does not grant those powers. `GET`/`PUT /api/operator/mods/{modId}/access` manages the full replacement and reports restart requirements. Historical public 2026.10.19 required an authenticated operator even in `none` mode. Current Core permits direct UI access in `none` mode and requires operator login when authentication is enabled; diagnostics/API tokens do not authorize this access-settings route. This is an ordinary contract update, not a security assessment of the deployment.
 
 Mod handlers receive untrusted arguments separately from trusted caller context and must implement their own argument and record-access checks. Installation is a code-trust decision; see [Extensions](../development/extensions.md) and [Trust boundaries](trust-boundaries.md#installed-mods-are-trusted-code).
 

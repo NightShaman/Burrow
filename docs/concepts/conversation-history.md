@@ -4,7 +4,6 @@
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
-
 A conversation is scoped by agent and session. PostgreSQL stores active entries, immutable archive snapshots and session metadata. Explicit session search and Dream can resolve evidence through these persisted originals. Brains stores saved memories separately.
 
 ## Original-message storage
@@ -28,8 +27,7 @@ Live entries have session-scoped unique entry IDs and idempotency keys. Append l
 Compaction and reset update generation counters transactionally. Fork defaults to the latest 200 active entries, reserves the target and rejects an existing target or the source itself.
 
 !!! warning "Reset preserves history"
-    Reset starts a fresh active transcript but retains earlier original messages in reset archives. Explicit agent-history search and Dream can still use those originals. Reset is not an erasure operation.
-
+    Reset starts a fresh active transcript but retains earlier original messages in reset archives. Explicit agent-history search and Dream can still use those originals. Reset is not an erasure operation. A reset request can carry an `operationId`, recorded with the committed reset generation so a client can reconcile a lost response by reading the same session. It is not an idempotency key; never automatically resend a reset because its response timed out. See [reset outcome reconciliation](../reference/api/sessions.md#reset-outcome-reconciliation).
 
 ## Compression and prompt context
 
@@ -113,7 +111,6 @@ Trace cleanup plans are dry-run by default; deletion requires explicit confirmat
 
 !!! warning "Deletion is not a complete-erasure guarantee"
     The old `/api/albdruck/purge-conversation` route is no longer mounted. Internal legacy purge code is not a supported HTTP workflow. Brains soft deletion, session retention, attachment cleanup, migration snapshots and external backups are distinct; no single operation here establishes erasure of every derivative or copy. The current retention preview/run API manages traces; it does not restore per-conversation purge. Inspect the appropriate cleanup targets before confirming any deletion.
-
 
 Use the operator [API reference](../reference/api.md) and [procedures](../operations/procedures.md) rather than direct SQL deletion. Review [Backup and recovery](../operations/backup-recovery.md) before applying irreversible retention changes.
 

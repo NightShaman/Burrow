@@ -27,6 +27,8 @@ Many settings editors guard unsaved changes when you switch sections, select ano
 3. Type a message and press **Enter** or click **Send message**. Use **Shift+Enter** for a new line.
 4. Watch the response and tool activity. Use **Stop response** to request cancellation. Choose Queue next, Steer, or Side question explicitly while a main run is busy; see the delivery choices below.
 
+For a loaded ordinary agent, **Edit Agent** above the conversation opens that selected agent in **Settings → Agents** through the normal navigation guard. Mod-owned agents keep their owning mod's editor route.
+
 A useful first request is specific about the result and location: “Inspect /srv/projects/example and summarize its test setup. Do not change files.” The agent's workspace is on the machine running Burrow or its assigned execution provider, not automatically on the computer displaying the web page.
 
 [Source: chat controls and steering](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatPage.tsx#L17-L131) · [Source: composer keys and buttons](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/chat/ChatComposer.tsx#L211-L221)
@@ -46,6 +48,10 @@ Acceptance is not completion. Inspect each input's status/result; a queue item c
 Side-question cards show snapshot time and source run/phase. Their answer is historical context, **not fresh verification**: no commands, tools, or new inspection run. Historical attachments are not replayed; newly attached material uses normal current-turn handling. Side question/answer records remain visible but do not automatically enter the main agent's prompt, summary, or continuity. **Use in main conversation** adds editable answer text to the existing draft without submitting it. Review/edit it, then explicitly Send/Queue next or Steer to introduce that instruction into the main lane.
 
 **Stop response** stops the main lane and holds current and future queued main inputs. `/stop` sets the hold even if no main run is active. **Resume queue** releases all held inputs in order, not only the selected item, and does not restart cancelled work. Cancelling a side question does not hold the main queue. Reset/`/new` fences old-generation queued/running work; refresh rather than resubmitting stale actions. After interruption, inspect receipts before creating replacement work.
+
+### If a reset response is lost
+
+The current UI gives reset a longer request budget, then checks its saved operation receipt if the response is uncertain. It never automatically repeats the reset. If you see **Reset outcome could not be confirmed**, refresh the session and inspect its state before trying again; a timeout does not prove the reset failed. An unconfirmed reset preserves the existing conversation and composer. Reset starts fresh active history while keeping the previous transcript in Archive, rather than erasing it.
 
 ### Compact working context without resetting history
 

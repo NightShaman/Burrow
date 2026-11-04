@@ -104,7 +104,7 @@ Identical structural spawn requests within the same parent lineage can reuse an 
 
 For an unknown or ambiguous peer, use Core-native `agents_list`. No Backdoor skill, MCP catalog lookup, health probe or peer-session inspection is needed for ordinary A2A. A known unambiguous peer can be messaged directly.
 
-The directory returns only exact `{id, name, enabled}` cards, with enabled agents by default. Optional `query` matches case-insensitive ID/name substrings; `includeDisabled: true` includes disabled identities. `limit` is 1–20 (default 20); follow `nextCursor` with unchanged filters until null. `totalCount` describes the filtered directory. If the registry changes, restart the listing. If provider-context projection reports omitted cards, narrow the query or page before advancing. Directory membership is not a health check or permission to inspect peer data.
+The directory returns only exact `{id, name, enabled}` cards, with enabled agents by default. Optional `query` matches case-insensitive ID/name substrings; `includeDisabled: true` includes disabled identities. `limit` is 1–20 (default 20); omit `cursor`, use null or use an empty string for the first page. For subsequent pages follow `nextCursor` with unchanged filters until null. `totalCount` describes the filtered directory. If the registry changes, restart the listing. If provider-context projection reports omitted cards, narrow the query or page before advancing. Directory membership is not a health check or permission to inspect peer data.
 
 | Mode | Behavior |
 |---|---|
@@ -122,6 +122,12 @@ The default mode is `request_reply`. Current Core routes new implicit deliveries
   "content": "Review the proposed interface and return your conclusion with any blockers."
 }
 ```
+
+### Reply delivery and attribution
+
+For an active `request_reply` or `request_reply_complete` exchange, the recipient's final response is automatically returned to the sender. Do not separately send that same answer with `agent_send_message`. Distinct progress, deliberate follow-up questions and other-peer messages can still use the messaging tool when it is available. This request-local guidance does not activate for ordinary operator turns or merely reading historical peer messages, and it is not mechanical text deduplication.
+
+Incoming peer speech stays attributed to the sending agent. Outbound speech replays as the sender's own assistant-role history, including after compaction-tail rotation. A shared A2A source run ID alone does not make an outbound message the owner of a provider-input snapshot. Compact transcript results retain the real recipient ID for display labels.
 
 ### Dedicated inbox history
 

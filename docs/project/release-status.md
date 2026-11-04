@@ -18,9 +18,9 @@ Later Core implementation was also reviewed. This historical comparison is not a
 
 Reviewed on **22 October 2026**: ordinary mods can request asynchronous, potentially paid image jobs through Core’s saved Forge selection and read only their own image jobs. The [Tutor Forge lesson](https://docs.goblin-kingdom.com/burrow-tutor/forge-images/) covers consent, durable retries, and previews. This interface is absent from the older public snapshot above. Current guides follow implementation; the public snapshot follows the daily sync. Update Core alongside mods that use this capability.
 
-## Current implementation check: 1 November 2026
+## Full implementation check: 1 November 2026
 
-This nightly pass uses current development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
+The 1 November full pass used its dated development implementation as documentation truth; it does not wait for a public mirror or alter a release. Pins:
 
 - Assembled Burrow: `fe851c4e546c9bf9f53f861e24f918474432c296`.
 - Core: `8b5889115680bcdbf698f1b93126254e1cf4d2e6`.
@@ -83,3 +83,9 @@ Current inspected assembly **2026.11.02.4**, commit `d25beccce60830cf4159d91cae9
 Current inspected assembly **2026.11.03.8**, commit `400ec8f2d0b24478ca2185bf8c38aee2ede4c445`, records Core `32dde3266a231777ddfec6dba141d6b9972a21fd` and UI `4a17a8c73c588a7582835ca6ff50dcabe409c33c`. This ordinary pass follows the merged Settings layout contract, horizontal agent-button overflow, latest-request context measurement and correlated provider usage, generic mod-owned native agent isolation, and preserved executable permissions in the release artifact handoff. The application schema reaches migration 90 for mod-owned agent metadata. The separately documented mod and skill repositories have no newer source commits than the previous documentation baseline; their cross-component compatibility is still checked.
 
 The full review remains dated **1 November**. This is static source reconciliation and safe documentation validation, not application/provider testing, a runtime deployment or proof that public releases and installed versions already include these changes.
+
+## 4 November implementation delta
+
+Inspected assembly **2026.11.04.9**, commit `86f41581cf4feccbd2126db38a6b746db6483080`, records Core `b62c57ef5e831bacebf2214a31c04147471c1267` and UI `f952d9494f97326f3f656c5a5427e9d4efc20e3a`. This ordinary pass reconciles independent mod-management/Core API agent authority, reset operation receipts and read-only outcome recovery, automatic A2A final delivery and transcript attribution, empty initial peer-directory cursors, canonical owned-agent avatars, imperative Settings layout/selector/navigation contracts and opt-in Archive heading/date/timezone support. The application schema reaches migration 92.
+
+The full review remains dated **1 November 2026**. This is changed-source/static documentation reconciliation, not application/provider testing, runtime deployment, public release promotion or proof of your installed behavior. Earlier dated sections and public-source links are historical evidence; current component and skill receipts are maintained separately. Menagerie remains a homepage placeholder, without a new full documentation section.

@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.03.8` | `400ec8f2d0b24478ca2185bf8c38aee2ede4c445` |
-| Core / Backend | `32dde3266a231777ddfec6dba141d6b9972a21fd` |
-| UI | `4a17a8c73c588a7582835ca6ff50dcabe409c33c` |
-| Skills | `f0f033fcd5b795bdc0a5dc8ec548ef82488e8f0e` |
+| Assembled Burrow, build `2026.11.04.9` | `86f41581cf4feccbd2126db38a6b746db6483080` |
+| Core / Backend | `b62c57ef5e831bacebf2214a31c04147471c1267` |
+| UI | `f952d9494f97326f3f656c5a5427e9d4efc20e3a` |
+| Skills | `0df0b5429d70fb327ca1875d3fb706cefdeab330` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -97,3 +97,9 @@ The current table pins build 2026.11.02.4 and its matching Backend/UI sources. T
 Current inspected assembly **2026.11.03.8**, commit `400ec8f2d0b24478ca2185bf8c38aee2ede4c445`, records Core `32dde3266a231777ddfec6dba141d6b9972a21fd` and UI `4a17a8c73c588a7582835ca6ff50dcabe409c33c`. This ordinary pass follows the merged Settings layout contract, horizontal agent-button overflow, latest-request context measurement and correlated provider usage, generic mod-owned native agent isolation, and preserved executable permissions in the release artifact handoff. The application schema reaches migration 90 for mod-owned agent metadata. The separately documented mod and skill repositories have no newer source commits than the previous documentation baseline; their cross-component compatibility is still checked.
 
 The full review remains dated **1 November**. This is static source reconciliation and safe documentation validation, not application/provider testing, a runtime deployment or proof that public releases and installed versions already include these changes.
+
+## 4 November implementation delta
+
+Inspected assembly **2026.11.04.9**, commit `86f41581cf4feccbd2126db38a6b746db6483080`, records Core `b62c57ef5e831bacebf2214a31c04147471c1267` and UI `f952d9494f97326f3f656c5a5427e9d4efc20e3a`. This ordinary pass reconciles independent mod-management/Core API agent authority, reset operation receipts and read-only outcome recovery, automatic A2A final delivery and transcript attribution, empty initial peer-directory cursors, canonical owned-agent avatars, imperative Settings layout/selector/navigation contracts and opt-in Archive heading/date/timezone support. The application schema reaches migration 92.
+
+The full review remains dated **1 November 2026**. This is changed-source/static documentation reconciliation, not application/provider testing, runtime deployment, public release promotion or proof of your installed behavior. Earlier dated sections and public-source links are historical evidence; current component and skill receipts are maintained separately. Menagerie remains a homepage placeholder, without a new full documentation section.

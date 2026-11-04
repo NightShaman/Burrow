@@ -255,3 +255,7 @@ Check the saved **Thinking** mode as well as **Effort**. Legacy Off means Disabl
 ## A scheduled task did not execute
 
 Read the saved job's **Last** outcome and task's current assignment/status. Only a saved, unarchived To Do task assigned to that job's agent can start. Skipped/missed is not completion. A one-time job is consumed by manual Run now or its due occurrence even if skipped; it is not still waiting for the original time. Correct the task or create a deliberately new schedule after reviewing existing receipts. See [scheduling](../guide/tasks.md#schedule-a-saved-board-task-or-a-one-time-run).
+
+## Reset outcome could not be confirmed
+
+Do not immediately repeat Reset. A transport timeout can occur after the database committed the reset. Refresh the same agent/session and inspect active history and Archive. Current UI resets carry a unique operation ID and reconcile it with a read-only session request; only an exact saved receipt with a positive reset generation and empty active turns establishes that UI attempt succeeded. If verification is unavailable, the UI keeps the prior conversation/composer. The operation ID is not a deduplication key and a second reset is a new mutation. See [reset outcome reconciliation](../reference/api/sessions.md#reset-outcome-reconciliation).

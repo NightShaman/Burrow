@@ -45,6 +45,12 @@ Tool results include source references, dates and neighboring dialogue. The tool
 
 No historical search is automatically run before a turn: the compatibility recall helper reports `automatic_recall_disabled`, and the support builder supplies no automatic session recall. Ask the agent to retrieve previous discussion explicitly, or use Archive/session search yourself.
 Continuity scope is an operator-selected namespace. GET/DELETE use query fields; PUT accepts agent/session plus `continuityScope` (or `scope`). It is not a path, cwd or execution-target selector. Handoff and handoff-candidate endpoints persist continuity evidence; they do not grant authority to change agent identity.
+## Reset outcome reconciliation
+
+`POST /api/sessions/{sessionId}/reset` accepts optional JSON `{ "operationId": "client-chosen-operation-id" }`. Core records that nonempty string atomically as `session.metadata.resetOperationId` together with `resetGeneration`. Read the same agent/session with `GET /api/sessions/{sessionId}?agentId=...` after a lost response. This is an outcome receipt, **not an idempotency key**: repeating the POST can reset again.
+
+The current UI allows 120 seconds for reset instead of the ordinary 30-second JSON request budget. After a transport/server failure, it performs a read-only check for the exact operation ID, positive safe-integer reset generation and empty turns on the same session. If that cannot prove success, it preserves the conversation/composer and asks for a refresh before trying again. Most explicit 4xx rejections are returned directly; 408 is treated as an uncertain outcome. A timeout alone proves neither failure nor rollback.
+
 ## Archive pagination
 
 | Surface | Useful selectors |

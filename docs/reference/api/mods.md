@@ -4,7 +4,6 @@
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
-
 Mods are trusted installed server/UI code. Distribution, activation, tool grants and application data are separate lifecycles. See [extension development](../../development/extensions.md) and [trust boundaries](../../security/trust-boundaries.md) before installing a source.
 
 ## Catalog and management
@@ -18,7 +17,7 @@ Sources use validated Git URLs, tagged manifests and checked archives. The curre
 Uninstall refuses system mods and preserves mod settings, encrypted secrets and `mods/mod-data/<id>`. Removing source metadata and uninstalling code are separate actions. Active lifecycle changes can be refused while the mod is busy; inspect the response rather than retrying destructive transitions blindly.
 ## Operator-owned system capability access
 
-`GET`/`PUT /api/operator/mods/{modId}/access` reads or replaces `grants`, `adminAgentIds` and `diagnosticAgentIds`. Supply all three arrays on replacement; grants must be declared by that mod and supported by Core. A manifest alone does not grant system capabilities. The response includes `declaredCapabilities` and reports `restartRequired` after a save.
+`GET`/`PUT /api/operator/mods/{modId}/access` reads or replaces `grants`, `diagnosticAgentIds`, `modManagementAgentIds` and `coreApiAgentIds`. Supply all four arrays on replacement; grants must be declared by that mod and supported by Core. `mod-management-v1` checks the trusted caller against `modManagementAgentIds`; `core-api-v1` checks `coreApiAgentIds`. Diagnostic cross-agent scope still uses `diagnosticAgentIds`. These lists are independent. Migration 91 copies existing Core-owned `adminAgentIds` into both new lists once; the legacy column is not consulted afterward. A manifest alone does not grant system capabilities. The response includes `declaredCapabilities` and reports `restartRequired` after a save.
 
 Current source accepts authenticated operator requests when UI authentication is enabled and direct operator requests in `none` mode. API tokens remain rejected. Historical public 2026.10.19 required an authenticated operator even in `none` mode; do not apply that older exception to the current implementation.
 
