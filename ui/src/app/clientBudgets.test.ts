@@ -13,10 +13,16 @@ describe('client budgets', () => {
   });
   it('accepts only positive safe-integer deployment overrides', async () => {
     vi.stubGlobal('window', {
-      __BURROW_CLIENT_BUDGETS__: { requestDeadlineMs: 1234, attachmentCount: 0, unexpected: 4 },
+      __BURROW_CLIENT_BUDGETS__: {
+        requestDeadlineMs: 1234,
+        sessionResetDeadlineMs: 4567,
+        attachmentCount: 0,
+        unexpected: 4,
+      },
     });
     const module = await import('./clientBudgets');
     expect(module.clientBudgets.requestDeadlineMs).toBe(1234);
+    expect(module.clientBudgets.sessionResetDeadlineMs).toBe(4567);
     expect(module.clientBudgets.attachmentCount).toBe(clientBudgets.attachmentCount);
     expect(Object.isFrozen(module.clientBudgets)).toBe(true);
   });

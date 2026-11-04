@@ -595,6 +595,8 @@ export type ChatSession = {
     conversationId?: string;
     transcriptGeneration?: string;
     resetAt?: string;
+    resetGeneration?: number;
+    resetOperationId?: string | null;
   };
 };
 
@@ -694,7 +696,11 @@ export async function apiLocal<T>(path: string, init: RequestInit = {}): Promise
   return api<T>(path, init);
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  options: { deadlineMs?: number } = {},
+): Promise<T> {
   if (path === '/api/chat') return parseApiResponse<T>(await fetchApi(path, init));
   const controller = new AbortController();
   const signal = init.signal
@@ -702,7 +708,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     : controller.signal;
   const timeout = window.setTimeout(
     () => controller.abort(new DOMException('Request deadline exceeded', 'TimeoutError')),
-    clientBudgets.requestDeadlineMs,
+    options.deadlineMs ?? clientBudgets.requestDeadlineMs,
   );
   try {
     const response = await fetch(path, browserRequestInit({ ...init, signal }));

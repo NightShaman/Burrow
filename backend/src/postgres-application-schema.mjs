@@ -1,3 +1,4 @@
+import { POSTGRES_RESET_PROJECTIONS_SQL } from './postgres-reset-projections.mjs';
 import { POSTGRES_CHAT_RESULT_PROJECTION_SQL } from './postgres-chat-result-projection.mjs';
 import { POSTGRES_AGENT_REFERENCE_IMAGE_SQL, POSTGRES_MOD_REFERENCE_IMAGE_SQL, POSTGRES_OPERATOR_REFERENCE_IMAGE_SQL } from './postgres-agent-reference-image-store.mjs';
 import { POSTGRES_ANTHROPIC_THINKING_SQL } from './postgres-anthropic-thinking.mjs';
@@ -232,4 +233,5 @@ ALTER TABLE core_mod_authority ADD COLUMN mod_management_agent_ids JSONB NOT NUL
 ALTER TABLE core_mod_authority ADD COLUMN core_api_agent_ids JSONB NOT NULL DEFAULT '[]';
 UPDATE core_mod_authority SET mod_management_agent_ids=admin_agent_ids, core_api_agent_ids=admin_agent_ids;
 ` },
+  { version: 92, name: 'reset-archive-projection-copies', sql: POSTGRES_RESET_PROJECTIONS_SQL },
 ]);

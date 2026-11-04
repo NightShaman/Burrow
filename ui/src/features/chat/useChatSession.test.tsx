@@ -100,11 +100,15 @@ describe('useChatSession', () => {
       });
       expect(result.current.sessionId).toBe(destination);
       expect(result.current.turns).toEqual([]);
-      expect(apiMock).toHaveBeenCalledWith(`/api/sessions/${destination}/reset?agentId=luna`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
+      expect(apiMock).toHaveBeenCalledWith(
+        `/api/sessions/${destination}/reset?agentId=luna`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: expect.any(String),
+        },
+        { deadlineMs: 120_000 },
+      );
       act(() => {
         result.current.leaveNewSessionForMessage();
         result.current.appendTurn(agentId, result.current.sessionId, {

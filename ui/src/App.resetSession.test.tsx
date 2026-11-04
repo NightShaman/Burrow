@@ -182,6 +182,23 @@ describe('Reset Session pending feedback', () => {
     expect(resetButton().disabled).toBe(false);
   });
 
+  it('preserves operator text and attachments when reset outcome is unconfirmed', async () => {
+    mocks.resetSession.mockRejectedValue(
+      new Error('Reset outcome could not be confirmed. Refresh the session before trying again.'),
+    );
+    renderApp();
+    await act(async () => {
+      fireEvent.click(resetButton());
+    });
+    expect(mocks.reportError).toHaveBeenCalledWith(
+      'Could not start a new session: Reset outcome could not be confirmed. Refresh the session before trying again.',
+    );
+    expect(mocks.setDraft).not.toHaveBeenCalled();
+    expect(mocks.clearAttachment).not.toHaveBeenCalled();
+    expect(mocks.refreshSessions).not.toHaveBeenCalled();
+    expect(mocks.resetSession).toHaveBeenCalledTimes(1);
+  });
+
   it('restores reset when a late response is discarded after navigation', async () => {
     const reset = deferred<boolean>();
     mocks.resetSession.mockReturnValue(reset.promise);

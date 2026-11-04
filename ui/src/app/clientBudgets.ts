@@ -7,7 +7,8 @@
  * limits bound localStorage parse/stringify work and avoid one session monopolizing
  * storage. Archive caps bound restored list/detail payload work. The 30s request
  * deadline is a recovery bound for ordinary JSON/body parsing; chat streams are
- * exempt because their duration is user-driven.
+ * exempt because their duration is user-driven. Session resets have a separate
+ * 120s deadline to allow long transcripts to be archived atomically.
  * Defaults account for base64 expansion (~4/3) plus UTF-16 preview strings:
  * a 16 MiB batch can occupy ~43 MiB before decoded image surfaces. Eight files
  * bound simultaneous FileReader work. The 8 MiB serialized cache budget counts
@@ -27,7 +28,8 @@ type BudgetName =
   | 'archiveSessionCacheEntries'
   | 'archiveDetailCacheEntries'
   | 'archiveSessionRowsPerQuery'
-  | 'requestDeadlineMs';
+  | 'requestDeadlineMs'
+  | 'sessionResetDeadlineMs';
 type BudgetOverrides = Partial<Record<BudgetName, number>>;
 declare global {
   interface Window {
@@ -46,6 +48,7 @@ const defaults: Record<BudgetName, number> = {
   archiveDetailCacheEntries: 24,
   archiveSessionRowsPerQuery: 500,
   requestDeadlineMs: 30_000,
+  sessionResetDeadlineMs: 120_000,
 };
 function configuredBudgets(): BudgetOverrides {
   const candidate = typeof window === 'undefined' ? null : window.__BURROW_CLIENT_BUDGETS__;

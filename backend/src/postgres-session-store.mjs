@@ -1,3 +1,4 @@
+import { POSTGRES_RESET_PROJECTIONS_SQL } from './postgres-reset-projections.mjs';
 import { POSTGRES_CHAT_RESULT_PROJECTION_SQL } from './postgres-chat-result-projection.mjs';
 import { POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL } from './postgres-archive-discovery-indexes.mjs';
 import { POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL } from './postgres-archive-chat-projection.mjs';
@@ -656,7 +657,7 @@ UPDATE conversation_entries SET has_payload_id=NULL;
 UPDATE conversation_archive_entries SET has_payload_id=NULL;
 `;
 
-export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL + POSTGRES_ARCHIVE_LEXICAL_SQL + POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL + POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL + POSTGRES_CHAT_RESULT_PROJECTION_SQL;
+export const POSTGRES_SESSION_FULL_SCHEMA_SQL = POSTGRES_SESSION_SCHEMA_SQL + POSTGRES_SESSION_ARCHIVE_SCHEMA_SQL + POSTGRES_SESSION_LOSSLESS_JSON_SCHEMA_SQL + POSTGRES_SESSION_OPERATOR_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_LOOKUP_SCHEMA_SQL + POSTGRES_SESSION_ORIGINAL_ROWS_SCHEMA_SQL + POSTGRES_SESSION_SEARCH_SCHEMA_SQL + POSTGRES_SESSION_NATIVE_SCHEMA_SQL + POSTGRES_SESSION_METADATA_SCHEMA_SQL + POSTGRES_SESSION_ASCII_SEARCH_SCHEMA_SQL + POSTGRES_CONTINUITY_STATE_SCHEMA_SQL + POSTGRES_RESET_INSTANT_SQL + POSTGRES_HISTORY_KEYSET_SQL + POSTGRES_LOGICAL_MEMBER_SQL + POSTGRES_ARCHIVE_RELATIONAL_ID_SQL + POSTGRES_CATALOG_SCALAR_ID_SQL + POSTGRES_LOGICAL_LOOKUP_INDEX_SQL + POSTGRES_AGENT_DELIVERY_SCHEMA_SQL + POSTGRES_AGENT_DELIVERY_OWNER_SQL + POSTGRES_OPERATOR_INSTANT_SQL + POSTGRES_ARCHIVE_LISTING_INDEX_SQL + POSTGRES_COMPACTION_PROJECTIONS_SQL + POSTGRES_ARCHIVE_LEXICAL_SQL + POSTGRES_ARCHIVE_CHAT_PROJECTION_SQL + POSTGRES_ARCHIVE_DISCOVERY_INDEX_SQL + POSTGRES_CHAT_RESULT_PROJECTION_SQL + POSTGRES_RESET_PROJECTIONS_SQL;
 
 const text = (value) => String(value ?? '');
 const required = (value, name) => { const result = text(value).trim(); if (!result) throw new Error(`${name} is required`); return result; };
@@ -1597,7 +1598,7 @@ export class PostgresSessionStore {
     return this.reset({ agentId, sessionId, freshExecutionSessionId: executionSessionId, a2aReservation: true });
   }
 
-  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {}, freshExecutionSessionId = null, a2aReservation = false } = {}) {
+  async reset({ agentId: rawAgentId, sessionId: rawSessionId, metadata = {}, operationId = null, freshExecutionSessionId = null, a2aReservation = false } = {}) {
     const agentId = required(rawAgentId, 'agentId'); const sid = required(rawSessionId, 'sessionId'); const now = this.clock();
     return withPostgresTransaction(this.pool, async (client) => {
       await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sid])}`)]);
@@ -1656,7 +1657,8 @@ export class PostgresSessionStore {
         WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,now]);
       await client.query(`INSERT INTO continuity_log(agent_id,session_id,head,manifest,queue,created_at)
         SELECT agent_id,session_id,head,manifest,queue,$3 FROM continuity_state WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,now]);
-      const rows = await client.query('SELECT entry FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 ORDER BY sequence', [agentId, sid]);
+      // Reset needs existence, not 28 MB of JSON transferred to Node and parsed.
+      const rows = await client.query('SELECT 1 FROM conversation_entries WHERE agent_id=$1 AND session_id=$2 LIMIT 1', [agentId, sid]);
       const archiveId = rows.rows.length ? randomUUID() : null;
       const generation = Number(prior.generation || 0) + 1;
       // Materialize the reconstructed count once at reset, not on every Archive
@@ -1685,13 +1687,18 @@ export class PostgresSessionStore {
       if (archiveId) await client.query("SELECT set_config('jit',$1,true)", [countJit]);
       if (archiveId) await client.query('INSERT INTO conversation_archives(agent_id,session_id,archive_id,generation,kind,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)', [agentId, sid, archiveId, generation - 1, 'reset', JSON.stringify({ ...prior, ...metadata, sourceSessionId: sid, archivedAt: now, chatTurnCount: null, archiveTranscriptTurnCount }), now]);
       const resetProofColumn = await this.hasProofProjection(client) ? ',run_key' : '';
+      // Older direct-schema fixtures do not include the chat projection yet.
+      // Production always has v82+, and copies its completed marker verbatim.
+      const hasChatProjection = (await client.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='conversation_entries' AND column_name='archive_chat_projected') AS available`)).rows[0]?.available === true;
+      const projections = 'entry_key,search_projection,search_grams,has_payload_id,has_compression_summary,operator_at,operator_ts_fallback,operator_projected'
+        + (hasChatProjection ? ',archive_chat_visible,archive_chat_at,archive_chat_projected' : '');
       if (archiveId) await client.query(`INSERT INTO conversation_archive_entries
-        (agent_id,session_id,source_store,source_id,ordinal,entry_key,entry,search_projection,created_at,archive_kind,generation,entry_id,idempotency_key${resetProofColumn})
-        SELECT agent_id,session_id,'archive',$3,sequence,to_json(entry_id)::text,entry,
-          COALESCE(burrow_json_member(entry,'content')::text,''),created_at,$4,$5,entry_id,idempotency_key${resetProofColumn}
+        (agent_id,session_id,source_store,source_id,ordinal,entry,created_at,archive_kind,generation,entry_id,idempotency_key,${projections}${resetProofColumn})
+        SELECT agent_id,session_id,'archive',$3,sequence,entry,created_at,$4,$5,entry_id,idempotency_key,${projections}${resetProofColumn}
         FROM conversation_entries WHERE agent_id=$1 AND session_id=$2`, [agentId,sid,archiveId,'reset',generation-1]);
       await client.query('DELETE FROM conversation_entries WHERE agent_id=$1 AND session_id=$2', [agentId, sid]);
-      const next = { ...prior, ...metadata, generation, resetGeneration: generation, archived: false, resetAt: now, archiveId, turnCount: 0, chatTurnCount: 0 };
+      const next = { ...prior, ...metadata, generation, resetGeneration: generation, archived: false, resetAt: now, resetOperationId: operationId, archiveId, turnCount: 0, chatTurnCount: 0 };
       await client.query('UPDATE conversation_sessions SET metadata=$3::jsonb,updated_at=$4 WHERE agent_id=$1 AND session_id=$2', [agentId, sid, JSON.stringify(next), now]);
       return { ok: true, agentId, sessionId: sid, archiveId, generation, metadata: { ...next, updatedAt: now } };
     });

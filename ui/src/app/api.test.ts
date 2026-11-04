@@ -168,6 +168,37 @@ describe('API requests', () => {
     vi.useRealTimers();
   });
 
+  it('allows the reset-specific deadline without changing ordinary request deadlines or retrying', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockImplementation(
+          (_path, init: RequestInit) =>
+            new Promise((_resolve, reject) =>
+              init.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
+            ),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+      const pending = api(
+        '/api/sessions/default/reset?agentId=a',
+        { method: 'POST', body: '{}' },
+        { deadlineMs: 120_000 },
+      );
+      const expectation = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect((fetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expectation;
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('combines caller cancellation with the deadline and does not retry requests', async () => {
     vi.useFakeTimers();
     const caller = new AbortController();

@@ -1,4 +1,6 @@
 import { api, type ChatSession, type SessionSummary } from '../../app/api';
+import { secureUuid } from '../../app/secureUuid';
+import { clientBudgets } from '../../app/clientBudgets';
 import { readStoredValue, writeStoredValue } from '../../app/browserStorage';
 
 export const sessionListCacheStorageKey = 'hc.chatSessions.v1';
@@ -90,10 +92,44 @@ export function createChatSessionRepository(): ChatSessionRepository {
       return response.session;
     },
     async resetSession(agentId, sessionId) {
-      await api(
-        `/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(agentId)}`,
-        { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-      );
+      const sessionPath = `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(agentId)}`;
+      const operationId = secureUuid();
+      try {
+        await api(
+          `/api/sessions/${encodeURIComponent(sessionId)}/reset?agentId=${encodeURIComponent(agentId)}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ operationId }),
+          },
+          { deadlineMs: clientBudgets.sessionResetDeadlineMs },
+        );
+      } catch (error) {
+        // A lost response is not proof the destructive operation failed. Never retry
+        // the POST: only accept an authoritative read of this exact operation.
+        const status = (error as { status?: number } | null)?.status;
+        if (status && status >= 400 && status < 500 && status !== 408) throw error;
+        try {
+          const { session } = await api<{ session: ChatSession }>(sessionPath, {
+            cache: 'no-store',
+          });
+          if (
+            session.id === sessionId &&
+            session.metadata?.resetOperationId === operationId &&
+            typeof session.metadata.resetGeneration === 'number' &&
+            Number.isSafeInteger(session.metadata.resetGeneration) &&
+            session.metadata.resetGeneration > 0 &&
+            Array.isArray(session.turns) &&
+            session.turns.length === 0
+          )
+            return;
+        } catch {
+          // Preserve the current conversation/composer when verification is unavailable.
+        }
+        throw new Error(
+          'Reset outcome could not be confirmed. Refresh the session before trying again.',
+        );
+      }
     },
   };
 }
