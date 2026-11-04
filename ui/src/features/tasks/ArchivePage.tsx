@@ -55,6 +55,7 @@ export function Archive({
   );
   const [modArchives, setModArchives] = useState<ModArchive[]>([]);
   const [modId, setModId] = useState('');
+  const [modHeaderRoot, setModHeaderRoot] = useState<HTMLDivElement | null>(null);
   const activeMod = modArchives.find((mod) => mod.modId === modId);
   useEffect(() => {
     let live = true;
@@ -312,6 +313,11 @@ export function Archive({
             </select>
           </label>
         </div>
+        <div
+          ref={setModHeaderRoot}
+          className="archive-heading-tools archive-mod-header"
+          hidden={!activeMod}
+        />
       </header>
       <div className="archive-layout">
         <aside className="archive-sidebar" aria-label="Archive navigation">
@@ -434,7 +440,12 @@ export function Archive({
         </aside>
         <main className="archive-content">
           {activeMod ? (
-            <ModArchiveHost panel={activeMod} date={selectedDate} />
+            <ModArchiveHost
+              key={`${activeMod.modId}:${activeMod.version || ''}`}
+              panel={activeMod}
+              date={selectedDate}
+              headerRoot={modHeaderRoot}
+            />
           ) : kind === 'chat' ? (
             <ChatArchiveShelf
               key={queryKey}
