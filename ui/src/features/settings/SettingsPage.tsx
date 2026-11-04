@@ -157,6 +157,8 @@ export function Settings({
     .concat(rightRailLayout === 'divided' ? [rightTopPanel, rightBottomPanel] : [rightSinglePanel])
     .includes('agents');
   const [modNavigationColumn, setModNavigationColumn] = useState<HTMLElement | null>(null);
+  const [modSelectorColumn, setModSelectorColumn] = useState<HTMLElement | null>(null);
+  const [hasModSelector, setHasModSelector] = useState(false);
   const [targetContributions, setTargetContributions] = useState<ModContribution[]>([]);
   const setupFinished = useRef(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
@@ -269,9 +271,11 @@ export function Settings({
   const schedulingFamily =
     tab === 'agents' && !agentGlobal && agents.length > 0
       ? (
-          { 'cron-jobs': 'cron', 'workflow-events': 'workflow', dreams: 'dreams' } as Partial<
-            Record<typeof agentSection, string>
-          >
+          {
+            'cron-jobs': 'cron',
+            'workflow-events': 'workflow',
+            dreams: 'dreams',
+          } as Partial<Record<typeof agentSection, string>>
         )[agentSection]
       : undefined;
   const composition = selectedContribution
@@ -378,7 +382,7 @@ export function Settings({
     <>
       {navigationTarget && createPortal(settingsNavigation, navigationTarget)}
       <main
-        className={`settings-blank-slate settings-fidgit${navigationTarget ? ' has-top-navigation' : ''}${tab === 'agents' ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`}
+        className={`settings-blank-slate settings-fidgit${navigationTarget ? ' has-top-navigation' : ''}${tab === 'agents' || (selectedContribution?.settingsUrl && hasModSelector) ? ' has-agent-selector' : ''}${utilityPanelOpen ? ' has-utility-panel' : ''}`}
         aria-label="Settings workspace"
       >
         {!navigationTarget && settingsNavigation}
@@ -405,6 +409,14 @@ export function Settings({
               }
             />
           </div>
+        )}
+
+        {selectedContribution?.settingsUrl && (
+          <div
+            className="settings-prototype-agent-selector"
+            ref={setModSelectorColumn}
+            hidden={!hasModSelector}
+          />
         )}
 
         <section className="settings-blank-column settings-prototype-sections">
@@ -732,6 +744,8 @@ export function Settings({
                 onAgentsChanged={onAgentsChanged}
                 navigationTarget={modNavigationColumn}
                 overflowTarget={overflowColumn}
+                selectorTarget={modSelectorColumn}
+                onSelectorVisibilityChange={setHasModSelector}
                 selectedAgentId={selectedAgentId}
                 selectedSectionId={selectedModSettings?.id}
                 onSectionChange={

@@ -192,7 +192,9 @@ it('shows agent options from active rail selections without focusing a dropdown'
   expect(screen.getByText('Agent panel options').closest('[data-family="rails"]')).toBeTruthy();
   fireEvent.focus(screen.getByLabelText('Right · panel'));
   expect(screen.getByText('Agent panel options')).toBeTruthy();
-  fireEvent.change(screen.getByLabelText('Left · panel'), { target: { value: 'workspace' } });
+  fireEvent.change(screen.getByLabelText('Left · panel'), {
+    target: { value: 'workspace' },
+  });
   expect(screen.queryByText('Agent panel options')).toBeNull();
   expect(
     screen.getByRole('heading', { name: 'Rail Panels' }).closest('.settings-content-bounded'),
@@ -204,7 +206,9 @@ it('shows agent options from active rail selections without focusing a dropdown'
   expect(single?.firstElementChild?.classList.contains('settings-prototype-configuration')).toBe(
     true,
   );
-  fireEvent.change(screen.getByLabelText('Left · layout'), { target: { value: 'divided' } });
+  fireEvent.change(screen.getByLabelText('Left · layout'), {
+    target: { value: 'divided' },
+  });
   expect(screen.getByText('Agent panel options')).toBeTruthy();
   expect(
     screen.getByText('Agent panel options').closest('[data-composition="paired"]'),
@@ -350,10 +354,14 @@ it('groups a mod settings contributions under one top-level tab and exposes seco
     );
   }
   render(<Parent />);
-  const switchboard = await screen.findByRole('button', { name: 'Switchboard' });
+  const switchboard = await screen.findByRole('button', {
+    name: 'Switchboard',
+  });
   expect(screen.getAllByRole('button', { name: 'Switchboard' })).toHaveLength(1);
   fireEvent.click(switchboard);
-  const secondary = screen.getByRole('navigation', { name: 'Switchboard settings sections' });
+  const secondary = screen.getByRole('navigation', {
+    name: 'Switchboard settings sections',
+  });
   for (const name of ['Status', 'Configuration', 'Pending admissions', 'Chat mappings'])
     expect(
       secondary.querySelector(
@@ -521,7 +529,9 @@ it('navigates between separate Models and Load Balancing editors without leaking
   expect(
     screen.getByRole('heading', { name: 'Models' }).closest('.settings-content-normalized'),
   ).toBeNull();
-  fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'Direct draft' } });
+  fireEvent.change(screen.getByLabelText('Provider'), {
+    target: { value: 'Direct draft' },
+  });
   fireEvent.click(screen.getByRole('button', { name: 'Load Balancing' }));
   expect(
     screen
@@ -545,7 +555,12 @@ it('scopes scheduling splits while preserving inventory/editor and Dreams portal
     if (path.startsWith('/api/scheduled-jobs')) return { jobs: [] };
     if (path === '/api/events/watches') return { watches: [] };
     if (path === '/api/events/settings')
-      return { settings: { secretConfigured: false, webhookPath: '/api/events/github' } };
+      return {
+        settings: {
+          secretConfigured: false,
+          webhookPath: '/api/events/github',
+        },
+      };
     if (path.endsWith('/dream-settings'))
       return {
         settings: {
@@ -557,7 +572,14 @@ it('scopes scheduling splits while preserving inventory/editor and Dreams portal
         },
       };
     if (path === '/api/settings/timezone') return { timezone: 'America/Chicago' };
-    return { wizardStep: 'ready', agent, settings: {}, documents: {}, servers: [], tools: [] };
+    return {
+      wizardStep: 'ready',
+      agent,
+      settings: {},
+      documents: {},
+      servers: [],
+      tools: [],
+    };
   });
   const { container } = render(
     <ConfirmProvider>
@@ -710,7 +732,11 @@ it('uses the empty native agent editor for an only-resident catalog', async () =
   const resident = {
     id: 'resident-only',
     name: 'Resident Only',
-    modAgent: { ownerModId: 'habitat', visibility: { agents: true, chat: true }, capabilities: {} },
+    modAgent: {
+      ownerModId: 'habitat',
+      visibility: { agents: true, chat: true },
+      capabilities: {},
+    },
   };
   render(
     <Settings
@@ -729,4 +755,81 @@ it('uses the empty native agent editor for an only-resident catalog', async () =
   expect(vi.mocked(api).mock.calls.some(([path]) => String(path).includes('/resident-only/'))).toBe(
     false,
   );
+});
+
+it('places owner-managed entity buttons in the native top row and keeps sections and statistics separate', async () => {
+  loadModSettingsContributions.mockResolvedValue([
+    {
+      modId: 'menagerie',
+      name: 'Menagerie',
+      settingsUrl: './ModSettingsHostFixture',
+      settings: [
+        {
+          id: 'controller',
+          navigation: { title: 'Details' },
+          primary: { title: 'Details', capability: 'settingsUi' },
+        },
+      ],
+    },
+  ]);
+  mountModSettings.mockImplementation((ctx) => {
+    const content = document.createElement('h2');
+    content.textContent = `Owner ${ctx.section}`;
+    ctx.primary.replace(content);
+    ctx.setEntitySelector({
+      label: 'Residents',
+      items: Array.from({ length: 24 }, (_, i) => ({
+        id: String(i),
+        label: `Resident ${i + 1}`,
+      })),
+      selectedId: '0',
+      onSelect: vi.fn(),
+      addLabel: 'New resident',
+      onAdd: vi.fn(),
+    });
+  });
+  vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+  function Parent() {
+    const [tab, setTab] = useState<SettingsTab>('mod-settings:menagerie:controller');
+    return (
+      <Settings
+        {...({
+          tab,
+          setTab,
+          agents: [],
+          selected: { id: '', name: '' },
+          savedProviders: [],
+          onAgentsChanged: vi.fn(),
+          agentRailPreferences: { view: 'regular', order: [] },
+        } as unknown as ComponentProps<typeof Settings>)}
+      />
+    );
+  }
+  const { container, unmount } = render(
+    <ConfirmProvider>
+      <Parent />
+    </ConfirmProvider>,
+  );
+  await screen.findByRole('button', { name: 'Resident 24' });
+  const shell = container.querySelector('.settings-fidgit')!;
+  const selector = shell.querySelector(':scope > .settings-prototype-agent-selector')!;
+  expect(shell.classList.contains('has-agent-selector')).toBe(true);
+  expect(selector.hasAttribute('hidden')).toBe(false);
+  expect(selector.querySelectorAll('[data-agent-id]')).toHaveLength(24);
+  expect(selector.querySelector('select')).toBeNull();
+  expect(
+    shell.querySelector('.settings-prototype-sections [aria-label="menagerie settings sections"]'),
+  ).toBeTruthy();
+  expect(shell.querySelector('.settings-content-workspace .agent-toolbar')).toBeNull();
+  if (shell.classList.contains('has-utility-panel'))
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse system statistics' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Open system statistics' }));
+  expect(shell.classList.contains('has-utility-panel')).toBe(true);
+  expect(shell.querySelector(':scope > .settings-prototype-agent-selector')).toBe(selector);
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse system statistics' }));
+  expect(shell.classList.contains('has-utility-panel')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Gateways' }));
+  await screen.findByRole('heading', { name: 'Owner gateways' });
+  expect(selector.querySelectorAll('[data-agent-id]')).toHaveLength(24);
+  unmount();
 });

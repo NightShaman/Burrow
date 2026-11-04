@@ -24,9 +24,13 @@ const strip = () => screen.getByRole('group', { name: 'Agent buttons' });
 const agentButton = (index: number) =>
   screen.getByRole('button', { name: `Agent ${index}` }) as HTMLButtonElement;
 const leftArrow = () =>
-  screen.getByRole('button', { name: 'Scroll agents left' }) as HTMLButtonElement;
+  screen.getByRole('button', {
+    name: 'Scroll agents left',
+  }) as HTMLButtonElement;
 const rightArrow = () =>
-  screen.getByRole('button', { name: 'Scroll agents right' }) as HTMLButtonElement;
+  screen.getByRole('button', {
+    name: 'Scroll agents right',
+  }) as HTMLButtonElement;
 
 // JSDOM does not lay out or scroll. Model the real relationship between the
 // available shell, arrow-reduced viewport, and nonwrapping agent content.
@@ -103,9 +107,17 @@ beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
     class {
-      entry: { callback: ResizeObserverCallback; instance: ResizeObserver; targets: Set<Element> };
+      entry: {
+        callback: ResizeObserverCallback;
+        instance: ResizeObserver;
+        targets: Set<Element>;
+      };
       constructor(callback: ResizeObserverCallback) {
-        this.entry = { callback, instance: this as unknown as ResizeObserver, targets: new Set() };
+        this.entry = {
+          callback,
+          instance: this as unknown as ResizeObserver,
+          targets: new Set(),
+        };
         observers.add(this.entry);
       }
       observe(target: Element) {
@@ -123,7 +135,10 @@ beforeEach(() => {
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
     const style = computedStyle(element, pseudo);
     if (isStrip(element))
-      Object.defineProperty(style, 'columnGap', { configurable: true, value: '7px' });
+      Object.defineProperty(style, 'columnGap', {
+        configurable: true,
+        value: '7px',
+      });
     return style;
   });
   const offsets = new WeakMap<Element, number>();
@@ -353,7 +368,12 @@ it('preserves Global and New Agent navigation guards while scrolling remains saf
   shellWidth = 400;
   const onSelectGlobal = vi.fn();
   function Subject() {
-    useUnsavedChanges({ dirty: true, busy: false, save: async () => true, discard: vi.fn() });
+    useUnsavedChanges({
+      dirty: true,
+      busy: false,
+      save: async () => true,
+      discard: vi.fn(),
+    });
     return <AgentToolbar {...props({ onSelectGlobal })} />;
   }
   render(
@@ -553,4 +573,38 @@ it('reserves the collapsed statistics opener space without narrowing the open do
   expect(screen.getByLabelText('Agent configuration selector').matches(reservation.selector)).toBe(
     false,
   );
+});
+
+it('shares the native arrow picker with 24 residents without a dropdown and remeasures the statistics width', async () => {
+  const { SettingsEntitySelector } = await import('./SettingsEntitySelector');
+  const onSelect = vi.fn();
+  render(
+    <SettingsEntitySelector
+      label="Resident configuration selector"
+      groupLabel="Configured residents"
+      buttonsLabel="Agent buttons"
+      noun="agents"
+      items={Array.from({ length: 24 }, (_, i) => ({
+        id: `resident-${i}`,
+        label: `Resident ${i + 1}`,
+      }))}
+      selectedId="resident-0"
+      onSelect={onSelect}
+    />,
+  );
+  expect(within(strip()).getAllByRole('button')).toHaveLength(24);
+  expect(screen.queryByRole('combobox')).toBeNull();
+  resize(900);
+  expect(rightArrow().disabled).toBe(false);
+  fireEvent.click(rightArrow());
+  expect(strip().scrollLeft).toBeGreaterThan(0);
+  fireEvent.keyDown(screen.getByRole('button', { name: 'Resident 1' }), { key: 'End' });
+  const last = screen.getByRole('button', { name: 'Resident 24' });
+  expect(document.activeElement).toBe(last);
+  expectVisible(last);
+  fireEvent.click(last);
+  expect(onSelect).toHaveBeenCalledWith('resident-23');
+  resize(4000);
+  expect(screen.queryByRole('button', { name: 'Scroll agents right' })).toBeNull();
+  expect(within(strip()).getAllByRole('button')).toHaveLength(24);
 });

@@ -70,3 +70,7 @@
   .agent-toolbar-buttons {
   padding-right: 44px;
 }
+/* Owner-managed selectors use the exact native row, but empty hosts reserve no row. */
+.settings-fidgit > .settings-prototype-agent-selector[hidden] {
+  display: none;
+}

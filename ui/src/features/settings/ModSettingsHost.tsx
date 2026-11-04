@@ -1,3 +1,4 @@
+import { SettingsEntitySelector, type SettingsEntityItem } from './SettingsEntitySelector';
 import { optimizeAvatar } from './OperatorProfile';
 import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
@@ -33,7 +34,16 @@ export type SettingsSurface = {
   replaceChildren: (...content: Node[]) => void;
   clear: () => void;
 };
+export type ModEntitySelector = {
+  label: string;
+  items: readonly SettingsEntityItem[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  addLabel?: string;
+  onAdd?: () => void;
+};
 type ModSettingsContext = {
+  setEntitySelector: (selector: ModEntitySelector | null) => void;
   selectedAgentId?: string;
   modId: string;
   runtimeScope: 'local';
@@ -589,6 +599,8 @@ export function ModSettingsHost({
   onAgentsChanged,
   navigationTarget,
   overflowTarget,
+  selectorTarget,
+  onSelectorVisibilityChange,
   selectedSectionId,
   onSectionChange,
 }: {
@@ -599,6 +611,8 @@ export function ModSettingsHost({
   onAgentsChanged: () => Promise<void>;
   navigationTarget: HTMLElement | null;
   overflowTarget: HTMLElement | null;
+  selectorTarget?: HTMLElement | null;
+  onSelectorVisibilityChange?: (visible: boolean) => void;
   selectedSectionId?: string;
   onSectionChange?: (sectionId: string) => void;
 }) {
@@ -611,6 +625,11 @@ export function ModSettingsHost({
   const [sections, setSections] = useState<ModSettingsSection[]>([]);
   const [section, setSection] = useState('');
   const [error, setError] = useState('');
+  const [entitySelector, setEntitySelector] = useState<ModEntitySelector | null>(null);
+  useEffect(() => {
+    onSelectorVisibilityChange?.(Boolean(entitySelector));
+    return () => onSelectorVisibilityChange?.(false);
+  }, [Boolean(entitySelector), onSelectorVisibilityChange]);
   const agentsRef = useRef(agents);
   const onAgentsChangedRef = useRef(onAgentsChanged);
   agentsRef.current = agents;
@@ -702,6 +721,26 @@ export function ModSettingsHost({
     const draft = createDraft();
     const navigationCancellations = new Set<() => void>();
     const context: ModSettingsContext = {
+      setEntitySelector: (selector) => {
+        if (disposed) return;
+        // Wrap callbacks in this mount's lifetime; a retired async mount must
+        // never replace the next resident's selector or run its callbacks.
+        setEntitySelector(
+          selector
+            ? {
+                ...selector,
+                onSelect: (id) => {
+                  if (!disposed) selector.onSelect(id);
+                },
+                onAdd: selector.onAdd
+                  ? () => {
+                      if (!disposed) selector.onAdd!();
+                    }
+                  : undefined,
+              }
+            : null,
+        );
+      },
       modId,
       selectedAgentId,
       runtimeScope: 'local',
@@ -771,6 +810,7 @@ export function ModSettingsHost({
       });
     return () => {
       disposed = true;
+      setEntitySelector(null);
       navigationCancellations.forEach((cancel) => cancel());
       draft.dispose();
       node.remove();
@@ -809,6 +849,41 @@ export function ModSettingsHost({
     : undefined;
   return (
     <>
+      {entitySelector &&
+        (selectorTarget ? (
+          createPortal(
+            <SettingsEntitySelector
+              label={entitySelector.label}
+              noun={entitySelector.label.toLowerCase()}
+              items={entitySelector.items}
+              selectedId={entitySelector.selectedId}
+              onSelect={entitySelector.onSelect}
+              action={
+                entitySelector.onAdd && entitySelector.addLabel ? (
+                  <button type="button" className="primary" onClick={entitySelector.onAdd}>
+                    {entitySelector.addLabel}
+                  </button>
+                ) : undefined
+              }
+            />,
+            selectorTarget,
+          )
+        ) : (
+          <SettingsEntitySelector
+            label={entitySelector.label}
+            noun={entitySelector.label.toLowerCase()}
+            items={entitySelector.items}
+            selectedId={entitySelector.selectedId}
+            onSelect={entitySelector.onSelect}
+            action={
+              entitySelector.onAdd && entitySelector.addLabel ? (
+                <button type="button" className="primary" onClick={entitySelector.onAdd}>
+                  {entitySelector.addLabel}
+                </button>
+              ) : undefined
+            }
+          />
+        ))}
       {navigationTarget &&
         createPortal(
           <nav

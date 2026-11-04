@@ -310,3 +310,56 @@ it('routes document metadata through shared narrow and wide pane rules', () => {
   ).toBe(true);
   expect(documentRules.some((rule) => rule.values.display === 'none')).toBe(false);
 });
+
+it('owns the shared entity selector and rejects retired mount updates and callbacks', async () => {
+  const contexts: any[] = [];
+  mountSettings.mockImplementation((ctx) => {
+    contexts.push(ctx);
+  });
+  const navigation = document.createElement('div'),
+    overflow = document.createElement('div'),
+    selector = document.createElement('div');
+  document.body.append(navigation, overflow, selector);
+  const onSelect = vi.fn(),
+    visible = vi.fn();
+  const view = render(
+    <ConfirmProvider>
+      <ModSettingsHost
+        modId="fixture"
+        settingsUrl="./ModSettingsHostFixture"
+        agents={[]}
+        onAgentsChanged={async () => {}}
+        navigationTarget={navigation}
+        overflowTarget={overflow}
+        selectorTarget={selector}
+        onSelectorVisibilityChange={visible}
+      />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(contexts).toHaveLength(1));
+  const current = contexts[0];
+  current.setEntitySelector({
+    label: 'Residents',
+    items: [{ id: 'a', label: 'Gerald' }],
+    selectedId: 'a',
+    onSelect,
+  });
+  await screen.findByRole('button', { name: 'Gerald' });
+  expect(selector.querySelector('.agent-toolbar-agent-list')).toBeTruthy();
+  await waitFor(() => expect(visible).toHaveBeenLastCalledWith(true));
+  fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
+  await waitFor(() => expect(contexts).toHaveLength(2));
+  expect(selector.querySelector('[data-agent-id]')).toBeNull();
+  current.setEntitySelector({
+    label: 'Old',
+    items: [{ id: 'z', label: 'Stale' }],
+    selectedId: 'z',
+    onSelect,
+  });
+  expect(screen.queryByRole('button', { name: 'Stale' })).toBeNull();
+  view.unmount();
+  expect(selector.childElementCount).toBe(0);
+  navigation.remove();
+  overflow.remove();
+  selector.remove();
+});
