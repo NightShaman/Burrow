@@ -37,13 +37,14 @@ function peerAgentContent(message) {
 }
 
 export function normalizeProviderMessage(message = {}) {
-  // A peer transcript turn is external speech from another agent, never this
-  // model's own prior assistant output. Anthropic only has user/assistant
-  // dialogue roles, so preserve speaker identity in an attributed user turn.
+  // Peer ingress is external user-role speech; sender outbound is this agent's
+  // prior assistant-role speech. Preserve the direction supplied by the A2A
+  // transcript, not the shared agent role or source run ID.
   const peerAgent = message.role === 'agent';
-  const role = peerAgent ? 'user' : String(message.role || '');
+  const outgoingAgent = peerAgent && message.metadata?.direction === 'outbound';
+  const role = outgoingAgent ? 'assistant' : peerAgent ? 'user' : String(message.role || '');
   if (!PROVIDER_ROLES.has(role)) return null;
-  const normalizedContent = peerAgent
+  const normalizedContent = peerAgent && !outgoingAgent
     ? peerAgentContent(message)
     : content(message.content);
   if (!normalizedContent && role !== 'assistant' && role !== 'tool') return null;
@@ -271,7 +272,8 @@ export function conversationProviderMessages({ priorSummary = '', recentMessages
     ...(text(priorSummary) ? [{ role: 'user', content: `# prior-conversation-summary\n\n${text(priorSummary)}` }] : []),
     ...recentMessages.flatMap((message) => {
       const snapshot = message?.metadata?.providerTurn;
-      if (snapshot?.version === 1 && Array.isArray(snapshot.messages)) {
+      if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
+          && !(message?.role === 'agent' && ['outbound', 'inbound'].includes(message?.metadata?.direction))) {
         return snapshot.messages.map((entry) => ({ ...entry, metadata: {
           providerMessageSource: entry.metadata?.providerMessageSource === 'support-context-provider'
             ? 'historical-support-snapshot' : 'historical-user-turn',

@@ -132,6 +132,7 @@ export async function buildContextForTurn({
   preparedContext = null,
   contextOptions = {},
   kernel = '',
+  incomingAgentMessage = null,
   selectedSkills = [],
   promptSkills = selectedSkills,
   availableSkills = [],
@@ -173,6 +174,7 @@ export async function buildContextForTurn({
   const assemble = async (context, workingContextChars = 0) => assemblePrompt({
     rootDir,
     kernel,
+    incomingAgentMessage,
     selectedSkills,
     promptSkills,
     availableSkills,

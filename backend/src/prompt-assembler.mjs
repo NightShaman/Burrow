@@ -1,3 +1,4 @@
+import { a2aReplyMechanics } from './a2a-reply-context.mjs';
 import { localTimestamp } from './timezone.mjs';
 import { resolveRuntimeTraceRoot } from './config.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
@@ -544,6 +545,7 @@ ${childModelGuidance}`;
 export async function assemblePrompt({
   rootDir,
   kernel = '',
+  incomingAgentMessage = null,
   selectedSkills = [],
   promptSkills = selectedSkills,
   conversationContext = null,
@@ -657,7 +659,7 @@ export async function assemblePrompt({
 
   const rawSections = [
     section('kernel', modContext ? '' : clampText(kernel, kernelLimit)),
-    section('prompt-boundary', modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] })),
+    section('prompt-boundary', [modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] }), a2aReplyMechanics(incomingAgentMessage)].filter(Boolean).join('\n\n')),
     section(modContext ? 'mod-profile-files' : 'profile-files', renderedProfileFiles.text, {
       items: renderedProfileFiles.included.map((file) => file.name),
       omittedItems: renderedProfileFiles.omitted.map((file) => file.name),

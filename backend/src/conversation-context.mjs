@@ -1,5 +1,5 @@
 import { normalizeProviderMessage } from './provider-messages.mjs';
-import { providerTurnsFromTranscript, providerTurnChars } from './conversation-message-budget.mjs';
+import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } from './conversation-message-budget.mjs';
 import { summarizeSessionTurns } from './session-entry.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';
 import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
@@ -149,6 +149,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
     if (isPromptChatMessage(entry)) {
       const executionDigest = isExecutionDigest(entry);
       if (executionDigest && !retainedDigestEntries.has(entry)) continue;
+      const providerTurn = executionDigest ? null : providerTurnForEntry(entry, providerTurns);
       chatMessages.push({
         id: entry.id || null,
         ts: entry.ts || null,
@@ -158,8 +159,7 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
         content: executionDigest ? renderExecutionDigest(entry) : String(entry.content || '').trim(),
         metadata: executionDigest
           ? { ...(entry.metadata || {}), providerMessageSource: 'prior-execution-continuity' }
-          : { ...(entry.metadata || {}), ...(!entry.metadata?.providerTurn && ['user', 'agent'].includes(entry.role) && providerTurns.has(entry.runId)
-            ? { providerTurn: providerTurns.get(entry.runId) } : {}) },
+          : { ...(entry.metadata || {}), ...(!entry.metadata?.providerTurn && providerTurn ? { providerTurn } : {}) },
       });
       continue;
     }

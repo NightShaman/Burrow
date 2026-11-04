@@ -22,7 +22,13 @@ export function providerTurnsFromTranscript(entries = []) {
 }
 
 export function providerTurnForEntry(entry, turns) {
-  return entry?.metadata?.providerTurn || (['user', 'agent'].includes(entry?.role) ? turns.get(entry.runId) : null);
+  // A2A records use the sender's sourceRunId on both sides of the delivery;
+  // neither record is that run's provider input. An inbound peer message is
+  // still external speech even when a run ID collides with a local snapshot.
+  if (entry?.role === 'agent' && ['outbound', 'inbound'].includes(entry?.metadata?.direction)) return null;
+  if (entry?.metadata?.providerTurn) return entry.metadata.providerTurn; // Delivered steering owns its own snapshot.
+  if (!entry?.runId || !['user', 'agent'].includes(entry.role)) return null;
+  return turns.get(entry.runId) || null;
 }
 
 export function providerTurnChars(snapshot) {

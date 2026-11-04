@@ -25,7 +25,7 @@ export function compactChatTurn(turn = {}) {
     const attachments = turn.metadata.attachments.map(compactAttachmentMetadata).filter(Boolean);
     if (attachments.length) metadata.attachments = attachments;
   }
-  for (const key of ['fromAgentName', 'fromAgentId', 'messageMode', 'direction', 'chatInput', 'lane', 'steering']) {
+  for (const key of ['fromAgentName', 'fromAgentId', 'toAgentId', 'messageMode', 'direction', 'chatInput', 'lane', 'steering']) {
     if (turn.metadata?.[key] !== undefined) metadata[key] = turn.metadata[key];
   }
   return {
