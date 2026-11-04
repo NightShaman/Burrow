@@ -22,7 +22,7 @@ import { Field, SettingSection } from './SettingsPrimitives';
 export type ModSettingsSection = {
   id: string;
   label: string;
-  layout?: SettingsContribution['sections'][number]['layout'];
+  layout?: SettingsContribution['sections'][number]['layout'] | 'form-wide';
 };
 type MountResult =
   | void
@@ -541,8 +541,10 @@ function validSections(value: unknown): ModSettingsSection[] {
       {
         id: item.id,
         label: item.label.trim(),
-        ...(item.layout === 'form' || item.layout === 'form-inventory'
-          ? { layout: item.layout as 'form' | 'form-inventory' }
+        ...(item.layout === 'form' ||
+        item.layout === 'form-wide' ||
+        item.layout === 'form-inventory'
+          ? { layout: item.layout as 'form' | 'form-wide' | 'form-inventory' }
           : {}),
       },
     ];

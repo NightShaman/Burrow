@@ -67,7 +67,9 @@ it('loads actual Backdoor through the host and keeps imperative form metadata an
     });
     await screen.findAllByRole('checkbox', { name: 'Agent 17' });
     expect(container.querySelector('.mod-settings-mount')).toBe(host);
-    expect(host?.getAttribute('data-settings-layout')).toBe('form');
+    expect(host?.getAttribute('data-settings-layout')).toBe(
+      section === 'Admin Access' ? 'form-wide' : 'form',
+    );
     expect(overflow.isConnected).toBe(true);
   }
 });
@@ -244,4 +246,21 @@ it('retains failed admin drafts and discards both independent lists without writ
     ),
   ).toHaveProperty('checked', false);
   expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+});
+
+it('keeps both actual Backdoor capability groups in one full-width form with shared actions', async () => {
+  const { container } = mountHost();
+  await screen.findByRole('checkbox', { name: 'Agent 17' });
+  click('Admin Access');
+  await screen.findByRole('heading', { name: 'Core API access' });
+  const pair = container.querySelector('.settings-section-pair');
+  expect(pair?.children).toHaveLength(2);
+  expect(pair?.children[0].getAttribute('aria-label')).toBe('Mod management');
+  expect(pair?.children[1].getAttribute('aria-label')).toBe('Core API access');
+  expect(container.querySelector('.mod-settings-mount')?.getAttribute('data-settings-layout')).toBe(
+    'form-wide',
+  );
+  expect(container.querySelectorAll('form')).toHaveLength(1);
+  expect(pair?.querySelector('button[type="submit"]')).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'Save admin access' })).toHaveLength(1);
 });

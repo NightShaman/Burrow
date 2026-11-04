@@ -133,14 +133,22 @@
    does not use the supporting target. No target ref is replaced. */
 .settings-blank-slate.settings-fidgit
   .settings-content-normalized:has(
-    .mod-settings-mount:is([data-settings-layout='form'], [data-settings-layout='activity'])
+    .mod-settings-mount:is(
+      [data-settings-layout='form'],
+      [data-settings-layout='form-wide'],
+      [data-settings-layout='activity']
+    )
   )
   > .settings-prototype-overflow {
   display: none;
 }
 .settings-blank-slate.settings-fidgit
   .settings-content-normalized:has(
-    .mod-settings-mount:is([data-settings-layout='form'], [data-settings-layout='activity'])
+    .mod-settings-mount:is(
+      [data-settings-layout='form'],
+      [data-settings-layout='form-wide'],
+      [data-settings-layout='activity']
+    )
   )
   > .settings-prototype-configuration {
   border: 0;
@@ -292,4 +300,24 @@
   .setting-actions
   button {
   width: auto;
+}
+
+/* Paired sections share one draft and Save; do not constrain them to half a workspace. */
+.settings-blank-slate.settings-fidgit
+  .settings-content-normalized:has(.mod-settings-mount[data-settings-layout='form-wide'])
+  > .settings-prototype-configuration {
+  grid-column: 1 / -1;
+  border: 0;
+}
+.settings-section-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--settings-pane-gap, 20px);
+  min-width: 0;
+}
+@container settings-form (min-width: 640px) {
+  .settings-section-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
 }

@@ -1,7 +1,7 @@
 /** Operator-facing assignment of Core-owned Backdoor diagnostic and administrative access. */
 export const settingsSections = [
   { id: 'global-access', label: 'Global Access', layout: 'form' },
-  { id: 'admin-access', label: 'Admin Access', layout: 'form' },
+  { id: 'admin-access', label: 'Admin Access', layout: 'form-wide' },
 ];
 
 const ADMIN_CAPABILITIES = [
@@ -86,10 +86,12 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
   const capabilityInputs = new Map();
   const groups = config.capabilities ?? [config];
   const groupBoxes = new Map();
+  const groupContainer = config.capabilities ? el('div', null, 'settings-section-pair') : body;
+  if (groupContainer !== body) body.append(groupContainer);
   for (const group of groups) {
     const box = el('section', null, 'settings-stack');
     box.setAttribute('aria-label', group.title);
-    body.append(box);
+    groupContainer.append(box);
     groupBoxes.set(group.key, box);
   }
 
