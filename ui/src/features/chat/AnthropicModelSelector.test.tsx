@@ -182,6 +182,7 @@ describe('native chat/main selector', () => {
       target: { value: 'manual' },
     });
     expect(updateAgent).toHaveBeenCalledWith({
+      modelConnectionId: 'native',
       provider: 'Native',
       model: 'manual',
       thinkingMode: 'default',
@@ -277,6 +278,7 @@ it('locks old-model tuning throughout a pending identity save, so it cannot merg
     target: { value: 'manual' },
   });
   expect(updateAgent).toHaveBeenCalledWith({
+    modelConnectionId: 'native',
     provider: 'Native',
     model: 'manual',
     thinkingMode: 'default',

@@ -417,7 +417,6 @@ function AppContent() {
     if (!selectedAgentId || resettingSessionRef.current || activeRunId) return;
     resettingSessionRef.current = true;
     setIsResettingSession(true);
-    clearError();
     try {
       if (!(await resetSession()) || !isAttachmentScopeCurrent()) return;
       setDraft('');
@@ -461,7 +460,6 @@ function AppContent() {
       .then((attachments) => {
         if (!isAttachmentScopeCurrent()) return;
         setAttachment(attachments);
-        if (accepted.length === files.length) clearError();
       })
       .catch(() => {
         if (isAttachmentScopeCurrent()) reportError('Could not read the attachment.');
@@ -877,6 +875,7 @@ function AppContent() {
                   turns={turns}
                   isLoading={isLoadingConversation}
                   error={chatError}
+                  onDismissError={clearError}
                   isSending={Boolean(displayedRun)}
                   steeringReady={Boolean(
                     displayedRun &&

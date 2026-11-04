@@ -50,6 +50,7 @@ type ChatTranscriptProps = {
   turns: SessionTurn[];
   isLoading: boolean;
   error: string;
+  onDismissError?: () => void;
   isSending: boolean;
   activeRunId: string;
   activeToolActivity?: ToolActivity;
@@ -72,6 +73,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   turns,
   isLoading,
   error,
+  onDismissError,
   isSending,
   activeRunId,
   activeToolActivity,
@@ -346,9 +348,19 @@ export const ChatTranscript = memo(function ChatTranscript({
         </>
       )}
       {error && (
-        <p className="chat-error" role="alert">
-          {error}
-        </p>
+        <div className="chat-error" role="alert">
+          <span>{error}</span>
+          {onDismissError && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={onDismissError}
+              aria-label="Dismiss chat error"
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

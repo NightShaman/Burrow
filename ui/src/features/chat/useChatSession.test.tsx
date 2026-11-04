@@ -1412,3 +1412,25 @@ it('finalizes recovered thoughts by explicit status for an empty terminal row, n
   expect(result.current.turns[0]?.metadata?.terminalStatus).toBe('cancelled');
   unmount();
 });
+
+it('retains a reported error across automatic conversation hydration until dismissal', async () => {
+  const delayed = deferred<unknown>();
+  apiMock.mockImplementation((path) =>
+    path === sessionListPath
+      ? delayed.promise
+      : Promise.resolve({ session: { id: sessionId, turns: [] } }),
+  );
+  const { result } = renderHook(() => useChatSession(agentId));
+  act(() => result.current.reportError('Visible failure'));
+  await act(async () => {
+    delayed.resolve({ sessions: [{ id: sessionId }] });
+  });
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  expect(result.current.chatError).toBe('Visible failure');
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.chatError).toBe('Visible failure');
+  act(() => result.current.clearError());
+  expect(result.current.chatError).toBe('');
+});

@@ -213,3 +213,34 @@ it('sends independent native mode through an Anthropic pool and reports pending 
     ['a', false],
   ]);
 });
+
+it('uses a resident saved connection ID for tuning even before its label is hydrated', async () => {
+  const agent = {
+    id: 'gerald',
+    provider: '',
+    modelConnectionId: 'lb',
+    model: 'luna',
+    effort: 'high',
+    temperature: 0.2,
+    modAgent: { ownerModId: 'menagerie' },
+  } as Agent;
+  const providers = [
+    { id: 'google', provider: 'Google', models: ['luna'] },
+    { id: 'lb', provider: 'OpenAI All', models: ['luna'] },
+  ] as SavedProvider[];
+  vi.mocked(api).mockResolvedValue({
+    selection: { model: 'luna', reasoningEffort: 'high', temperature: 0.9 },
+  });
+  const commit = vi.fn();
+  const { result } = renderHook(() => useModelSelectionWriter(providers, commit, vi.fn()));
+  await act(async () => {
+    await result.current(agent, { temperature: 0.9 });
+  });
+  expect(JSON.parse(vi.mocked(api).mock.lastCall![1]!.body as string)).toMatchObject({
+    connectionId: 'lb',
+  });
+  expect(commit).toHaveBeenLastCalledWith(
+    'gerald',
+    expect.objectContaining({ modelConnectionId: 'lb', provider: 'OpenAI All' }),
+  );
+});

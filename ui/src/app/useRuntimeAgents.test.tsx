@@ -1098,3 +1098,87 @@ it.each([true, false])(
     unmount();
   },
 );
+
+it.each([true, false])(
+  'retains resident saved LB identity (catalog first=%s)',
+  async (catalogFirst) => {
+    const google = { id: 'google', provider: 'Google', models: ['gemini'] } as SavedProvider;
+    const lb = { id: 'openai-lb', provider: 'OpenAI All', models: ['gpt-6-luna'] } as SavedProvider;
+    const providers = [google, lb];
+    runtimeProviders.current = catalogFirst ? providers : [];
+    const agent = {
+      id: 'gerald',
+      name: 'Gerald',
+      enabled: true,
+      modAgent: { ownerModId: 'burrow-menagerie', visibility: { agents: true, chat: true } },
+    };
+    apiMock.mockImplementation(async (path) => {
+      if (path === '/api/agents') return { agents: [agent] };
+      if (path === '/api/agents/overview')
+        return {
+          agents: [
+            {
+              agent,
+              sessionId: 'default',
+              selection: {
+                connectionId: lb.id,
+                model: 'gpt-6-luna',
+                reasoningEffort: 'high',
+                temperature: 0.7,
+              },
+              status: { agents: [] },
+              contexts: {},
+            },
+          ],
+        };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result } = renderRuntimeAgents('gerald');
+    await waitFor(() => expect(result.current.registryState).toBe('ready'));
+    const [resident] = reconcileModelCatalog(result.current.agents, providers);
+    expect(resident).toMatchObject({
+      provider: lb.provider,
+      modelConnectionId: lb.id,
+      model: 'gpt-6-luna',
+      effort: 'high',
+      temperature: 0.7,
+      workspace: '',
+      subagents: [],
+    });
+    const [missing] = reconcileModelCatalog([resident], [google]);
+    expect(missing).toMatchObject({ provider: '', modelConnectionId: lb.id, model: 'gpt-6-luna' });
+    runtimeProviders.current = [];
+  },
+);
+
+it('hydrates a saved resident LB selection in the legacy overview path without engineering requests', async () => {
+  const agent = {
+    id: 'gerald',
+    name: 'Gerald',
+    enabled: true,
+    modAgent: { ownerModId: 'menagerie' },
+  };
+  apiMock.mockImplementation(async (path) => {
+    if (path === '/api/agents') return { agents: [agent] };
+    if (path === '/api/agents/overview') throw Object.assign(new Error('Legacy'), { status: 404 });
+    if (path === '/api/settings/identities') return { agents: [] };
+    if (path === '/api/agents/gerald/model-selection')
+      return { selection: { connectionId: 'lb', model: 'luna', reasoningEffort: 'high' } };
+    throw new Error(`Unexpected engineering request: ${path}`);
+  });
+  runtimeProviders.current = [
+    { id: 'google', provider: 'Google', models: ['gemini'] },
+    { id: 'lb', provider: 'OpenAI All', models: ['luna'] },
+  ] as SavedProvider[];
+  const { result } = renderRuntimeAgents('gerald');
+  await waitFor(() => expect(result.current.registryState).toBe('ready'));
+  expect(result.current.agents[0]).toMatchObject({
+    provider: 'OpenAI All',
+    modelConnectionId: 'lb',
+    model: 'luna',
+    workspace: '',
+    subagents: [],
+  });
+  expect(reportError).not.toHaveBeenCalled();
+  runtimeProviders.current = [];
+});

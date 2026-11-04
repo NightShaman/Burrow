@@ -1,4 +1,4 @@
-import { isNativeThinkingProvider } from '../../app/modelSelectionOptions';
+import { chatProvider, isNativeThinkingProvider } from '../../app/modelSelectionOptions';
 import { chatToolIdentity } from './chatToolIdentity';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -166,9 +166,19 @@ export function useChatRun({
     };
     const sentAt = performance.now();
     const runId = createRunId(target.sessionId);
-    const provider =
-      savedProviders.find((item) => item.provider === selected?.provider) ?? savedProviders[0];
-    const model = selected?.model || provider?.models[0];
+    const provider = chatProvider(selected, savedProviders);
+    const model =
+      selected?.model ||
+      (selected?.modAgent || selected?.modelConnectionId ? '' : provider?.models[0]);
+    if (
+      (selected?.modAgent || selected?.modelConnectionId) &&
+      (!provider || !model || !provider.models.includes(model))
+    ) {
+      session.reportError(
+        'The saved model connection or model is unavailable. Select an available provider and model before sending.',
+      );
+      return;
+    }
     const attachments = session.attached;
     const requestBody = {
       agentId: target.resourceAgentId,
@@ -193,7 +203,6 @@ export function useChatRun({
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));
     setAgentActivity(target.agentId, 'thinking');
-    session.clearError();
     const appendVisibleTurn = transientContextCommand
       ? session.appendTransientTurn
       : session.appendTurn;

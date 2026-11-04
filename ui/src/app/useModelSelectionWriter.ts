@@ -1,4 +1,4 @@
-import { isNativeThinkingProvider } from './modelSelectionOptions';
+import { chatProvider, isNativeThinkingProvider } from './modelSelectionOptions';
 import { useRef } from 'react';
 import { api } from './api';
 import type { Agent, SavedProvider } from './types';
@@ -18,10 +18,18 @@ export function useModelSelectionWriter(
     const key = JSON.stringify(['local', resourceId]);
     const pending = entries.current.get(key);
     const next = { ...(pending?.next ?? selected), ...patch };
+    // A deliberate provider change replaces the old connection identity.
     if (
-      !providers.some((item) => item.provider === next.provider && item.models.includes(next.model))
+      patch.provider !== undefined &&
+      patch.provider !== (pending?.next ?? selected).provider &&
+      patch.modelConnectionId === undefined
     )
+      next.modelConnectionId = providers.find((item) => item.provider === patch.provider)?.id;
+    const connection = chatProvider(next, providers);
+    if (!connection || !connection.models.includes(next.model)) {
+      report('Could not save model selection: the selected connection or model is unavailable.');
       return Promise.resolve(false);
+    }
     const entry: Entry = pending ?? { next, version: 0, waiters: [] };
     entry.next = next;
     entry.version++;
@@ -35,9 +43,7 @@ export function useModelSelectionWriter(
         for (;;) {
           const version = entry.version,
             intent = entry.next;
-          const connection = providers.find(
-            (item) => item.provider === intent.provider && item.models.includes(intent.model),
-          );
+          const connection = chatProvider(intent, providers);
           if (!connection) break;
           try {
             const { selection } = await api<{

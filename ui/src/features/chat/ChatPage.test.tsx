@@ -856,3 +856,48 @@ it('clears repeated same-session reset generations and never flushes old text af
   unmount();
   expect(setDraft).not.toHaveBeenCalledWith('typed before second reset');
 });
+
+it('resolves resident provider by connection ID, never the first entry, and retains unavailable model', () => {
+  const providers = [
+    { id: 'google', provider: 'Google', models: ['gemini'] },
+    { id: 'lb', provider: 'OpenAI All', models: ['gpt-6-luna'] },
+  ] as import('../../app/types').SavedProvider[];
+  const resident = {
+    ...agent,
+    provider: '',
+    modelConnectionId: 'lb',
+    model: 'gpt-6-luna',
+    modAgent: { ownerModId: 'menagerie' },
+  } as Agent;
+  const blocked = vi.fn();
+  const props = {
+    selected: resident,
+    savedProviders: providers,
+    updateAgent: vi.fn(),
+    sessions: [],
+    sessionId: 'default',
+    onSessionChange: vi.fn(),
+    onNewSession: vi.fn(),
+    onNewNamedSession: vi.fn(),
+    onCreateGroup: vi.fn(),
+    onSelectionBlockedChange: blocked,
+  };
+  const view = render(<ChatModelSelector {...props} />);
+  expect((screen.getByLabelText('Provider') as HTMLSelectElement).value).toBe('OpenAI All');
+  expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('gpt-6-luna');
+  view.rerender(<ChatModelSelector {...props} savedProviders={[providers[0]]} />);
+  expect((screen.getByLabelText('Provider') as HTMLSelectElement).value).toBe('');
+  expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('gpt-6-luna');
+  expect(blocked).toHaveBeenLastCalledWith(true);
+});
+
+it('shows a dismissible error without replacing theatrical terminal cards', () => {
+  const dismiss = vi.fn();
+  renderChat({
+    error: 'The resident request failed. Your draft is preserved.',
+    onDismissError: dismiss,
+  });
+  expect(screen.getByRole('alert').textContent).toContain('Your draft is preserved');
+  fireEvent.click(screen.getByRole('button', { name: 'Dismiss chat error' }));
+  expect(dismiss).toHaveBeenCalledOnce();
+});

@@ -285,7 +285,7 @@ export function useChatSession(selectedAgentId: string) {
       // every uncached agent/session switch.
       setIsLoadingConversation(true);
     }
-    setChatError('');
+    // Background/session hydration must not erase a reported failure.
     sessionRepository
       .loadSession(selectedAgentId, sessionId)
       .then((session) => {

@@ -87,7 +87,10 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
 export function reconcileModelCatalog(agents: Agent[], providers: SavedProvider[]): Agent[] {
   if (!providers.length) return agents;
   return agents.map((agent) => {
-    if (agent.modAgent) return agent;
+    if (agent.modAgent) {
+      const provider = providers.find((item) => item.id === agent.modelConnectionId);
+      return { ...agent, provider: provider?.provider ?? '' };
+    }
     const provider =
       providers.find((item) => item.id === agent.modelConnectionId) ??
       providers.find((item) => item.provider === agent.provider) ??

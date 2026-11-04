@@ -1150,3 +1150,54 @@ it('reports a truncated stream as transport error without fabricating an assista
     'Message failed: The stream ended without a terminal event.',
   );
 });
+
+it.each(['saved', 'missing-connection', 'missing-model', 'unconfigured'])(
+  'uses resident saved connection or blocks rather than sending Google (%s)',
+  async (scenario) => {
+    const session = createSession();
+    const google = {
+      id: 'google',
+      provider: 'Google',
+      models: ['gemini'],
+      apiType: 'google',
+    } as import('../../app/types').SavedProvider;
+    const lb = {
+      id: 'lb',
+      provider: 'OpenAI All',
+      models: ['gpt-6-luna'],
+    } as import('../../app/types').SavedProvider;
+    const selected = {
+      id: 'gerald',
+      provider: '',
+      modelConnectionId: scenario === 'unconfigured' ? undefined : 'lb',
+      model: scenario === 'missing-model' ? 'removed-model' : 'gpt-6-luna',
+      effort: 'high',
+      temperature: 0.2,
+      modAgent: { ownerModId: 'menagerie' },
+    } as import('../../app/types').Agent;
+    streamChatMock.mockResolvedValue({ terminalType: 'run.completed', finalResult: { ok: true } });
+    const { result } = renderHook(() =>
+      useChatRun({
+        selectedAgentId: 'gerald',
+        selected,
+        savedProviders: scenario === 'missing-connection' ? [google] : [google, lb],
+        session,
+        setAgentActivity: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+    if (scenario === 'saved') {
+      expect(streamChatMock.mock.calls[0][0].requestBody).toMatchObject({
+        modelConnectionId: 'lb',
+        model: 'gpt-6-luna',
+      });
+      expect(session.clearError).not.toHaveBeenCalled();
+    } else {
+      expect(streamChatMock).not.toHaveBeenCalled();
+      expect(session.reportError).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+      expect(session.setDraft).not.toHaveBeenCalled();
+    }
+  },
+);

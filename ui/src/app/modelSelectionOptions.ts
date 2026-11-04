@@ -1,4 +1,4 @@
-import type { SavedProvider } from './types';
+import type { Agent, SavedProvider } from './types';
 
 export const reasoningEffortsForModel = (provider: SavedProvider | undefined, model: string) => [
   'off',
@@ -66,4 +66,17 @@ export function nativeThinkingOptions(
       ? `Saved effort “${effort}” is unavailable for this mode. Choose an effort.`
       : '';
   return { modes, efforts, modeInvalid, effortInvalid, legacyLabel, issue };
+}
+
+/** A persisted connection identity is authoritative, including when unavailable.
+ * Legacy engineering agents without a saved identity retain their default;
+ * mod-owned residents must never inherit the first catalog entry. */
+export function chatProvider(
+  selected: Pick<Agent, 'provider' | 'modelConnectionId' | 'modAgent'> | undefined,
+  providers: SavedProvider[],
+): SavedProvider | undefined {
+  if (selected?.modelConnectionId)
+    return providers.find((item) => item.id === selected.modelConnectionId);
+  const named = providers.find((item) => item.provider === selected?.provider);
+  return named ?? (selected?.modAgent ? undefined : providers[0]);
 }

@@ -1,4 +1,5 @@
 import {
+  chatProvider,
   isNativeThinkingProvider,
   nativeThinkingOptions,
   thinkingModeLabel,
@@ -58,10 +59,14 @@ export function ChatModelSelector({
   savingSelection?: boolean;
   onSelectionBlockedChange?: (blocked: boolean) => void;
 }) {
-  const provider =
-    savedProviders.find((item) => item.provider === selected.provider) ?? savedProviders[0];
+  const provider = chatProvider(selected, savedProviders);
   const models = provider?.models ?? [];
-  const model = models.includes(selected.model) ? selected.model : (models[0] ?? '');
+  const model =
+    selected.modAgent || selected.modelConnectionId
+      ? selected.model
+      : models.includes(selected.model)
+        ? selected.model
+        : (models[0] ?? '');
   const native = isNativeThinkingProvider(provider);
   const identity = JSON.stringify([selected.id, provider?.id, model]);
   type Draft = { patch: Partial<Agent>; displayPair: boolean; pending: boolean; failed: boolean };
@@ -85,6 +90,9 @@ export function ChatModelSelector({
   const thinking = nativeThinkingOptions(provider, model, thinkingMode, effort);
   const efforts = native ? thinking.efforts : reasoningEffortsForModel(provider, model);
   const blocked =
+    Boolean(
+      (selected.modAgent || selected.modelConnectionId) && (!provider || !models.includes(model)),
+    ) ||
     savingNative ||
     Boolean(nativeDraft) ||
     (native && (thinking.modeInvalid || thinking.effortInvalid));
@@ -138,6 +146,7 @@ export function ChatModelSelector({
   const updateForModel = (next: SavedProvider | undefined, nextModel: string) => {
     const patch = {
       provider: next?.provider ?? '',
+      modelConnectionId: next?.id,
       model: nextModel,
       effort: isNativeThinkingProvider(next) ? 'off' : defaultReasoningEffort(next, nextModel),
       thinkingMode: isNativeThinkingProvider(next) ? 'default' : null,
@@ -228,7 +237,13 @@ export function ChatModelSelector({
           onChange={(e) => chooseProvider(e.target.value)}
           disabled={locked || savingNative || !savedProviders.length}
         >
-          {!savedProviders.length && <option value="">Configured runtime</option>}
+          {!provider && (
+            <option value="">
+              {selected.modelConnectionId
+                ? `Unavailable · ${selected.modelConnectionId}`
+                : 'Select provider'}
+            </option>
+          )}
           {savedProviders.map((item) => (
             <option value={item.provider} key={item.id}>
               {item.provider}
@@ -245,7 +260,9 @@ export function ChatModelSelector({
           onChange={(e) => chooseModel(e.target.value)}
           disabled={locked || savingNative || !models.length}
         >
-          {!models.length && <option value="">Configured runtime</option>}
+          {!models.includes(model) && (
+            <option value={model}>{model ? `Unavailable · ${model}` : 'Select model'}</option>
+          )}
           {models.map((item) => (
             <option key={item} value={item}>
               {provider?.modelLabels?.[item] ?? item}
@@ -373,6 +390,7 @@ export function Chat({
   turns,
   isLoading,
   error,
+  onDismissError,
   isSending,
   steeringReady,
   activeRunId,
@@ -404,6 +422,7 @@ export function Chat({
   turns: SessionTurn[];
   isLoading: boolean;
   error: string;
+  onDismissError?: () => void;
   isSending: boolean;
   steeringReady?: boolean;
   activeRunId: string;
@@ -670,6 +689,7 @@ export function Chat({
         turns={transcriptTurns}
         isLoading={isLoading}
         error={error}
+        onDismissError={onDismissError}
         isSending={isSending}
         activeRunId={activeRunId}
         activeToolActivity={activeToolActivity}

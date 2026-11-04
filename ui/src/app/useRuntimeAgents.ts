@@ -118,7 +118,15 @@ async function loadLegacyOverview(
           agent,
           identity: identitiesByAgentId.get(agent.id),
           sessionId,
-          selection: null,
+          selection:
+            agent.enabled && agent.modAgent
+              ? (
+                  await api<{ selection: ModelSelection }>(
+                    `/api/agents/${encodeURIComponent(agent.id)}/model-selection`,
+                    { signal },
+                  )
+                ).selection
+              : null,
           status: { agents: [] },
           contexts: {},
         };
@@ -248,7 +256,13 @@ export function useRuntimeAgents({
             };
           const agent = asAgent(entry);
           // Mod identities have no engineering workspace/profile/provider defaults.
-          if (entry.agent.modAgent) return agent;
+          if (entry.agent.modAgent)
+            return {
+              ...agent,
+              provider:
+                runtimeProviders.current.find((item) => item.id === agent.modelConnectionId)
+                  ?.provider ?? '',
+            };
           const parentStatus = entry.status.agents.find(
             (item) => item.sessionId === entry.sessionId,
           );
