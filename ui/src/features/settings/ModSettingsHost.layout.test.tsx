@@ -1,3 +1,4 @@
+import { UnsavedChangesProvider } from '../../app/UnsavedChanges';
 import normalizedCss from './normalizedWorkspace.css?raw';
 import postcss from 'postcss';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -445,3 +446,53 @@ it.each(['mod', 'url', 'resource', 'declarative', 'failure'])(
     navigation.remove();
   },
 );
+
+it('guards cross-section actions and ignores invalid or retired navigation', async () => {
+  const contexts: any[] = [];
+  mountSettings.mockImplementation((ctx) => {
+    contexts.push(ctx);
+  });
+  const nav = document.createElement('div');
+  document.body.append(nav);
+  const changed = vi.fn();
+  const view = render(
+    <ConfirmProvider>
+      <UnsavedChangesProvider>
+        <ModSettingsHost
+          modId="fixture"
+          settingsUrl="./ModSettingsHostFixture"
+          agents={[]}
+          onAgentsChanged={async () => {}}
+          navigationTarget={nav}
+          overflowTarget={null}
+          onSectionChange={changed}
+        />
+      </UnsavedChangesProvider>
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(contexts).toHaveLength(1));
+  const ctx = contexts[0],
+    prepare = vi.fn();
+  ctx.navigateSection('not-a-section', prepare);
+  expect(prepare).not.toHaveBeenCalled();
+  ctx.setDraft({ dirty: true, busy: false, save: async () => false, discard: vi.fn() });
+  ctx.navigateSection('documents', prepare);
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+  expect(prepare).not.toHaveBeenCalled();
+  ctx.navigateSection('documents', prepare);
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  expect(prepare).not.toHaveBeenCalled();
+  ctx.navigateSection('documents', prepare);
+  await screen.findByRole('alertdialog');
+  fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  await waitFor(() => expect(contexts).toHaveLength(2));
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenCalledWith('documents');
+  ctx.navigateSection('form', prepare);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  view.unmount();
+  nav.remove();
+});

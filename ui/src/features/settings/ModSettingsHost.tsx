@@ -53,6 +53,7 @@ type ModSettingsContext = {
   overflow: SettingsSurface | null;
   confirm: ReturnType<typeof useConfirm>;
   navigate: (proceed: () => void) => void;
+  navigateSection: (sectionId: string, beforeNavigate?: () => void) => void;
   setDraft: (draft: UnsavedDraft | null) => void;
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
   fetchContent: (path: string, init?: RequestInit) => Promise<Response>;
@@ -637,6 +638,8 @@ export function ModSettingsHost({
   }, [Boolean(entitySelector), onSelectorVisibilityChange]);
   const agentsRef = useRef(agents);
   const onAgentsChangedRef = useRef(onAgentsChanged);
+  const onSectionChangeRef = useRef(onSectionChange);
+  onSectionChangeRef.current = onSectionChange;
   agentsRef.current = agents;
   onAgentsChangedRef.current = onAgentsChanged;
 
@@ -772,6 +775,14 @@ export function ModSettingsHost({
           if (!disposed) proceed();
         });
         if (!completed) navigationCancellations.add(cancel);
+      },
+      navigateSection: (sectionId, beforeNavigate) => {
+        if (disposed || !sections.some((item) => item.id === sectionId)) return;
+        context.navigate(() => {
+          beforeNavigate?.();
+          setSection(sectionId);
+          onSectionChangeRef.current?.(sectionId);
+        });
       },
       setDraft: draft.setDraft,
       api: modApi(modId),
