@@ -22,7 +22,7 @@ import { Field, SettingSection } from './SettingsPrimitives';
 export type ModSettingsSection = {
   id: string;
   label: string;
-  layout?: SettingsContribution['sections'][number]['layout'] | 'form-wide';
+  layout?: SettingsContribution['sections'][number]['layout'] | 'form-wide' | 'document';
 };
 type MountResult =
   | void
@@ -543,8 +543,11 @@ function validSections(value: unknown): ModSettingsSection[] {
         label: item.label.trim(),
         ...(item.layout === 'form' ||
         item.layout === 'form-wide' ||
+        item.layout === 'document' ||
         item.layout === 'form-inventory'
-          ? { layout: item.layout as 'form' | 'form-wide' | 'form-inventory' }
+          ? {
+              layout: item.layout as 'form' | 'form-wide' | 'form-inventory' | 'document',
+            }
           : {}),
       },
     ];
@@ -852,9 +855,9 @@ export function ModSettingsHost({
                 await module.handleSettingsAction(actionId, values);
                 if (module?.createSettingsContribution) {
                   try {
-                    const { agents: currentAgents } = await apiLocal<{ agents: Agent[] }>(
-                      '/api/agents',
-                    );
+                    const { agents: currentAgents } = await apiLocal<{
+                      agents: Agent[];
+                    }>('/api/agents');
                     const refreshed = validateSettingsContribution(
                       await module.createSettingsContribution(
                         settingsFactoryContext(modId, enabledAgents(currentAgents)),

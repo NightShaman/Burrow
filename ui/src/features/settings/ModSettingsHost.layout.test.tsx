@@ -1,3 +1,5 @@
+import normalizedCss from './normalizedWorkspace.css?raw';
+import postcss from 'postcss';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
@@ -13,6 +15,7 @@ vi.mock('./ModSettingsHostFixture', () => ({
   settingsSections: [
     { id: 'main', label: 'Main', layout: 'form-inventory' },
     { id: 'overview', label: 'Overview', layout: 'form' },
+    { id: 'documents', label: 'Documents', layout: 'document' },
     { id: 'advanced', label: 'Advanced', layout: 'form-inventory' },
     { id: 'legacy', label: 'Legacy', layout: 'unsupported' },
   ],
@@ -173,7 +176,10 @@ it('switches mixed imperative and declarative sections without competing DOM own
       if (label === 'Declarative form') await screen.findByLabelText('Declared name');
       else if (label === 'Declarative inventory')
         await screen.findByRole('button', { name: 'Declared item' });
-      else await screen.findByRole('heading', { name: `Imperative ${label.toLowerCase()}` });
+      else
+        await screen.findByRole('heading', {
+          name: `Imperative ${label.toLowerCase()}`,
+        });
       expect(container.querySelector('.mod-settings-mount')).toBe(host);
       expect(host?.getAttribute('data-settings-layout')).toBe(
         label === 'Legacy'
@@ -203,4 +209,104 @@ it('switches mixed imperative and declarative sections without competing DOM own
     navigation.remove();
     overflow.remove();
   }
+});
+
+it('validates imperative document layout and keeps both portal targets across section changes', async () => {
+  createSettingsContribution.mockResolvedValue(undefined);
+  const navigation = document.createElement('div');
+  const overflow = document.createElement('div');
+  document.body.append(navigation, overflow);
+  const mounted = vi.fn();
+  mountSettings.mockImplementation((context) => {
+    mounted(context.section, context.primary, context.overflow);
+    return () => {};
+  });
+  try {
+    const { container } = render(
+      <ConfirmProvider>
+        <ModSettingsHost
+          modId="fixture"
+          settingsUrl="./ModSettingsHostFixture"
+          agents={[]}
+          onAgentsChanged={async () => {}}
+          navigationTarget={navigation}
+          overflowTarget={overflow}
+        />
+      </ConfirmProvider>,
+    );
+    await screen.findByRole('button', { name: 'Documents' });
+    const host = container.querySelector('.mod-settings-mount');
+    fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
+    await waitFor(() => expect(host?.getAttribute('data-settings-layout')).toBe('document'));
+    await waitFor(() => expect(mounted.mock.calls.at(-1)?.[0]).toBe('documents'));
+    expect(container.querySelector('.mod-settings-mount')).toBe(host);
+    expect(overflow.isConnected).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Legacy' }));
+    await waitFor(() => expect(host?.getAttribute('data-settings-layout')).toBe('imperative'));
+    expect(container.querySelector('.mod-settings-mount')).toBe(host);
+  } finally {
+    navigation.remove();
+    overflow.remove();
+  }
+});
+
+it('routes document metadata through shared narrow and wide pane rules', () => {
+  const sheet = postcss.parse(normalizedCss);
+  const rules: {
+    selector: string;
+    container: string;
+    values: Record<string, string>;
+  }[] = [];
+  sheet.walkRules((rule) => {
+    const values: Record<string, string> = {};
+    rule.walkDecls((declaration) => {
+      values[declaration.prop] = declaration.value;
+    });
+    rules.push({
+      selector: rule.selector,
+      container: rule.parent?.type === 'atrule' ? rule.parent.params : '',
+      values,
+    });
+  });
+  const documentRules = rules.filter((rule) =>
+    rule.selector.includes("[data-settings-layout='document']"),
+  );
+  expect(
+    documentRules.some(
+      (rule) =>
+        !rule.container &&
+        rule.values['grid-template-columns'] === 'clamp(240px, 24%, 320px) minmax(0, 1fr)',
+    ),
+  ).toBe(true);
+  expect(
+    documentRules.some(
+      (rule) =>
+        !rule.container &&
+        rule.values['grid-template-rows'] === 'minmax(0, min(220px, 35%)) minmax(0, 1fr)',
+    ),
+  ).toBe(true);
+  expect(
+    documentRules.some(
+      (rule) =>
+        rule.container === 'settings-workspace (min-width: 640px)' &&
+        rule.values['grid-row'] === '1 / -1',
+    ),
+  ).toBe(true);
+  expect(
+    documentRules.some(
+      (rule) =>
+        rule.selector.endsWith('.profile-document-selector') &&
+        !rule.container &&
+        rule.values.display === 'flex',
+    ),
+  ).toBe(true);
+  expect(
+    documentRules.some(
+      (rule) =>
+        rule.selector.endsWith('.profile-document-selector') &&
+        rule.container &&
+        rule.values.display === 'grid',
+    ),
+  ).toBe(true);
+  expect(documentRules.some((rule) => rule.values.display === 'none')).toBe(false);
 });
