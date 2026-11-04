@@ -311,7 +311,7 @@ it('routes document metadata through shared narrow and wide pane rules', () => {
   expect(documentRules.some((rule) => rule.values.display === 'none')).toBe(false);
 });
 
-it('owns the shared entity selector and rejects retired mount updates and callbacks', async () => {
+it('keeps the selector DOM across sections while rejecting retired updates and callbacks', async () => {
   const contexts: any[] = [];
   mountSettings.mockImplementation((ctx) => {
     contexts.push(ctx);
@@ -341,15 +341,24 @@ it('owns the shared entity selector and rejects retired mount updates and callba
   current.setEntitySelector({
     label: 'Residents',
     items: [{ id: 'a', label: 'Gerald' }],
-    selectedId: 'a',
+    selectedId: '',
     onSelect,
   });
   await screen.findByRole('button', { name: 'Gerald' });
-  expect(selector.querySelector('.agent-toolbar-agent-list')).toBeTruthy();
+  const bar = selector.querySelector('.agent-toolbar-agent-list')!;
+  const resident = screen.getByRole('button', { name: 'Gerald' });
+  bar.scrollLeft = 83;
+  resident.focus();
   await waitFor(() => expect(visible).toHaveBeenLastCalledWith(true));
+  visible.mockClear();
   fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
   await waitFor(() => expect(contexts).toHaveLength(2));
-  expect(selector.querySelector('[data-agent-id]')).toBeNull();
+  expect(selector.querySelector('.agent-toolbar-agent-list')).toBe(bar);
+  expect(bar.scrollLeft).toBe(83);
+  expect(document.activeElement).toBe(resident);
+  expect(visible).not.toHaveBeenCalled();
+  fireEvent.click(resident);
+  expect(onSelect).not.toHaveBeenCalled();
   current.setEntitySelector({
     label: 'Old',
     items: [{ id: 'z', label: 'Stale' }],
@@ -357,9 +366,82 @@ it('owns the shared entity selector and rejects retired mount updates and callba
     onSelect,
   });
   expect(screen.queryByRole('button', { name: 'Stale' })).toBeNull();
+  const nextSelect = vi.fn();
+  contexts[1].setEntitySelector({
+    label: 'Residents',
+    items: [{ id: 'a', label: 'Gerald' }],
+    selectedId: '',
+    onSelect: nextSelect,
+  });
+  await waitFor(() => expect(resident.getAttribute('aria-pressed')).toBe('false'));
+  expect(selector.querySelector('.agent-toolbar-agent-list')).toBe(bar);
+  fireEvent.click(resident);
+  expect(nextSelect).toHaveBeenCalledWith('a');
+  expect(onSelect).not.toHaveBeenCalled();
+  contexts[1].setEntitySelector(null);
+  await waitFor(() => expect(selector.childElementCount).toBe(0));
   view.unmount();
   expect(selector.childElementCount).toBe(0);
   navigation.remove();
   overflow.remove();
   selector.remove();
 });
+
+it.each(['mod', 'url', 'resource', 'declarative', 'failure'])(
+  'clears a retained selector on %s changes',
+  async (change) => {
+    const contexts: any[] = [];
+    mountSettings.mockImplementation((ctx) => {
+      contexts.push(ctx);
+    });
+    const navigation = document.createElement('div');
+    document.body.append(navigation);
+    const props = {
+      modId: 'fixture',
+      settingsUrl: './ModSettingsHostFixture',
+      agents: [],
+      onAgentsChanged: async () => {},
+      navigationTarget: navigation,
+      overflowTarget: null,
+    };
+    const makeUi = (overrides = {}) => (
+      <ConfirmProvider>
+        <ModSettingsHost {...props} {...overrides} />
+      </ConfirmProvider>
+    );
+    const view = render(makeUi());
+    await waitFor(() => expect(contexts).toHaveLength(1));
+    contexts[0].setEntitySelector({
+      label: 'Residents',
+      items: [{ id: 'a', label: 'Gerald' }],
+      selectedId: '',
+      onSelect: vi.fn(),
+    });
+    await screen.findByRole('button', { name: 'Gerald' });
+    if (change === 'mod') view.rerender(makeUi({ modId: 'other' }));
+    if (change === 'url') view.rerender(makeUi({ settingsUrl: './ModSettingsImperativeFixture' }));
+    if (change === 'resource') view.rerender(makeUi({ selectedAgentId: 'other' }));
+    if (change === 'declarative') {
+      createSettingsContribution.mockResolvedValue({
+        sections: [
+          {
+            id: 'main',
+            label: 'Main',
+            layout: 'form',
+            fields: [{ id: 'name', label: 'Name', value: 'Example' }],
+          },
+        ],
+      });
+      view.rerender(makeUi({ modId: 'other' }));
+      await screen.findByLabelText('Name');
+    }
+    if (change === 'failure') {
+      mountSettings.mockRejectedValueOnce(new Error('Synthetic mount failure'));
+      fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
+      await screen.findByRole('alert');
+    }
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Gerald' })).toBeNull());
+    view.unmount();
+    navigation.remove();
+  },
+);

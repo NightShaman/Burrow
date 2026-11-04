@@ -626,6 +626,11 @@ export function ModSettingsHost({
   const [section, setSection] = useState('');
   const [error, setError] = useState('');
   const [entitySelector, setEntitySelector] = useState<ModEntitySelector | null>(null);
+  // The header belongs to the loaded settings owner, not an individual section.
+  // Keep its DOM/scroll position while the next section publishes fresh callbacks.
+  useEffect(() => {
+    setEntitySelector(null);
+  }, [settingsUrl, modId, selectedAgentId]);
   useEffect(() => {
     onSelectorVisibilityChange?.(Boolean(entitySelector));
     return () => onSelectorVisibilityChange?.(false);
@@ -698,7 +703,11 @@ export function ModSettingsHost({
           ? definition.fields?.length || definition.actions?.length
           : definition.items?.length),
     );
-    if (hasDeclarativeContent || !module?.mountSettings || !primary || !section) return;
+    if (hasDeclarativeContent || !module?.mountSettings) {
+      setEntitySelector(null);
+      return;
+    }
+    if (!primary || !section) return;
     const node = document.createElement('div');
     node.className = 'mod-settings-surface';
     primary.replaceChildren(node);
@@ -805,12 +814,15 @@ export function ModSettingsHost({
         else cleanup = candidate;
       })
       .catch((cause) => {
-        if (!disposed)
+        if (!disposed) {
+          setEntitySelector(null);
           setError(cause instanceof Error ? cause.message : 'Could not mount mod settings.');
+        }
       });
     return () => {
       disposed = true;
-      setEntitySelector(null);
+      // Retired callbacks are already guarded by `disposed`. Do not remove the
+      // header between same-owner sections while their data loads.
       navigationCancellations.forEach((cancel) => cancel());
       draft.dispose();
       node.remove();
