@@ -198,7 +198,8 @@ export class PostgresAlbdruckStore {
       const removedIdentities = new Set();
       const signalIdentity = item => item?.evidenceKey ? JSON.stringify([item.evidenceKey, item.kind, item.scope, item.guidance]) : null;
       const signalReferences = item => references(item?.sourceRefs) ||
-        (Array.isArray(item?.evidence) && item.evidence.some(evidenceItem => references(evidenceItem?.sourceRef)));
+        (Array.isArray(item?.evidence) && item.evidence.some(evidenceItem => references(evidenceItem?.sourceRef))) ||
+        (Array.isArray(item?.context) && item.context.some(turn => references(turn?.sourceRef)));
       const addId = id => { if (typeof id === 'string' && id) removedIds.add(id); };
       const addIdentity = identity => { if (typeof identity === 'string' && identity) removedIdentities.add(identity); };
       // Legacy resolved evidence lacks sourceRefs. An ID/identity linked to a
@@ -217,13 +218,13 @@ export class PostgresAlbdruckStore {
           }
         }
         for (const item of resolved) {
-          if (references(item?.sourceRefs) || removedIds.has(item?.id) || (item?.identity && removedIdentities.has(item.identity))) {
+          if (signalReferences(item) || removedIds.has(item?.id) || (item?.identity && removedIdentities.has(item.identity))) {
             addId(item?.id); addIdentity(item?.identity);
           }
         }
       } while (removedIds.size + removedIdentities.size !== previousSize);
       const keptSignals = signals.filter(item => !signalReferences(item) && !removedIds.has(item?.id) && !(signalIdentity(item) && removedIdentities.has(signalIdentity(item))));
-      const keptResolved = resolved.filter(item => !references(item?.sourceRefs) && !removedIds.has(item?.id) && !(item?.identity && removedIdentities.has(item.identity)));
+      const keptResolved = resolved.filter(item => !signalReferences(item) && !removedIds.has(item?.id) && !(item?.identity && removedIdentities.has(item.identity)));
       const keptEntries = entries.filter(entry => !references(entry?.sourceRefs) && !(Array.isArray(entry?.sourceSignalIds) && entry.sourceSignalIds.some(id => removedIds.has(id))));
       derived.preference_signals = signals.length - keptSignals.length;
       derived.preference_resolved_evidence = resolved.length - keptResolved.length;

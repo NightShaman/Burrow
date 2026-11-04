@@ -4,7 +4,7 @@ import { withTiddleOccurrence, runAsync, tiddlePersistence } from './tiddle-pers
 import { rollingCardActive } from './postgres-rolling-continuity-store.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { completeCurator, curatorRoot, readCuratorSelection } from './curator-runtime.mjs';
-import { appendPreferenceSignalAsync } from './preference-learning.mjs';
+import { appendPreferenceSignalAsync, preferenceConversationContext, PREFERENCE_INTENT_INSTRUCTIONS } from './preference-learning.mjs';
 
 const PASS_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 const LOOKBACK_MS = 24 * 60 * 60 * 1_000;
@@ -91,7 +91,7 @@ export function groundTiddlePreferenceSignal({ signal, agentId, residue = [] } =
   // If any supporting time is unknown, neither end of the interval is safe.
   const known = times.every(Boolean) ? times.sort() : [];
   const evidenceKey = createHash('sha256').update(JSON.stringify(['tiddle-preference-evidence-v1', text(agentId), [...observation.sourceRefs].sort()])).digest('hex');
-  return { ...observation, evidence: supporting.map(item => ({ sourceRef: item.ref, at: trustedUserAt(item.userAt), content: item.message })), sourceAt: known[0] || null, sourceEndAt: known.at(-1) || null, evidenceKey };
+  return { ...observation, context: preferenceConversationContext(residue.flatMap(item => [{ sourceRef: item.ref, sessionId: item.sessionId, role: 'user', at: item.userAt, content: item.message, operatorInput: item.operatorInput }, { sourceRef: item.ref, sessionId: item.sessionId, role: 'assistant', at: item.at, content: item.answer, operatorInput: false }]), observation.sourceRefs), evidence: supporting.map(item => ({ sourceRef: item.ref, at: trustedUserAt(item.userAt), content: item.message })), sourceAt: known[0] || null, sourceEndAt: known.at(-1) || null, evidenceKey };
 }
 
 export function parseTiddleProposal(value) {
@@ -148,6 +148,7 @@ function prompt({ agentId, scope, residue, cards }) {
     'You are Tiddle. You reconcile rolling conversational continuity on a four-hour cadence. Return JSON only; never address the user.',
     'Warm continuity means a concept persisted, resumed, or recurred across the window. A single vivid turn is not warmth. Default to NOOP.',
     'Do not create tasks, decisions, emotional/therapy notes, transcript summaries, raw tool dumps, verified external state, or instructions for the agent. This is recall metadata only.',
+    PREFERENCE_INTENT_INSTRUCTIONS,
     'Separately, notice a clear, enduring operator behavioral preference, either an explicit positive preference or a correction. You may emit at most one grounded preferenceSignal; it is an observation, never a profile edit. Do not infer a stable preference from a mood, one-off task instruction, or generic conversation. Use {kind:reinforce|contradict|replace,scope,guidance,reason,sourceRefs:[...]} and cite only the exact ref(s) of the supporting operator messages, not assistant answers or every new ref. Every cited message must contain supporting operator text; at least one cited ref must have newSinceLastPass:true. If you cannot cite the support, omit preferenceSignal.',
     'Return JSON with the normal action fields and optional preferenceSignal. Use UPSERT only when the supplied residue demonstrates a compact future-turn-relevant thread that persisted or recurred. If it is an existing concept, set targetId to that exact existing card id even if you improve its title. Set targetId:null only for a genuinely new concept. Output either {"action":"NOOP","reason":"..."} or {"action":"UPSERT","targetId":"existing-card-id-or-null","title":"...","summary":"...","reason":"..."}.',
     `Agent: ${agentId}; continuity scope: ${scope}`,

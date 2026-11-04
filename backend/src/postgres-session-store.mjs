@@ -1913,6 +1913,10 @@ export class PostgresSessionStore {
             remember(entry.sourceRef);
             return { ...entry, sourceRef: rewritePreferenceRef(entry.sourceRef) };
           }) };
+          if (evidence && Array.isArray(item.context)) next = { ...next, context: item.context.map(entry => {
+            remember(entry.sourceRef);
+            return { ...entry, sourceRef: rewritePreferenceRef(entry.sourceRef) };
+          }) };
           return next;
         });
         const nextAudit = audit && { ...audit, ...(audit.entries ? { entries: rewriteItems(audit.entries) } : {}) };

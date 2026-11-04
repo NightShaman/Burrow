@@ -26,6 +26,20 @@ const order = "CASE kind WHEN 'SOUL' THEN 0 WHEN 'RULES' THEN 1 WHEN 'ORIENTATIO
 const now = () => new Date().toISOString();
 const globalProfile = row => ({ useGlobalRules: Boolean(row?.use_global_rules), useGlobalOrientation: Boolean(row?.use_global_orientation) });
 function document(row) { return row && { kind: row.kind, markdown: row.markdown, format: 'markdown', createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at, updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at }; }
+const revisionedDocument = row => row ? { ...document(row), revision: row.revision } : null;
+const sameRulesDocument = (current, baseline) => current === null ? baseline === null : Boolean(baseline) &&
+  ['kind', 'markdown', 'format', 'createdAt', 'updatedAt', 'revision'].every(key => current[key] === baseline[key] && baseline[key] != null);
+const sameRulesSnapshot = (current, baseline) => Boolean(baseline) && current.useGlobalRules === baseline.useGlobalRules &&
+  sameRulesDocument(current.agent, baseline.agent) && sameRulesDocument(current.global, baseline.global);
+const ruleRowSql = 'SELECT kind,markdown,created_at,updated_at,xmin::text AS revision FROM agent_profile_documents WHERE agent_id=$1 AND kind=\'RULES\'';
+const globalRuleRowSql = "SELECT kind,markdown,created_at,updated_at,xmin::text AS revision FROM global_profile_documents WHERE kind='RULES'";
+function validatedRuleAmendments(value) {
+  if (!Array.isArray(value) || value.some(item => !['agent', 'global'].includes(item?.scope) ||
+    typeof item.oldText !== 'string' || !item.oldText || typeof item.newText !== 'string' || item.oldText === item.newText)) {
+    throw new Error('preference_rule_amendment_invalid');
+  }
+  return value;
+}
 
 // Whole-profile saves rewrite rows for CAS, but only changed preference text
 // establishes a new operator baseline. Clear automated ownership even on an
@@ -103,6 +117,17 @@ export class PostgresAgentProfileStore {
     const row = result.rows[0];
     return row ? { ...document(row), revision: row.revision } : null;
   }
+  /** Private RULES CAS tokens; global ownership remains independent of the agent row. */
+  async preferenceRulesSnapshot(agent) {
+    const id = agentId(agent);
+    return withPostgresTransaction(this.pool, async client => {
+      const agentRow = (await client.query('SELECT use_global_rules FROM agents WHERE id=$1 FOR SHARE', [id])).rows[0];
+      if (!agentRow) throw new Error('agent_not_found');
+      const own = (await client.query(ruleRowSql, [id])).rows[0];
+      const global = (await client.query(globalRuleRowSql)).rows[0];
+      return { agent: revisionedDocument(own), global: revisionedDocument(global), useGlobalRules: agentRow.use_global_rules };
+    });
+  }
   async replace(agent, documents = []) {
     const id = agentId(agent);
     const normalized = (Array.isArray(documents) ? documents : []).map((item) => ({ kind: kind(item?.kind), markdown: markdown(item?.markdown) }));
@@ -134,36 +159,65 @@ export class PostgresAgentProfileStore {
       return rows.rows.map(document);
     });
   }
-  /** Profile, per-signal resolution and private audit share the operator profile-write lock. */
-  async atomicPreferenceUpdate(agent, { markdown: content, stateKey, state, auditKey, audit, signalsKey, signals, at, decide }) {
+  /** Profile, RULES, per-signal resolution and private audit share one transaction. */
+  async atomicPreferenceUpdate(agent, { markdown: content, stateKey, state, auditKey, audit, signalsKey, signals, at, decide, rulesBaseline = null, ruleAmendments = [] }) {
     const id = agentId(agent);
     const normalized = content === null ? null : markdown(content);
+    const amendments = validatedRuleAmendments(ruleAmendments);
+    if (amendments.length && !rulesBaseline) return { applied: false, reason: 'rules_baseline_required' };
     return withPostgresTransaction(this.pool, async (client) => {
-      const found = await client.query('SELECT id FROM agents WHERE id=$1 FOR UPDATE', [id]);
+      const found = await client.query(rulesBaseline ? 'SELECT id,use_global_rules FROM agents WHERE id=$1 FOR UPDATE' : 'SELECT id FROM agents WHERE id=$1 FOR UPDATE', [id]);
       if (!found.rows[0]) throw new Error('agent_not_found');
+      // Lock global first, then agent RULES, consistently after the agent lock.
+      // The checks also guard maintenance reviews with no proposed amendments.
+      let ruleChanges = [];
+      if (rulesBaseline) {
+        const global = (await client.query(`${globalRuleRowSql} FOR UPDATE`)).rows[0];
+        const own = (await client.query(`${ruleRowSql} FOR UPDATE`, [id])).rows[0];
+        const rules = { agent: revisionedDocument(own), global: revisionedDocument(global), useGlobalRules: found.rows[0].use_global_rules };
+        if (!sameRulesSnapshot(rules, rulesBaseline)) return { applied: false, reason: 'rules_baseline_changed' };
+        const next = { agent: own?.markdown, global: global?.markdown };
+        for (const amendment of amendments) {
+          if (amendment.scope === 'global' && !rules.useGlobalRules) return { applied: false, reason: 'rules_scope_unavailable' };
+          const source = next[amendment.scope];
+          const first = source?.indexOf(amendment.oldText) ?? -1;
+          if (first < 0 || source.indexOf(amendment.oldText, first + amendment.oldText.length) !== -1) {
+            return { applied: false, reason: 'rule_amendment_mismatch' };
+          }
+          next[amendment.scope] = markdown(source.slice(0, first) + amendment.newText + source.slice(first + amendment.oldText.length));
+        }
+        ruleChanges = ['global', 'agent'].filter(scope => next[scope] !== (scope === 'agent' ? own?.markdown : global?.markdown))
+          .map(scope => ({ scope, markdown: next[scope] }));
+      }
+      const rulesChanged = ruleChanges.length > 0;
       const profileResult = await client.query('SELECT kind,markdown,created_at,updated_at,xmin::text AS revision FROM agent_profile_documents WHERE agent_id=$1 AND kind=$2 FOR UPDATE', [id, 'PREFERENCES']);
       const row = profileResult.rows[0];
-      const current = row ? { ...document(row), revision: row.revision } : null;
+      const current = revisionedDocument(row);
       const readMeta = async (key) => { const result = await client.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1 FOR UPDATE', [key]); try { return JSON.parse(result.rows[0]?.value_json || 'null'); } catch { return null; } };
       for (const key of [...new Set([stateKey, auditKey, signalsKey].filter(Boolean))].sort()) await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${key}`]);
       const priorState = await readMeta(stateKey);
       const priorAudit = await readMeta(auditKey);
       const priorSignals = signalsKey ? await readMeta(signalsKey) : null;
       const retainedSignals = priorSignals?.signals || [];
-      const decision = decide?.({ current, priorState, retainedSignals }) || { apply: true };
+      const ruleContext = { rulesChanged, ruleAmendments: amendments };
+      const decision = decide?.({ current, priorState, retainedSignals, ...ruleContext }) || { apply: true };
       if (!decision.apply) return decision.result || { applied: false, reason: decision.reason };
       const writeProfile = decision.writeProfile !== false;
       let next = current;
       if (writeProfile) {
         const result = await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=CASE WHEN agent_profile_documents.kind='PREFERENCES' AND agent_profile_documents.markdown=EXCLUDED.markdown THEN agent_profile_documents.updated_at ELSE EXCLUDED.updated_at END RETURNING kind,markdown,created_at,updated_at,xmin::text AS revision`, [id, 'PREFERENCES', normalized, at]);
-        next = { ...document(result.rows[0]), revision: result.rows[0].revision };
+        next = revisionedDocument(result.rows[0]);
+      }
+      for (const change of ruleChanges) {
+        if (change.scope === 'global') await client.query("UPDATE global_profile_documents SET markdown=$1,updated_at=$2 WHERE kind='RULES'", [change.markdown, at]);
+        else await client.query("UPDATE agent_profile_documents SET markdown=$1,updated_at=$2 WHERE agent_id=$3 AND kind='RULES'", [change.markdown, at, id]);
       }
       const writeMeta = (key, value) => client.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [key, JSON.stringify(value), at]);
-      const nextState = typeof state === 'function' ? state(priorState, { current, next, decision, retainedSignals }) : state;
-      const nextAudit = audit(priorAudit, current, decision);
+      const nextState = typeof state === 'function' ? state(priorState, { current, next, decision, retainedSignals, ...ruleContext }) : state;
+      const nextAudit = audit(priorAudit, current, decision, ruleContext);
       await writeMeta(stateKey, nextState); await writeMeta(auditKey, nextAudit);
-      if (signals) await writeMeta(signalsKey, signals(priorSignals, { state: nextState }));
-      return { applied: writeProfile, reviewed: true, reason: decision.reason || null, entry: nextAudit.entries[0], state: nextState };
+      if (signals) await writeMeta(signalsKey, signals(priorSignals, { state: nextState, ...ruleContext }));
+      return { applied: writeProfile || rulesChanged, rulesChanged, reviewed: true, reason: decision.reason || null, entry: nextAudit.entries[0], state: nextState };
     });
   }
   async replacePreferences(agent, value) { return this.replaceSingle(agent, 'PREFERENCES', value); }
