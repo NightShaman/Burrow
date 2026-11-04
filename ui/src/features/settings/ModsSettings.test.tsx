@@ -67,7 +67,7 @@ describe('ModsSettings layout contract', () => {
     expect(overflow.querySelector('.mod-system-badge')?.textContent).toBe('System');
     expect(overflow.querySelector('.memory-connection.selected')).toBeNull();
     expect(container.textContent).not.toContain('Beta');
-    expect(screen.queryByRole('button', { name: 'Refresh catalog' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh catalog' })).toBeTruthy();
     expect(overflow.getAttribute('aria-label')).toBeNull();
     expect(overflow.querySelector('[aria-label="Mod catalog"]')?.textContent).toContain('Beta');
     expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull();
@@ -82,7 +82,14 @@ describe('ModsSettings layout contract', () => {
   it('keeps source configuration in column 3 and configured sources in column 4', async () => {
     loadMock.mockResolvedValue({
       restartRequired: false,
-      mods: [],
+      mods: [
+        {
+          id: 'alpha',
+          name: 'Alpha mod',
+          status: 'available',
+          source: 'https://mods.example/catalog.json',
+        },
+      ],
       sources: [
         {
           id: 'source-1',
@@ -95,7 +102,9 @@ describe('ModsSettings layout contract', () => {
     const overflow = document.createElement('section');
     document.body.appendChild(overflow);
     const { container } = render(<ModsSettings section="sources" overflowTarget={overflow} />);
-    await waitFor(() => expect(overflow.textContent).toContain('mods.example'));
+    await screen.findByRole('button', { name: 'Edit Alpha mod' });
+    expect(overflow.textContent).not.toContain('mods.example');
+    expect(overflow.querySelector('strong')?.textContent).toBe('Alpha mod');
     expect(
       container.querySelector('input[placeholder="https://git.example.com/team/mod.git"]'),
     ).toBeTruthy();
@@ -109,7 +118,111 @@ describe('ModsSettings layout contract', () => {
     expect(overflow.querySelector('[aria-label="Configured mod sources"]')?.textContent).toContain(
       'Ready',
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alpha mod' }));
+    expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe(
+      'https://mods.example/catalog.json',
+    );
     overflow.remove();
+  });
+});
+
+describe('Mods catalog refresh', () => {
+  const alpha = {
+    id: 'alpha',
+    name: 'Alpha',
+    status: 'installed',
+    source: 'https://example.test/alpha.git',
+    version: '1.0.0',
+  };
+  const beta = { id: 'beta', name: 'Beta', status: 'installed', version: '2.0.0' };
+  const catalog = { restartRequired: false, mods: [alpha, beta], sources: [] };
+
+  it.each(['installed', 'sources'] as const)(
+    'refreshes %s with the existing source action and preserves selection',
+    async (section) => {
+      loadMock.mockResolvedValue(catalog);
+      let finish!: (result: management.ModManagementState) => void;
+      vi.mocked(management.modManagementAction).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      render(<ModsSettings section={section} />);
+      const label = section === 'installed' ? 'Refresh catalog' : 'Refresh sources';
+      const refresh = await screen.findByRole('button', { name: label });
+      await screen.findByText(
+        section === 'installed' ? 'Installed version' : 'No custom sources configured.',
+      );
+      if (section === 'installed')
+        fireEvent.click(screen.getByRole('button', { name: 'Manage Beta' }));
+      fireEvent.click(refresh);
+      expect(
+        (screen.getByRole('button', { name: 'Refreshing…' }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      fireEvent.click(refresh);
+      expect(management.modManagementAction).toHaveBeenCalledTimes(1);
+      expect(management.modManagementAction).toHaveBeenCalledWith('/api/mod-management/refresh', {
+        method: 'POST',
+      });
+      loadMock.mockResolvedValue({
+        ...catalog,
+        mods: [alpha, { ...beta, latestVersion: '3.0.0' }],
+      });
+      await act(async () => finish({ ok: true }));
+      await screen.findByRole('button', { name: label });
+      if (section === 'installed') {
+        expect(
+          screen.getByRole('button', { name: 'Manage Beta' }).getAttribute('aria-pressed'),
+        ).toBe('true');
+        expect((screen.getByLabelText('Latest source version') as HTMLOutputElement).value).toBe(
+          '3.0.0',
+        );
+      }
+    },
+  );
+
+  it('retains the catalog on refresh failure and permits retry, including when empty', async () => {
+    loadMock.mockResolvedValue(catalog);
+    vi.mocked(management.modManagementAction).mockRejectedValueOnce(
+      new Error('Source check failed'),
+    );
+    render(<ModsSettings />);
+    await screen.findByRole('button', { name: 'Manage Beta' });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalog' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Source check failed');
+    expect(screen.getByRole('button', { name: 'Manage Alpha' })).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Refresh catalog' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+    vi.mocked(management.modManagementAction).mockResolvedValueOnce({ ok: true });
+    loadMock.mockResolvedValue({ ...catalog, mods: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalog' }));
+    await screen.findByText('No mods found. Add a source in Mod sources.');
+    expect(screen.getByRole('button', { name: 'Refresh catalog' })).toBeTruthy();
+  });
+
+  it('does not fabricate names for undiscovered sources or expose URLs on selector cards', async () => {
+    loadMock.mockResolvedValue({
+      ...catalog,
+      mods: [],
+      sources: [
+        {
+          id: 'pending',
+          url: 'git@example.test:team/unknown.git',
+          status: 'error',
+          error: 'Discovery failed',
+        },
+      ],
+    });
+    render(<ModsSettings section="sources" />);
+    const source = await screen.findByRole('button', { name: 'Edit Undiscovered mod' });
+    expect(source.textContent).not.toContain('git@example.test');
+    expect(source.textContent).toContain('Discovery failed');
+    fireEvent.click(source);
+    expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe(
+      'git@example.test:team/unknown.git',
+    );
   });
 });
 
@@ -413,8 +526,8 @@ describe('Git mod sources', () => {
     const { container, unmount } = render(
       <ModsSettings section="sources" overflowTarget={overflow} />,
     );
-    await screen.findByRole('button', { name: `Edit ${url}` });
-    fireEvent.click(screen.getByRole('button', { name: `Edit ${url}` }));
+    await screen.findByRole('button', { name: 'Edit Undiscovered mod' });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Undiscovered mod' }));
     expect(container.textContent).toContain('Selected mod source');
     const sourceUrl = screen.getByLabelText('Git repository URL') as HTMLInputElement;
     expect(sourceUrl.value).toBe(url);
@@ -430,7 +543,7 @@ describe('Git mod sources', () => {
     );
     expect(screen.queryByRole('button', { name: 'Save automatic checks' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'New source' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: `Edit ${url}` }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Undiscovered mod' }));
     expect(sourceUrl.value).toBe('');
     expect(screen.getByRole('button', { name: 'Add source' })).toBeTruthy();
     unmount();
@@ -455,7 +568,7 @@ describe('Git mod sources', () => {
       .mockResolvedValueOnce(removed);
     vi.mocked(management.modManagementAction).mockResolvedValue({ ok: true });
     render(<ModsSettings section="sources" />);
-    fireEvent.click(await screen.findByRole('button', { name: `Edit ${url}` }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Undiscovered mod' }));
     expect(screen.getByText('Stored credential configured')).toBeTruthy();
     expect(screen.getByText('Leave the password or token empty to keep using it.')).toBeTruthy();
     expect(
@@ -601,7 +714,7 @@ describe('Git mod sources', () => {
       expect(screen.getByRole('alert').textContent).toContain('Source saved, but discovery failed'),
     );
     expect(screen.getByRole('alert').textContent).toContain('mod_source_authentication_failed');
-    expect(screen.getByText(url)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit Undiscovered mod' })).toBeTruthy();
     expect(screen.getByText(/failed · mod_source_authentication_failed/)).toBeTruthy();
     expect((screen.getByLabelText('Git repository URL') as HTMLInputElement).value).toBe(url);
   });

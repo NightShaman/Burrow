@@ -266,7 +266,7 @@ const mods = Array.from({ length: 6 }, (_, i) => ({
   managedSkillVersion: '1.0.0',
   status: 'installed',
   enabled: i % 3 !== 2,
-  source: `https://example.invalid/mod-${i + 1}.git`,
+  source: `https://example.invalid/synthetic-team/mod-source-${i + 1}.git`,
 }));
 const modSources = Array.from({ length: 4 }, (_, i) => ({
   id: `source-${i + 1}`,

@@ -150,11 +150,7 @@ it('loads every built-in subsection against isolated realistic fixture data', as
           document.querySelectorAll('.memory-connection-list .memory-connection'),
         ).toHaveLength(4);
         await act(async () => {
-          fireEvent.click(
-            document.querySelector(
-              '[aria-label="Edit https://example.invalid/synthetic-team/mod-source-1.git"]',
-            )!,
-          );
+          fireEvent.click(document.querySelector('[aria-label="Edit Fixture Mod"]')!);
         });
         await waitFor(() =>
           expect(document.querySelector('[aria-label="Browse stored credentials"]')).toBeTruthy(),

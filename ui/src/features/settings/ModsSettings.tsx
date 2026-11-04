@@ -30,6 +30,10 @@ function formatCheckedTime(value: string) {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
 }
 
+function sourceModName(source: ModSource, mods: ModRecord[]) {
+  return mods.find((mod) => mod.source === source.url)?.name || 'Undiscovered mod';
+}
+
 function actionLabel(mod: ModRecord) {
   if (mod.status !== 'installed') return 'Install';
   return mod.version && mod.latestVersion && mod.updateAvailable === true ? 'Update' : 'Reinstall';
@@ -497,6 +501,17 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
     }
   };
 
+  const refreshSourcesAction = (label: string) => (
+    <button
+      className="secondary"
+      type="button"
+      disabled={busy !== null}
+      onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}
+    >
+      {busy === 'refresh' ? 'Refreshing…' : label}
+    </button>
+  );
+
   const modInventoryContents =
     state.mods.length === 0 ? (
       <p className="settings-empty">No mods found. Add a source in Mod sources.</p>
@@ -548,6 +563,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
   const modConfiguration = (
     <section className="setting-section mod-configuration" aria-labelledby="selected-mod-heading">
       <h2 id="selected-mod-heading">{selectedMod ? selectedMod.name : 'Mod details'}</h2>
+      <div className="setting-actions">{refreshSourcesAction('Refresh catalog')}</div>
       {selectedMod ? (
         <>
           <dl className="settings-metadata">
@@ -651,7 +667,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
             <button
               type="button"
               className="memory-connection-select"
-              aria-label={`Edit ${source.url}`}
+              aria-label={`Edit ${sourceModName(source, state.mods)}`}
               aria-pressed={source.id === selectedSourceId}
               onClick={() => {
                 const selecting = selectedSourceId !== source.id;
@@ -663,7 +679,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
                 if (sourceSecretRef.current) sourceSecretRef.current.value = '';
               }}
             >
-              <strong>{source.url}</strong>
+              <strong>{sourceModName(source, state.mods)}</strong>
               <small>
                 {source.status || 'Unknown'}
                 {source.lastCheckedAt
@@ -1051,14 +1067,7 @@ export function ModsSettings({ section = 'installed', overflowTarget }: Props) {
         For SSH, configure keys and host trust on the Core service account.
       </p>
       <div className="model-actions">
-        <button
-          className="secondary"
-          type="button"
-          disabled={busy !== null}
-          onClick={() => void run('refresh', '/api/mod-management/refresh', { method: 'POST' })}
-        >
-          {busy === 'refresh' ? 'Refreshing…' : 'Refresh sources'}
-        </button>
+        {refreshSourcesAction('Refresh sources')}
         <button
           className="primary"
           type="button"
