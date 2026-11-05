@@ -587,3 +587,72 @@ it('renders Menagerie image portraits on native agent cards', () => {
   const select = screen.getByRole('button', { name: 'Select Gerald' });
   expect(select.querySelector('img')?.getAttribute('src')).toBe(avatar);
 });
+
+it.each(['regular', 'compact'] as const)(
+  'hides Menagerie minion expansion in %s cards, including retained expanded state',
+  (view) => {
+    const onSelectAgent = vi.fn();
+    const onToggleAgent = vi.fn();
+    const resident: Agent = {
+      ...agent,
+      id: 'gerald',
+      name: 'Gerald',
+      modAgent: {
+        ownerModId: 'burrow-menagerie',
+        capabilities: {},
+        visibility: { agents: false },
+      },
+    };
+    render(
+      <AgentsPanel
+        ownerModId="burrow-menagerie"
+        agents={[resident]}
+        view={view}
+        selectedStreamId="gerald"
+        expandedAgents={new Set(['gerald'])}
+        onSelectAgent={onSelectAgent}
+        onToggleAgent={onToggleAgent}
+        onSelectSubagent={vi.fn()}
+      />,
+    );
+    const select = screen.getByRole('button', { name: 'Select Gerald' });
+    expect(select.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('button', { name: /Expand Gerald|Collapse Gerald/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Select Child' })).toBeNull();
+    expect(screen.getByText('Idle')).toBeTruthy();
+    fireEvent.click(select);
+    expect(onSelectAgent).toHaveBeenCalledWith(resident);
+    expect(onToggleAgent).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps expansion for non-Menagerie mod agents and hides it for residents in the general panel', () => {
+  render(
+    <AgentsPanel
+      agents={[
+        {
+          ...agent,
+          modAgent: { ownerModId: 'other-mod', capabilities: {}, visibility: { agents: true } },
+        },
+        {
+          ...agent,
+          id: 'kerning',
+          name: 'Kerning',
+          modAgent: {
+            ownerModId: 'burrow-menagerie',
+            capabilities: {},
+            visibility: { agents: true },
+          },
+        },
+      ]}
+      selectedStreamId="smatchet"
+      expandedAgents={new Set(['smatchet', 'kerning'])}
+      onSelectAgent={vi.fn()}
+      onToggleAgent={vi.fn()}
+      onSelectSubagent={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('button', { name: 'Collapse Smatchet' })).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Select Child' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: /Expand Kerning|Collapse Kerning/ })).toBeNull();
+});

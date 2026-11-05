@@ -331,6 +331,7 @@ function AgentCard({
   onSelectSubagent: (id: string) => void;
 }) {
   const selected = selectedStreamId === agent.id;
+  const showMinions = agent.modAgent?.ownerModId !== 'burrow-menagerie';
   return (
     <div className="agent-group">
       <div className={`agent-card ${selected ? 'active' : ''}`}>
@@ -362,18 +363,20 @@ function AgentCard({
             </span>
           </span>
         </button>
-        <button
-          type="button"
-          className="agent-toggle"
-          onClick={onToggle}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`}
-          aria-expanded={expanded}
-        >
-          <Chevron direction="right" />
-        </button>
+        {showMinions && (
+          <button
+            type="button"
+            className="agent-toggle"
+            onClick={onToggle}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${agent.name}`}
+            aria-expanded={expanded}
+          >
+            <Chevron direction="right" />
+          </button>
+        )}
         {!compact && <ContextUsage value={agent.context} details={agent.contextDetails} />}
       </div>
-      {expanded && (
+      {showMinions && expanded && (
         <AgentMinions
           agent={agent}
           selectedStreamId={selectedStreamId}
