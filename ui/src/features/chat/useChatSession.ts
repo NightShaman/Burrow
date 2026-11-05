@@ -4,6 +4,7 @@ import { isWithinAttachmentBudget } from '../../app/clientBudgets';
 import {
   textFromChatValue,
   type ChatAttachment,
+  type ChatSession,
   type SessionSummary,
   type SessionTurn,
   type ToolActivity,
@@ -17,7 +18,7 @@ import {
   type ConversationCache,
 } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
-import { reconcileSessionTurns } from './chatTurnReconciliation';
+import { cachedTurnsForSession, reconcileSessionTurns } from './chatTurnReconciliation';
 import { finalizeThoughtProgress } from './chatThoughtProgress';
 import { chatTerminalMetadata } from './chatTerminal';
 import { createChatSessionRepository, readSessionListCache } from './chatSessionRepository';
@@ -70,6 +71,22 @@ export function useChatSession(selectedAgentId: string) {
   const [, setToolActivityVersion] = useState(0);
   const pendingTurnsRef = useRef(new Map<string, SessionTurn[]>());
   const conversationCacheRef = useRef<ConversationCache>({});
+  // Local turns bridge persistence lag only until the server acknowledges each
+  // run/role. Completing a stream is not a transcript acknowledgement.
+  const reconcileSnapshot = useCallback(
+    (cacheKey: string, session: ChatSession, cachedTurns: SessionTurn[]) => {
+      const pending = cachedTurnsForSession(session, pendingTurnsRef.current.get(cacheKey) ?? []);
+      const next = reconcileSessionTurns(session, cachedTurns, pending);
+      const acknowledged = new Set(
+        (session.turns ?? []).map((turn) => `${turn.runId}:${turn.role}`),
+      );
+      const remaining = pending.filter((turn) => !acknowledged.has(`${turn.runId}:${turn.role}`));
+      if (remaining.length) pendingTurnsRef.current.set(cacheKey, remaining);
+      else pendingTurnsRef.current.delete(cacheKey);
+      return next;
+    },
+    [],
+  );
   const cacheInitialized = useRef(false);
   if (!cacheInitialized.current) {
     conversationCacheRef.current = readConversationCache();
@@ -148,11 +165,7 @@ export function useChatSession(selectedAgentId: string) {
         conversationCacheRef.current[cacheKey] !== cachedTurns
       )
         return false;
-      const nextTurns = reconcileSessionTurns(
-        session,
-        cachedTurns ?? [],
-        pendingTurnsRef.current.get(cacheKey) ?? [],
-      ).map((turn) => {
+      const nextTurns = reconcileSnapshot(cacheKey, session, cachedTurns ?? []).map((turn) => {
         if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
         const recovered = recoveredProgress[turn.runId];
         if (!recovered?.length) return turn;
@@ -310,10 +323,10 @@ export function useChatSession(selectedAgentId: string) {
           conversationCacheRef.current[cacheKey] !== cachedTurns
         )
           return;
-        const nextTurns = reconcileSessionTurns(
+        const nextTurns = reconcileSnapshot(
+          cacheKey,
           session,
           conversationCacheRef.current[cacheKey] ?? [],
-          pendingTurnsRef.current.get(cacheKey) ?? [],
         );
         conversationCacheRef.current[cacheKey] = nextTurns;
         writeConversationCache(conversationCacheRef.current, cacheKey);
@@ -353,10 +366,10 @@ export function useChatSession(selectedAgentId: string) {
         conversationCacheRef.current[cacheKey] !== turnsAtRequestStart
       )
         return;
-      const nextTurns = reconcileSessionTurns(
+      const nextTurns = reconcileSnapshot(
+        cacheKey,
         session,
         conversationCacheRef.current[cacheKey] ?? [],
-        pendingTurnsRef.current.get(cacheKey) ?? [],
       ).map((turn) => {
         const activity = turn.runId ? toolActivityByRunRef.current[turn.runId] : undefined;
         const normalizedTurn = { ...turn, content: textFromChatValue(turn.content) };
@@ -383,10 +396,10 @@ export function useChatSession(selectedAgentId: string) {
       const session = await sessionRepository.loadOlder(selectedAgentId, sessionId);
       if (attachmentScopeRef.current !== scope || generation !== conversationCacheGeneration)
         return;
-      const next = reconcileSessionTurns(
+      const next = reconcileSnapshot(
+        cacheKey,
         session,
         conversationCacheRef.current[cacheKey] ?? [],
-        pendingTurnsRef.current.get(cacheKey) ?? [],
       );
       conversationCacheRef.current[cacheKey] = next;
       writeConversationCache(conversationCacheRef.current, cacheKey);
@@ -466,6 +479,7 @@ export function useChatSession(selectedAgentId: string) {
     setSessionId(resetSessionId);
     sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
     const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
+    pendingTurnsRef.current.delete(cacheKey);
     conversationCacheRef.current[cacheKey] = [];
     writeConversationCache(conversationCacheRef.current, cacheKey);
     setTurns([]);
@@ -479,18 +493,13 @@ export function useChatSession(selectedAgentId: string) {
   }, [isNewSession]);
   const appendTurn = useCallback((agentId: string, targetSessionId: string, turn: SessionTurn) => {
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
-    if (turn.runId && turn.role === 'user')
+    if (turn.runId && (turn.role === 'user' || turn.role === 'assistant'))
       pendingTurnsRef.current.set(cacheKey, [
-        ...(pendingTurnsRef.current.get(cacheKey) ?? []),
+        ...(pendingTurnsRef.current.get(cacheKey) ?? []).filter(
+          (pending) => pending.runId !== turn.runId || pending.role !== turn.role,
+        ),
         turn,
       ]);
-    if (turn.runId && turn.role === 'assistant')
-      pendingTurnsRef.current.set(
-        cacheKey,
-        (pendingTurnsRef.current.get(cacheKey) ?? []).filter(
-          (pending) => pending.runId !== turn.runId,
-        ),
-      );
     const nextTurns = [...(conversationCacheRef.current[cacheKey] ?? []), turn];
     conversationCacheRef.current[cacheKey] = nextTurns;
     writeConversationCache(conversationCacheRef.current, cacheKey);

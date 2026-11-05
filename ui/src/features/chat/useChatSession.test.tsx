@@ -1465,3 +1465,82 @@ it('loads older pages on demand and retains them through a newest-page refresh',
   });
   expect(result.current.turns.map((turn) => turn.content)).toEqual(['old', 'new']);
 });
+
+it.each(['empty', 'user-only', 'assistant-only'] as const)(
+  'keeps the completed local pair through %s snapshots until each role is acknowledged',
+  async (snapshot) => {
+    const user = { role: 'user' as const, runId: 'final-run', content: 'Question' };
+    const answer = { role: 'assistant' as const, runId: 'final-run', content: 'Final answer' };
+    let persisted = [] as (typeof user | typeof answer)[];
+    apiMock.mockImplementation(async (path) => {
+      if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+      if (path === conversationPath) return { session: { id: sessionId, turns: persisted } };
+      return { runs: [], subagents: [] };
+    });
+    const { result, unmount } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+    act(() => {
+      result.current.appendTurn(agentId, sessionId, user);
+      result.current.appendTurn(agentId, sessionId, answer);
+      result.current.setDraft('Next question');
+    });
+    persisted = snapshot === 'user-only' ? [user] : snapshot === 'assistant-only' ? [answer] : [];
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
+    expect(result.current.turns).toHaveLength(2);
+    expect(result.current.turns).toEqual(expect.arrayContaining([user, answer]));
+    // A later empty snapshot must still retain the role not yet acknowledged.
+    persisted = [];
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
+    if (snapshot !== 'assistant-only') expect(result.current.turns).toContainEqual(answer);
+    if (snapshot !== 'user-only') expect(result.current.turns).toContainEqual(user);
+    persisted = [user, answer];
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
+    expect(result.current.turns).toEqual([user, answer]);
+    expect(result.current.draft).toBe('Next question');
+    // Confirmed server turns are not immortal pending writes: a purge wins.
+    persisted = [];
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
+    expect(result.current.turns).toEqual([]);
+    unmount();
+  },
+);
+
+it('clears unacknowledged final turns on local reset, even without dated turns or reset metadata', async () => {
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath) return { session: { id: sessionId, turns: [] } };
+    return { ok: true, runs: [], subagents: [] };
+  });
+  const { result, unmount } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  act(() => {
+    result.current.appendTurn(agentId, sessionId, {
+      role: 'user',
+      runId: 'reset-run',
+      content: 'Question',
+    });
+    result.current.appendTurn(agentId, sessionId, {
+      role: 'assistant',
+      runId: 'reset-run',
+      content: 'Final answer',
+    });
+  });
+  await act(async () => {
+    await result.current.resetSession();
+  });
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns).toEqual([]);
+  unmount();
+});
