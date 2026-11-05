@@ -1,3 +1,4 @@
+import { POSTGRES_SESSION_RECALL_NONBLOCKING_SQL } from './postgres-session-recall-nonblocking.mjs';
 import { POSTGRES_SESSION_RETRIEVAL_SQL } from './postgres-session-retrieval.mjs';
 import { POSTGRES_SESSION_RECALL_REPAIRS_SQL } from './postgres-session-recall-repairs.mjs';
 import { POSTGRES_CONVERSATION_EMBEDDINGS_SQL } from './postgres-conversation-embeddings.mjs';
@@ -240,4 +241,5 @@ UPDATE core_mod_authority SET mod_management_agent_ids=admin_agent_ids, core_api
   { version: 93, name: 'indexed-session-recall', sql: POSTGRES_SESSION_RETRIEVAL_SQL },
   { version: 94, name: 'background-conversation-embeddings', sql: `ALTER TABLE brain_embedding_settings ADD COLUMN conversation_enabled boolean NOT NULL DEFAULT false;\n` + POSTGRES_CONVERSATION_EMBEDDINGS_SQL },
   { version: 95, name: 'session-recall-projection-repairs', sql: POSTGRES_SESSION_RECALL_REPAIRS_SQL },
+  { version: 96, name: 'nonblocking-session-recall', sql: POSTGRES_SESSION_RECALL_NONBLOCKING_SQL },
 ]);

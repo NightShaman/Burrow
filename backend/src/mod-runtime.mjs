@@ -10,6 +10,9 @@ import { manifestManagedSkills } from './managed-skills.mjs';
 // Reserved for mod-owned persistent data; never a discoverable/installable mod.
 export const MOD_DATA_DIRECTORY = 'mod-data';
 const MOD_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Distribution owns these temporary siblings during update/uninstall. They
+// deliberately retain the original manifest and are never installed mods.
+const MOD_LIFECYCLE_DIRECTORY = /^[a-z0-9]+(?:-[a-z0-9]+)*\.(?:backup-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|uninstall-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?:\.recovery)?)$/;
 const SYSTEM_CAPABILITY_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 export const SUPPORTED_SYSTEM_MOD_CAPABILITIES = Object.freeze(['execution-provider-v1', 'mod-management-v1', 'core-api-v1']);
 const SUPPORTED_SYSTEM_MOD_CAPABILITY_SET = new Set(SUPPORTED_SYSTEM_MOD_CAPABILITIES);
@@ -131,7 +134,7 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
   const mods = [];
   const seen = new Map();
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === MOD_DATA_DIRECTORY) continue;
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === MOD_DATA_DIRECTORY || MOD_LIFECYCLE_DIRECTORY.test(entry.name)) continue;
     const root = path.join(modsRoot, entry.name);
     let manifest = null;
     let manifestId = '';
