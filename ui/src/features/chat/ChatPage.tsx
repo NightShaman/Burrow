@@ -389,6 +389,9 @@ export function Chat({
   isNewSession,
   turns,
   isLoading,
+  onLoadOlder,
+  hasOlder,
+  isLoadingOlder,
   error,
   onDismissError,
   isSending,
@@ -432,6 +435,9 @@ export function Chat({
   liveAnswer: string;
   liveStage?: ChatLiveStage;
   a2aActivities?: import('../../app/api').ActiveA2AActivity[];
+  onLoadOlder?: () => Promise<void>;
+  hasOlder?: boolean;
+  isLoadingOlder?: boolean;
   runtimeUserMessage?: string;
   runtimeUserMessageMetadata?: SessionTurn['metadata'];
   onSend: (draft?: string, onAccepted?: () => void) => void;
@@ -688,6 +694,9 @@ export function Chat({
         isNewSession={isNewSession}
         turns={transcriptTurns}
         isLoading={isLoading}
+        onLoadOlder={onLoadOlder}
+        hasOlder={hasOlder}
+        isLoadingOlder={isLoadingOlder}
         error={error}
         onDismissError={onDismissError}
         isSending={isSending}

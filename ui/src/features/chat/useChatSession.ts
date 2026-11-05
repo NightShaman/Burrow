@@ -27,6 +27,22 @@ export { conversationCacheKey } from './chatConversationCache';
 /** Owns durable chat-session state, draft retention, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string) {
   const sessionRepository = useMemo(() => createChatSessionRepository(), []);
+  const [olderState, setOlderState] = useState<{ key: string; hasMore: boolean; loading: boolean }>(
+    { key: '', hasMore: false, loading: false },
+  );
+  const olderRequest = useRef(false);
+  const loadSession = useCallback(
+    async (agentId: string, id: string) => {
+      const session = await sessionRepository.loadSession(agentId, id);
+      setOlderState({
+        key: conversationCacheKey(agentId, id),
+        hasMore: Boolean(session.hasMore),
+        loading: false,
+      });
+      return session;
+    },
+    [sessionRepository],
+  );
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
   const [attachmentState, setAttachmentState] = useState<{
     scope: object;
@@ -125,7 +141,7 @@ export function useChatSession(selectedAgentId: string) {
     onRefresh: async ({ current, generation, recoveredProgress }) => {
       const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
       const cachedTurns = conversationCacheRef.current[cacheKey];
-      const session = await sessionRepository.loadSession(selectedAgentId, sessionId);
+      const session = await loadSession(selectedAgentId, sessionId);
       if (
         !current() ||
         conversationCacheGeneration !== generation ||
@@ -286,8 +302,7 @@ export function useChatSession(selectedAgentId: string) {
       setIsLoadingConversation(true);
     }
     // Background/session hydration must not erase a reported failure.
-    sessionRepository
-      .loadSession(selectedAgentId, sessionId)
+    loadSession(selectedAgentId, sessionId)
       .then((session) => {
         if (
           cancelled ||
@@ -328,7 +343,7 @@ export function useChatSession(selectedAgentId: string) {
       const cacheKey = conversationCacheKey(agentId, targetSessionId);
       const generationAtRequestStart = conversationCacheGeneration;
       const turnsAtRequestStart = conversationCacheRef.current[cacheKey];
-      const session = await sessionRepository.loadSession(agentId, targetSessionId);
+      const session = await loadSession(agentId, targetSessionId);
       // A refresh started before a direct send may resolve after appendTurn has
       // added the optimistic user message. That older server snapshot must not
       // erase newer local turns; the run's terminal refresh will reconcile once
@@ -356,6 +371,35 @@ export function useChatSession(selectedAgentId: string) {
     },
     [selectedAgentId, sessionId, sessionRepository],
   );
+
+  const loadOlder = useCallback(async () => {
+    if (olderRequest.current || !selectedAgentId || !sessionId) return;
+    const scope = attachmentScopeRef.current;
+    const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
+    const generation = conversationCacheGeneration;
+    olderRequest.current = true;
+    setOlderState((current) => ({ ...current, loading: true }));
+    try {
+      const session = await sessionRepository.loadOlder(selectedAgentId, sessionId);
+      if (attachmentScopeRef.current !== scope || generation !== conversationCacheGeneration)
+        return;
+      const next = reconcileSessionTurns(
+        session,
+        conversationCacheRef.current[cacheKey] ?? [],
+        pendingTurnsRef.current.get(cacheKey) ?? [],
+      );
+      conversationCacheRef.current[cacheKey] = next;
+      writeConversationCache(conversationCacheRef.current, cacheKey);
+      setTurns(next);
+      setOlderState({ key: cacheKey, hasMore: Boolean(session.hasMore), loading: false });
+    } catch (error) {
+      if (attachmentScopeRef.current === scope)
+        setChatError(`Could not load older messages: ${(error as Error).message}`);
+    } finally {
+      olderRequest.current = false;
+      setOlderState((current) => ({ ...current, loading: false }));
+    }
+  }, [selectedAgentId, sessionId, sessionRepository]);
 
   const selectSession = useCallback(
     (targetSessionId: string, targetAgentId = selectedAgentId) => {
@@ -536,6 +580,12 @@ export function useChatSession(selectedAgentId: string) {
   const clearError = useCallback(() => setChatError(''), []);
 
   return {
+    loadOlder,
+    hasOlder:
+      !isNewSession &&
+      olderState.key === conversationCacheKey(selectedAgentId, sessionId) &&
+      olderState.hasMore,
+    isLoadingOlder: olderState.loading,
     composerResetGeneration,
     isAttachmentScopeCurrent,
     attached,

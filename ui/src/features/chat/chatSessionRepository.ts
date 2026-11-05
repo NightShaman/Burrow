@@ -72,12 +72,37 @@ export function writeSessionListCache(
 export type ChatSessionRepository = {
   listSessions: (agentId: string) => Promise<SessionSummary[]>;
   loadSession: (agentId: string, sessionId: string) => Promise<ChatSession>;
+  loadOlder: (agentId: string, sessionId: string) => Promise<ChatSession>;
   resetSession: (agentId: string, sessionId: string) => Promise<void>;
 };
 
 /** Provides local-runtime chat session requests. */
 export function createChatSessionRepository(): ChatSessionRepository {
-  return {
+  const loaded = new Map<string, ChatSession>();
+  const epochs = new Map<string, number>();
+  const revisions = new Map<string, number>();
+  const resets = new Map<string, Promise<void>>();
+  const key = (agentId: string, sessionId: string) => JSON.stringify([agentId, sessionId]);
+  const read = async (agentId: string, sessionId: string, before?: string | null) => {
+    const response = await api<{ session: ChatSession }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(agentId)}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+    );
+    return response.session;
+  };
+  const sameGeneration = (a: ChatSession, b: ChatSession) =>
+    (a.metadata?.resetGeneration ?? 0) === (b.metadata?.resetGeneration ?? 0) &&
+    a.metadata?.resetAt === b.metadata?.resetAt;
+  const merge = (older: ChatSession, newer: ChatSession): ChatSession => {
+    const ids = new Set(newer.turns?.map((turn) => turn.id).filter(Boolean));
+    return {
+      ...newer,
+      turns: [
+        ...(older.turns ?? []).filter((turn) => turn.id && !ids.has(turn.id)),
+        ...(newer.turns ?? []),
+      ],
+    };
+  };
+  const repository: ChatSessionRepository = {
     async listSessions(agentId) {
       const response = await api<{ sessions: SessionSummary[] }>(
         `/api/sessions?agentId=${encodeURIComponent(agentId)}`,
@@ -86,12 +111,65 @@ export function createChatSessionRepository(): ChatSessionRepository {
       return response.sessions;
     },
     async loadSession(agentId, sessionId) {
-      const response = await api<{ session: ChatSession }>(
-        `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(agentId)}`,
-      );
-      return response.session;
+      const cacheKey = key(agentId, sessionId);
+      if (resets.has(cacheKey)) await resets.get(cacheKey);
+      const epoch = epochs.get(cacheKey) ?? 0;
+      const revision = (revisions.get(cacheKey) ?? 0) + 1;
+      revisions.set(cacheKey, revision);
+      const page = await read(agentId, sessionId);
+      if (epoch !== (epochs.get(cacheKey) ?? 0) || revision !== revisions.get(cacheKey))
+        return loaded.get(cacheKey) ?? page;
+      const previous = loaded.get(key(agentId, sessionId));
+      if (
+        previous &&
+        (previous.metadata?.resetGeneration ?? 0) > (page.metadata?.resetGeneration ?? 0)
+      )
+        return previous;
+      // Keep the previously loaded prefix, but always use a fresh newest cursor.
+      const session = previous && sameGeneration(previous, page) ? merge(previous, page) : page;
+      loaded.set(key(agentId, sessionId), session);
+      return session;
+    },
+    async loadOlder(agentId, sessionId) {
+      const cacheKey = key(agentId, sessionId);
+      if (resets.has(cacheKey)) await resets.get(cacheKey);
+      const epoch = epochs.get(cacheKey) ?? 0;
+      const previous = loaded.get(cacheKey);
+      if (!previous?.hasMore || !previous.nextCursor)
+        return previous ?? this.loadSession(agentId, sessionId);
+      try {
+        let page = await read(agentId, sessionId, previous.nextCursor);
+        // Refresh may have moved the cursor back to the newest page. Walk only
+        // on explicit demand until the already loaded prefix is crossed.
+        const oldestId = previous.turns?.find((turn) => turn.id)?.id;
+        while (
+          oldestId &&
+          !page.turns?.some((turn) => turn.id === oldestId) &&
+          page.hasMore &&
+          page.nextCursor &&
+          page.turns?.every((turn) => previous.turns?.some((old) => old.id === turn.id))
+        ) {
+          page = await read(agentId, sessionId, page.nextCursor);
+        }
+        const current = loaded.get(cacheKey) ?? previous;
+        if (epoch !== (epochs.get(cacheKey) ?? 0) || !sameGeneration(current, page)) return current;
+        const session = {
+          ...merge(page, current),
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+        };
+        loaded.set(cacheKey, session);
+        return session;
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('archive_cursor_invalid'))
+          throw error;
+        // Append/compaction invalidates cursors; a reset instead replaces the
+        // generation. Never clear a conversation just because a cursor expired.
+        return this.loadSession(agentId, sessionId);
+      }
     },
     async resetSession(agentId, sessionId) {
+      loaded.delete(key(agentId, sessionId));
       const sessionPath = `/api/sessions/${encodeURIComponent(sessionId)}?agentId=${encodeURIComponent(agentId)}`;
       const operationId = secureUuid();
       try {
@@ -130,6 +208,23 @@ export function createChatSessionRepository(): ChatSessionRepository {
           'Reset outcome could not be confirmed. Refresh the session before trying again.',
         );
       }
+    },
+  };
+  return {
+    ...repository,
+    resetSession(agentId, sessionId) {
+      const cacheKey = key(agentId, sessionId);
+      epochs.set(cacheKey, (epochs.get(cacheKey) ?? 0) + 1);
+      const reset = (resets.get(cacheKey) ?? Promise.resolve()).then(() =>
+        repository.resetSession(agentId, sessionId),
+      );
+      resets.set(cacheKey, reset);
+      void reset
+        .finally(() => {
+          if (resets.get(cacheKey) === reset) resets.delete(cacheKey);
+        })
+        .catch(() => undefined);
+      return reset;
     },
   };
 }

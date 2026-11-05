@@ -1,8 +1,9 @@
+import { historicalProviderTurnMessages } from './provider-turn-replay.mjs';
 import { contextUsageFromRequest } from './model-adapters/adapter-primitives.mjs';
 
-// Dispatch snapshots are the provider-visible input for a historical user turn,
-// including its support pack. Both retention and compression must charge that
-// input, not just the (often tiny) chat text. Originals remain archival evidence.
+// Retention and compression charge the same historical input that replay sends:
+// original user content/images, without obsolete request-local support packs.
+// Complete dispatch snapshots remain immutable archival evidence.
 export function providerTurnsFromTranscript(entries = []) {
   const turns = new Map();
   for (const entry of entries) {
@@ -34,7 +35,7 @@ export function providerTurnForEntry(entry, turns) {
 export function providerTurnChars(snapshot) {
   let promptChars = 0;
   let imageCount = 0;
-  for (const entry of snapshot.messages || []) {
+  for (const entry of historicalProviderTurnMessages(snapshot)) {
     if (typeof entry.content === 'string') promptChars += entry.content.length;
     else for (const part of Array.isArray(entry.content) ? entry.content : []) {
       promptChars += String(part?.text || '').length;

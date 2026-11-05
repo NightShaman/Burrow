@@ -244,6 +244,9 @@ function AppContent() {
     reportError,
     clearError,
     isLoadingConversation,
+    loadOlder,
+    hasOlder,
+    isLoadingOlder,
     draft,
     setDraft,
     refreshSessions,
@@ -874,6 +877,9 @@ function AppContent() {
                   isNewSession={isNewSession}
                   turns={turns}
                   isLoading={isLoadingConversation}
+                  onLoadOlder={loadOlder}
+                  hasOlder={hasOlder}
+                  isLoadingOlder={isLoadingOlder}
                   error={chatError}
                   onDismissError={clearError}
                   isSending={Boolean(displayedRun)}

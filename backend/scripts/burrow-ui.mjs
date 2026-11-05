@@ -1,8 +1,8 @@
 #!/usr/bin/env node
+import { activeSessionDetail } from './ui/active-session-detail.mjs';
 import { assertModAgentAvailable } from '../src/mod-agent-runtime.mjs';
 import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute, createOperatorReferenceImageRoutes } from './ui/agent-reference-image-routes.mjs';
 import { createBoardTaskExecutor } from '../src/task-execution.mjs';
-import { isDisplayChatMessage } from '../src/session-entry.mjs';
 import { chatResultMetadata } from '../src/chat-result-metadata.mjs';
 import { compactChatTurn } from '../src/compact-chat-turn.mjs';
 import { createArchiveReadProcess } from './ui/archive-read-process.mjs';
@@ -2001,18 +2001,10 @@ async function sessionActivities({ sessionId, turns } = {}) {
 }
 
 
-async function sessionDetail(id, { rootDir, agentId = null } = {}) {
+async function sessionDetail(id, { rootDir, agentId = null, limit, before } = {}) {
   agentId ||= (await resolveAgentRuntime()).agentId;
-  const metadata = await postgresApplication.stores.conversations.getMetadata({ agentId, sessionId: id });
-  if (!metadata) return null;
-  const [chatEntries, activityTurns] = await Promise.all([
-    postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'chat', limit: 200 }),
-    postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'activity', limit: 20 }),
-  ]);
-  const chatTurns = chatEntries.filter(isChatMessage);
-  const visibleTurns = chatEntries.filter(entry => isDisplayChatMessage(entry) || Boolean(entry.metadata?.chatInput && entry.role));
-  const turns = [...visibleTurns, ...activityTurns].sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || ''))).map(compactChatTurn);
-  return { id, turnCount: metadata.turnCount ?? turns.length, metadata, summary: metadata.summary || summarizeSessionTurns(chatTurns, { maxChars: 2000 }), turns, activities: activityTurns.filter((turn) => turn.metadata?.toolActivity).map((turn) => ({ ...turn.metadata.toolActivity, runId: turn.runId || null })) };
+  return activeSessionDetail({ store: postgresApplication.stores.conversations, agentId, sessionId: id,
+    cursorSecret: settingsKeyFromEnvironment(), limit, before, summarizeSessionTurns });
 }
 
 async function listTraces(sessionId = 'default', agentId = null) {

@@ -113,27 +113,22 @@ async function loadLegacyOverview(
   return Promise.all(
     agents.map(async (agent) => {
       const sessionId = parentSessionIdForAgent(agent.id);
-      if (!agent.enabled || agent.modAgent)
+      if (!agent.enabled)
         return {
           agent,
           identity: identitiesByAgentId.get(agent.id),
           sessionId,
-          selection:
-            agent.enabled && agent.modAgent
-              ? (
-                  await api<{ selection: ModelSelection }>(
-                    `/api/agents/${encodeURIComponent(agent.id)}/model-selection`,
-                    { signal },
-                  )
-                ).selection
-              : null,
+          selection: null,
           status: { agents: [] },
           contexts: {},
         };
       const [statusResult, contextResult, selection] = await Promise.all([
-        api<{ agents: AgentStatus[] }>(
-          `/api/agent-status?sessionId=${encodeURIComponent(sessionId)}&agentId=${encodeURIComponent(agent.id)}`,
-          { signal },
+        (agent.modAgent
+          ? Promise.resolve({ agents: [] as AgentStatus[] })
+          : api<{ agents: AgentStatus[] }>(
+              `/api/agent-status?sessionId=${encodeURIComponent(sessionId)}&agentId=${encodeURIComponent(agent.id)}`,
+              { signal },
+            )
         )
           .then((status) => ({ status }))
           .catch((error: Error) => ({ error })),
@@ -255,10 +250,13 @@ export function useRuntimeAgents({
               subagents: oldAgent?.subagents.map((child) => ({ ...child, retained: true })) ?? [],
             };
           const agent = asAgent(entry);
+          const parentContext = entry.contexts[entry.sessionId] ?? {};
           // Mod identities have no engineering workspace/profile/provider defaults.
           if (entry.agent.modAgent)
             return {
               ...agent,
+              context: contextPercent(parentContext),
+              contextDetails: contextDetails(parentContext),
               provider:
                 runtimeProviders.current.find((item) => item.id === agent.modelConnectionId)
                   ?.provider ?? '',
@@ -344,7 +342,6 @@ export function useRuntimeAgents({
                   temperature,
                 };
               })();
-          const parentContext = entry.contexts[entry.sessionId] ?? {};
           // An agent-level failure is not an authoritative empty minion list or
           // proof of agent-wide coverage. Keep every known child until a good load.
           const knownChildren = entry.error

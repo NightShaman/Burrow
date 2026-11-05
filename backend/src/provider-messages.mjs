@@ -3,6 +3,7 @@
 // boundary. Keep dialogue roles meaningful; provenance belongs in receipts, not
 // in fake `user:` / `assistant:` content prefixes.
 import { createHash } from 'node:crypto';
+import { historicalProviderTurnMessages } from './provider-turn-replay.mjs';
 
 const PROVIDER_ROLES = new Set(['system', 'developer', 'user', 'assistant', 'tool']);
 const PREVIEW_CHARS = 240;
@@ -274,9 +275,8 @@ export function conversationProviderMessages({ priorSummary = '', recentMessages
       const snapshot = message?.metadata?.providerTurn;
       if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
           && !(message?.role === 'agent' && ['outbound', 'inbound'].includes(message?.metadata?.direction))) {
-        return snapshot.messages.map((entry) => ({ ...entry, metadata: {
-          providerMessageSource: entry.metadata?.providerMessageSource === 'support-context-provider'
-            ? 'historical-support-snapshot' : 'historical-user-turn',
+        return historicalProviderTurnMessages(snapshot).map((entry) => ({ ...entry, metadata: {
+          providerMessageSource: 'historical-user-turn',
         } }));
       }
       return [message];

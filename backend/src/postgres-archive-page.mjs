@@ -191,7 +191,9 @@ function snapshotPageSQL(kind) {
     FROM ${table} e WHERE e.agent_id=$1 AND e.session_id=$2 ${whereSource}
       AND $6::text IS NOT DISTINCT FROM $6::text AND $7::bigint IS NOT DISTINCT FROM $7::bigint
       AND ($8::bigint IS NULL OR ${ordinal}<$8::bigint)
-  ) SELECT c.ordinal::text AS ordinal,w.store,w.source_store,w.source_id,w.ordinal::text AS winner_ordinal
+  ) SELECT c.ordinal::text AS ordinal,w.store,w.source_store,w.source_id,w.ordinal::text AS winner_ordinal,
+      COALESCE('p:' || c.payload_key,'o:' || NULLIF(c.entry_id,''),
+        'r:' || json_build_array(c.source_store,c.source_id,c.ordinal::text)::text) AS display_key
     FROM candidates c
     CROSS JOIN LATERAL (
       SELECT choices.* FROM (
@@ -233,7 +235,7 @@ const RESET_COUNT_CACHE_LIMIT = 512;
 export async function readArchiveTranscriptPage(pool, {
   agentId: rawAgentId, sessionId: rawSessionId, limit, before = null, from = null, to = null,
   signal, deadline, cursorSecret,
-} = {}) {
+} = {}, transactionClient = null) {
   const agentId = required(rawAgentId, 'agentId'), sessionId = required(rawSessionId, 'sessionId');
   if ((from && !validInstant(from)) || (to && !validInstant(to))) throw new Error('archive_date_invalid');
   if (!(typeof cursorSecret === 'string' && cursorSecret.length || Buffer.isBuffer(cursorSecret) && cursorSecret.length)) throw new Error('archive_cursor_secret_required');
@@ -241,7 +243,7 @@ export async function readArchiveTranscriptPage(pool, {
   // Older signed cursors contain row-hash revisions; v82 uses transactional
   // source revisions, so an upgrade intentionally invalidates those cursors.
   const cursor = parseCursor(cursorSecret, before, scope), size = pageSize(limit);
-  return withArchiveRead(pool, async client => {
+  const read = async client => {
     const target = (await client.query(targetSQL, [agentId, sessionId])).rows[0];
     if (!target) return null;
     const params = [agentId, target.source, target.reset ? target.archive_id : null,
@@ -298,14 +300,19 @@ export async function readArchiveTranscriptPage(pool, {
     // that the canonical predicate would reject if legacy projections drift.
     if (payloads.some(row => !isChatMessage(row.entry))) throw new Error('archive_projection_invalid');
     const entries = payloads.map(row => row.entry).reverse();
+    // Display-only occurrence identity: never write synthetic IDs into evidence.
+    // Relational IDs survive compaction copies, even when payload.id is absent.
+    const displayIds = selected.map(row => 'display:' + mac(cursorSecret,
+      JSON.stringify([agentId, target.source, String(target.min_generation), row.display_key])).toString('base64url')).reverse();
     const hasMore = found.length > size;
     const metadata = { ...target.metadata, ...(target.reset ? { archiveTranscriptTurnCount: count } : {}),
       createdAt: target.created_at, updatedAt: target.updated_at };
     const sourceSessionId = target.reset ? target.metadata?.sourceSessionId || target.source : target.source;
-    return { entries, hasMore, nextCursor: hasMore ? makeCursor(cursorSecret, scope, revision, selected.at(-1).position) : null,
+    return { entries, displayIds, hasMore, nextCursor: hasMore ? makeCursor(cursorSecret, scope, revision, selected.at(-1).position) : null,
       historyStatus: 'complete', metadata, turnCount: target.reset ? count : metadata.turnCount ?? entries.length, archiveSnapshot: target.reset ? 'reset' : null,
       sourceSessionId, createdAt: target.created_at, updatedAt: target.updated_at,
       summary: target.reset ? target.metadata?.summary : metadata.summary,
       summaryStatus: target.metadata?.summaryStatus, title: target.metadata?.archiveTitle };
-  }, { signal, deadline });
+  };
+  return transactionClient ? read(transactionClient) : withArchiveRead(pool, read, { signal, deadline });
 }

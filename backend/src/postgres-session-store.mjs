@@ -1293,16 +1293,25 @@ export class PostgresSessionStore {
     return { entries, olderCursor: hasMore ? String(entries[0].sequence) : null };
   }
 
-  async projection({ agentId, sessionId, visibility, limit, predicate = null }) {
-    // Never invoke PostgreSQL JSON extraction on the entry: even extracting an
-    // unrelated field decodes escaped NUL and fails with 22P05. Scan newest first
-    // in bounded batches so the limit applies *after* visibility filtering.
+  async projection({ agentId, sessionId, visibility, limit, predicate = null, transactionClient = null, indexedVisibility = false }) {
+    // Display reads use the existing conservative GIN candidate projection, then
+    // compare only a lossless lexical scalar before hydrating matching entries.
+    // Native entry->'visibility' is NOT safe: unrelated NUL/surrogate escapes can
+    // fail extraction. NULL grams stay eligible, and the lexical scanner handles
+    // escaped keys/values and duplicate members with JS's last-member semantics.
+    // Keep the older generic path for callers on pre-Archive schemas.
     const aid = required(agentId, 'agentId'); const sid = required(sessionId, 'sessionId');
+    const grams = indexedVisibility ? [...new Set(Array.from({ length: visibility.length - 2 }, (_, i) => visibility.slice(i, i + 3)))] : null;
+    const candidate = indexedVisibility ? `AND (search_grams IS NULL OR search_grams @> $5::text[])
+        AND CASE WHEN search_grams IS NULL OR search_grams @> $5::text[] THEN
+          burrow_history_key((burrow_json_members(entry,ARRAY['visibility']))[1]::text)=burrow_history_text($6)
+          ELSE false END` : '';
     const size = limitValue(limit); const matches = []; let before = null;
     while (matches.length < size) {
-      const result = await this.pool.query(`SELECT sequence,entry FROM conversation_entries
+      const result = await (transactionClient || this.pool).query(`SELECT sequence,entry FROM conversation_entries
         WHERE agent_id=$1 AND session_id=$2 AND ($3::bigint IS NULL OR sequence<$3::bigint)
-        ORDER BY sequence DESC LIMIT $4`, [aid, sid, before, 256]);
+        ${candidate}
+        ORDER BY sequence DESC LIMIT $4`, [aid, sid, before, 256, ...(indexedVisibility ? [grams, visibility] : [])]);
       for (const row of result.rows) {
         if (row.entry.visibility === visibility && (!predicate || predicate(row.entry))) matches.push(rowEntry(row));
         if (matches.length === size) break;
@@ -1446,6 +1455,17 @@ export class PostgresSessionStore {
   // bounded canonical page has been selected.
   async readArchiveTranscriptPage(args = {}) {
     return readArchiveTranscriptPage(this.pool, args);
+  }
+
+  // Page, live projections and metadata must share one reset-generation snapshot.
+  async readActiveSessionDisplay(args = {}) {
+    return withArchiveRead(this.pool, async transactionClient => {
+      const page = await readArchiveTranscriptPage(this.pool, args, transactionClient);
+      if (!page || page.archiveSnapshot || args.before) return { page, activity: [], liveChat: [] };
+      const activity = await this.projection({ ...args, visibility: 'activity', limit: 20, transactionClient, indexedVisibility: true });
+      const liveChat = await this.projection({ ...args, visibility: 'chat', limit: 200, transactionClient, indexedVisibility: true });
+      return { page, activity, liveChat };
+    }, args);
   }
 
   // Reconstruct a reset's entire conversation without rewriting immutable

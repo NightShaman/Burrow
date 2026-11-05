@@ -439,6 +439,7 @@ export type GeneratedArtifact = {
 };
 
 export type SessionTurn = {
+  id?: string;
   type?: string;
   role?: string | null;
   content?: string;
@@ -586,6 +587,8 @@ export type ArchiveRunListResponse = { ok: true; runs: ArchiveRunDetail[] };
 export type ArchiveRunResponse = { ok: true; run: ArchiveRunDetail };
 
 export type ChatSession = {
+  hasMore?: boolean;
+  nextCursor?: string | null;
   id: string;
   turns?: SessionTurn[];
   activities?: SessionToolActivity[];

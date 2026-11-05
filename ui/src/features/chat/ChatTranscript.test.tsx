@@ -1234,3 +1234,29 @@ it('renders a Menagerie resident portrait in native chat turns', () => {
     avatar,
   );
 });
+
+it('offers older loading inline and disables duplicate requests while loading', () => {
+  const load = vi.fn(async () => {});
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    turns: [message('Newest')],
+    isLoading: false,
+    error: '',
+    isSending: false,
+    activeRunId: '',
+    liveProgress: [],
+    liveAnswer: '',
+    hasOlder: true,
+    onLoadOlder: load,
+  };
+  const view = render(<ChatTranscript {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Load older messages' }));
+  expect(load).toHaveBeenCalledTimes(1);
+  view.rerender(<ChatTranscript {...props} isLoadingOlder />);
+  expect(
+    (screen.getByRole('button', { name: 'Loading older messages…' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+});

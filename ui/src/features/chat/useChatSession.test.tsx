@@ -60,7 +60,13 @@ describe('useChatSession', () => {
     const { result } = renderHook(() => useChatSession(agentId));
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
     const delayed = deferred<unknown>();
-    apiMock.mockReturnValueOnce(delayed.promise);
+    apiMock.mockImplementation((path, init) => {
+      if (init?.method === 'POST') return delayed.promise;
+      if (path === sessionListPath) return Promise.resolve({ sessions: [{ id: sessionId }] });
+      if (path.startsWith('/api/sessions/'))
+        return Promise.resolve({ session: { id: sessionId, turns: [] } });
+      return Promise.resolve({ runs: [] });
+    });
     let pending!: Promise<unknown>;
     act(() => {
       pending = result.current.resetSession();
@@ -1433,4 +1439,29 @@ it('retains a reported error across automatic conversation hydration until dismi
   expect(result.current.chatError).toBe('Visible failure');
   act(() => result.current.clearError());
   expect(result.current.chatError).toBe('');
+});
+
+it('loads older pages on demand and retains them through a newest-page refresh', async () => {
+  const turn = (id: string) => ({ id, type: 'message', role: 'user', content: id });
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (String(path).includes('before='))
+      return { session: { id: sessionId, turns: [turn('old')], hasMore: false, nextCursor: null } };
+    if (path === conversationPath)
+      return {
+        session: { id: sessionId, turns: [turn('new')], hasMore: true, nextCursor: 'cursor' },
+      };
+    throw new Error(`Unexpected path: ${path}`);
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.hasOlder).toBe(true));
+  expect(apiMock.mock.calls.some(([path]) => String(path).includes('before='))).toBe(false);
+  await act(async () => {
+    await result.current.loadOlder();
+  });
+  expect(result.current.turns.map((turn) => turn.content)).toEqual(['old', 'new']);
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns.map((turn) => turn.content)).toEqual(['old', 'new']);
 });

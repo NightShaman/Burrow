@@ -49,6 +49,9 @@ type ChatTranscriptProps = {
   isNewSession: boolean;
   turns: SessionTurn[];
   isLoading: boolean;
+  onLoadOlder?: () => Promise<void>;
+  hasOlder?: boolean;
+  isLoadingOlder?: boolean;
   error: string;
   onDismissError?: () => void;
   isSending: boolean;
@@ -72,6 +75,9 @@ export const ChatTranscript = memo(function ChatTranscript({
   isNewSession,
   turns,
   isLoading,
+  onLoadOlder,
+  hasOlder,
+  isLoadingOlder,
   error,
   onDismissError,
   isSending,
@@ -195,6 +201,25 @@ export const ChatTranscript = memo(function ChatTranscript({
         </div>
       ) : (
         <>
+          {hasOlder && onLoadOlder && (
+            <button
+              className="secondary"
+              disabled={isLoadingOlder}
+              onClick={async () => {
+                const container = messagesRef.current;
+                const height = container?.scrollHeight ?? 0;
+                const top = container?.scrollTop ?? 0;
+                stickToBottomRef.current = false;
+                await onLoadOlder();
+                requestAnimationFrame(() => {
+                  if (container && container === messagesRef.current)
+                    container.scrollTop = top + container.scrollHeight - height;
+                });
+              }}
+            >
+              {isLoadingOlder ? 'Loading older messages…' : 'Load older messages'}
+            </button>
+          )}
           {isSubagent && (
             <div className="stream-banner">
               <span>Minion stream</span>

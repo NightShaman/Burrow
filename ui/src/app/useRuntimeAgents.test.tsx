@@ -1182,3 +1182,72 @@ it('hydrates a saved resident LB selection in the legacy overview path without e
   expect(reportError).not.toHaveBeenCalled();
   runtimeProviders.current = [];
 });
+
+describe('resident context hydration', () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+  });
+
+  it.each(['overview', 'legacy'])(
+    'hydrates resident context through %s without engineering defaults',
+    async (mode) => {
+      const resident = { id: 'gerald', name: 'Gerald', enabled: true, modAgent: true };
+      const status = {
+        context: {
+          usageRatio: 0.423,
+          estimatedTokens: 42300,
+          capacityTokens: 100000,
+          pressure: 'normal',
+          source: 'estimated',
+        },
+        compaction: { active: true, summarizedTurnCount: 8, rawRecentTurnCount: 4 },
+        recall: { used: true, scope: 'session', sourceCount: 2 },
+      };
+      apiMock.mockImplementation(async (path) => {
+        if (path === '/api/agents') return { agents: [resident] };
+        if (path === '/api/agents/overview') {
+          if (mode === 'legacy') throw Object.assign(new Error('Not found'), { status: 404 });
+          return {
+            agents: [
+              {
+                agent: resident,
+                sessionId: 'default',
+                selection: null,
+                status: { agents: [] },
+                contexts: { default: status },
+              },
+            ],
+          };
+        }
+        if (path === '/api/settings/identities') return { agents: [] };
+        if (path === '/api/agents/gerald/model-selection') return { selection: null };
+        if (path === '/api/session/context-status?agentId=gerald&sessionId=default')
+          return { status };
+        throw new Error(`Unexpected path: ${path}`);
+      });
+      const { result } = renderRuntimeAgents('gerald');
+      await waitFor(() => expect(result.current.agents[0]?.context).toBe(42));
+      expect(result.current.agents[0]).toMatchObject({
+        workspace: '',
+        provider: '',
+        subagents: [],
+        contextDetails: {
+          estimatedTokens: 42300,
+          capacityTokens: 100000,
+          compactionActive: true,
+          summarizedTurnCount: 8,
+          rawRecentTurnCount: 4,
+          recallUsed: true,
+          recallScope: 'session',
+          recallSourceCount: 2,
+        },
+      });
+      expect(apiMock.mock.calls.some(([path]) => path.startsWith('/api/agent-status'))).toBe(false);
+      if (mode === 'legacy')
+        expect(apiMock).toHaveBeenCalledWith(
+          '/api/session/context-status?agentId=gerald&sessionId=default',
+          expect.anything(),
+        );
+    },
+  );
+});
