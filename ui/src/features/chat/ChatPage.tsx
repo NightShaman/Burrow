@@ -74,6 +74,11 @@ export function ChatModelSelector({
   // still-pending write or move its failure onto a different agent.
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const busyOwners = useRef(new Set<string>());
+  const [temperatureDrafts, setTemperatureDrafts] = useState<
+    Record<string, { value: number; revision: number }>
+  >({});
+  const temperatureRevision = useRef(0);
+  const temperatureDraft = temperatureDrafts[identity];
   const nativeDraft = drafts[identity];
   const savingNative = savingSelection || nativeDraft?.pending === true;
   const retryNative = nativeDraft?.failed === true;
@@ -95,6 +100,7 @@ export function ChatModelSelector({
     ) ||
     savingNative ||
     Boolean(nativeDraft) ||
+    Boolean(temperatureDraft) ||
     (native && (thinking.modeInvalid || thinking.effortInvalid));
   useLayoutEffect(() => {
     onSelectionBlockedChange?.(blocked);
@@ -127,9 +133,10 @@ export function ChatModelSelector({
   };
   const saveNative = (nextMode: string | null, nextEffort: string) =>
     saveModelPatch({ thinkingMode: nextMode, effort: nextEffort }, true);
-  const temperature = Number.isFinite(selected.temperature)
+  const savedTemperature = Number.isFinite(selected.temperature)
     ? Math.max(0, Math.min(2, selected.temperature))
     : 0.2;
+  const temperature = temperatureDraft?.value ?? savedTemperature;
   const a2aInDefault = selected.contextConfig?.a2aInDefault !== false;
   const selectableSessions = sessions.filter((session) => {
     const id = session.id.toLowerCase();
@@ -162,7 +169,28 @@ export function ChatModelSelector({
     updateForModel(next, next?.models[0] ?? '');
   };
   const chooseModel = (nextModel: string) => updateForModel(provider, nextModel);
-  const chooseTemperature = (value: string) => updateAgent({ temperature: Number(value) });
+  const chooseTemperature = async (value: string) => {
+    const revision = ++temperatureRevision.current;
+    const temperature = Number(value);
+    // Drag feedback must not wait for persistence. The owner-scoped writer
+    // serializes/coalesces saves; only the newest intent may clear its draft.
+    setTemperatureDrafts((current) => ({
+      ...current,
+      [identity]: { value: temperature, revision },
+    }));
+    try {
+      await updateAgent({ temperature });
+    } catch {
+      // The writer reports save errors. Restore the acknowledged value below.
+    } finally {
+      setTemperatureDrafts((current) => {
+        if (current[identity]?.revision !== revision) return current;
+        const next = { ...current };
+        delete next[identity];
+        return next;
+      });
+    }
+  };
   const visibleSessions = [...selectableSessions];
   // Keep the selected address represented while session metadata is pending.
   if (sessionId && !visibleSessions.some((session) => session.id === sessionId)) {
@@ -219,8 +247,10 @@ export function ChatModelSelector({
         max="2"
         step="0.1"
         value={temperature}
-        onChange={(e) => chooseTemperature(e.target.value)}
-        disabled={locked || savingNative || !provider}
+        onChange={(e) => void chooseTemperature(e.target.value)}
+        disabled={
+          locked || Boolean(nativeDraft) || (savingSelection && !temperatureDraft) || !provider
+        }
       />
     </label>
   );
