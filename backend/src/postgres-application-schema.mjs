@@ -1,4 +1,5 @@
 import { POSTGRES_SESSION_RETRIEVAL_SQL } from './postgres-session-retrieval.mjs';
+import { POSTGRES_SESSION_RECALL_REPAIRS_SQL } from './postgres-session-recall-repairs.mjs';
 import { POSTGRES_CONVERSATION_EMBEDDINGS_SQL } from './postgres-conversation-embeddings.mjs';
 import { POSTGRES_RESET_PROJECTIONS_SQL } from './postgres-reset-projections.mjs';
 import { POSTGRES_CHAT_RESULT_PROJECTION_SQL } from './postgres-chat-result-projection.mjs';
@@ -238,4 +239,5 @@ UPDATE core_mod_authority SET mod_management_agent_ids=admin_agent_ids, core_api
   { version: 92, name: 'reset-archive-projection-copies', sql: POSTGRES_RESET_PROJECTIONS_SQL },
   { version: 93, name: 'indexed-session-recall', sql: POSTGRES_SESSION_RETRIEVAL_SQL },
   { version: 94, name: 'background-conversation-embeddings', sql: `ALTER TABLE brain_embedding_settings ADD COLUMN conversation_enabled boolean NOT NULL DEFAULT false;\n` + POSTGRES_CONVERSATION_EMBEDDINGS_SQL },
+  { version: 95, name: 'session-recall-projection-repairs', sql: POSTGRES_SESSION_RECALL_REPAIRS_SQL },
 ]);
