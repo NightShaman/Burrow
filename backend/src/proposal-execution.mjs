@@ -503,7 +503,8 @@ export async function executeReviewedProposalActions({ conversationStore = null,
 
     if (action.tool === 'session_search') {
       const started = await traceLogger?.toolStart?.({ tool: 'session_search', query: action.query, scope: action.sessionScope });
-      const result = await searchAgentSessionEvidence({
+      let result;
+      try { result = await searchAgentSessionEvidence({
         conversationStore: conversationStore || executionContext?.conversationStore || executionContext?.stores?.conversations,
         continuityStore: executionContext?.stores?.continuity,
         rootDir: executionContext?.agentWorkspaceRoot || rootDir,
@@ -516,7 +517,11 @@ export async function executeReviewedProposalActions({ conversationStore = null,
         limit: action.limit,
         since: action.since, until: action.until, sourceId: action.sourceId,
         sourceSessionId: action.sourceSessionId, neighborCount: action.neighborCount,
-      });
+        signal: abortSignal, deadline: executionContext?.deadline,
+      }); } catch(error) {
+        if(error.code !== 'session_recall_not_ready') throw error;
+        result={ok:false,tool:'session_search',error:error.code,readiness:error.readiness,retryable:true,results:[],count:0};
+      }
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({
         tool: 'session_search',

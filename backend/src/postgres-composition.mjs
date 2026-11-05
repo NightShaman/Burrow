@@ -1,3 +1,5 @@
+import { createSessionRecallBackfillWorker } from './postgres-session-recall-backfill.mjs';
+import { PostgresConversationEmbeddings } from './postgres-conversation-embeddings.mjs';
 import { PostgresAgentReferenceImageStore } from './postgres-agent-reference-image-store.mjs';
 import { startArchiveChatBackfill } from './postgres-archive-chat-backfill.mjs';
 import { PostgresChatInputStore } from './postgres-chat-input-store.mjs';
@@ -105,9 +107,16 @@ export async function createPostgresApplication({
     };
     stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models, logger });
     stores.brains.embeddings = stores.brainEmbeddings;
+    stores.conversationEmbeddings = new PostgresConversationEmbeddings({ pool: sharedPool, models: stores.models, settings: stores.brainEmbeddings, logger });
+    stores.brainEmbeddings.conversations = stores.conversationEmbeddings;
+    stores.conversations.embeddings = stores.conversationEmbeddings;
+    stores.sessionRecallBackfill = createSessionRecallBackfillWorker({pool:sharedPool,onError:({code})=>logger?.warn?.('session_recall_backfill_unavailable',{code})});
+    stores.brainEmbeddings.lexical = stores.sessionRecallBackfill;
     stores.albdruck = new PostgresAlbdruckStore({ pool: sharedPool, resolveOriginal: (ref, client) => stores.conversations.resolveOriginal(ref, client), searchHistory: input => stores.conversations.history(input) });
     await stores.forge.init();
     stores.brainEmbeddings.start();
+    stores.sessionRecallBackfill.start();
+    stores.conversationEmbeddings.start();
     const operatorBackfill = startOperatorInstantBackfill(sharedPool, operatorBackfillOptions);
     const archiveChatBackfill = startArchiveChatBackfill(sharedPool);
     let closePromise = null;
@@ -123,6 +132,8 @@ export async function createPostgresApplication({
       closePromise ||= attemptResourceClosers([
         () => archiveChatBackfill.close(),
         () => operatorBackfill.close(),
+        () => stores.sessionRecallBackfill.close(),
+        () => stores.conversationEmbeddings.close(),
         () => stores.brainEmbeddings.close(),
         () => stores.models.close(),
         () => stores.chatInputs.close(),

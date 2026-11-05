@@ -1,4 +1,5 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
+import { archiveReadQuery } from './postgres-archive-read.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
 
 const MAX_TITLE_CHARS = 240;
@@ -95,9 +96,15 @@ export class PostgresContinuityHandoffStore {
       return publicRecord(result.rows[0]);
     });
   }
-  async list({ agentId, limit = 3 } = {}) {
+  async list({ agentId, limit = 3, signal, deadline } = {}) {
     if (!text(agentId)) throw new Error('continuity_handoff_agent_id_required');
-    const result = await this.pool.query(`SELECT * FROM continuity_handoffs WHERE agent_id=$1 AND expires_at >= $2 ORDER BY updated_at DESC LIMIT $3`, [text(agentId), now(), Math.max(1, Math.min(5, Number(limit) || 3))]);
+    const sql = `SELECT * FROM continuity_handoffs WHERE agent_id=$1 AND expires_at >= $2 ORDER BY updated_at DESC LIMIT $3`;
+    const values = [text(agentId), now(), Math.max(1, Math.min(5, Number(limit) || 3))];
+    // Keep ordinary runtime reads unchanged; only owned history reads use the
+    // shared Archive gate and cancellable, deadline-bound SQL checkout.
+    const result = signal || deadline !== undefined
+      ? await archiveReadQuery(this.pool, sql, values, { signal, deadline })
+      : await this.pool.query(sql, values);
     return result.rows.map(publicRecord);
   }
   async get({ agentId, sessionId } = {}) {

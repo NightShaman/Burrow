@@ -35,7 +35,7 @@ CREATE TRIGGER brain_embedding_changed AFTER INSERT OR UPDATE ON brain_memories 
 INSERT INTO brain_embedding_jobs(agent_id,id,revision) SELECT agent_id,id,revision FROM brain_memories WHERE deleted_at IS NULL;
 `;
 const fingerprint=c=>createHash('sha256').update(JSON.stringify(c ? [c.id,c.apiType,c.baseUrl,c.updatedAt] : null)).digest('hex');
-const publicSettings=r=>({enabled:r.enabled,connectionId:r.connection_id,model:r.model,generation:String(r.generation)});
+const publicSettings=r=>({enabled:r.enabled,conversationEnabled:r.conversation_enabled === true,connectionId:r.connection_id,model:r.model,generation:String(r.generation)});
 export function cosine(a,b) {
  if(a.length!==b.length) return null;
  let dot=0,aa=0,bb=0; for(let i=0;i<a.length;i++){dot+=a[i]*b[i];aa+=a[i]*a[i];bb+=b[i]*b[i];}
@@ -71,21 +71,26 @@ export class PostgresBrainEmbeddings {
  }
  async configure(input) {
   if(typeof input.enabled!=='boolean') throw new Error('brain_embedding_enabled_required');
+  if(input.conversationEnabled !== undefined && typeof input.conversationEnabled !== 'boolean') throw new Error('brain_embedding_enabled_required');
   const connectionId=input.connectionId || null,model=input.model || null;
   if(connectionId!==null && typeof connectionId!=='string' || model!==null && typeof model!=='string') throw new Error('brain_embedding_selection_invalid');
   let f=fingerprint(null);
-  if(input.enabled || connectionId || model) {
+  if(input.enabled || input.conversationEnabled || connectionId || model) {
    if(!connectionId || !model) throw new Error('brain_embedding_selection_required');
    await this.provider.context(connectionId);
    f=fingerprint(await this.models.get(connectionId));
   }
   await withPostgresTransaction(this.pool,async c=>{
    const old=(await c.query('SELECT * FROM brain_embedding_settings WHERE singleton FOR UPDATE')).rows[0];
-   if(old.enabled===input.enabled && old.connection_id===connectionId && old.model===model && old.connection_fingerprint===f) return;
-   await c.query('UPDATE brain_embedding_settings SET enabled=$1,connection_id=$2,model=$3,generation=generation+1,connection_fingerprint=$4 WHERE singleton',[input.enabled,connectionId,model,f]);
-   await this.reset(c);
+   const conversationEnabled=input.conversationEnabled ?? old.conversation_enabled ?? false;
+   if(conversationEnabled && (!connectionId || !model)) throw new Error('brain_embedding_selection_required');
+   if(old.enabled===input.enabled && (old.conversation_enabled ?? false)===conversationEnabled && old.connection_id===connectionId && old.model===model && old.connection_fingerprint===f) return;
+   await c.query('UPDATE brain_embedding_settings SET enabled=$1,connection_id=$2,model=$3,generation=generation+CASE WHEN connection_id IS DISTINCT FROM $2 OR model IS DISTINCT FROM $3 OR connection_fingerprint IS DISTINCT FROM $4 THEN 1 ELSE 0 END,connection_fingerprint=$4,conversation_enabled=$5 WHERE singleton',[input.enabled,connectionId,model,f,conversationEnabled]);
+   if(old.connection_id!==connectionId || old.model!==model || old.connection_fingerprint!==f) await this.reset(c);
   });
   if(!input.enabled) for(const controller of this.active) controller.abort();
+  this.conversations?.wake();
+  if(this.conversations) await this.conversations.reconcile();
   this.wake();return this.status();
  }
  async status() {
@@ -94,10 +99,11 @@ export class PostgresBrainEmbeddings {
    (SELECT count(*) FROM brain_embedding_vectors WHERE generation=$1)::text AS indexed,
    (SELECT count(*) FROM brain_embedding_jobs)::text AS pending,
    (SELECT count(*) FROM brain_embedding_jobs WHERE error IS NOT NULL)::text AS failed`,[s.generation])).rows[0];
-  return {...publicSettings(s),...r,storage:'postgres_float8_exact_cosine',lastError:r.failed!=='0'?'brain_embedding_index_failed':null};
+  const lexical=this.lexical ? await this.lexical.status() : null;
+  return {...publicSettings(s),...r,...(lexical?{lexical:{ready:lexical.ready,processed:lexical.processedRows,stage:lexical.phase,lastError:lexical.lastError || null}}:{}),storage:'postgres_float8_exact_cosine',lastError:r.failed!=='0'?'brain_embedding_index_failed':null,...(this.conversations?{conversations:await this.conversations.status()}: {})};
  }
  async test(input) { const v=await this.provider.embed({...input,text:'Burrow saved memory embedding capability test.'});return {ok:true,dimensions:v.length}; }
- async reindex() { await withPostgresTransaction(this.pool,async c=>{await c.query('UPDATE brain_embedding_settings SET generation=generation+1 WHERE singleton');await this.reset(c);});this.wake();return this.status(); }
+ async reindex() { await withPostgresTransaction(this.pool,async c=>{await c.query('UPDATE brain_embedding_settings SET generation=generation+1 WHERE singleton');await this.reset(c);});if(this.conversations) await this.conversations.reindex();this.wake();return this.status(); }
  start() { this.stopped=false;this.timer=setInterval(()=>this.wake(),2000);this.timer.unref();this.wake(); }
  wake() { if(!this.stopped && !this.running) this.running=this.drain().then(()=>this.operationalState('worker',null),error=>{if(!this.stopped)this.operationalState('worker',error);}).finally(()=>{this.running=null;}); }
  async close() { this.stopped=true;clearInterval(this.timer);for(const controller of this.active) controller.abort();if(this.running) await this.running; }

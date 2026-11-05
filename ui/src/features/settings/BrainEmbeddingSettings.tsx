@@ -10,6 +10,27 @@ import { Field, SettingSection } from './SettingsPrimitives';
 
 type Status = {
   enabled: boolean;
+  conversationEnabled?: boolean;
+  lexical?: {
+    ready: boolean;
+    processed: number;
+    stage: string;
+    lastError: string | null;
+  };
+  conversations?: {
+    enabled: boolean;
+    total: number;
+    indexed: number;
+    pending: number;
+    failed: number;
+    lastError: string | null;
+    storage: string;
+    dimensions: number | null;
+    generation: string;
+    epoch: string;
+    backfillComplete: boolean;
+    dirty: number;
+  };
   connectionId: string | null;
   model: string | null;
   generation: string;
@@ -34,9 +55,15 @@ const json = (method: string, body?: unknown) => ({
 });
 
 export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: SavedProvider[] }) {
-  const [baseline, setBaseline] = useState({ enabled: false, connectionId: '', model: '' });
+  const [baseline, setBaseline] = useState({
+    enabled: false,
+    conversationEnabled: false,
+    connectionId: '',
+    model: '',
+  });
   const [status, setStatus] = useState<Status | null>(null);
   const [enabled, setEnabled] = useState(false);
+  const [conversationEnabled, setConversationEnabled] = useState(false);
   const [connectionId, setConnectionId] = useState('');
   const [model, setModel] = useState('');
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
@@ -59,7 +86,7 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
     t.epoch === epoch.current &&
     t.generation === generation.current;
   const accept = (s: Status) => {
-    generation.current = s.generation;
+    generation.current = `${s.generation}:${s.conversations?.generation ?? ''}:${s.conversations?.epoch ?? ''}`;
     setStatus(s);
   };
   const edit = () => {
@@ -76,10 +103,12 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
         if (!current(t)) return;
         accept(s);
         setEnabled(s.enabled);
+        setConversationEnabled(s.conversationEnabled ?? false);
         setConnectionId(s.connectionId ?? '');
         setModel(s.model ?? '');
         setBaseline({
           enabled: s.enabled,
+          conversationEnabled: s.conversationEnabled ?? false,
           connectionId: s.connectionId ?? '',
           model: s.model ?? '',
         });
@@ -135,10 +164,20 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
     },
     3000,
     !!status && !busy,
-    `${busy}:${status?.generation ?? ''}`,
+    `${busy}:${status?.generation ?? ''}:${status?.conversations?.generation ?? ''}:${status?.conversations?.epoch ?? ''}`,
   );
   const request = async (action: 'save' | 'test' | 'reindex'): Promise<boolean> => {
     if (busy || !status) return false;
+    if (
+      action === 'save' &&
+      (enabled || conversationEnabled) &&
+      (!selected || (manual && !tested))
+    ) {
+      setError(
+        'Choose a connection and embedding model or deployment ID; test a manual ID before enabling indexing.',
+      );
+      return false;
+    }
     epoch.current++;
     const t = ticket();
     setBusy(action);
@@ -159,28 +198,29 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
             action === 'save'
               ? {
                   enabled,
-                  ...(enabled || (selection.connectionId && selection.model)
+                  conversationEnabled,
+                  ...(enabled || conversationEnabled || (selection.connectionId && selection.model)
                     ? selection
                     : { connectionId: null, model: null }),
                 }
               : undefined,
           ),
         );
-        if (current(t)) {
-          accept(s);
-          if (action === 'save') {
-            const accepted = {
-              enabled: s.enabled,
-              connectionId: s.connectionId ?? '',
-              model: s.model ?? '',
-            };
-            setBaseline(accepted);
-            setEnabled(accepted.enabled);
-            setConnectionId(accepted.connectionId);
-            setModel(accepted.model);
-          }
-        }
         if (!current(t)) return false;
+        accept(s);
+        if (action === 'save') {
+          const accepted = {
+            enabled: s.enabled,
+            conversationEnabled: s.conversationEnabled ?? false,
+            connectionId: s.connectionId ?? '',
+            model: s.model ?? '',
+          };
+          setBaseline(accepted);
+          setEnabled(accepted.enabled);
+          setConversationEnabled(accepted.conversationEnabled);
+          setConnectionId(accepted.connectionId);
+          setModel(accepted.model);
+        }
       }
       return true;
     } catch {
@@ -197,12 +237,15 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
     dirty:
       !!status &&
       (enabled !== baseline.enabled ||
+        conversationEnabled !== baseline.conversationEnabled ||
         connectionId !== baseline.connectionId ||
         model !== baseline.model),
     busy: !!busy,
     save: () => request('save'),
     discard: () => {
+      edit();
       setEnabled(baseline.enabled);
+      setConversationEnabled(baseline.conversationEnabled);
       setConnectionId(baseline.connectionId);
       setModel(baseline.model);
       setTested('');
@@ -210,6 +253,7 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
     },
   });
   const selected = !!connectionId && !!model.trim();
+  const indexingEnabled = enabled || conversationEnabled;
   const manual = !discovery?.models.some((m) => m.id === model.trim());
   const locked = !!busy;
   return (
@@ -228,6 +272,25 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
           />{' '}
           Enable Brains embeddings globally
         </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={conversationEnabled}
+            disabled={locked || !status}
+            aria-describedby="conversation-embedding-help"
+            onChange={(e) => {
+              edit();
+              setConversationEnabled(e.target.checked);
+            }}
+          />{' '}
+          Index conversation history for session search
+        </label>
+        <p id="conversation-embedding-help" className="settings-help">
+          Off by default, including upgrades. When enabled, the selected provider receives saved
+          conversation passages for background indexing. Session search retrieves original dialogue;
+          embeddings help find it, not verify current facts or grant authorization. Both indexes
+          share the provider and model below.
+        </p>
         <div className="field-pair provider-model-fields">
           <Field label="Provider">
             <select
@@ -272,7 +335,7 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
           <p className="hint">
             {discovery.capabilityDisclosure}
             {!discovery.models.length &&
-              ' No embedding models advertised. Use a manual ID and test.'}
+              ' No embedding models advertised. Use a manual model or deployment ID and test.'}
           </p>
         )}
         {discoveryError && (
@@ -280,7 +343,7 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
             {discoveryError}
           </p>
         )}
-        <Field label="Embedding model ID (manual fallback)">
+        <Field label="Embedding model or deployment ID (manual fallback)">
           <input
             value={model}
             disabled={locked || !status}
@@ -297,17 +360,17 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
           <button
             type="button"
             className="primary"
-            disabled={locked || !status || (enabled && (!selected || (manual && !tested)))}
+            disabled={locked || !status || (indexingEnabled && (!selected || (manual && !tested)))}
             onClick={() => void request('save')}
           >
             Save embedding settings
           </button>
           <button
             type="button"
-            disabled={locked || !status?.enabled}
+            disabled={locked || !(status?.enabled || status?.conversationEnabled)}
             onClick={() => void request('reindex')}
           >
-            Reindex all memories asynchronously
+            Reindex memories and conversations
           </button>
         </div>
         {tested && <p role="status">{tested}</p>}
@@ -318,16 +381,49 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
         )}
         {status && (
           <p role="status">
-            {status.enabled ? 'Enabled' : 'Disabled'} · Generation {status.generation} · Indexed{' '}
-            {status.indexed} / {status.total} · Pending {status.pending} · Failed {status.failed} ·
-            Storage {status.storage}. Partial coverage remains searchable lexically. Indexing runs
-            asynchronously; status refreshes every 3 seconds.
+            Brains {status.enabled ? 'enabled' : 'disabled'} · Generation {status.generation} ·
+            Indexed {status.indexed} / {status.total} · Pending {status.pending} · Failed{' '}
+            {status.failed} · Storage {status.storage}.
           </p>
         )}
         {status?.lastError && (
           <p role="alert">
-            Indexing error: {status.lastError}. Check provider availability and model support;
-            failed jobs retry automatically.
+            Brains indexing error: {status.lastError}. Check provider availability and model
+            support; failed jobs retry automatically.
+          </p>
+        )}
+        {status?.lexical && (
+          <p role="status">
+            {status.lexical.ready
+              ? 'Session search ready'
+              : `Session search preparing history · ${status.lexical.processed} occurrences processed`}
+          </p>
+        )}
+        {status?.lexical?.lastError && (
+          <p role="alert">Session search preparation error: {status.lexical.lastError}</p>
+        )}
+        {status && (
+          <p role="status">
+            Conversations {status.conversationEnabled ? 'enabled' : 'disabled'}
+            {status.conversations && (
+              <>
+                {' · Indexed '}
+                {status.conversations.indexed} / {status.conversations.total}
+                {' · Pending '}
+                {status.conversations.pending}
+                {' · Failed '}
+                {status.conversations.failed}
+                {status.conversationEnabled &&
+                  (!status.conversations.backfillComplete || status.conversations.dirty > 0) &&
+                  ' · Catching up'}
+              </>
+            )}
+          </p>
+        )}
+        {status?.conversations?.lastError && (
+          <p role="alert">
+            Conversation indexing error: {status.conversations.lastError}. Check provider
+            availability and model support; failed jobs retry automatically.
           </p>
         )}
         {error && (
@@ -336,8 +432,11 @@ export function BrainEmbeddingSettings({ savedProviders }: { savedProviders: Sav
           </p>
         )}
         <p className="settings-help">
-          Manage saved memories independently in the Brains workspace. Saved memory is not
-          verification of current runtime truth.
+          {status?.lexical?.ready === false
+            ? 'Session search becomes available when history preparation completes. Embedding indexing continues in the background.'
+            : 'Partial coverage remains searchable lexically. Indexing runs in the background.'}{' '}
+          Status refreshes every 3 seconds. Manage saved memories independently in the Brains
+          workspace. Saved memory is not verification of current runtime truth.
         </p>
       </div>
     </SettingSection>

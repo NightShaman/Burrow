@@ -1739,7 +1739,7 @@ async function exportSnapshot(categories = []) {
       retentionPolicy: await postgresApplication.stores.retentionSettings.readPolicy(),
       workingMemoryRetention: await postgresApplication.stores.workingMemoryRetention.read(),
       brainMemory: await readDreamPromotion(metadataStore()),
-      brainEmbeddings: await postgresApplication.stores.brainEmbeddings.settings().then(s => ({ enabled: s.enabled, connectionId: s.connection_id, model: s.model })),
+      brainEmbeddings: await postgresApplication.stores.brainEmbeddings.settings().then(s => ({ enabled: s.enabled, conversationEnabled: s.conversation_enabled === true, connectionId: s.connection_id, model: s.model })),
       executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
       curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
       ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],

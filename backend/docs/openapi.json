@@ -6640,7 +6640,7 @@
         ],
         "operationId": "getBrainEmbeddingSettings",
         "summary": "Embedding settings and persistent index status",
-        "description": "Operator-authorized optional Brains embeddings; existing UI authentication and browser-origin policy. Hosted test/index operations can incur provider charges when explicitly configured. No automatic recall injection. Provider errors never include credentials or response bodies.",
+        "description": "Operator-authorized optional embeddings use an existing shared model connection. Brains and conversation indexing are independently enabled; conversation indexing defaults off. Hosted test/index operations can incur provider charges and transmit content. No automatic recall injection. Provider errors never include credentials or response bodies.",
         "responses": {
           "200": {
             "description": "Embedding result",
@@ -6662,8 +6662,8 @@
           "Brains"
         ],
         "operationId": "putBrainEmbeddingSettings",
-        "summary": "Enable or select Brains embedding backend",
-        "description": "Operator-authorized optional Brains embeddings; existing UI authentication and browser-origin policy. Hosted test/index operations can incur provider charges when explicitly configured. No automatic recall injection. Provider errors never include credentials or response bodies.",
+        "summary": "Configure shared embedding backend and independently enabled scopes",
+        "description": "Operator-authorized optional embeddings use an existing shared model connection. Brains and conversation indexing are independently enabled; conversation indexing defaults off. Hosted test/index operations can incur provider charges and transmit content. No automatic recall injection. Provider errors never include credentials or response bodies.",
         "responses": {
           "200": {
             "description": "Embedding result",
@@ -6782,8 +6782,8 @@
           "Brains"
         ],
         "operationId": "reindexBrainEmbeddings",
-        "summary": "Invalidate vectors and enqueue every active saved memory",
-        "description": "Operator-authorized optional Brains embeddings; existing UI authentication and browser-origin policy. Hosted test/index operations can incur provider charges when explicitly configured. No automatic recall injection. Provider errors never include credentials or response bodies.",
+        "summary": "Invalidate and requeue Brains and conversation indexes",
+        "description": "Operator-authorized optional embeddings use an existing shared model connection. Brains and conversation indexing are independently enabled; conversation indexing defaults off. Hosted test/index operations can incur provider charges and transmit content. No automatic recall injection. Provider errors never include credentials or response bodies. Reindex invalidates and requeues both Brains and conversation indexes asynchronously.",
         "responses": {
           "200": {
             "description": "Embedding result",
@@ -15402,9 +15402,14 @@
               "string",
               "null"
             ]
+          },
+          "conversationEnabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Independently enable conversation indexing; when omitted, the current setting is preserved."
           }
         },
-        "description": "Global Brains-only selection of existing encrypted model connection. No new credential fields. Enabling requires connectionId and embedding model. Disabled by default."
+        "description": "Shared existing encrypted model connection and embedding model for independently enabled Brains and conversation indexing. Either enabled scope requires a selection; both scopes are disabled by default. No new credential fields."
       },
       "BrainEmbeddingStatus": {
         "type": "object",
@@ -15459,6 +15464,105 @@
               "string",
               "null"
             ]
+          },
+          "conversationEnabled": {
+            "type": "boolean",
+            "description": "Independent conversation indexing setting."
+          },
+          "conversations": {
+            "type": "object",
+            "description": "Optional conversation indexing status. Counts are numbers; generation and epoch are decimal strings.",
+            "required": [
+              "enabled",
+              "total",
+              "indexed",
+              "pending",
+              "failed",
+              "lastError",
+              "storage",
+              "dimensions",
+              "generation",
+              "epoch",
+              "backfillComplete",
+              "dirty"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "indexed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pending": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lastError": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "storage": {
+                "type": "string"
+              },
+              "dimensions": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "generation": {
+                "type": "string"
+              },
+              "epoch": {
+                "type": "string"
+              },
+              "backfillComplete": {
+                "type": "boolean"
+              },
+              "dirty": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "lexical": {
+            "type": "object",
+            "description": "Optional lexical backfill readiness status.",
+            "required": [
+              "ready",
+              "processed",
+              "stage"
+            ],
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "processed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "stage": {
+                "type": "string"
+              },
+              "lastError": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
           }
         }
       },
