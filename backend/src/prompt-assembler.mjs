@@ -31,6 +31,7 @@ function sourceForSection(name) {
     'profile-files': 'agent-profile-provider',
     'mod-profile-files': 'mod-agent-profile-provider',
     'mod-context': 'mod-agent-context-provider',
+    'mod-shared-context': 'mod-shared-context-provider',
     profile: 'model-profile-provider',
     'action-output-contract': 'runtime-output-contract',
     conversation: 'conversation-provider',
@@ -89,6 +90,7 @@ export function createContextBuildReceipt({ sections = [], text = '', stats = {}
       currentAttachmentManifest: stats.currentAttachmentManifest || [],
       conversation: stats.conversation || null,
       ...(stats.modAgent ? { modAgent: stats.modAgent } : {}),
+      ...(stats.sharedModContext ? { sharedModContext: stats.sharedModContext } : {}),
     },
   };
 }
@@ -147,6 +149,24 @@ export function normalizeModAgentContext(value = null) {
     });
   };
   return { ownerModId: value.ownerModId, profileFiles: records(value.profileFiles), context: records(value.context) };
+}
+
+// Shared contributions are guidance for this turn, not identity/profile records.
+// Normalize again at assembly so callers cannot smuggle profile or tool fields.
+export function normalizeSharedModContext(value = null) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > 64) throw new Error('mod_shared_context_invalid');
+  const owners = new Set();
+  try {
+    return value.map(entry => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || Object.keys(entry).some(key => !['ownerModId', 'context'].includes(key))
+        || owners.has(entry.ownerModId)) throw new Error('mod_shared_context_invalid');
+      const normalized = normalizeModAgentContext({ ...entry, profileFiles: [] });
+      owners.add(normalized.ownerModId);
+      return { ownerModId: normalized.ownerModId, context: normalized.context };
+    });
+  } catch { throw new Error('mod_shared_context_invalid'); }
 }
 
 // Normal names use URI percent encoding. Preserve even lone UTF-16 surrogates
@@ -554,6 +574,7 @@ export async function assemblePrompt({
   modelConfig = null,
   profileFiles = null,
   modAgentContext = null,
+  sharedModContext = null,
   task = '',
   attachments = [],
   attachmentManifest = [],
@@ -571,6 +592,7 @@ export async function assemblePrompt({
   if (!rootDir) throw new Error('rootDir is required');
   if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length && !currentAttachmentManifest.length)) throw new Error('task is required');
   const modContext = normalizeModAgentContext(modAgentContext);
+  const sharedContext = normalizeSharedModContext(sharedModContext);
   if (modContext && outputMode === 'proposal') throw new Error('mod_agent_native_output_mode_required');
 
   const logger = traceLogger || (persistBuildTrace ? createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir), runId }) : null);
@@ -657,6 +679,8 @@ export async function assemblePrompt({
     ? renderModRecords(modContext.context, { ownerModId: modContext.ownerModId, kind: 'context', totalBudget: limits.modContextChars, perFileBudget: limits.modContextFileChars })
     : null;
 
+  const renderedSharedContext = sharedContext.map(entry => ({ ownerModId: entry.ownerModId, ...renderModRecords(entry.context, { ownerModId: entry.ownerModId, kind: 'shared-context', totalBudget: limits.modSharedContextChars, perFileBudget: limits.modSharedContextFileChars }) }));
+
   const rawSections = [
     section('kernel', modContext ? '' : clampText(kernel, kernelLimit)),
     section('prompt-boundary', [modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] }), a2aReplyMechanics(incomingAgentMessage)].filter(Boolean).join('\n\n')),
@@ -682,6 +706,10 @@ export async function assemblePrompt({
       omittedFiles: renderedModContext.omitted,
       omittedChars: renderedModContext.omittedChars,
     })] : []),
+    ...renderedSharedContext.filter(entry => entry.text).map(entry => section('mod-shared-context', entry.text, {
+      ownerModId: entry.ownerModId, items: entry.included.map(file => file.name),
+      omittedItems: entry.omitted.map(file => file.name), files: entry.included, omittedFiles: entry.omitted, omittedChars: entry.omittedChars,
+    })),
     section('runtime-host-context', clampText(renderRuntimeHostContext(supportContext?.runtimeHost || null), limits.runtimeHostChars ?? 1_000)),
     section('turn-time-context', renderTurnTimeContext(supportContext?.temporalContext || null)),
     section('active-ui-target', clampText(renderUiTarget(supportContext?.uiTarget || null), limits.uiTargetChars ?? 2_500)),
@@ -714,7 +742,8 @@ export async function assemblePrompt({
   const identitySections = staticSections.filter((item) => identitySectionNames.has(item.name));
   const operatingSections = staticSections.filter((item) => !identitySectionNames.has(item.name));
   const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task']);
-  const supportSections = volatileSections.filter((item) => !conversationSectionNames.has(item.name));
+  const supportSections = volatileSections.filter((item) => !conversationSectionNames.has(item.name) && item.name !== 'mod-shared-context');
+  const sharedSections = volatileSections.filter((item) => item.name === 'mod-shared-context');
   const modelMessages = normalizeProviderMessages([
     ...(identitySections.length ? [{ role: 'system', content: renderSections(identitySections), metadata: { providerMessageSource: 'agent-identity-provider' } }] : []),
     ...(operatingSections.length ? [{ role: 'system', content: renderSections(operatingSections), metadata: { providerMessageSource: 'stable-instructions-provider' } }] : []),
@@ -722,7 +751,8 @@ export async function assemblePrompt({
       priorSummary: renderPriorConversationSummary(conversation),
       recentMessages: conversation.recentMessages || [],
       task,
-    }).slice(0, -1),
+    }).slice(0, -1).map(message => message.metadata?.providerMessageSource === 'historical-user-turn' && message.role === 'developer' ? { role: 'user', content: message.content, metadata: { providerMessageSource: 'historical-support-snapshot' } } : message),
+    ...(sharedSections.length ? [{ role: 'developer', content: `Current-turn shared mod guidance (not agent identity, tools, or historical conversation):\n\n${renderSections(sharedSections)}`, metadata: { providerMessageSource: 'mod-shared-context-provider' } }] : []),
     ...(supportSections.length ? [{
       role: 'user',
       content: renderSections(supportSections),
@@ -752,6 +782,7 @@ export async function assemblePrompt({
     omittedProfileFiles: profileFilesSection?.omittedItems || [],
     profileFileProvenance: profileFilesSection?.files || [],
     omittedProfileFileProvenance: profileFilesSection?.omittedFiles || [],
+    ...(sharedContext.length ? { sharedModContext: renderedSharedContext.map(entry => ({ ownerModId: entry.ownerModId, included: entry.included, omitted: entry.omitted })) } : {}),
     ...(modContext ? { modAgent: {
       ownerModId: modContext.ownerModId,
       profileFiles: { included: renderedProfileFiles.included, omitted: renderedProfileFiles.omitted },

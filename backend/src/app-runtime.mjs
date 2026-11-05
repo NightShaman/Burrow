@@ -12,7 +12,7 @@ import { postgresContinuity } from './postgres-continuity.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
-import { activeModAgentProvider, resolveModAgentContext } from './mod-agent-runtime.mjs';
+import { activeModAgentProvider, resolveModAgentContext, resolveSharedModContext } from './mod-agent-runtime.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
@@ -231,6 +231,7 @@ async function runAskChatUnserialized({
   };
   const modAgentContext = modAgent ? { ownerModId: modAgent.ownerModId, ...await resolveModAgentContext(agentRuntime, { sessionId: historySessionId, signal: normalizedArgs.abort_signal }) } : null;
   if (modAgent) assertOwnerStillCurrent();
+  const sharedModContext = await resolveSharedModContext(agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } }, { sessionId: historySessionId, signal: normalizedArgs.abort_signal });
   const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
   const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
   const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;
@@ -547,7 +548,7 @@ async function runAskChatUnserialized({
     : message;
   let promptContext;
   try {
-    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, incomingAgentMessage, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, sharedModContext, incomingAgentMessage, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
   } catch (error) {
     // Context preparation can reject before returning its final inspection.
     // Route that exact budget failure through the same durable blocked owner,

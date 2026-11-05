@@ -21,6 +21,7 @@ const activeInvocations = new Map();
 const cancelledInvocations = new Set();
 let diagnosticHandlers = null;
 let agentContextProvider = null;
+let sharedContextProvider = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
 const invocationScope = new AsyncLocalStorage();
@@ -147,6 +148,9 @@ function registrar(modId) {
     agentContext: Object.freeze({ register(provider) {
       if (!registrationOpen || agentContextProvider || typeof provider !== 'function') throw new Error('mod_agent_context_registration_invalid');
       agentContextProvider = provider;
+    }, registerShared(provider) {
+      if (!registrationOpen || sharedContextProvider || typeof provider !== 'function') throw new Error('mod_shared_context_registration_invalid');
+      sharedContextProvider = provider;
     } }),
     toolsApi: Object.freeze({ register({ name, description, inputSchema, handler, resolveProtectedReference, availability = 'grant-required' }) {
       if (!registrationOpen || typeof name !== 'string' || !/^[A-Za-z0-9._-]+$/.test(name) || toolHandlers.has(name) || typeof description !== 'string' || !description.trim() || !inputSchema || typeof inputSchema !== 'object' || Array.isArray(inputSchema) || inputSchema.type !== 'object' || typeof handler !== 'function') throw new Error('mod_tool_registration_invalid');
@@ -245,13 +249,13 @@ async function activate(message) {
   const result = await module.activate(Object.freeze(context));
   registration.closeRegistration();
   cleanup = typeof result === 'function' ? result : result && typeof result.close === 'function' ? () => result.close() : null;
-  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers), secretReferenceSchemes: [...secretReferenceProviders.keys()], agentContext: Boolean(agentContextProvider) });
+  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers), secretReferenceSchemes: [...secretReferenceProviders.keys()], agentContext: Boolean(agentContextProvider), sharedContext: Boolean(sharedContextProvider) });
 }
 
 async function invoke(message) {
   const secretListScheme = message.routeId?.startsWith("secret-reference-list:") ? message.routeId.slice(22) : null;
   const secretResolveScheme = message.routeId?.startsWith("secret-reference-resolve:") ? message.routeId.slice(25) : null;
-  const handler = message.routeId === 'agent-context' ? agentContextProvider : secretListScheme ? secretReferenceProviders.get(secretListScheme)?.list : secretResolveScheme ? secretReferenceProviders.get(secretResolveScheme)?.resolve : message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
+  const handler = message.routeId === 'agent-context' ? agentContextProvider : message.routeId === 'shared-context' ? sharedContextProvider : secretListScheme ? secretReferenceProviders.get(secretListScheme)?.list : secretResolveScheme ? secretReferenceProviders.get(secretResolveScheme)?.resolve : message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
   const controller = new AbortController();
   activeInvocations.set(message.requestId, controller);

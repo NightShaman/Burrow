@@ -1,5 +1,5 @@
 import { buildTurnContext, conversationContextFromEngine } from './context-engine.mjs';
-import { assemblePrompt, normalizeModAgentContext } from './prompt-assembler.mjs';
+import { assemblePrompt, normalizeModAgentContext, normalizeSharedModContext } from './prompt-assembler.mjs';
 import { compressContextForPromptPressure, prepareSessionTurnContext } from './context-preparation.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';
@@ -138,6 +138,7 @@ export async function buildContextForTurn({
   availableSkills = [],
   modelProfile = null,
   modAgentContext = null,
+  sharedModContext = null,
   supportContext = null,
   task = '',
   attachments = [],
@@ -157,6 +158,7 @@ export async function buildContextForTurn({
   if (typeof task !== 'string' || (!task && !attachments.length && !attachmentManifest.length)) throw new Error('task is required');
 
   const modContext = normalizeModAgentContext(modAgentContext);
+  const sharedContext = normalizeSharedModContext(sharedModContext);
   // Mod-owned agents do not inherit the engineering working-memory channels.
   // Keep the receipt and ReadEvidence budget aligned with what can be rendered.
   const effectiveSupportContext = modContext && supportContext
@@ -183,6 +185,7 @@ export async function buildContextForTurn({
     modelConfig,
     profileFiles: context.support?.profileFiles || null,
     modAgentContext: modContext,
+    sharedModContext: sharedContext,
     supportContext: effectiveSupportContext,
     task,
     attachments,

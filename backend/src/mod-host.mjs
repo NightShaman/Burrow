@@ -534,6 +534,9 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       routes.secretReferenceSchemes = Array.isArray(message.secretReferenceSchemes) && message.secretReferenceSchemes.every(scheme => typeof scheme === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(scheme)) ? [...new Set(message.secretReferenceSchemes)] : [];
       if (typeof message.agentContext !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       routes.agentContextSupported = message.agentContext;
+      // Older hosts without shared registration remain compatible.
+      if (message.sharedContext !== undefined && typeof message.sharedContext !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
+      routes.sharedContextSupported = message.sharedContext === true;
       routes.tools = message.tools;
       activationSucceeded = true;
       resolveActivation(routes);
@@ -558,7 +561,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       error.statusCode = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
       entry.reject(error);
     } else {
-      try { entry.resolve(entry.routeId === 'agent-context' ? message.result : entry.routeId?.startsWith('diagnostic-') || entry.routeId?.startsWith('secret-reference-') || entry.routeId?.startsWith('tool:') ? validateJsonBody(message.result) : validateRouteResult(message.result)); }
+      try { entry.resolve((entry.routeId === 'agent-context' || entry.routeId === 'shared-context') ? message.result : entry.routeId?.startsWith('diagnostic-') || entry.routeId?.startsWith('secret-reference-') || entry.routeId?.startsWith('tool:') ? validateJsonBody(message.result) : validateRouteResult(message.result)); }
       catch { entry.reject(hostError('mod_route_response_invalid')); }
     }
   });

@@ -268,6 +268,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         const activation = await host.activated;
         const descriptions = activation;
         mod.agentContextSupported = activation.agentContextSupported;
+        mod.sharedContextSupported = activation.sharedContextSupported;
         mod.diagnosticsSupported = activation.diagnosticsSupported;
         mod.secretReferenceSchemes = activation.secretReferenceSchemes || [];
         if (!Array.isArray(activation.tools)) throw new Error(`mod_tool_description_invalid:${mod.id}`);

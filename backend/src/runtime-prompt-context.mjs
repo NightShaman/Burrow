@@ -46,7 +46,7 @@ export async function runtimeHostContext(executionContext = {}) {
   return context;
 }
 
-export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, incomingAgentMessage = null, signal = null, modAgentContext = null } = {}) {
+export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, incomingAgentMessage = null, signal = null, modAgentContext = null, sharedModContext = null } = {}) {
   signal?.throwIfAborted();
   const groupSupport = groupChannelContext?.channelId && Array.isArray(groupChannelContext.turns) ? { groupChannel: groupChannelContext } : {};
   const hostContext = modAgentContext ? null : await runtimeHostContext(executionContext);
@@ -58,6 +58,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     preparedContext,
     contextOptions: { stores, agentId: runtimeState.agentId },
     modAgentContext,
+    sharedModContext,
     incomingAgentMessage,
     kernel: plainChatKernel({ agentName: agentRuntime?.agent?.name || agentRuntime?.agentId || runtimeState.agentId }),
     selectedSkills: route.promptPlan.selectedSkills,
