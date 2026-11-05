@@ -981,6 +981,8 @@
   letter-spacing: 0.02em;
 }
 .model-error-card p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   margin: 0 0 8px;
   color: var(--text-strong);
 }

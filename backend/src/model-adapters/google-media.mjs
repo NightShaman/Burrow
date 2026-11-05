@@ -1,3 +1,5 @@
+import { providerErrorSecrets, withProviderErrorScope } from '../model-failure.mjs';
+import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { randomUUID } from 'node:crypto';
 import { googleNativeBase, googleNativeHeaders, googleMediaKind, googleModelId } from './google-native-catalog.mjs';
 import { createGoogleLyriaAdapter } from './google-lyria.mjs';
@@ -18,13 +20,16 @@ export function createGoogleMediaAdapter({ config = {}, fetchImpl = fetch, idFac
   const base = googleNativeBase(config), headers = googleNativeHeaders(config), model = googleModelId(config.model), budgets = mediaBudgets(config);
   return { provider:'google', api:'google-generative-language', model, outputKind:kind,
     async complete({ prompt, signal, sourceImages: inputImages } = {}) {
+      return withProviderErrorScope(providerErrorSecrets(config, headers), async () => {
       const sourceImages = validatedSourceImages(inputImages);
       if (sourceImages && !referenceImageCapability(config).available) throw new Error('agent_reference_image_unsupported');
       const parts = [{ text:String(prompt || '') }, ...(sourceImages || []).map(({ bytes, mimeType }) => ({ inlineData: { mimeType, data: bytes.toString('base64') } }))];
       const requestId=idFactory();
-      const response=await fetchImpl(`${base}/models/${encodeURIComponent(model)}:generateContent`, { method:'POST', headers, body:JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ responseModalities:['TEXT','IMAGE'] } }), ...(signal ? {signal} : {}) });
-      if (!response.ok) { const details=await readProviderError(response,[config.apiKey,config.auth?.token].filter(Boolean)); return {ok:false,status:response.status,error:details.message,errorDetails:details,outputArtifacts:[]}; }
+      const response=await fetchProviderMedia(fetchImpl, `${base}/models/${encodeURIComponent(model)}:generateContent`, { method:'POST', headers, body:JSON.stringify({ contents:[{ role:'user', parts }], generationConfig:{ responseModalities:['TEXT','IMAGE'] } }), ...(signal ? {signal} : {}) });
+      if (!response.ok) { const details=await readProviderError(response,providerErrorSecrets(config, headers)); return {ok:false,status:response.status,error:details.message,errorDetails:details,modelFailure:details.modelFailure,outputArtifacts:[]}; }
       const data=JSON.parse((await mediaBytes(response,budgets.metadata)).toString('utf8'));
+      const failure = providerMediaEnvelopeResult(data, { requestId, provider: 'google', api: 'google-generative-language', model, status: response.status });
+      if (failure) return failure;
       const outputArtifacts=[]; let total=0;
       for (const part of data.candidates?.[0]?.content?.parts || []) {
         if (!part.inlineData) continue;
@@ -36,5 +41,6 @@ export function createGoogleMediaAdapter({ config = {}, fetchImpl = fetch, idFac
         outputArtifacts.push({kind:'image',name:`google-${requestId}-${outputArtifacts.length}.${extension}`,mimeType,sizeBytes:bytes.length,source:{bytes}});
       }
       return {ok:outputArtifacts.length>0,requestId,provider:'google',api:'google-generative-language',model,status:response.status,outputArtifacts,error:outputArtifacts.length ? null : 'google_returned_no_image'};
+      });
     } };
 }

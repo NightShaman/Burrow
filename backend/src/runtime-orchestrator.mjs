@@ -380,7 +380,10 @@ export async function runPlainModelTurn({
       await onContextUsage?.(usage);
     };
     model = await adapter.complete({ sessionId, conversationId, previousModel: model, prompt: modelInput.prompt || (modelInput.vision ? undefined : prompt.text), messages: modelInput.messages || undefined, traceLogger, signal: abortSignal || undefined, ...(!outputOnlyArtifact && emitTextDelta ? { onTextDelta: emitTextDelta } : {}), ...(!outputOnlyArtifact && emitThoughtDelta ? { onThoughtDelta: emitThoughtDelta } : {}), ...(!outputOnlyArtifact && emitContextUsage ? { onContextUsage: emitContextUsage, modelCall } : {}), ...toolArgs });
-    nativeTranscript = modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
+    // The adapter transcript includes provider-generated pending tool evidence
+    // (notably Claude's assistant blocks). Input-only history is not that source.
+    nativeTranscript = Array.isArray(model?.nativeTranscript) ? model.nativeTranscript
+      : modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }];
     await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
       iteration: 0,
       model,

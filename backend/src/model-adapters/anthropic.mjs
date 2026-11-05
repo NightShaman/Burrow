@@ -1,6 +1,6 @@
 import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
-import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult, markProviderStreamTruncated } from '../model-failure.mjs';
+import { providerErrorSecrets, classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult, markProviderStreamTruncated } from '../model-failure.mjs';
 import { CLAUDE_CODE_VERSION, CLAUDE_CODE_BILLING_SYSTEM_BLOCK } from './anthropic-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { DEFAULT_MODEL_OUTPUT_TOKENS } from '../config.mjs';
@@ -556,7 +556,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
         try { data = responseBody.ok ? (responseBody.text ? JSON.parse(responseBody.text) : {}) : { error: { message: responseBody.error } }; }
         catch { data = { raw: responseBody.text }; }
       }
-      const providerErrorEnvelope = data?.error;
+      const providerErrorEnvelope = responseBody.ok ? data?.error : null;
       const envelopeError = !streaming ? anthropicEnvelopeError(data) : null;
       if (envelopeError) data = { ...data, error: { message: envelopeError } };
       const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
@@ -576,12 +576,12 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
         ? { role: 'assistant', content: assistantBlocks }
         : null;
       const nativeTranscript = normalizeProviderMessages([...sourceTranscript, ...(pendingAssistantMessage ? [pendingAssistantMessage] : assistantMessage ? [assistantMessage] : [])]);
-      const failureMessage = maxTokensIncomplete ? (candidateChoice?.text || (candidateChoice?.toolCalls || []).length ? 'model_max_tokens_incomplete' : 'model_max_tokens_empty') : (responseBody.error || data?.error?.message || data?.message || responseBody.text?.slice?.(0, 500) || `HTTP ${response.status}`);
+      const failureMessage = maxTokensIncomplete ? (candidateChoice?.text || (candidateChoice?.toolCalls || []).length ? 'model_max_tokens_incomplete' : 'model_max_tokens_empty') : (responseBody.error || data?.error?.message || `HTTP ${response.status}`);
       const failureDetails = responseBody.errorDetails || ((data?.error || data?.type) ? { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : data?.type ? { type: boundedText(data.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), status: response.status } : null);
       const normalizedUsage = providerUsageValues(data?.usage, { provider:'anthropic', api:'anthropic-messages' });
       const result = { ok: success, requestId, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, choice, modelCall, responseId: providerResponseIdentifier(data?.id), responseModel: providerResponseModel(data?.model), usage: data?.usage || null, normalizedUsage, contextUsage: normalizedUsage.input === null ? requestContextUsage : contextUsageFromResponse(requestContextUsage, { input_tokens:normalizedUsage.input }, clock), error: success ? null : failureMessage, raw: success ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: choice?.text?.length || 0 } : {}) } : { error: { message: failureMessage, ...(failureDetails ? { details: failureDetails } : {}) } }, nativeTranscript, ...(choice?.anthropic?.assistantBlocks?.length ? { anthropicContinuation: { assistantBlocks: choice.anthropic.assistantBlocks } } : {}) };
       if (!success && !responseBody.ok) result.modelFailure = classifyModelFailure(responseBody, { signal });
-      if (!success && providerErrorEnvelope && response.ok) result.modelFailure = classifyModelFailure(markProviderEnvelopeFailure({}, providerErrorEnvelope));
+      if (!success && providerErrorEnvelope) result.modelFailure = classifyModelFailure(markProviderEnvelopeFailure({}, providerErrorEnvelope));
       if (!success && signal?.aborted) result.cancelled = true;
       const settledResult = recordResult(providerFailureResult(result));
       if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
@@ -589,9 +589,9 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
         stage: 'response', ...callbackIdentity, responseModel: result.responseModel, responseId: result.responseId,
         responseStatus: response.status, responseOk: success,
       })));
-      await providerDiagnostic(() => traceLogger?.model?.({ stage: 'model-response', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, normalizedUsage, contextUsage:result.contextUsage, contextBudgetTokens:config.contextTokens ?? config.contextWindow ?? null, cachedTokens: normalizedUsage.cached, stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, ...(streaming ? { streamEventSequence: responseBody.eventSequence || [] } : {}), error: result.error, ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}), ts: clock() }));
+      await providerDiagnostic(() => traceLogger?.model?.({ stage: 'model-response', requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, status: response.status, ok: success, usage: result.usage, normalizedUsage, contextUsage:result.contextUsage, contextBudgetTokens:config.contextTokens ?? config.contextWindow ?? null, cachedTokens: normalizedUsage.cached, stablePrefixHash, finishReason: result.choice?.finishReason || candidateChoice?.finishReason || null, responseChars: result.choice?.text?.length || 0, responseBytes: responseBody.bytes, streamed: streaming, ...(streaming ? { streamEventSequence: responseBody.eventSequence || [] } : {}), error: settledResult.error, ...(responseBody.errorDetails ? { errorDetails: settledResult.raw?.error?.details || {} } : {}), ts: clock() }));
       return settledResult;
-    }, { timing, signal });
+    }, { timing, signal, protectedValues: providerErrorSecrets(config) });
   };
 
   return { provider: 'anthropic', api: 'anthropic-messages', model, url, supportsVision: true, estimateRequest, complete, async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], preparedMessages = null, ...options } = {}) {

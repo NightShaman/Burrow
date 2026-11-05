@@ -1,9 +1,50 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { redactProtectedText } from './redaction.mjs';
+
+const providerErrorScopes = new AsyncLocalStorage();
+export const withProviderErrorScope = (protectedValues, operation) => providerErrorScopes.run(protectedValues || [], operation);
+
+// Only provider boundaries supply text. Classification never depends on prose.
+export function providerErrorSecrets(config = {}, headers = {}) {
+  const values = [config.apiKey, config.auth?.token, config.auth?.apiKey, config.auth?.accessToken, config.auth?.refreshToken];
+  for (const [key, value] of Object.entries({ ...config.headers, ...headers })) {
+    if (/authorization|api[-_]?key|token|secret|cookie|password|credential/i.test(key) && typeof value === 'string') {
+      values.push(value);
+      if (/^(?:Bearer|Basic)\s+/i.test(value)) values.push(value.replace(/^\S+\s+/, ''));
+    }
+  }
+  for (const raw of [config.baseUrl, config.apiBaseUrl, config.url]) {
+    try { const url = new URL(raw); values.push(url.username, url.password); for (const [key, value] of url.searchParams) if (/key|token|secret|password|credential/i.test(key)) values.push(value); } catch {}
+  }
+  return [...new Set(values.filter(value => typeof value === 'string' && value.length).flatMap(value => [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1)]))];
+}
+
+export function sanitizeProviderMessage(value, protectedValues = providerErrorScopes.getStore() || []) {
+  if (typeof value !== 'string') return undefined;
+  // Redact before truncating: a credential crossing the limit must not leak.
+  let source = redactProtectedText(value, protectedValues);
+  for (const secret of protectedValues) {
+    for (let length = Math.min(secret.length - 1, source.length); length >= 4; length--) {
+      if (source.endsWith(secret.slice(0, length))) { source = source.slice(0, -length) + '[redacted]'; break; }
+    }
+  }
+  const message = redactProtectedText(source, protectedValues)
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+/gi, '$1 [redacted]')
+    .replace(/((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|credential)(?:["']?)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s&,;]+)/gi, '$1[redacted]')
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b/g, '[redacted]')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
+  return message ? message.slice(0, 2048) : undefined;
+}
+const withMessage = (failure, value) => {
+  const message = failure.origin === 'upstream' ? sanitizeProviderMessage(value) : undefined;
+  return message ? { ...failure, message } : failure;
+};
 
 const failureScopes = new AsyncLocalStorage();
 export const withModelFailureScope = operation => failureScopes.run({}, operation);
-// Failure metadata is a bounded decision aid, never a copy of provider/error
-// text. Thrown-error provenance belongs to the exact object that crossed a
+// Failure classification is a bounded decision aid. Optional upstream message
+// is separately sanitized display text. Thrown-error provenance belongs to the exact object that crossed a
 // transport boundary; a TypeError name or a status property is not proof.
 // Provenance and retained results are scoped to a single invocation. A frozen
 // error (or the same error object used by overlapping calls) stays safe.
@@ -97,7 +138,7 @@ export function markProviderTransportError(error, { stage } = {}) {
   // A failed body read is itself a transport boundary. No parser, decoder,
   // callback, diagnostics or response processing runs within this boundary.
   if (recognized || fetchFailed || stage === 'read') {
-    scopeSet(provenance, error, { origin: 'upstream', code: stage === 'read' ? 'provider_read_failed' : 'provider_transport_failed', retryable: true });
+    scopeSet(provenance, error, withMessage({ origin: 'upstream', code: stage === 'read' ? 'provider_read_failed' : 'provider_transport_failed', retryable: true }, get(error, 'message')));
   }
   return error;
 }
@@ -111,7 +152,7 @@ export function markProviderStreamTruncated(value) {
 
 // Exact structured provider fields only: terminal evidence must not become
 // retryable just because an error arrived over HTTP 200 or has an unfamiliar
-// companion type. Keep raw vendor codes/messages out of public metadata.
+// companion type. Vendor messages are sanitized separately from stable codes.
 const TERMINAL_PROVIDER_ERRORS = new Set([
   'authentication_error', 'invalid_api_key', 'invalid_authentication',
   'permission_error', 'permission_denied', 'access_denied',
@@ -147,11 +188,11 @@ export function markProviderEnvelopeFailure(value, error = {}) {
       : fields.some(field => RATE_LIMIT_PROVIDER_ERRORS.has(field)) ? { origin: 'upstream', code: 'provider_rate_limited', retryable: true }
         : fields.some(field => TRANSIENT_PROVIDER_ERRORS.has(field)) ? { origin: 'upstream', code: 'provider_unavailable', retryable: true }
           : { origin: 'upstream', code: 'provider_generation_failed', retryable: true };
-  scopeSet(provenance, value, modelFailure);
+  scopeSet(provenance, value, withMessage(modelFailure, typeof error === 'string' ? error : get(error, 'message')));
   return value;
 }
 
-function safeMetadata(value) {
+function safeClassification(value) {
   if (!isObject(value)) return null;
   const origin = get(value, 'origin'), code = get(value, 'code'), retryable = get(value, 'retryable'), status = get(value, 'status');
   if (origin === 'upstream' && failureHttpStatus(status) && code === `provider_http_${status}` && retryable === transientStatus(status)) return httpFailure(status);
@@ -161,6 +202,11 @@ function safeMetadata(value) {
   if (origin === 'unknown' && code === 'model_failure_unknown' && retryable === false) return unknown();
   if (origin === 'burrow' && retryable === false && (BURROW_CODES.has(code) || ['model_configuration_invalid', 'model_request_invalid', 'provider_transport_configuration_invalid'].includes(code))) return { origin, code, retryable };
   return null;
+}
+
+function safeMetadata(value) {
+  const failure = safeClassification(value);
+  return failure ? withMessage(failure, get(value, 'message')) : null;
 }
 
 export function classifyModelFailure(value, { signal } = {}) {
@@ -214,9 +260,20 @@ export function providerFailureResult(result) {
   if (!isObject(result) || get(result, 'ok') !== false) return result;
   const status = get(result, 'status');
   const modelFailure = cancelled(result) ? cancellation()
-    : failureHttpStatus(status) ? httpFailure(status)
+    : failureHttpStatus(status) ? withMessage(httpFailure(status), classifyModelFailure(result).message)
       : classifyModelFailure(result);
-  return { ...result, modelFailure };
+  const error = modelFailure.message || sanitizeProviderMessage(get(result, 'error')) || modelFailure.code;
+  const raw = get(result, 'raw');
+  const details = get(get(raw, 'error'), 'details');
+  const safeDetails = {};
+  for (const key of ['type', 'code', 'param', 'status', 'message', 'eventType', 'responseStatus', 'reason', 'responseType']) {
+    const value = get(details, key);
+    if (typeof value === 'string') safeDetails[key] = sanitizeProviderMessage(value);
+    else if (typeof value === 'number' && Number.isFinite(value)) safeDetails[key] = value;
+  }
+  return { ...result, error, ...(get(raw, 'error') ? { raw: { error: { message: error,
+    ...(details ? { details: safeDetails } : {}),
+  } } } : {}), modelFailure };
 }
 
 function originalErrorText(error) {
@@ -250,8 +307,8 @@ export function modelFailureResult(error, { signal } = {}) {
   const providerPool = get(error, 'providerPool');
   const result = {
     // The original thrown value remains available for investigation; decision
-    // metadata is separate and contains no message, cause, or provider text.
-    ok: false, error: originalErrorText(error), usage: null, choice: { text: '' },
+    // classification is separate from sanitized upstream display text.
+    ok: false, error: modelFailure.origin === 'upstream' ? (modelFailure.message || modelFailure.code) : originalErrorText(error), usage: null, choice: { text: '' },
     ...(status !== undefined ? { status } : {}),
     ...(providerPool !== undefined ? { providerPool } : {}),
     ...(modelFailure.origin === 'cancelled' ? { cancelled: true } : {}),

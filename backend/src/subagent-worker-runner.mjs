@@ -705,6 +705,7 @@ async function runRegisteredSpawnSubagentChild({
   let activitySequence = 0;
   const toolResults = [];
   const completedCalls = [];
+  if (Array.isArray(first.nativeTranscript)) messages.splice(0, messages.length, ...first.nativeTranscript);
   let current = first;
   let terminalResult = terminalResultFromToolCalls(firstToolCalls, { toolResults, target });
   const forcedContinuations = new Map();

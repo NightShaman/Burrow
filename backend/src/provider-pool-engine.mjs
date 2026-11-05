@@ -3,11 +3,8 @@ import { randomUUID } from 'node:crypto';
 
 export const AFFINITY_CACHE_TTL_MS = 1_800_000;
 export const USAGE_STALE_MS = 120_000;
-// Percentage-point hysteresis: normal imbalance needs 25 points; low allowance
-// needs a real 10-point improvement. Never compare raw tier-weighted capacity.
-export const STICKY_REMAINING_FLOOR = 20;
-export const STICKY_IMBALANCE_GAP = 25;
-export const STICKY_MIN_IMPROVEMENT = 10;
+// Sticky accounts move only at the applicable five-hour headroom boundary.
+export const STICKY_REMAINING_FLOOR = 5;
 const CAPACITIES = { openai: [1, 5, 10, 25], anthropic: [1, 5, 20, 1.25, 6.25] };
 const time = (value) => typeof value === 'number' ? value : Date.parse(value);
 
@@ -37,13 +34,24 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
   if (!windows.length || windows.some((window) => window.usedPercent == null || !Number.isFinite(Number(window.usedPercent)))) return { eligible: false, reason: 'usage_missing' };
   // Pressure and independent exhaustion are intentionally separate predicates.
   const exhausted = Boolean(usage.blocked) || windows.some((window) => Number(window.usedPercent) >= 100);
-  const pressureThreshold = window => window.key === 'five_hour' || (family === 'openai' && (Number(window.windowSeconds) > 0 ? Number(window.windowSeconds) < 86_400 : window.key === 'primary')) ? 95 : 100;
-  const pressure = windows.some(window => Number(window.usedPercent) > pressureThreshold(window));
+  // Only provider-declared five-hour windows qualify. A weekly/unknown primary
+  // (including Pro plans without a short window) must not acquire a fake wall.
+  const atHeadroom = window => (Number(window.windowSeconds) === 18_000 ||
+    (window.key === 'five_hour' && !(Number(window.windowSeconds) > 0))) && Number(window.usedPercent) >= 95;
+  const pressure = windows.some(atHeadroom);
   const used = Math.max(...windows.map((window) => Number(window.usedPercent)));
   const resets = windows.map((window) => time(window.resetAt)).filter((reset) => Number.isFinite(reset) && reset > now);
-  const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || Number(window.usedPercent) > pressureThreshold(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
+  const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || atHeadroom(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
   return { eligible: !exhausted && !pressure, reason: exhausted ? 'quota_exhausted' : pressure ? 'quota_pressure' : null,
     exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+}
+
+// All known constraints for one account must expire; the first account to
+// become available determines the pool retry time. Unknown availability is not
+// permission to hammer accounts already proven unavailable.
+export function poolRetryNotBefore(diagnostics, now = Date.now()) {
+  const resets = diagnostics.filter(row => !row.eligible).map(row => row.blockedUntil).filter(value => Number.isFinite(value) && value > now);
+  return resets.length ? Math.min(...resets) : null;
 }
 
 export class ProviderPoolEngine {
@@ -59,7 +67,7 @@ export class ProviderPoolEngine {
     this.affinityCache = new Map(); // Advisory cache only: never bypass durable ownership reads.
   }
 
-  async select({ threadKey, model, exclude = [], requiredMemberId = null } = {}) {
+  async select({ threadKey, model, exclude = [], requiredMemberId = null, preferredMemberId = null } = {}) {
     const refreshed = await this.refreshConnection?.();
     if (refreshed) this.connection = refreshed.connection;
     const connection = this.connection;
@@ -87,26 +95,14 @@ export class ProviderPoolEngine {
       for (const candidate of diagnostics) {
         if (exclude.includes(candidate.id)) { candidate.eligible = false; candidate.reason = 'attempt_failed'; }
         const state = health.find((row) => row.member_id === candidate.id);
-        if (state && time(state.cooldown_until) > now) { candidate.eligible = false; candidate.reason = state.last_reason || 'cooldown'; }
+        if (state && time(state.cooldown_until) > now) { candidate.eligible = false; candidate.reason = state.last_reason || 'cooldown'; candidate.blockedUntil = Math.max(candidate.blockedUntil || 0, time(state.cooldown_until)); }
       }
-      // A continuation is not new work: usage and health are advisory, not
-      // permission to strand an already executed tool result or signed turn.
-      // Explicit pool disable, removal and failed member resolution remain hard.
-      if (requiredMemberId) {
-        const candidate = diagnostics.find(row => row.id === requiredMemberId);
-        if (!candidate) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
-          diagnostics: [{ id: requiredMemberId, eligible: false, reason: 'member_removed' }, ...diagnostics],
-          rejection: { memberId: requiredMemberId, reason: 'member_removed', hard: true },
-        });
-        if (refreshed && !refreshed.members.find(member => member.id === requiredMemberId)) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
+      // Account-bound evidence constrains the destination, not eligibility.
+      // Never force an exhausted/cooling account just because it owns a turn.
+      if (requiredMemberId && !diagnostics.some(row => row.id === requiredMemberId)) {
+        throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
           diagnostics, rejection: { memberId: requiredMemberId, reason: 'member_removed', hard: true },
         });
-        if (exclude.includes(requiredMemberId)) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), {
-          diagnostics, rejection: { memberId: requiredMemberId, reason: 'attempt_failed', hard: true },
-        });
-        candidate.continuationOverride = candidate.eligible ? [] : [candidate.reason];
-        candidate.eligible = true;
-        candidate.reason = null;
       }
       const available = diagnostics.filter((candidate) => candidate.eligible);
       const eligible = (id) => available.find((candidate) => candidate.id === id);
@@ -118,22 +114,15 @@ export class ProviderPoolEngine {
       if (requiredMemberId) {
         // Native IDs and signed blocks may only return to the account that made them.
         selected = eligible(requiredMemberId);
-        if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics, rejection: { memberId: requiredMemberId, reason: diagnostics.find(row => row.id === requiredMemberId)?.reason || 'member_unavailable', hard: true } });
+        if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics, retryNotBefore: diagnostics.find(row => row.id === requiredMemberId)?.blockedUntil || null, rejection: { memberId: requiredMemberId, reason: diagnostics.find(row => row.id === requiredMemberId)?.reason || 'member_unavailable', hard: true } });
+      } else if (preferredMemberId && eligible(preferredMemberId)) {
+        selected = eligible(preferredMemberId);
       } else if (flags.sticky !== false && owner && ids.includes(owner)) {
         if (affinity.substitute_id && time(affinity.substitute_until) > now) selected = eligible(affinity.substitute_id);
         if (!selected) selected = eligible(owner);
       }
-      // Only unpinned requests may rebalance. Keep durable ownership until the
-      // alternate actually succeeds; the adapter promotes with compare-and-swap.
-      if (!requiredMemberId && flags.sticky !== false && selected) {
-        const best = [...available].sort((a, b) => b.remainingPercent - a.remainingPercent)[0];
-        const improvement = best.remainingPercent - selected.remainingPercent;
-        if (best.id !== selected.id && (improvement >= STICKY_IMBALANCE_GAP ||
-          selected.remainingPercent <= STICKY_REMAINING_FLOOR && improvement >= STICKY_MIN_IMPROVEMENT)) {
-          rebalanceReason = improvement >= STICKY_IMBALANCE_GAP ? 'sticky_imbalance' : 'sticky_allowance_floor';
-          selected = best;
-        }
-      }
+      if (!requiredMemberId && owner && !eligible(owner) &&
+        diagnostics.find(candidate => candidate.id === owner)?.pressure) rebalanceReason = 'sticky_headroom_floor';
       if (!selected && available.length) {
         if (flags.preferEarlierReset === true) selected = [...available].sort((a, b) => (a.resetAt ?? Infinity) - (b.resetAt ?? Infinity))[0];
         else {
@@ -142,7 +131,7 @@ export class ProviderPoolEngine {
           selected = available.find((candidate) => (cursor -= candidate.weight) < 0) || available.at(-1);
         }
       }
-      if (!selected) throw Object.assign(new Error('provider_pool_no_eligible_members'), { diagnostics });
+      if (!selected) throw Object.assign(new Error('provider_pool_no_eligible_members'), { diagnostics, retryNotBefore: poolRetryNotBefore(diagnostics, now) });
       // A temporarily unavailable owner retains ownership indefinitely. Removal is permanent.
       if (!owner || !ids.includes(owner) || flags.sticky === false) owner = selected.id;
       if (owner !== selected.id) {

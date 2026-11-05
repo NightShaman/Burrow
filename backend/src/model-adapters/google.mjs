@@ -4,7 +4,7 @@ import { buildProviderMessageManifest } from './adapter-primitives.mjs';
 import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
 import { googleNativeBase, googleNativeHeaders, googleModelId } from './google-native-catalog.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
-import { classifyModelFailure, providerFailureResult, markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
+import { providerErrorSecrets, classifyModelFailure, providerFailureResult, markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
 
 function partsFor(content) {
   if (!Array.isArray(content)) return content ? [{ text: String(content) }] : [];
@@ -145,14 +145,14 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       const usage = data.usageMetadata ? { prompt_tokens:data.usageMetadata.promptTokenCount ?? null, completion_tokens:data.usageMetadata.candidatesTokenCount ?? null, total_tokens:data.usageMetadata.totalTokenCount ?? null, prompt_tokens_details:{ cached_tokens:cachedTokens } } : null;
       const normalizedUsage = providerUsageValues(usage, { provider:'google', api });
       const contextUsage = contextUsageFromResponse(requestContext, usage, clock);
-      const result = recordResult(providerFailureResult({ ok, requestId, modelCall, provider:'google', api, model, responseModel:providerResponseModel(data.modelVersion), responseId:providerResponseIdentifier(data.responseId), status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, normalizedUsage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error && response.ok ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, data.error)) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
+      const result = recordResult(providerFailureResult({ ok, requestId, modelCall, provider:'google', api, model, responseModel:providerResponseModel(data.modelVersion), responseId:providerResponseIdentifier(data.responseId), status:response.status, choice:{ index:0, finishReason:candidate?.finishReason, text, message:{ role:'assistant', content:text }, toolCalls:calls }, usage, normalizedUsage, contextUsage, error:ok ? null : `google_generation_failed:${response.status}:${candidate?.finishReason || 'no_candidate'}`, raw:{ usageMetadata:data.usageMetadata }, nativeTranscript:[...source,...(parts.length ? [assistant] : [])], ...(!ok && data.error ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, data.error)) } : {}), ...(!ok && signal?.aborted ? { cancelled: true } : {}) }));
       await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContext, contextUsage, {
         stage:'response', ...callbackIdentity, responseModel:result.responseModel, responseId:result.responseId,
         responseStatus:response.status, responseOk:ok,
       })));
       await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-response', requestId, provider:'google', api, model, modelCall, status:response.status, ok, usage, normalizedUsage, contextUsage, contextBudgetTokens:config.contextTokens ?? config.contextWindow ?? null, cachedTokens, finishReason:candidate?.finishReason || null, responseChars:text.length, streamed:streaming, ts:clock() }));
       return result;
-    }, { timing, signal });
+    }, { timing, signal, protectedValues: providerErrorSecrets(config, headers) });
   };
   return { provider:'google', api, model, url, supportsVision:config.supportsVision === true || config.capabilities?.images === true, estimateRequest, complete,
     async continueWithToolResults({ previousModel, baseMessages=[], preparedMessages, toolCalls=[], toolResults=[], ...options } = {}) {

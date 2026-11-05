@@ -945,6 +945,7 @@ describe('structured terminal turns', () => {
             code: 'provider_http_429',
             retryable: true,
             status: 429,
+            message: 'The usage limit has been reached',
           },
         },
       },
@@ -1016,6 +1017,8 @@ describe('structured terminal turns', () => {
         metadata: { chatResultVersion: 2, terminalStatus: terminalType.slice(4) },
       });
       expect(assistant.metadata.modelFailure?.code).toBe(code);
+      if (code === 'provider_http_429')
+        expect(assistant.metadata.modelFailure.message).toBe('The usage limit has been reached');
       expect(session.reportError.mock.calls.flat().join(' ')).not.toContain('Request failed:');
     },
   );

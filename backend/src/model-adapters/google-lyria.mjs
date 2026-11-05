@@ -1,3 +1,5 @@
+import { classifyModelFailure, providerErrorSecrets, withProviderErrorScope } from '../model-failure.mjs';
+import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { googleNativeBase, googleNativeHeaders, GOOGLE_MUSIC_MODELS } from './google-native-catalog.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { randomUUID } from 'node:crypto';
@@ -36,18 +38,20 @@ export function createGoogleLyriaAdapter({ config = {}, fetchImpl = globalThis.f
   const budgets = mediaBudgets(config);
   const url = endpoint(config.baseUrl);
   const model = canonicalModel(config.model);
-  return { provider: config.provider || 'google', api: 'google-interactions', model, url, outputKind: 'audio', complete: async ({ prompt, signal } = {}) => {
+  return { provider: config.provider || 'google', api: 'google-interactions', model, url, outputKind: 'audio', complete: async ({ prompt, signal } = {}) => withProviderErrorScope(providerErrorSecrets(config), async () => {
     const requestId = idFactory();
     const body = { model, input: text(prompt) };
     const headers = googleNativeHeaders(config);
-    const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
+    const response = await fetchProviderMedia(fetchImpl, url, { method: 'POST', headers, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
     if (!response.ok) {
-      const bounded = await readProviderError(response, [config.apiKey, config.auth?.token, config.auth?.apiKey].filter(Boolean));
+      const bounded = await readProviderError(response, providerErrorSecrets(config, headers));
       const providerRequestId = text(response.headers?.get?.('x-request-id'));
       const details = { ...bounded, httpStatus: response.status, ...(providerRequestId ? { requestId: providerRequestId } : {}) };
-      return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: details.message, errorDetails: details };
+      return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: details.message, errorDetails: details, modelFailure: details.modelFailure };
     }
-    let data; try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch { return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned invalid JSON' }; }
+    let data; try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch (error) { if (classifyModelFailure(error).origin === 'upstream') throw error; return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned invalid JSON' }; }
+    const failure = providerMediaEnvelopeResult(data, { requestId, provider: 'google', api: 'google-interactions', model, status: response.status });
+    if (failure) return failure;
     const audio = audioData(data);
     const encoded = audio.data;
     const mimeType = audio.mimeType || 'audio/mpeg';
@@ -56,7 +60,7 @@ export function createGoogleLyriaAdapter({ config = {}, fetchImpl = globalThis.f
     if (!encoded || !/^[A-Za-z0-9+/]+=*$/.test(encoded)) return { ok: false, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [], error: 'Google returned no audio data' };
     const bytes = decodeMedia(encoded, Math.min(budgets.asset, budgets.total));
     return { ok: true, requestId, provider: 'google', api: 'google-interactions', model, status: response.status, outputArtifacts: [{ kind: 'audio', name: `lyria-${requestId}.${extension}`, mimeType, sizeBytes: bytes.length, source: { bytes } }] };
-  } };
+  }) };
 }
 
 export { canonicalModel };

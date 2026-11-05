@@ -1260,3 +1260,77 @@ it('offers older loading inline and disables duplicate requests while loading', 
     (screen.getByRole('button', { name: 'Loading older messages…' }) as HTMLButtonElement).disabled,
   ).toBe(true);
 });
+
+it.each(['', 'A genuine partial answer'])(
+  'displays actual provider prose and copies error details with content %s',
+  async (content) => {
+    const copied: string[] = [];
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => {
+        copied.push(document.querySelector<HTMLTextAreaElement>('body > textarea')?.value ?? '');
+        return true;
+      }),
+    });
+    show(
+      [
+        {
+          type: 'message',
+          role: 'assistant',
+          content,
+          metadata: {
+            chatResultVersion: 2,
+            terminalStatus: 'failed',
+            modelFailure: {
+              origin: 'upstream',
+              code: 'provider_http_429',
+              status: 429,
+              retryable: true,
+              message: 'The usage limit has been reached',
+            },
+            modelRecovery: { version: 1, retryCount: 2, requests: [{ state: 'exhausted' }] },
+          },
+        },
+      ],
+      parent,
+    );
+    expect(screen.getByRole('alert').textContent).toContain('The usage limit has been reached');
+    expect(screen.getByRole('alert').textContent).not.toContain('requests (HTTP 429)');
+    const copy = screen.getByRole('button', { name: /Copy Hatchet message/ });
+    expect(copy.className).toBe('copy-message');
+    fireEvent.click(copy);
+    await waitFor(() => expect(copy.textContent).toContain('Copied'));
+    expect(copied).toHaveLength(1);
+    expect(copied[0]).toContain('The usage limit has been reached');
+    expect(copied[0]).toContain('HTTP status: 429');
+    expect(copied[0]).toContain('Recovery 1: exhausted');
+    if (content) expect(copied[0]).toContain(content);
+  },
+);
+
+it('renders provider prose literally, never as executable markup', () => {
+  const prose = '<script>alert(1)</script> **limit reached**';
+  const { container } = show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: {
+            origin: 'upstream',
+            code: 'provider_http_400',
+            status: 400,
+            retryable: false,
+            message: prose,
+          },
+        },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getByText(prose)).toBeTruthy();
+  expect(container.querySelector('script')).toBeNull();
+});

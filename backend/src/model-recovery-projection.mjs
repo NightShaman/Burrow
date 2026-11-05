@@ -1,8 +1,8 @@
 import { classifyModelFailure } from './model-failure.mjs';
 
 // These projections are wire/persistence schemas, not error serializers. Keep
-// provider envelopes, messages, causes, credentials and arbitrary extra fields
-// out even when a caller accidentally supplies an unsanitized trace record.
+// provider envelopes, causes, credentials and arbitrary extra fields
+// out. Only the bounded, sanitized upstream message field is display text.
 const STATES = new Set(['recovering', 'resumed', 'exhausted', 'blocked', 'requires_investigation', 'cancelled']);
 const METHODS = new Set(['complete', 'continueWithToolResults']);
 const FAILOVER_CODES = new Set([

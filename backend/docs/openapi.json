@@ -17127,6 +17127,21 @@
           },
           "modelRecovery": {
             "$ref": "#/components/schemas/ModelRecovery"
+          },
+          "chatResultVersion": {
+            "type": "integer",
+            "const": 2,
+            "description": "Structured chat result contract. Assistant content is real output, never an encoded model-error marker."
+          },
+          "terminalStatus": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "cancelled",
+              "superseded"
+            ],
+            "description": "Runtime-owned terminal state; independent of HTTP success and answer spelling."
           }
         },
         "additionalProperties": false
@@ -17338,7 +17353,7 @@
       },
       "ModelFailure": {
         "type": "object",
-        "description": "Curated producer-proven failure origin. Not provider/error prose. retryable denotes eligibility, not permission to replay tools.",
+        "description": "Producer-proven failure classification, independent of optional credential-redacted upstream explanation. retryable denotes eligibility, not permission to replay tools.",
         "required": [
           "origin",
           "code",
@@ -17365,6 +17380,11 @@
             "type": "integer",
             "minimum": 100,
             "maximum": 599
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Optional actual upstream error explanation, credential-redacted before truncation. Absent for local/unknown/cancelled failures or unusable provider messages; consumers use a generic fallback."
           }
         },
         "additionalProperties": false

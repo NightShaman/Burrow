@@ -1,3 +1,4 @@
+import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { modelInputForPlainTurn } from './runtime-orchestrator.mjs';
 import { promptTextAttachments } from './runtime-turn-input.mjs';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -496,7 +497,7 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
       if (signal?.aborted) { result = fail('side_question_cancelled', 499, 'cancelled'); return; }
       try { assertOwner(); } catch { result = fail('mod_agent_unavailable', 503); }
     };
-    const artifact = () => ({ ...result, ...(result.answerText ? { answerText: redactProtectedText(result.answerText, protectedValues(config)) } : {}) });
+    const artifact = () => ({ ...result, ...chatResultMetadata(result), ...(result.answerText ? { answerText: redactProtectedText(result.answerText, protectedValues(config)) } : {}) });
     const terminalEvent = () => [result.ok ? 'run-completed' : result.decision === 'cancelled' ? 'run-cancelled' : 'run-failed',
       { lane: 'side_question', originRunId: job.snapshot?.originRunId || null, ok: result.ok, decision: result.decision, blockers: result.blockers, ...recoveryMetadata() }];
     fenceResult();
@@ -522,5 +523,5 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     result = fail('side_question_trace_persistence_failed', 500);
   }
   try { telemetry?.endRun?.(runId, result); } catch {}
-  return result;
+  return { ...result, ...chatResultMetadata(result) };
 }

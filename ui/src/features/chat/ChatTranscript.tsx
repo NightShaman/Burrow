@@ -6,6 +6,7 @@ import {
 } from './chatInputs';
 import { chatToolIdentity } from './chatToolIdentity';
 import {
+  chatTerminalCopy,
   chatTerminalDiagnostic,
   chatTerminalMetadata,
   type ChatTerminalMetadata,
@@ -924,8 +925,11 @@ export function ChatMessage({
     side === 'agent' &&
     terminal?.terminalStatus !== undefined &&
     terminal.terminalStatus !== 'completed';
+  const copyText = [text, hasTerminalError && terminal ? chatTerminalCopy(terminal) : '']
+    .filter(Boolean)
+    .join('\n\n');
   const copy = async () => {
-    const didCopy = await copyMarkdown(text);
+    const didCopy = await copyMarkdown(copyText);
     setCopyState(didCopy ? 'copied' : 'failed');
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
@@ -1023,7 +1027,7 @@ export function ChatMessage({
               Use in main conversation
             </button>
           )}
-        {text && (
+        {copyText && (
           <button
             className="copy-message"
             onClick={copy}

@@ -66,7 +66,13 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     if (dispatch) state.dispatches.push(dispatch);
     try {
       const response = await fetchImpl(...fetchArgs);
-      if (dispatch) dispatch.status = response?.status;
+      if (dispatch) {
+        dispatch.status = response?.status;
+        const retry = response?.headers?.get?.('retry-after');
+        const delay = retry && /^\s*\d+(?:\.\d+)?\s*$/.test(retry) ? Number(retry) * 1000 : null;
+        const reset = delay !== null ? now() + delay : Date.parse(retry);
+        if (Number.isFinite(reset) && reset > now()) dispatch.retryNotBefore = reset;
+      }
       return response;
     } catch (error) {
       if (state) state.fetchError = error;
@@ -109,14 +115,9 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     const nativeHistory = signedHistory || history.some(message => ['function_call', 'function_call_output'].includes(message?.type));
     if (nativeHistory && !previousRoute?.servingConnectionId) throw new Error('provider_pool_signed_history_owner_missing');
     if (nativeHistory) continuation = true;
-    const initialRequest = Array.isArray(args.messages) ? args.messages :
-      args.prompt != null ? [{ role: 'user', content: args.prompt }] : [];
-    const protocolHistory = initialRequest.some(message => message?.role === 'tool' ||
-      ['function_call', 'function_call_output'].includes(message?.type) ||
-      Array.isArray(message?.tool_calls) && message.tool_calls.length ||
-      Array.isArray(message?.content) && message.content.some(part =>
-        ['tool_use', 'tool_result', 'thinking', 'redacted_thinking'].includes(part?.type)));
-    const freshRequest = method === 'complete' && !continuation && !previousRoute && !protocolHistory;
+    // A request may start with historical portable tool rounds. The submitted
+    // request, not the absence of tool history, defines its replay boundary.
+    const freshRequest = method === 'complete' && !continuation && !previousRoute;
     if (continuation && (!previousRoute?.servingConnectionId || previousRoute.logicalConnectionId !== pool.connection.id)) {
       throw new Error('provider_pool_continuation_owner_missing');
     }
@@ -137,17 +138,28 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       // the scrubbed portable replay, never the previous owner's native state.
       const recoveringAlternate = continuation && canReplay && !attempt && recoveryRoute?.servingConnectionId
         && recoveryRoute.servingConnectionId !== previousRoute.servingConnectionId;
-      const requiredMemberId = continuation && !(attempt && canReplay)
+      const preferredMemberId = continuation && canReplay && !attempt
         ? (recoveringAlternate ? recoveryRoute.servingConnectionId : previousRoute.servingConnectionId) : null;
+      const requiredMemberId = continuation && !canReplay ? previousRoute.servingConnectionId : null;
       let selection;
-      try { selection = await engine.select({ threadKey, model: config.model, exclude: excluded, requiredMemberId }); }
+      try { selection = await engine.select({ threadKey, model: config.model, exclude: excluded, requiredMemberId, preferredMemberId }); }
       catch (error) {
         if (!originalFailure) {
           const prior = priorManagedFailure(args);
-          if (prior && !args.signal?.aborted) throw retainSecondary(error, prior);
+          if (prior && !args.signal?.aborted) {
+            if (['provider_pool_no_eligible_members', 'provider_pool_continuation_owner_unavailable'].includes(error?.message)) {
+              return { ...prior, retryNotBefore: error.retryNotBefore || prior.retryNotBefore || null, recoveryUnavailable: true };
+            }
+            throw retainSecondary(error, prior);
+          }
           throw error;
         }
         const diagnostic = { code: 'provider_pool_alternate_selection_failed', action: 'blocked' };
+        if (error?.message === 'provider_pool_no_eligible_members' || error?.message === 'provider_pool_continuation_owner_unavailable') {
+          if (!args.recoveryContext && originalFailure instanceof Error) return preserveOriginalFailure(originalFailure, originalRoute, diagnostic);
+          return { ...routedReceipt(originalReceipt, originalRoute, diagnostic),
+            retryNotBefore: error.retryNotBefore || originalReceipt.retryNotBefore || null, recoveryUnavailable: true };
+        }
         if (!args.recoveryContext) return preserveOriginalFailure(originalFailure, originalRoute, diagnostic);
         throw retainSecondary(error, routedReceipt(originalReceipt, originalRoute, diagnostic));
       }
@@ -233,6 +245,8 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         // overwrite provenance, even if a logger reuses the same Error object.
         result = modelFailureResult(error, { signal: args.signal });
       }
+      const retryNotBefore = Math.max(0, ...fetchState.dispatches.map(dispatch => dispatch.retryNotBefore || 0), Number(result?.retryNotBefore) || 0);
+      if (retryNotBefore) result = { ...result, retryNotBefore };
       const receipt = routedReceipt(result, route);
       const capture = async () => {
         // Preserve direct callers using custom member adapters that don't use
@@ -322,8 +336,14 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       if (result.recoveryFailure) return receipt;
       const retryable = !result.ok && ([401, 403, 429].includes(Number(result.status)) || (Number(result.status) >= 500 && Number(result.status) <= 599));
       if (retryable) {
-        try { await cooldown(selection.memberId, `http_${result.status}`, args, metric); }
-        catch (error) { throw retainSecondary(error, receipt); }
+        try {
+          const health = await cooldown(selection.memberId, `http_${result.status}`, args, metric, result.retryNotBefore, selection.diagnostics);
+          const until = health?.cooldown_until instanceof Date ? health.cooldown_until.getTime() : Date.parse(health?.cooldown_until);
+          if (continuation && !canReplay && Number.isFinite(until) && until > now()) {
+            result = { ...result, retryNotBefore: Math.max(result.retryNotBefore || 0, until) };
+            receipt.retryNotBefore = result.retryNotBefore;
+          }
+        } catch (error) { throw retainSecondary(error, receipt); }
       }
       if (retryable && continuation && replay?.error && !callbackInvoked && !visible && !args.signal?.aborted && attempt === 0 && !result.choice?.text && !result.choice?.toolCalls?.length) {
         return preserveOriginalFailure(result, route, replayBlockDiagnostic(replay.error));
@@ -350,15 +370,18 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
   // add observational reads before/after it: a slow optional snapshot must never
   // prevent the cooldown or the alternate provider dispatch. Without prior-row
   // evidence this is a persisted window, not a claimed entry/extension transition.
-  const cooldown = async (memberId, reason, args, metric) => {
-    const row = await engine.cooldown(memberId, reason);
-    if (!(engine instanceof ProviderPoolEngine) || !row) return;
+  const cooldown = async (memberId, reason, args, metric, retryNotBefore = null, diagnostics = []) => {
+    const knownReset = diagnostics?.find(candidate => candidate.id === memberId)?.blockedUntil;
+    const duration = Math.max(60_000, (retryNotBefore || 0) - now(), (knownReset || 0) - now());
+    const row = await engine.cooldown(memberId, reason, ...(duration > 60_000 ? [duration] : []));
+    if (!(engine instanceof ProviderPoolEngine) || !row) return row;
     const timestamp = value => value instanceof Date ? value.getTime() : Date.parse(value);
     const until = timestamp(row.cooldown_until), updated = timestamp(row.updated_at);
-    if (!Number.isFinite(until) || !Number.isFinite(updated) || until <= updated || row.last_reason !== reason) return;
+    if (!Number.isFinite(until) || !Number.isFinite(updated) || until <= updated || row.last_reason !== reason) return row;
     deferProviderDiagnostic(args.traceLogger, () => providerObservation(args.traceLogger,'model',{ stage:'provider-pool-cooldown', requestId:metric.id, poolId:pool.connection.id, memberId, model:config.model,
       transition:'persisted', reason:reason === 'transport_unavailable' ? 'transport' : reason === 'http_429' ? 'rate_limited' : ['http_401','http_403'].includes(reason) ? 'authentication' : 'provider_failure',
       durationMs:until - updated, updatedAtMs:updated, cooldownUntilMs:until, boundary:'persisted-health-window' }), { optional:true });
+    return row;
   };
   const startMetrics = async args => {
     const started = now(), monotonicStarted = performance.now();

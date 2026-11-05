@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { hasProviderDelta, providerCompletion, providerUsageValues, capturedProviderUsage, providerTokenCount } from './provider-responsiveness.mjs';
 import { wireFingerprint } from './wire-fingerprint.mjs';
 import { poolAttemptUsage } from '../postgres-provider-pool-metrics.mjs';
-import { markProviderTransportError, markModelInternalError, markModelCallbackError, modelFailureResult, retainModelFailure } from '../model-failure.mjs';
+import { markProviderTransportError, markModelInternalError, markModelCallbackError, modelFailureResult, retainModelFailure, withProviderErrorScope, markProviderEnvelopeFailure, classifyModelFailure, providerFailureResult } from '../model-failure.mjs';
 
 const pending = new WeakMap();
 const routing = new AsyncLocalStorage();
@@ -75,7 +75,8 @@ export async function providerCallback(operation) {
 // Flush without allowing a later diagnostics error to replace the response or
 // transport failure. Finished provider results are registered BEFORE response
 // callbacks/logging; a success plus persistence failure is still a failure.
-export async function settleProviderDiagnostics(traceLogger, operation, { timing = null, signal = null } = {}) {
+export async function settleProviderDiagnostics(traceLogger, operation, { timing = null, signal = null, protectedValues = [] } = {}) {
+  return withProviderErrorScope(protectedValues, async () => {
   let result, primary, failed = false;
   try { result = await operation(value => { result = value; try { timing?.received?.(value); } catch {} return value; }); }
   catch (error) { failed = true; primary = error; }
@@ -93,6 +94,7 @@ export async function settleProviderDiagnostics(traceLogger, operation, { timing
   }
   if (failed) throw recordedError;
   return result;
+  });
 }
 
 export function providerTiming({ traceLogger, requestId, provider, api, model, modelCall = null, identity = {}, contextBudgetTokens = null, clock = () => new Date().toISOString(), monotonicClock = () => performance.now() } = {}) {
@@ -214,6 +216,22 @@ export async function invokeProviderFetch(fetchImpl, url, options, { traceLogger
   const result = outcome.value;
   timing.mark('provider-response-headers', { status: result.status });
   return result;
+}
+
+export function providerMediaEnvelopeResult(data, fields = {}) {
+  if (!data || !Object.hasOwn(data, 'error') || !data.error) return null;
+  const failure = classifyModelFailure(markProviderEnvelopeFailure({}, data.error));
+  return providerFailureResult({ ...fields, ok: false, outputArtifacts: [], error: failure.message || failure.code, modelFailure: failure });
+}
+
+// Media transports use the same provenance without chat timing/recovery receipts.
+export async function fetchProviderMedia(fetchImpl, url, options) {
+  try { return await fetchImpl(url, options); }
+  catch (error) {
+    let valid = false;
+    try { valid = ['http:', 'https:'].includes(new URL(url).protocol); } catch {}
+    throw markProviderTransportError(error, { stage: valid ? 'fetch' : 'configuration' });
+  }
 }
 
 // These wrappers contain only the provider read itself. Parsing, callbacks,

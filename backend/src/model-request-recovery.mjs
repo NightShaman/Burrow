@@ -14,6 +14,7 @@ function copyResult(result, fields = {}) {
 // planner, turn ingress or completed action is executed by this helper.
 export function createModelRequestRecovery(adapter, {
   maxAttempts = 3, maxRetriesPerRun = 4, delays = [1000, 3000],
+  clock = Date.now, maxRecoveryWaitMs = 30_000,
   wait = (ms, signal) => sleep(ms, undefined, { signal }), beforeAttempt = null, onAttempt = null,
 } = {}) {
   maxAttempts = Math.min(3, Math.max(1, Number.isSafeInteger(maxAttempts) ? maxAttempts : 3));
@@ -154,11 +155,14 @@ export function createModelRequestRecovery(adapter, {
       recoveryRoute = response.providerPool || recoveryRoute;
       partialOutput = { textChars, thoughtChars };
       if (failure.origin === 'cancelled' || signal?.aborted) return stopped();
+      const retryDelay = Math.max(0, (Number(response.retryNotBefore) || 0) - clock());
+      const unavailable = response.recoveryUnavailable === true && !retryDelay;
+      const waitTooLong = retryDelay > Math.min(30_000, Math.max(0, Number(maxRecoveryWaitMs) || 0));
       const state = lastFailure.origin === 'unknown' ? 'requires_investigation'
-        : lastFailure.origin === 'burrow' || !lastFailure.retryable || ['image', 'audio'].includes(adapter.outputKind) ? 'blocked'
+        : lastFailure.origin === 'burrow' || !lastFailure.retryable || unavailable || waitTooLong || ['image', 'audio'].includes(adapter.outputKind) ? 'blocked'
           : exhausted() ? 'exhausted' : 'recovering';
       try {
-        const delayMs = state === 'recovering' ? Math.min(30_000, Math.max(0, Number(delays[Math.max(0, physicalAttempts - 1)] ?? 3000) || 0)) : 0;
+        const delayMs = state === 'recovering' ? Math.max(retryDelay, Math.min(30_000, Math.max(0, Number(delays[Math.max(0, physicalAttempts - 1)] ?? 3000) || 0))) : 0;
         await publish(state, { delayMs });
         await guard();
         if (state !== 'recovering') return finish(lastFailure.origin !== 'upstream' && originalFailure.origin === 'upstream' ? copyResult(originalResult, { recoveryFailure: lastFailure }) : lastResult);

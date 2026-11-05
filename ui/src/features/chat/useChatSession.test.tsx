@@ -1344,7 +1344,13 @@ it('hydrates empty structured terminal and literal marker successes across reloa
     metadata: {
       chatResultVersion: 2,
       terminalStatus: 'failed',
-      modelFailure: { origin: 'upstream', code: 'provider_http_429', retryable: true, status: 429 },
+      modelFailure: {
+        origin: 'upstream',
+        code: 'provider_http_429',
+        retryable: true,
+        status: 429,
+        message: 'The usage limit has been reached',
+      },
       modelRecovery: { version: 1, retryCount: 1, requests: [{ state: 'exhausted' }] },
     },
   };

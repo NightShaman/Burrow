@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   chatAnswerText,
+  chatTerminalCopy,
   chatTerminalDiagnostic,
   chatTerminalMetadata,
   chatTerminalResult,
@@ -158,4 +159,101 @@ it('bounds recovery records, numeric fields and nested failures without preservi
       },
     ],
   });
+});
+
+it.each(['result', 'summary', 'root'] as const)(
+  'preserves explicit provider prose in %s without changing classification',
+  (place) => {
+    const metadata = {
+      chatResultVersion: 2 as const,
+      terminalStatus: 'failed' as const,
+      modelFailure: { ...rateLimit, message: 'The usage limit has been reached' },
+    };
+    const parsed = chatTerminalResult(
+      place === 'root' ? metadata : { [place]: metadata },
+      'run.failed',
+    );
+    expect(parsed).toEqual(metadata);
+    expect(chatTerminalDiagnostic(parsed)).toEqual({
+      message: 'The usage limit has been reached',
+      overloaded: true,
+      upstream: true,
+    });
+  },
+);
+
+it.each([undefined, '', '   ', { message: 'opaque' }, ['opaque'], 429])(
+  'uses generic fallback for unusable provider message %s',
+  (message) => {
+    const terminal = chatTerminalMetadata({
+      chatResultVersion: 2,
+      terminalStatus: 'failed',
+      modelFailure: { ...rateLimit, message },
+      error: { arbitrary: 'private' },
+    })!;
+    expect(terminal.modelFailure?.message).toBeUndefined();
+    expect(chatTerminalDiagnostic(terminal).message).toContain('HTTP 429');
+  },
+);
+
+it('bounds prose at the contract boundary and does not label local wording as provider text', () => {
+  const terminal = chatTerminalMetadata({
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: { ...rateLimit, message: 'x'.repeat(9000), raw: 'private' },
+  })!;
+  expect(terminal.modelFailure?.message).toHaveLength(2048);
+  expect(JSON.stringify(terminal)).not.toContain('private');
+  expect(
+    chatTerminalDiagnostic({
+      ...terminal,
+      modelFailure: {
+        origin: 'burrow',
+        code: 'model_result_invalid',
+        retryable: false,
+        message: 'Provider sounding prose',
+      },
+    }),
+  ).toMatchObject({ upstream: false, message: 'The runtime received an invalid model result.' });
+});
+
+it('copies useful projected diagnostics and recovery without arbitrary errors', () => {
+  const terminal = chatTerminalMetadata({
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: { ...rateLimit, message: 'The usage limit has been reached' },
+    error: { secret: 'private' },
+    modelRecovery: {
+      version: 1,
+      retryCount: 2,
+      requests: [
+        {
+          state: 'blocked',
+          attempt: 3,
+          maxAttempts: 3,
+          delayMs: 1000,
+          lastFailure: { ...rateLimit, message: 'Retry after reset' },
+          failover: { code: 'provider_pool_alternate_selection_failed', action: 'blocked' },
+          arbitrary: 'private',
+        },
+      ],
+    },
+  })!;
+  const copied = chatTerminalCopy(terminal);
+  for (const detail of [
+    'The usage limit has been reached',
+    'Run status: failed',
+    'Origin: upstream',
+    'Code: provider_http_429',
+    'HTTP status: 429',
+    'Retryable: yes',
+    'Recovery retries: 2',
+    'Recovery 1: blocked',
+    'Attempt: 3/3',
+    'Delay: 1000 ms',
+    'Retry after reset',
+    'provider_pool_alternate_selection_failed',
+  ])
+    expect(copied).toContain(detail);
+  expect(copied).not.toContain('private');
 });

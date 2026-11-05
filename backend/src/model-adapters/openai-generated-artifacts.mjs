@@ -1,3 +1,5 @@
+import { classifyModelFailure, providerErrorSecrets, withProviderErrorScope } from '../model-failure.mjs';
+import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { fetchProviderImage } from './provider-image-url.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
@@ -152,7 +154,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
   const baseUrl = config.baseUrl || config.apiBaseUrl || config.url;
   const url = endpoint(baseUrl, kind === 'image' ? 'images/generations' : 'audio/speech');
 
-  const complete = async (options = {}) => {
+  const complete = async (options = {}) => withProviderErrorScope(providerErrorSecrets(config), async () => {
     const requestId = idFactory();
     const prompt = promptFrom(options);
     const sourceImages = validatedSourceImages(options.sourceImages);
@@ -173,12 +175,12 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     // Trace only immutable metadata, not binary input or an encoded portrait.
     const traceBody = sourceImages ? { ...body, sourceImages: sourceImages.map(({ mimeType, name, bytes }) => ({ mimeType, name, sizeBytes: bytes.length })) } : body;
     await traceRequest(options.traceLogger, { requestId, provider, model, url: requestUrl, headers, body: traceBody, clock, protectedValues: options.protectedValues || [] });
-    const response = await fetchImpl(requestUrl, { method: 'POST', headers, body: requestBody, ...(options.signal ? { signal: options.signal } : {}) });
+    const response = await fetchProviderMedia(fetchImpl, requestUrl, { method: 'POST', headers, body: requestBody, ...(options.signal ? { signal: options.signal } : {}) });
     if (!response.ok) {
-      const providerErrorDetails = await providerError(response, [config.apiKey]);
+      const providerErrorDetails = await providerError(response, providerErrorSecrets(config));
       const error = providerErrorDetails.message;
       await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: false, error, errorDetails: providerErrorDetails, ts: clock() });
-      return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error, errorDetails: providerErrorDetails };
+      return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error, errorDetails: providerErrorDetails, modelFailure: providerErrorDetails.modelFailure };
     }
 
     let outputArtifacts;
@@ -195,7 +197,9 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
       outputArtifacts = [{ kind: 'audio', name: `speech-${requestId}.${format.extension}`, mimeType, sizeBytes: bytes.length, source: { bytes } }];
     } else {
       let data;
-      try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch { return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error: 'image provider returned invalid JSON' }; }
+      try { data = JSON.parse((await mediaBytes(response, budgets.metadata)).toString('utf8')); } catch (error) { if (classifyModelFailure(error).origin === 'upstream') throw error; return { ok: false, requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, outputArtifacts: [], error: 'image provider returned invalid JSON' }; }
+      const failure = providerMediaEnvelopeResult(data, { requestId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null });
+      if (failure) return failure;
       responseId ||= text(data?.id) || null;
       usage = data?.usage || null;
       if (!Array.isArray(data?.data) || !data.data.length) return { ok: false, requestId, responseId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: null, usage, outputArtifacts: [], error: 'image provider returned no images' };
@@ -212,7 +216,7 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
     const result = { ok: true, requestId, responseId, provider, api: 'openai-generated-artifact', model, status: response.status, choice: { text: '', finishReason: 'stop', toolCalls: [] }, usage, outputArtifacts, error: null };
     await options.traceLogger?.model?.({ stage: 'model-response', requestId, provider, api: 'openai-generated-artifact', model, status: response.status, ok: true, usage: result.usage, artifactCount: outputArtifacts.length, responseBytes: outputArtifacts.reduce((sum, item) => sum + item.sizeBytes, 0), ts: clock() });
     return result;
-  };
+  });
 
   return { provider, api: 'openai-generated-artifact', model, url, outputKind: kind, supportsVision: false, complete };
 }

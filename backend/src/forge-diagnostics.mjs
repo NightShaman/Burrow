@@ -1,3 +1,5 @@
+import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult, withProviderErrorScope } from './model-failure.mjs';
+import { readProviderChunk, readProviderText } from './model-adapters/provider-fetch.mjs';
 const DEFAULT_PROVIDER_ERROR_BYTES = 16 * 1024;
 const PUBLIC_DIAGNOSTIC_KEYS = Object.freeze(['stage', 'message', 'code', 'httpStatus', 'requestId', 'truncated', 'observedBytes', 'maxBytes']);
 
@@ -49,7 +51,7 @@ export async function readProviderError(response, secrets = [], { byteBudget = p
   let decoded = '', copied = 0, observedBytes = 0, truncated = false;
   if (!reader) {
     // Compatibility for injected fetch mocks only; native Response always streams.
-    const body = typeof response?.text === 'function' ? await response.text() : '';
+    const body = typeof response?.text === 'function' ? await readProviderText(response) : '';
     const bytes = Buffer.from(body, 'utf8');
     observedBytes = bytes.length;
     truncated = observedBytes > limit;
@@ -57,7 +59,7 @@ export async function readProviderError(response, secrets = [], { byteBudget = p
   } else {
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readProviderChunk(reader);
         if (done) break;
         observedBytes += value.byteLength;
         const take = Math.min(limit - copied, value.byteLength);
@@ -73,17 +75,19 @@ export async function readProviderError(response, secrets = [], { byteBudget = p
       if (!truncated) decoded += decoder.decode();
     } finally { reader.releaseLock?.(); }
   }
-  let code;
+  let code, envelope;
   if (!truncated) {
     try {
       const parsed = JSON.parse(decoded);
+      envelope = parsed?.error;
       code = parsed?.error?.status ?? parsed?.error?.code ?? parsed?.status ?? parsed?.code;
       const message = parsed?.error?.message ?? parsed?.message;
       if (typeof message === 'string') decoded = message;
     } catch {}
   }
   const message = sanitizeDiagnostic(truncated ? removePartialSecret(decoded, secrets) : decoded, secrets);
-  return { message, ...(typeof code === 'string' || typeof code === 'number' ? { code: sanitizeDiagnostic(String(code), secrets) } : {}),
+  const modelFailure = withProviderErrorScope(secrets, () => providerFailureResult({ ok: false, status: response?.status, ...(envelope ? { modelFailure: classifyModelFailure(markProviderEnvelopeFailure({}, envelope)) } : {}) }).modelFailure);
+  return { message, modelFailure, ...(typeof code === 'string' || typeof code === 'number' ? { code: sanitizeDiagnostic(String(code), secrets) } : {}),
     ...(truncated ? { truncated: true, observedBytes, maxBytes: limit } : {}) };
 }
 

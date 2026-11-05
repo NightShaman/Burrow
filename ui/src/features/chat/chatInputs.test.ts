@@ -72,3 +72,38 @@ it('renders API side answers once and replaces them with retained native message
   const next = reconcileChatInputs(first, [input]);
   expect(next).toHaveLength(2);
 });
+
+it('projects an empty structured side-question failure once with actual provider explanation', () => {
+  const terminal = {
+    chatResultVersion: 2 as const,
+    terminalStatus: 'failed' as const,
+    modelFailure: {
+      origin: 'upstream' as const,
+      code: 'provider_http_429',
+      status: 429,
+      retryable: true,
+      message: 'The usage limit has been reached',
+    },
+  };
+  const input: ChatInput = {
+    ...queueInput,
+    intent: 'side_question',
+    status: 'failed',
+    result: { ok: false, answerText: '', decision: null, blockers: [], ...terminal },
+  };
+  const first = reconcileChatInputs([], [input]);
+  expect(first.map((turn) => turn.role)).toEqual(['user', 'assistant']);
+  expect(first[1]).toMatchObject({ content: '', metadata: { ...terminal, lane: 'side_question' } });
+  expect(reconcileChatInputs(first, [input])).toHaveLength(2);
+});
+
+it('does not invent model provider errors from arbitrary side-question input errors', () => {
+  const input: ChatInput = {
+    ...queueInput,
+    intent: 'side_question',
+    status: 'failed',
+    error: 'Local transport failed',
+    result: null,
+  };
+  expect(reconcileChatInputs([], [input])).toHaveLength(1);
+});

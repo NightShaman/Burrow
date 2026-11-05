@@ -394,7 +394,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         // event. Preserve that structured terminal evidence, not just its prose.
         const providerError = Object.keys(eventError).length ? eventError
           : Object.keys(responseError).length ? responseError : event.type === 'error' ? event : {};
-        providerErrorEnvelope = providerError;
+        providerErrorEnvelope = Object.keys(providerError).length ? providerError : typeof event.error === 'string' ? { message: event.error } : providerError;
         const fallbackMessage = typeof event.error === 'string' ? event.error : null;
         streamError = boundedText(providerError.message || event.message || fallbackMessage || 'model_stream_failed', 500);
         streamErrorDetails = {
@@ -414,7 +414,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     if (providerResponseModel(event?.model)) chatResponseModel = providerResponseModel(event.model);
     if (providerResponseIdentifier(event?.id)) chatResponseId = providerResponseIdentifier(event.id);
     if (event?.usage && typeof event.usage === 'object') usage = compactUsage(event.usage) || usage;
-    if (event?.error && typeof event.error === 'object') {
+    if (event?.error && ['object', 'string'].includes(typeof event.error)) {
       providerErrorEnvelope = event.error; streamError = boundedText(event.error.message || 'model_stream_failed', 500); return;
     }
     const choice = event?.choices?.[0];

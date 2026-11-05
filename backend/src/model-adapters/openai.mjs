@@ -1,6 +1,6 @@
 import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback } from './provider-fetch.mjs';
-import { classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult } from '../model-failure.mjs';
+import { providerErrorSecrets, classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult } from '../model-failure.mjs';
 import { apiMode, isChatGptBackendBaseUrl, isCodexBackendConfig, responsesUrl, completionUrl } from './openai-transport.mjs';
 import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
@@ -203,12 +203,12 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       // back to their normal JSON response rather than converting a complete
       // answer into an empty streamed one.
       const providerReturnedJson = streaming && /application\/json/i.test(String(response?.headers?.get?.('content-type') || ''));
-      const responseBody = streaming && !providerReturnedJson
+      const responseBody = streaming && response.ok && !providerReturnedJson
         ? await readResponseSseBounded(response, { mode, maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought'), onToolDelta: () => { try { timing.stream('tool'); } catch {} } })
         : await readResponseTextBounded(response, config.maxResponseBytes);
       const text = responseBody.text || '';
-      let data = streaming && !providerReturnedJson ? responseBody.data : null;
-      if (!streaming || providerReturnedJson) {
+      let data = streaming && response.ok && !providerReturnedJson ? responseBody.data : null;
+      if (!streaming || !response.ok || providerReturnedJson) {
         try {
           data = responseBody.ok ? (text ? JSON.parse(text) : {}) : { error: { message: responseBody.error } };
         } catch {
@@ -218,7 +218,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
 
       // HTTP success alone is not a completed provider generation. Apply the
       // nonstream schema gate also when a proxy ignores the streaming request.
-      const providerErrorEnvelope = data?.error;
+      const providerErrorEnvelope = responseBody.ok ? data?.error : null;
       const envelopeError = (!streaming || providerReturnedJson) ? openAIEnvelopeError(data, mode) : null;
       if (envelopeError) data = { ...data, error: { message: envelopeError } };
       const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
@@ -236,7 +236,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         usage: data?.usage || null,
         normalizedUsage: providerUsageValues(data?.usage, { provider:'openai-compatible', api:mode }),
         contextUsage: contextUsageFromResponse(requestContextUsage, data?.usage || null, clock),
-        error: ok ? null : (responseBody.error || data?.error?.message || data?.message || text.slice(0, 500) || `HTTP ${response.status}`),
+        error: ok ? null : (responseBody.error || data?.error?.message || `HTTP ${response.status}`),
         // Provider envelopes can include unbounded vendor-specific fields
         // (reasoning, annotations, debug payloads). Nothing outside this
         // adapter needs them; retaining one turns a compact tool call into a
@@ -244,7 +244,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         // transport receipt, or the explicit error shape expected by callers.
         raw: ok
           ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: responseBody.streamedTextChars || 0, streamFallback: providerReturnedJson } : {}) }
-          : { error: { message: responseBody.error || data?.error?.message || data?.message || `HTTP ${response.status}`, ...((responseBody.errorDetails || data?.error) ? { details: responseBody.errorDetails || { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), ...(data?.error?.param ? { param: boundedText(data.error.param, 128) } : {}), status: response.status } } : {}) } },
+          : { error: { message: responseBody.error || data?.error?.message || `HTTP ${response.status}`, ...((responseBody.errorDetails || data?.error) ? { details: responseBody.errorDetails || { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), ...(data?.error?.param ? { param: boundedText(data.error.param, 128) } : {}), status: response.status } } : {}) } },
         // Chat Completions has no server-side previous-response chain. Return
         // this bounded, protocol-native transcript so the caller can append
         // the next call/result pair instead of forgetting prior tool rounds.
@@ -253,7 +253,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
 
       // Capture parser/HTTP provenance before response diagnostics can throw.
       if (!ok && !responseBody.ok) result.modelFailure = classifyModelFailure(responseBody, { signal });
-      if (!ok && providerErrorEnvelope && response.ok && (!streaming || providerReturnedJson)) result.modelFailure = classifyModelFailure(markProviderEnvelopeFailure({}, providerErrorEnvelope));
+      if (!ok && providerErrorEnvelope && (!streaming || !response.ok || providerReturnedJson)) result.modelFailure = classifyModelFailure(markProviderEnvelopeFailure({}, providerErrorEnvelope));
       if (!ok && signal?.aborted) result.cancelled = true;
       const settledResult = recordResult(providerFailureResult(result));
       if (result.choice?.text || result.choice?.toolCalls?.length) timing.useful(result.choice?.toolCalls?.length ? 'tool' : 'final-text');
@@ -281,13 +281,13 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         streamed: streaming && !providerReturnedJson,
         streamFallback: providerReturnedJson,
         streamedTextChars: responseBody.streamedTextChars || 0,
-        error: result.error,
-        ...(responseBody.errorDetails ? { errorDetails: responseBody.errorDetails } : {}),
+        error: settledResult.error,
+        ...(responseBody.errorDetails ? { errorDetails: settledResult.raw?.error?.details || {} } : {}),
         ts: clock(),
       }));
 
       return settledResult;
-    }, { timing, signal });
+    }, { timing, signal, protectedValues: providerErrorSecrets(config) });
   };
 
   return {

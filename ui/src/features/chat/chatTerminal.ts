@@ -6,6 +6,8 @@ export type ModelFailure = {
   code: string;
   retryable: boolean;
   status?: number;
+  /** Bounded, credential-redacted explanation supplied by the backend. */
+  message?: string;
 };
 export type ModelRecovery = {
   version: 1;
@@ -77,6 +79,9 @@ function chatFailure(value: unknown): ModelFailure | undefined {
     origin: failure.origin as ModelFailure['origin'],
     code: failure.code,
     retryable: failure.retryable,
+    ...(typeof failure.message === 'string' && failure.message.trim()
+      ? { message: failure.message.trim().slice(0, 2048) }
+      : {}),
     ...(Number.isInteger(failure.status) &&
     (failure.status as number) >= 100 &&
     (failure.status as number) <= 599
@@ -237,18 +242,66 @@ export function chatTerminalDiagnostic(metadata: ChatTerminalMetadata): {
       (failure.code === `provider_http_${failure.status}` &&
         (failure.status === 429 || failure.status === 503)));
   const message =
-    upstream && failure.status && failure.code === `provider_http_${failure.status}`
-      ? failure.status === 429
-        ? 'The model provider is rate limiting requests (HTTP 429).'
-        : failure.status === 503
-          ? 'The model provider is temporarily unavailable (HTTP 503).'
-          : `The model provider returned HTTP ${failure.status}.`
-      : failure &&
-          (failure.origin === 'upstream' || !failure.code.startsWith('provider_')) &&
-          labels[failure.code]
-        ? labels[failure.code]
-        : failure
-          ? `${upstream ? 'The model provider' : failure.origin === 'burrow' ? 'The runtime' : 'The run'} could not complete this response (code: ${failure.code}).`
-          : 'The run could not be completed.';
+    upstream && failure.message?.trim()
+      ? failure.message
+      : upstream && failure.status && failure.code === `provider_http_${failure.status}`
+        ? failure.status === 429
+          ? 'The model provider is rate limiting requests (HTTP 429).'
+          : failure.status === 503
+            ? 'The model provider is temporarily unavailable (HTTP 503).'
+            : `The model provider returned HTTP ${failure.status}.`
+        : failure &&
+            (failure.origin === 'upstream' || !failure.code.startsWith('provider_')) &&
+            labels[failure.code]
+          ? labels[failure.code]
+          : failure
+            ? `${upstream ? 'The model provider' : failure.origin === 'burrow' ? 'The runtime' : 'The run'} could not complete this response (code: ${failure.code}).`
+            : 'The run could not be completed.';
   return { message, overloaded, upstream };
+}
+
+/** Copy only the projected terminal contract, never raw errors or response envelopes. */
+export function chatTerminalCopy(metadata: ChatTerminalMetadata): string {
+  const terminal = chatTerminalMetadata(metadata);
+  if (!terminal || terminal.terminalStatus === 'completed') return '';
+  const failure = terminal.modelFailure;
+  const recovery = terminal.modelRecovery;
+  const failureDetail = (label: string, value: ModelFailure) =>
+    `${label}: ${value.code}${value.status ? ` (HTTP ${value.status})` : ''}${value.message ? ` — ${value.message}` : ''}`;
+  return [
+    chatTerminalDiagnostic(terminal).message,
+    `Run status: ${terminal.terminalStatus}`,
+    ...(failure
+      ? [
+          `Origin: ${failure.origin}`,
+          `Code: ${failure.code}`,
+          ...(failure.status ? [`HTTP status: ${failure.status}`] : []),
+          `Retryable: ${failure.retryable ? 'yes' : 'no'}`,
+        ]
+      : []),
+    ...(recovery
+      ? [
+          `Recovery retries: ${recovery.retryCount}`,
+          ...recovery.requests.map((request, index) =>
+            [
+              `Recovery ${index + 1}: ${request.state}`,
+              ...(request.attempt !== undefined
+                ? [
+                    `Attempt: ${request.attempt}${request.maxAttempts !== undefined ? `/${request.maxAttempts}` : ''}`,
+                  ]
+                : []),
+              ...(request.delayMs !== undefined ? [`Delay: ${request.delayMs} ms`] : []),
+              ...(request.retryCount !== undefined ? [`Retries: ${request.retryCount}`] : []),
+              ...(request.originalFailure
+                ? [failureDetail('Original failure', request.originalFailure)]
+                : []),
+              ...(request.lastFailure ? [failureDetail('Last failure', request.lastFailure)] : []),
+              ...(request.failover
+                ? [`Failover: ${request.failover.code} (${request.failover.action})`]
+                : []),
+            ].join('\n'),
+          ),
+        ]
+      : []),
+  ].join('\n');
 }

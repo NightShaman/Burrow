@@ -1,4 +1,5 @@
 import type { ChatAttachment, SessionTurn } from '../../app/api';
+import { chatTerminalMetadata, type ChatTerminalMetadata } from './chatTerminal';
 
 export type BusyIntent = 'queue_next' | 'steer' | 'side_question';
 export type ChatInput = {
@@ -15,12 +16,14 @@ export type ChatInput = {
   completedAt: string | null;
   message: string;
   attachments: ChatAttachment[];
-  result: {
-    ok: boolean;
-    answerText: string | null;
-    decision: string | null;
-    blockers: string[];
-  } | null;
+  result:
+    | (Partial<ChatTerminalMetadata> & {
+        ok: boolean;
+        answerText: string | null;
+        decision: string | null;
+        blockers: string[];
+      })
+    | null;
   error: string | null;
   snapshot: {
     id: string | null;
@@ -141,14 +144,19 @@ export function reconcileChatInputs(turns: SessionTurn[], inputs: ChatInput[]): 
           })),
         },
       });
-    if (input.intent === 'side_question' && input.result?.answerText && !answerSeen.has(input.id))
+    const terminal = chatTerminalMetadata(input.result);
+    if (
+      input.intent === 'side_question' &&
+      !answerSeen.has(input.id) &&
+      (input.result?.answerText || (terminal && terminal.terminalStatus !== 'completed'))
+    )
       merged.push({
         type: 'message',
         role: 'assistant',
         runId: input.runId,
         ts: input.completedAt ?? input.createdAt,
-        content: input.result.answerText,
-        metadata,
+        content: input.result?.answerText ?? '',
+        metadata: { ...metadata, ...terminal },
       });
   }
   return merged.sort((a, b) => (Date.parse(a.ts ?? '') || 0) - (Date.parse(b.ts ?? '') || 0));
