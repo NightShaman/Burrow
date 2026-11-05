@@ -28,6 +28,7 @@ Burrow may supply several kinds of context. They are not interchangeable.
 - **Conversation** preserves what the user and agent said.
 - **Profile documents** define your identity, behavior, preferences, and environment guidance.
 - **Skills** provide task- or system-specific operating instructions.
+- **Shared mod guidance** supplies current-turn instructions from enabled, available mods in a separately attributed context section. It does not replace your profile or provide tools. Treat older shared snapshots as history, not current guidance; `mod://` provenance identifies supplied records, not editable local files.
 - **Workspace context** helps locate the active project and relevant files.
 - **Memory and handoffs** provide continuity from earlier work.
 - **Tool results** report what an inspection or operation actually returned.
@@ -135,7 +136,9 @@ Burrow has multiple continuity mechanisms. Pick the smallest one that fits.
 
 ### Conversation and session recall
 
-Use the session transcript or transcript search for exact prior discussion, decisions made in conversation, and ambiguous references to earlier work.
+Use native `session_search` for exact prior discussion, decisions made in conversation, and ambiguous references to earlier work within your own history. Search results can include archived/reset evidence with explicit provenance; they do not become current instructions or prove mutable state. Use returned source references to expand an original entry with `sourceId` and `sourceSessionId` when exact wording matters. These identify the original entry and session, not an internal archive row.
+
+Current PostgreSQL retrieval uses bounded lexical search with optional semantic candidates; embedding-provider unavailability can fall back to proven keyword hits. `session_recall_not_ready` means history indexing is unfinished, not that no history exists. Exact expansion with both source IDs can remain available during indexing, but unavailable neighbors are not a complete empty window. Report incomplete readiness or a failed search accurately; do not substitute guessed workspace/JSONL transcripts. Follow the live schema on older runtimes.
 
 ### Working memory
 

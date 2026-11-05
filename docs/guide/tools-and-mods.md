@@ -130,3 +130,7 @@ For command rules, select **execute**: command-pattern matching is only evaluate
 ## Images from transport mods
 
 Current Core accepts real image attachments in mod-submitted agent turns. Transport support is separate: a mod must download and submit supported bytes, and the selected model's vision behavior still applies. The current [Switchboard guide](https://docs.goblin-kingdom.com/burrow-switchboard/) covers Telegram inbound images and its limits; this does not imply Discord attachments or outbound media support. Core and the mod must both include the capability. Accepted normalized content is retained with the durable turn and normal chat artifacts, not just a transient URL. See [external-turn contract](../reference/api/mods.md#external-agent-turns-with-images).
+
+## Refresh the mod catalog
+
+Checked **5 November 2026**: **Installed mods → Refresh catalog** checks configured sources without leaving the selected mod editor. **Mod sources → Refresh sources** performs the same discovery refresh. Source selectors show the discovered mod name, or **Undiscovered mod** before discovery. Verify the actual URL in the source editor before changing credentials. Refreshing does not install, update or enable a package; those remain separate actions.

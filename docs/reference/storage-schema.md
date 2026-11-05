@@ -331,3 +331,13 @@ Migration **90**, `mod-owned-agents`, adds the nullable `agents.mod_agent_json` 
 | 92 | `reset-archive-projection-copies` | Reuses completed Chat visibility/occurrence projections when reset copies unchanged originals, including a known null occurrence instant; new or changed payloads still require projection. |
 
 Reset now copies existing lexical/occurrence projections rather than reparsing every original in application memory. Unprojected originals retain fallback/backfill handling; these changes do not make an archive summary or a timeout proof of completion. Session metadata atomically records the reset operation receipt with its generation. Neither migration changes PostgreSQL's major version or authorizes manual ledger/SQL edits. Statically checked against Core `b62c57ef5e831bacebf2214a31c04147471c1267`; this documentation review did not execute migrations.
+
+## 5 November migration additions
+
+| Version | Migration | Purpose |
+|---|---|---|
+| 93 | `indexed-session-recall` | Derived occurrence/lexical indexes, write triggers and a durable bounded background backfill checkpoint; native originals remain authoritative. |
+| 94 | `background-conversation-embeddings` | Independent default-false `conversation_enabled`, derived passage/occurrence/vector storage and durable queues/backfill state; shares the existing embedding connection/model. |
+| 95 | `session-recall-projection-repairs` | Preserves grandfathered null source storage clocks in derived recall and reuses completed recall/operator/Dream projections for verified unchanged reset copies. |
+
+Startup does not scan or embed all retained history. Broad session recall remains explicitly not-ready until lexical backfill completes; exact source/session expansion still works. Conversation embeddings require separate consent and pgvector support; missing vector support does not disable lexical retrieval. Disabling or reindexing a derived index does not delete original conversations. Migration 95 preserves published v93/v94 checksums and does not rewrite retained history. These are application migrations, not a PostgreSQL major upgrade or permission to edit the ledger. Statically checked against Core `6465a9b200bc550697ddfc41959d671eac9abf33`; no migrations were run in this documentation review.

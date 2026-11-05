@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.04.9` | `86f41581cf4feccbd2126db38a6b746db6483080` |
-| Core / Backend | `b62c57ef5e831bacebf2214a31c04147471c1267` |
-| UI | `f952d9494f97326f3f656c5a5427e9d4efc20e3a` |
-| Skills | `0df0b5429d70fb327ca1875d3fb706cefdeab330` |
+| Assembled Burrow, build `2026.11.05.4` | `1952f88ff182ef465370209f3f1969cbdfbd79e6` |
+| Core / Backend | `6465a9b200bc550697ddfc41959d671eac9abf33` |
+| UI | `4f7f58f682a0cffe83290276307c66631a361de3` |
+| Skills | `46e26a8242f3f38c59c502391c6a4c4c73f10d12` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -103,3 +103,9 @@ The full review remains dated **1 November**. This is static source reconciliati
 Inspected assembly **2026.11.04.9**, commit `86f41581cf4feccbd2126db38a6b746db6483080`, records Core `b62c57ef5e831bacebf2214a31c04147471c1267` and UI `f952d9494f97326f3f656c5a5427e9d4efc20e3a`. This ordinary pass reconciles independent mod-management/Core API agent authority, reset operation receipts and read-only outcome recovery, automatic A2A final delivery and transcript attribution, empty initial peer-directory cursors, canonical owned-agent avatars, imperative Settings layout/selector/navigation contracts and opt-in Archive heading/date/timezone support. The application schema reaches migration 92.
 
 The full review remains dated **1 November 2026**. This is changed-source/static documentation reconciliation, not application/provider testing, runtime deployment, public release promotion or proof of your installed behavior. Earlier dated sections and public-source links are historical evidence; current component and skill receipts are maintained separately. Menagerie remains a homepage placeholder, without a new full documentation section.
+
+## 5 November implementation delta
+
+Inspected assembly **2026.11.05.4**, commit `1952f88ff182ef465370209f3f1969cbdfbd79e6`, records Core `6465a9b200bc550697ddfc41959d671eac9abf33` and UI `4f7f58f682a0cffe83290276307c66631a361de3`. This ordinary pass reconciles current-intent preference curation, indexed session recall and optional conversation embeddings, OpenAI-compatible embedding support, enabled-mod shared guidance, resident model-connection identity and retained Chat errors, and catalog-refresh controls. Switchboard's native Settings workspaces and historical Archive are reconciled in its component guide.
+
+The full page review remains dated **1 November**; unchanged pages retain that evidence. These are static source and test-file checks, not executed application/provider tests, a runtime deployment or a release promotion. Public mirrors and installed packages can lag development source. Menagerie's coming-soon placeholder and approved artwork/navigation remain unchanged.

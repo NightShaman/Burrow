@@ -116,3 +116,9 @@ For authentication errors, connection failures, and safe diagnostics, see [Updat
 For ordinary API-key connections, newly discovered model IDs start unchecked. Select at least one before saving; rediscovery preserves existing selections and leaves newly found IDs unchecked. OAuth and Load Balancing discovery retain their existing behavior. This editor opt-in does not redefine pool catalog intersections or disable pool routing through an account checkbox.
 
 Provider quota indicators and their polling were removed from the bottom status bar. OpenAI LB aggregate request/token statistics remain a separate feature; this UI removal does not disable provider-pool capacity routing.
+
+## Saved connections for mod-owned agents
+
+Checked **5 November 2026**: a saved connection ID is authoritative even if that connection is unavailable. A mod-owned resident does not silently use the first configured provider or its first model. Before sending, choose an available provider and enabled model for that resident. If the saved connection/model cannot be resolved, Chat reports the problem without submitting the turn. Changing the provider deliberately replaces the old connection identity; failed selection saves remain errors rather than successful changes.
+
+For background embeddings, use the separate controls under **Settings → General → Continuity**, described in [Skills and memory](skills-and-memory.md#optional-embeddings). A working chat model does not by itself establish embedding support.

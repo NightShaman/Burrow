@@ -374,3 +374,9 @@ Source-reviewed on 30 October 2026 against UI `bb78b136e7ceb21858b134c1f8376726d
 Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
 
 Photos belong to Core: database links plus runtime-managed original artifacts, not execution-host workspace files or expiring chat attachments. Back up the database and runtime artifacts together. Selective settings exports do not include these photos.
+
+## Chat connection and error feedback
+
+Checked **5 November 2026**: Chat honors a mod-owned resident's saved model connection and model. An unavailable saved selection blocks sending with an error instead of silently choosing the first provider. Choose an available selection deliberately. Reported Chat errors remain visible during background/session hydration and when starting another send; use **Dismiss** to clear the displayed alert after reviewing it. Dismissing an alert does not retry a request or establish that it succeeded.
+
+In **Settings → Mods → Installed mods**, **Refresh catalog** checks configured sources. **Mod sources** labels a discovered source with its mod name, or **Undiscovered mod** until it is known. Open its editor to verify the repository URL. A refresh updates discovery metadata; it does not install or update a mod.

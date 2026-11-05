@@ -259,3 +259,9 @@ Read the saved job's **Last** outcome and task's current assignment/status. Only
 ## Reset outcome could not be confirmed
 
 Do not immediately repeat Reset. A transport timeout can occur after the database committed the reset. Refresh the same agent/session and inspect active history and Archive. Current UI resets carry a unique operation ID and reconcile it with a read-only session request; only an exact saved receipt with a positive reset generation and empty active turns establishes that UI attempt succeeded. If verification is unavailable, the UI keeps the prior conversation/composer. The operation ID is not a deduplication key and a second reset is a new mutation. See [reset outcome reconciliation](../reference/api/sessions.md#reset-outcome-reconciliation).
+
+## Resident connection unavailable or persistent Chat error
+
+Checked **5 November 2026**: if a mod-owned resident reports that its saved connection or model is unavailable, check that exact connection under **Settings → Connections → Models**, then explicitly select an available provider/model for the resident. Core does not substitute the first catalog entry for a missing resident selection. Treat failed selection saves as failures.
+
+Background Chat refreshes and another send no longer erase a reported error. Read it, inspect any completed effects before retrying, and choose **Dismiss** when you have handled the message. Dismissal is presentation only, not proof of a successful turn. If only conversation search is unavailable, check the separate history-preparation and embedding statuses under **General → Continuity**; an embedding backlog is not the same as a failed chat connection.

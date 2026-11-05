@@ -103,4 +103,17 @@ The learner proposes against the **current operator-edited PREFERENCES document*
 
 Supporting operator-message times, not extraction time, establish chronology. Old, mixed-before-edit or unknown-time evidence is deferred rather than restoring removed guidance. Tiddle cites exact supporting operator residue, including at least one newly observed reference; overlapping Dream phases deduplicate evidence. Quiet Dream windows can adjudicate pending preferences without repeating extraction or memory publication.
 
-PREFERENCES remains current guidance only. Evidence, citations and audit stay in private provenance. The learner does not change SOUL, RULES, ORIENTATION or TOOLS, and inactivity alone does not remove preferences. Conversation purge removes linked private provenance, not operator-authored PREFERENCES. This is a static source check of Core `bea2171508d1821440ed5c554a688768848699c9`, not a claim that a particular preference was learned.
+PREFERENCES remains current guidance only, organized by topic; evidence, citations and audit stay in private provenance. A single clear lasting preference is sufficient, but a correction, joke, roleplay or one-task request is not automatically standing guidance. Bounded adjacent conversation helps interpret the operator's words without giving assistant replies authority. Stable preferences do not expire after 90 days, and silence or replay of old conversations is not reinforcement.
+
+With no new eligible signals, the final Dream preference pass can review nonempty current guidance at most daily after a successful review. Maintenance may rearrange or remove current statements, including duplicates of effective RULES; it cannot add or reword guidance, restore removed history, or amend RULES. Old or unknown-time signals remain deferred.
+
+Inference and maintenance cannot rewrite RULES. A clear explicit operator-directed standing change can reconcile only its exact conflicting rule, with cited newer operator evidence and a separate semantic review of intent and scope. Agent-local direction stays local; changing enabled Global Rules requires explicit shared/all-agent intent. Ambiguous intent leaves the proposal pending without a rule edit or a competing preference. Current preference and rule versions, including global enablement, are checked before the atomic commit. SOUL, ORIENTATION, TOOLS and unrelated rules remain untouched.
+
+Conversation purge removes linked private context/provenance, not operator-authored PREFERENCES. Historical provenance never authorizes restoring removed guidance. These changed contracts were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**, not tested against a live operator profile.
+
+## Independent conversation embeddings
+
+Brains and conversation embeddings have separate off-by-default switches but share one selected connection and embedding model. Enabling Brains alone does not send conversation history. Explicit conversation opt-in allows background indexing of retained eligible dialogue, including reset and compaction archives, and query embeddings for `session_search`. Tool/debug/system entries, compression summaries and isolated execution sessions are excluded. No automatic recall is added.
+
+Conversation vectors use PostgreSQL pgvector/HNSW, unlike Brains' exact cosine implementation. Missing vector support or a provider outage leaves lexical retrieval available once the lexical index is ready. Passage counts describe a bounded, deduplicated derived index, not every message or complete original coverage; expand the original for exact wording. See [conversation search](conversation-history.md#search-and-recall) and the [embedding API](../reference/api/memory.md#brain-embeddings).
+

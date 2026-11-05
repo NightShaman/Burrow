@@ -88,9 +88,13 @@ Memories you create or edit through the operator interface are operator-owned; a
 
 ### Optional embeddings
 
-Open **Settings → General → Continuity** to configure embeddings globally. This release supports Google and Ollama embedding adapters; a working chat connection to another provider does not establish embedding support. Choose a supported provider and embedding model, test it, then enable and save the settings. A manually entered model ID requires a successful test before saving an enabled configuration. **Reindex all memories asynchronously** rebuilds the index in the background; the page reports indexed, pending, and failed counts. Partial coverage remains searchable lexically, and saved-memory editing remains separate from indexing.
+Checked **5 November 2026**: open **Settings → General → Continuity** to configure optional background embeddings. **Enable Brains embeddings globally** and **Index conversation history for session search** are separate switches. Conversation indexing is off by default, including upgrades. Both indexes share the selected provider and embedding model or deployment ID; enabling one does not enable the other.
 
-Enabling a remote embedding provider involves sending memory text to that provider for indexing. Choose the provider with the sensitivity of your saved content in mind.
+Google and Ollama remain supported. Current Core also supports compatible OpenAI embeddings endpoints and Azure deployment IDs; a working chat connection alone does not prove embedding support. Discover a supported embedding model, or enter its exact manual model/deployment ID and test it successfully before enabling indexing. Save the coupled embedding settings explicitly.
+
+Enabling a remote provider sends saved memory text and, when conversation indexing is enabled, saved conversation passages to that provider. Choose the provider and each opt-in with the sensitivity of that content in mind. Embeddings help retrieve original dialogue; they do not verify current facts or grant authorization.
+
+**Reindex memories and conversations** rebuilds enabled indexes asynchronously. The page separates Brains and Conversations counts for indexed, pending and failed work, plus conversation catch-up status. **Session search preparing history** reports lexical preparation separately from semantic indexing. Search becomes available when history preparation finishes; partial embedding coverage can still use lexical search. Failed indexing jobs retry automatically, and the page reports preparation/indexing errors separately. Saved-memory editing remains independent of indexing.
 
 [Source: embedding controls](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/BrainEmbeddingSettings.tsx#L48-L80) · [Source: supported providers and text requests](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/brain-embedding-provider.mjs#L15-L59)
 
@@ -117,3 +121,4 @@ Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, 
 Open **Archive → Dreams** for agent/day groups containing narratives and separate Light/Deep/REM attempt outcomes, errors and progress. The former Settings Recent activity list has moved there. A prior successful narrative and a later failed attempt can both remain visible. Current Core saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
 
 [Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)
+

@@ -35,19 +35,25 @@ Read the returned `id` and `revision` before editing; URL-encode the ID in the i
 
 ## Brain embeddings
 
-Embeddings are optional and disabled by default. They enrich the explicit runtime `brain_search` tool. `GET /api/brains` continues to use lexical substring listing even when embeddings are enabled.
+Brains and conversation embeddings are independently optional and disabled by default. They share one connection/model selection for explicit `brain_search` and `session_search`. `GET /api/brains` continues lexical substring listing; `brain_read` and original conversation expansion remain exact.
 
 | Method | Path | Input / result |
 |---|---|---|
 | `GET` | `/api/settings/brain-embeddings` | Enabled state, selected connection/model, generation, total/indexed/pending/failed counts, storage and last error |
-| `PUT` | `/api/settings/brain-embeddings` | JSON `enabled` boolean; complete `connectionId`/`model` pair when enabling or retaining a selection |
+| `PUT` | `/api/settings/brain-embeddings` | JSON `enabled` boolean for Brains, optional `conversationEnabled` boolean (omission preserves current setting); complete `connectionId`/`model` pair when either scope is enabled |
 | `GET` | `/api/settings/brain-embeddings/models` | `connectionId` query; discover models from that connection |
 | `POST` | `/api/settings/brain-embeddings/test` | JSON `connectionId`, `model`; tests embedding capability and returns `{ok, dimensions}` |
-| `POST` | `/api/settings/brain-embeddings/reindex` | Reset vectors, enqueue active memories and advance generation; returns status |
+| `POST` | `/api/settings/brain-embeddings/reindex` | Invalidate/requeue Brains and conversation indexes; returns status without awaiting completion |
 
-These routes use the normal UI authentication/browser-origin boundary. Handled embedding errors return 400 with `brain_embedding_request_failed`. Enabling indexing sends saved-memory title/content to the selected embedding provider; search sends the query. Use a connection appropriate for that data. Indexing is asynchronous: a successful settings/reindex response is not a completed-index receipt. Check `pending`, `failed` and `indexed` afterward. Jobs persist and retry with backoff; edits/deletions invalidate stale vectors.
+These routes use the normal UI authentication/browser-origin boundary. Handled embedding errors return 400 with `brain_embedding_request_failed`. Enabling Brains sends saved-memory title/content to the selected provider. Separate conversation opt-in permits bounded retained dialogue passages, including reset/compaction archives, to be sent in the background; enabling Brains alone does not do this. Search sends query text. Disabling conversations prevents new document/query requests, but cannot recall data already received by a provider. Use a connection appropriate for that data. Indexing is asynchronous: a successful settings/reindex response is not a completed-index receipt. Check `pending`, `failed` and `indexed` afterward. Jobs persist and retry with backoff; edits/deletions invalidate stale vectors.
 
-Hybrid search ranks lexical and exact cosine matches over the active agent's records. On embedding-provider failure it returns lexical results with `retrieval: {mode: "lexical", fallback: "embedding_unavailable"}`. Ranked cursors bind the agent, query and corpus digest; changes can invalidate the cursor, requiring a fresh search. This is explicit recall, never an automatic prompt preload.
+Brains hybrid search ranks lexical and exact cosine matches over the active agent's records. On embedding-provider failure it returns lexical results with `retrieval: {mode: "lexical", fallback: "embedding_unavailable"}`. Ranked cursors bind the agent, query and corpus digest; changes can invalidate the cursor, requiring a fresh search. This is explicit recall, never an automatic prompt preload.
+Additional status can include `conversationEnabled`, `conversations` and `lexical`. Brains counts remain decimal strings; conversation `total`, `indexed`, `pending`, `failed` and `dirty` are numeric counts of deduplicated passages/work, not messages. Check `backfillComplete` as well as `pending`: discovery may remain incomplete while pending is temporarily zero. Conversation status also reports `storage`, `dimensions`, `generation`, `epoch` and sanitized `lastError`. Lexical readiness/progress is separate from embedding coverage.
+
+Ollama and Google embedding discovery remain capability-filtered. OpenAI-compatible and Azure connections support embedding requests, but their discovery returns no guessed models: enter the embedding model or Azure deployment manually and test it. A chat model catalog or ChatGPT/Codex subscription endpoint does not establish embedding capability. The test itself makes a provider request; confirm hosted cost/privacy before testing. See [model setup](../../guide/models.md).
+
+Conversation retrieval uses pgvector/HNSW semantic candidates plus the native lexical/original path. `conversation_embedding_pgvector_unavailable` indicates missing vector support, not lost conversation history. Conversation provider failure falls back to lexical search; exact source expansion does not make an embedding request. See [conversation history](../../concepts/conversation-history.md).
+
 ## Retired Albdruck routes and original evidence
 
 The current router does **not** mount `/api/albdruck/*`, including `/knowledge`, `/recall`, `/history`, `/retention` or `/purge-conversation`. Legacy store/migration code and stale generated API artifacts can still mention those names; they do not make the HTTP routes available.
@@ -117,3 +123,7 @@ Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-
 ## 27 October delta review
 
 Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.
+
+## 5 November development delta
+
+The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../../project/source-map.md).

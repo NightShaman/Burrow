@@ -51,6 +51,14 @@ Owned-agent reads include the canonical chat `avatar`. An owned update may set `
 
 Owned `referenceImages.get`, `.put` and `.remove` use the canonical agent reference store. Portable settings preserve ownership/capability/visibility records; restoring an unavailable owner leaves its agent unavailable, and conflicting regular/mod or different-owner identities are rejected. This host contract is not a separate public HTTP endpoint or a guarantee that every declared flag is exposed by every route.
 
+## Enabled-mod shared guidance
+
+An enabled mod may supply text to all native agents and residents, including A2A recipient turns, independently of owning an agent. Register `context.agents.context.registerShared(provider)` once during activation. The callback receives `{ agentId, sessionId }` for the logical conversation and `{ signal }`, and returns only `{ context: [{ name, content }] }`. Names must be unique non-path identifiers of at most 128 characters; at most 64 records and 1,000,000 combined UTF-8 name/content bytes are accepted. Profile, identity and tool fields are rejected.
+
+Core resolves currently published contributions in mod-ID order. Disablement, unload or replacement removes old contributions from fresh turns; a failed or malformed active provider reports `mod_agent_unavailable` rather than silently dropping guidance. Shared-only registration grants no agent ownership or tools.
+
+Current shared guidance is a separate developer message with `mod-shared-context-provider` provenance and `mod://<mod-id>/agent/shared-context/<record>` labels. It does not replace individual profiles. Earlier snapshots are history, not current instructions; prompt compression retains the current turn's captured contribution. Side questions capture guidance separately from the conversation transaction and record its own resolution time while remaining snapshot-only and tool-free. Core supplies the generic mechanism; the mod owns the text.
+
 ## Contribute Settings and Archive UI
 
 Imperative Settings sections can opt into `form`, `form-wide`, `form-inventory` or `document` layout metadata. `form` keeps the complete save scope in primary on the left half of a wide workspace; `form-wide` spans both tracks. `form-inventory` uses overflow for the left inventory and primary for its editor. `document` instead uses primary for document choices and overflow for the editor. Below 640px available work-area width, the corresponding panes stack or fill the width. Host surfaces remain stable; metadata does not create declarative content or protect drafts by itself.
@@ -88,3 +96,7 @@ This capability does not automatically grant other host interfaces or cross-agen
 ## 3 November development delta
 
 The changed context and host contracts above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## 5 November development delta
+
+The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
