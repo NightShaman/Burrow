@@ -39,16 +39,16 @@ export function createSessionRecallBackfillWorker({pool:rawPool,pageSize=16,poll
  const pool=normalizePostgresPool(rawPool);
  if(!Number.isInteger(pageSize)||pageSize<1||pageSize>256)throw new Error('session_recall_page_size_invalid');
  for(const n of [pollIntervalMs,statementTimeoutMs,lockTimeoutMs,publishTimeoutMs])if(!Number.isFinite(n)||n<1)throw new Error('session_recall_worker_timeout_invalid');
- let activePageSize=pageSize;
+ let activePageSize=pageSize,fullPages=0;
  let closed=false,started=false,timer=null,inflight=null,controller=null,lastError=null,notifiedError=null;
- const status=async()=>({...await readSessionRecallReadiness(pool),lastError:lastError ? (['55P03','57014','40001'].includes(lastError.code)?'session_recall_backfill_retrying':'session_recall_backfill_failed') : null});
+ const status=async()=>({...await readSessionRecallReadiness(pool),pageSize,activePageSize,lastError:lastError ? (['55P03','57014','40001'].includes(lastError.code)?'session_recall_backfill_retrying':'session_recall_backfill_failed') : null});
  function runPage(){
   if(closed)return Promise.reject(new Error('session_recall_worker_closed'));
   if(inflight)return inflight;
   controller=new AbortController();
   const pageController=controller;
   const timeout=setTimeout(()=>pageController.abort(new Error('session_recall_page_timeout')),statementTimeoutMs);timeout.unref?.();
-  let publishTimer;
+  let publishTimer,pageRows=0;
   inflight=withPostgresTransaction(pool,async client=>{
    await client.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
    await client.query("SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('jit','off',true)",
@@ -66,6 +66,7 @@ export function createSessionRecallBackfillWorker({pool:rawPool,pageSize=16,poll
    const keys=(await client.query(`SELECT agent_id,session_id,${live?"sequence::text AS source_id,sequence AS ordinal":"source_id,ordinal"}
     FROM ${table} WHERE ($3::text IS NULL OR $3::text IS NOT NULL) AND ($1::text IS NULL OR ${tuple}>${bind})
     ORDER BY ${live?'agent_id,session_id,sequence':'agent_id,session_id,source_store,source_id,ordinal'} LIMIT $5`,values)).rows;
+   pageRows=keys.length;
    // Stage computed projection on this owned checkout. TEMP has no FK to
    // sessions. Expensive parsing/folding/grams only holds AccessShare on sources.
    await client.query('CREATE TEMP TABLE recall_prepared (LIKE conversation_recall_rows INCLUDING DEFAULTS, source_version text) ON COMMIT DROP');
@@ -113,7 +114,12 @@ export function createSessionRecallBackfillWorker({pool:rawPool,pageSize=16,poll
     completed_at=CASE WHEN $1='complete' THEN clock_timestamp() ELSE NULL END WHERE singleton RETURNING *`,
     [next,last?.agent_id??null,last?.session_id??null,last?.source_id??null,last?.ordinal??null,keys.length]);
    return readinessOf(result.rows[0]);
-  },{signal:controller.signal}).then(result=>{lastError=null;return result;}).catch(error=>{lastError=error;
+  },{signal:controller.signal}).then(result=>{lastError=null;
+    // Increase cautiously only after committed, full pages; never exceed configuration.
+    if(pageRows===activePageSize && !result.ready && activePageSize<pageSize){
+     if(++fullPages>=4){activePageSize++;fullPages=0;}
+    }else fullPages=0;
+    return result;}).catch(error=>{lastError=error;fullPages=0;
     // Retrying an oversized multi-row page unchanged can never make progress.
     // Keep its durable cursor, but reduce the next preparation/publication unit.
     if(error.code==='57014'||error.message==='session_recall_page_timeout')activePageSize=Math.max(1,Math.floor(activePageSize/2));
