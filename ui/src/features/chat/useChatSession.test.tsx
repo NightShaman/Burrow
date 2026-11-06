@@ -124,11 +124,12 @@ describe('useChatSession', () => {
       });
       expect(result.current.turns).toEqual([{ role: 'user', content: 'Next message' }]);
       if (destination !== 'default') {
+        expect(localStorage.getItem('hc.chatConversations.v1')).toContain('Unrelated default');
         act(() => result.current.selectSession('default'));
-        expect(result.current.turns).toContainEqual({
-          role: 'assistant',
-          content: 'Unrelated default',
-        });
+        expect(result.current.turns).toEqual([]);
+        expect(result.current.isLoadingConversation).toBe(true);
+        await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+        expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Old context' }]);
       }
     },
   );
@@ -468,7 +469,7 @@ describe('useChatSession', () => {
     rerender({ agent: nextAgentId });
 
     expect(result.current.sessionId).toBe('');
-    expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Previous conversation' }]);
+    expect(result.current.turns).toEqual([]);
     expect(result.current.isLoadingConversation).toBe(true);
 
     await act(async () => {

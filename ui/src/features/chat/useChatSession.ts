@@ -209,17 +209,18 @@ export function useChatSession(selectedAgentId: string) {
     // prevents the chat frame from showing the old transcript while the new
     // agent's session list is hydrating.
     setSessionId('');
-    // Keep the currently rendered conversation in place until the incoming
-    // agent's session resolves. Clearing it here creates a blank frame between
-    // two real conversations; loading state prevents it from being mistaken
-    // for a settled empty session.
+    // Cached transcripts are reconciliation input, not evidence that the
+    // incoming conversation is current. Never paint another agent's history.
+    setTurns([]);
     // The session list must resolve before the new agent's conversation can
     // load. Mark that whole handoff as loading so an empty-state logo only
     // represents a deliberate new/reset session, never an agent switch.
     const cachedSessions = readSessionListCache(selectedAgentId);
     if (cachedSessions) {
       setSessions(cachedSessions);
-      setIsLoadingConversation(false);
+      setIsLoadingConversation(
+        Boolean(cachedSessions.length || sessionIdByAgentRef.current[selectedAgentId]),
+      );
       setSessionId((current) => {
         const remembered = sessionIdByAgentRef.current[selectedAgentId];
         const availableSessionIds = new Set(cachedSessions.map((session) => session.id));
@@ -288,15 +289,12 @@ export function useChatSession(selectedAgentId: string) {
     setIsNewSession(false);
   }, [selectedAgentId]);
 
-  useEffect(() => {
-    // An agent switch deliberately clears the target session id while its
-    // session list loads. Do not clear `turns` for that intermediate state:
-    // doing so creates the visible chat → blank → chat flash. The old rendered
-    // conversation stays in place under the loading state until the new one is
-    // available. Only an explicit new/reset session or no selected agent gets
-    // a blank transcript here.
+  useLayoutEffect(() => {
+    // Fetch the newest page before exposing a navigated conversation. A cached
+    // transcript may predate work completed while another agent was selected.
     if (!selectedAgentId || isNewSession) {
       setTurns([]);
+      setIsLoadingConversation(false);
       return;
     }
     if (!sessionId) return;
@@ -309,15 +307,8 @@ export function useChatSession(selectedAgentId: string) {
     const generationAtRequestStart = conversationCacheGeneration;
     const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
     const cachedTurns = conversationCacheRef.current[cacheKey];
-    if (cachedTurns) {
-      setTurns(cachedTurns);
-      setIsLoadingConversation(false);
-    } else {
-      // Retain the previous rendered surface until this conversation arrives.
-      // Replacing it with an empty array produces a visible blank flash on
-      // every uncached agent/session switch.
-      setIsLoadingConversation(true);
-    }
+    setTurns([]);
+    setIsLoadingConversation(true);
     // Background/session hydration must not erase a reported failure.
     loadSession(selectedAgentId, sessionId)
       .then((session) => {
@@ -434,9 +425,8 @@ export function useChatSession(selectedAgentId: string) {
       sessionIdByAgentRef.current[targetAgentId] = targetSessionId;
       parentSessionIdByAgentRef.current[targetAgentId] = targetSessionId;
       setSessionId(targetSessionId);
-      setTurns(
-        conversationCacheRef.current[conversationCacheKey(targetAgentId, targetSessionId)] ?? [],
-      );
+      setTurns([]);
+      setIsLoadingConversation(true);
       setIsNewSession(false);
       setChatError('');
     },
@@ -447,30 +437,33 @@ export function useChatSession(selectedAgentId: string) {
       clearActivity();
       // Return to this agent’s remembered parent/root anchor, not the child.
       const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
+      // Clicking the already displayed parent is not navigation. Clearing it
+      // would leave an unchanged effect dependency waiting for a new request.
+      if (agentId === selectedAgentId && targetSessionId === sessionId) return;
       if (targetSessionId) sessionIdByAgentRef.current[agentId] = targetSessionId;
       else delete sessionIdByAgentRef.current[agentId];
       setSessionId(targetSessionId);
-      const cachedTurns = targetSessionId
-        ? conversationCacheRef.current[conversationCacheKey(agentId, targetSessionId)]
-        : undefined;
-      if (cachedTurns) setTurns(cachedTurns);
+      setTurns([]);
+      setIsLoadingConversation(true);
       setIsNewSession(false);
       setChatError('');
     },
-    [clearActivity],
+    [clearActivity, selectedAgentId, sessionId],
   );
   const selectChildSession = useCallback(
     (agentId: string, childSessionId: string, rootSessionId?: string | null) => {
+      if (agentId === selectedAgentId && childSessionId === sessionId) return;
       clearActivity();
       childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
       if (rootSessionId) parentSessionIdByAgentRef.current[agentId] = rootSessionId;
       sessionIdByAgentRef.current[agentId] = childSessionId;
       setSessionId(childSessionId);
-      setTurns(conversationCacheRef.current[conversationCacheKey(agentId, childSessionId)] ?? []);
+      setTurns([]);
+      setIsLoadingConversation(true);
       setIsNewSession(false);
       setChatError('');
     },
-    [clearActivity],
+    [clearActivity, selectedAgentId, sessionId],
   );
   const parentSessionIdForAgent = useCallback(
     (agentId: string) => parentSessionIdByAgentRef.current[agentId] || 'default',
