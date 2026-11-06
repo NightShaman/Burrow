@@ -51,7 +51,7 @@ Image attachments become multimodal content only when the selected model/adapter
 
 Output-only generators receive the current generation instruction and adapter-owned generation options. They do not receive the assembled profile, history, memory, tools, or a conversational follow-up. Generated sources must be persisted before attachment metadata enters the assistant transcript.  
 
-Use [Forge jobs](workers-tasks.md#background-maintenance-and-generation) when generation should be tracked asynchronously. A listed preview model is a configured compatibility entry, not evidence that the provider currently makes it available to the account.
+Use [Forge jobs](workers-tasks.md#background-maintenance-and-generation) for durable generation tracking. The operator HTTP surface is asynchronous; native chat generation waits and automatically delivers its artifacts. A listed preview model is a configured compatibility entry, not evidence that the provider currently makes it available to the account.
 
 ## Reasoning, sampling, and caching
 
@@ -109,7 +109,7 @@ The runtime selects and compresses context before calling a model. The current m
 
 Legacy usage without request correlation is labeled historical. After actual semantic compaction, stale measurements are replaced by a reconstructed estimate until successor-context usage is available. Requested model and provider-returned model are separate facts; a missing returned model stays unknown. See the [context-status fields](../reference/api/sessions.md#latest-request-context-status).
 
-Inspect the current session with `/context` and the redacted provider-ready request with `/context full` where supported by the chat transport. See [Observability](../operations/observability.md), [Runtime architecture](../architecture/runtime.md), and [Known limitations](../project/known-limitations.md). 
+Inspect a concise overview of the last captured provider request with `/context`, or the same capture's readable message contents with `/context full`, where supported by the chat transport. These commands are not a live preview of the next turn. See [Observability](../operations/observability.md), [Runtime architecture](../architecture/runtime.md), and [Known limitations](../project/known-limitations.md). 
 
 ## Failure interpretation
 

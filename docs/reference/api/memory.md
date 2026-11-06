@@ -127,3 +127,7 @@ Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4
 ## 5 November development delta
 
 The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../../project/source-map.md).
+
+## Lexical rollout progress
+
+Checked **6 November 2026**: the historical recall worker's status distinguishes configured `pageSize` from adaptive `activePageSize`. Default pages use up to 16 occurrences and a 60-second preparation budget. Preparation avoids foreground session/source row locks; a separate 250ms publication cancellation budget covers version checks, projection writes and cursor advancement. Failed pages roll back without advancing the checkpoint. Timeout reduces the next page size down to one; four consecutive full committed pages increase it toward the configured maximum. Broad recall still waits for lexical readiness; exact original expansion remains separate. No history truncation or automatic embedding opt-in is introduced.

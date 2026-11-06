@@ -64,7 +64,9 @@ Use **Archive** or the trace endpoints to inspect completed work. Current CLI re
 
 Replace `assistant` and `RUN_ID` with actual identifiers. These commands need a reachable configured database and key. They do not start the database; application composition may check/apply pending migrations.
 
-`/context` shows the current reconstructible context. `/context full` displays captured provider-visible request context where available. It can expose conversation and tool evidence; use it locally and review carefully before sharing.
+`/context` shows a concise overview of the last captured provider request: model, matching usage measurement, included message groups and captured profile/context record sizes. `/context full` expands that same capture in provider-message order. Neither command reconstructs a preview from current settings. If no capture exists, the command reports `provider_request_unavailable`; send a normal message first rather than treating an absent capture as empty context.
+
+Current Chat renders expandable capture details, message contents, tool schemas/provider options and the redacted raw request. Plain clients receive readable Markdown. Usage is unavailable when the capture and meter request IDs do not match. Capture-time omission/redaction markers remain, and provider-held history referenced by a response/conversation ID may not be inside the capture. These views can still expose private conversation, profiles and tool evidence; review before sharing.
 
 A receipt can show that a command ran without proving the user's overall objective. Prefer concrete changed-file, exit-status, verification, and terminal-result evidence over narrative success claims.
 

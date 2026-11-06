@@ -104,12 +104,10 @@ These are messages handled by the HTTP chat path, separate from shell commands:
 |---|---|
 | `/help` | List available commands |
 | `/status` | Agent/model/run/context status |
-| `/context` | Current reconstructible context |
-| `/context full` | Captured provider-visible request context, when available |
+| `/context` | Concise overview of the last captured provider request |
+| `/context full` | Full readable contents of the same capture in provider-message order |
 | `/new` | Start fresh conversation boundary, archiving prior history |
 | `/stop` | Cancel the selected session main run and hold current/future queued main inputs |
 | `/compact` | Compact context without main-agent inference; originals remain archived, empty/irreducible history can be a no-op |
 
-`/context full` can reveal private conversation and evidence; review before sharing.
-
-
+Both context commands use captured evidence, not a fresh preview of current settings. Missing capture returns `provider_request_unavailable`; a meter without the matching request ID is not displayed as correlated usage. Chat provides expandable technical/raw details. Redaction and existing omission markers remain, but private conversation and evidence can still appear; review before sharing. See [captured context reports](../operations/observability.md#traces-and-persisted-evidence).

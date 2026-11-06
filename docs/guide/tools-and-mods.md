@@ -134,3 +134,7 @@ Current Core accepts real image attachments in mod-submitted agent turns. Transp
 ## Refresh the mod catalog
 
 Checked **5 November 2026**: **Installed mods → Refresh catalog** checks configured sources without leaving the selected mod editor. **Mod sources → Refresh sources** performs the same discovery refresh. Source selectors show the discovered mod name, or **Undiscovered mod** before discovery. Verify the actual URL in the source editor before changing credentials. Refreshing does not install, update or enable a package; those remain separate actions.
+
+## Temporary mod lifecycle directories
+
+Checked **6 November 2026**: discovery ignores distribution-owned backup/uninstall siblings matching the lifecycle naming contract, including uninstall recovery directories, even though those folders retain the original manifest. They are not separate installed mods. This does not authorize deleting recovery data or bypassing normal update/uninstall reconciliation. Ordinary installed-mod validation and duplicate-ID checks remain in force.

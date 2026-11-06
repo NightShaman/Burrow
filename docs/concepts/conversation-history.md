@@ -51,7 +51,7 @@ Covered IDs support rebuilding on a subsequent compression cycle when originals 
 
 Current Core adds `/compact`: it invokes the existing planner through serialized session command admission, with no main-agent model inference. It retains authoritative originals transactionally, reports no-op for empty/irreducible history, and is not `/new`. Started/completed/failed progress is retained for operator inspection; successful rotation refreshes the context meter. A completion with `compressed:false` is an honest skipped rotation, not a fabricated summary.
 
-Historical provider snapshots are budgeted by provider-visible text, support material and image-token estimates rather than encoded image/data-URI byte length. A small visible chat message can therefore still carry a large replayed request. Uncovered history displaced by preparation can trigger compaction even if an older request receipt was below threshold. The planner refreshes authority before rotation; below-window screenshots are not compacted just for large encoded bytes. Required/current material that still cannot fit fails the final assembled-request budget guard. Summaries remain lossy navigation, never original proof.
+Historical replay is budgeted by retained provider-visible user content and image-token estimates rather than encoded image/data-URI byte length. Runtime-tagged old support packs remain immutable dispatch evidence but are omitted from replay; current support is assembled and charged once. User-authored headings are not a stripping rule, and legacy untagged content keeps its existing representation. Uncovered history displaced by preparation can trigger compaction even if an older request receipt was below threshold. The planner refreshes authority before rotation; below-window screenshots are not compacted just for large encoded bytes. Required/current material that still cannot fit fails the final assembled-request budget guard. Summaries remain lossy navigation, never original proof.
 
 ### Targeted originals and cancellation
 
@@ -129,3 +129,7 @@ Chat and Archive retain structured terminal status and safe model-failure/recove
 ## 5 November development delta
 
 The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## Active chat scrollback after compaction
+
+Checked **6 November 2026**: active Chat pages through retained compacted predecessors in the current reset generation, with overlap deduplicated. **Load older messages** retrieves older display pages; **Jump to latest message** returns from scrolled-up history. This display projection does not reinsert recovered turns into model context. Explicit reset is a separate boundary, and retention/deletion still limits what can be recovered. Snapshot-bound cursors may become invalid after concurrent history changes; restart at the newest page rather than interpreting invalidation as lost history.

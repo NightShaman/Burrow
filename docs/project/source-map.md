@@ -109,3 +109,9 @@ The full review remains dated **1 November 2026**. This is changed-source/static
 Inspected assembly **2026.11.05.4**, commit `1952f88ff182ef465370209f3f1969cbdfbd79e6`, records Core `6465a9b200bc550697ddfc41959d671eac9abf33` and UI `4f7f58f682a0cffe83290276307c66631a361de3`. This ordinary pass reconciles current-intent preference curation, indexed session recall and optional conversation embeddings, OpenAI-compatible embedding support, enabled-mod shared guidance, resident model-connection identity and retained Chat errors, and catalog-refresh controls. Switchboard's native Settings workspaces and historical Archive are reconciled in its component guide.
 
 The full page review remains dated **1 November**; unchanged pages retain that evidence. These are static source and test-file checks, not executed application/provider tests, a runtime deployment or a release promotion. Public mirrors and installed packages can lag development source. Menagerie's coming-soon placeholder and approved artwork/navigation remain unchanged.
+
+## Ordinary source delta: 6 November 2026
+
+Compared the 5 November baseline with assembly `e8acb74a168970eb5dbfdd463745144976811b19` (**2026.11.06.8**), Core `4e5a505c12b236ed394b09a577a2d583b409a69f` and UI `aa759fbf429cebd5fe070d3eb28491f63bf5fc77`. Source areas inspected include `context-report.mjs`, `provider-turn-replay.mjs`, provider pool/recovery and error projection, active-session display/archive paging, recall backfill, Forge store/tools, Chat transcript/navigation/cache/input ownership and regression test definitions. Affected guides describe current implementation; unchanged sections keep their prior full-review evidence.
+
+No runtime tests, live provider calls, migrations or installed-package checks were performed. Public links remain historical immutable references; source hashes record the inspected development revisions without exposing private source URLs.

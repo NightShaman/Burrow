@@ -140,3 +140,13 @@ A failed response can show genuine partial output alongside its structured failu
 Saving a photo neither injects it into every prompt nor starts paid generation. Ask for generation explicitly. `forge_catalog` discovers saved agent photos, the operator photo and each model's reference-image capability; `attachment_view` can inspect the returned attachment ID. Native `forge_create_job` can select its own photo with `useAgentReferenceImage:true`, other saved agents with ordered `referenceAgentIds`, and the operator photo with `useOperatorReferenceImage:true`. Duplicate agent IDs are removed; the operator is appended after selected agents. False/null/omitted flags and an empty/null ID list select no photos. See [Forge reference contract](../reference/api/artifacts.md#canonical-reference-image-generation).
 
 Photos belong to Core: database links plus runtime-managed original artifacts, not execution-host workspace files or expiring chat attachments. Back up the database and runtime artifacts together. Selective settings exports do not include these photos.
+
+## Current chat history and delivery behavior
+
+Checked **6 November 2026**:
+
+- **Load older messages** includes retained compacted history within the current reset generation. **Jump to latest message** appears when you scroll away from the bottom. Reset archives remain separate.
+- A visited, current in-memory conversation can reopen immediately while background reads keep visited chats current. A known-stale or unvisited conversation shows loading until its own fresh transcript arrives; another agent's text is not its history. Browser cache alone is not server evidence.
+- Final replies remain displayed until the persisted transcript acknowledges them. A provider failure uses its redacted explanation when available, otherwise a generic message. **Copy message** includes the safe terminal status/error details even for an error-only turn; review copied text before sharing.
+- `/context` summarizes the last captured provider request; `/context full` opens readable contents and technical disclosures from the same capture. Neither is a preview of your next turn.
+- Native chat Forge generation waits and delivers succeeded media as assistant attachments automatically. Do not ask for the same paid generation again because a chat was stopped: the job may still finish and deliver to its original conversation. A reset fences that old delivery. The operator Forge screen/API keeps its asynchronous workflow.

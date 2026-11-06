@@ -100,3 +100,7 @@ The changed context and host contracts above were checked statically against Bac
 ## 5 November development delta
 
 The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## Temporary mod lifecycle directories
+
+Checked **6 November 2026**: discovery ignores distribution-owned backup/uninstall siblings matching the lifecycle naming contract, including uninstall recovery directories, even though those folders retain the original manifest. They are not separate installed mods. This does not authorize deleting recovery data or bypassing normal update/uninstall reconciliation. Ordinary installed-mod validation and duplicate-ID checks remain in force.

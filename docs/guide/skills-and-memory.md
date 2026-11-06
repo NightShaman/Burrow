@@ -61,6 +61,8 @@ Open **Settings → Agents**, choose the agent, then **Profile documents**. Sele
 
 In current Core, **Settings → Agents → Global → Global documents** also provides Global Rules and Global Orientation. Each agent independently opts in through **Include Global Rules** and **Include Global Orientation**; included global text comes first, followed by that agent's local text. Both are off by default for existing agents.
 
+Current model-facing context renders readable record headings, such as **Soul**, rather than filesystem paths or `.md` names. Original names and provenance remain in context-build receipts; a displayed record is not an editable host file.
+
 These are agent guidance documents. Writing a permission into a document does not create an operating-system sandbox or an MCP grant; configure actual access separately in [Tools and mods](tools-and-mods.md).
 
 [Source: profile document editor](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentProfileDocuments.tsx#L6-L52)

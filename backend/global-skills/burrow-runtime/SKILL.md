@@ -28,7 +28,7 @@ Burrow may supply several kinds of context. They are not interchangeable.
 - **Conversation** preserves what the user and agent said.
 - **Profile documents** define your identity, behavior, preferences, and environment guidance.
 - **Skills** provide task- or system-specific operating instructions.
-- **Shared mod guidance** supplies current-turn instructions from enabled, available mods in a separately attributed context section. It does not replace your profile or provide tools. Treat older shared snapshots as history, not current guidance; `mod://` provenance identifies supplied records, not editable local files.
+- **Shared mod guidance** supplies current-turn instructions from enabled, available mods in a separately attributed context section. It does not replace your profile or provide tools. Treat older shared snapshots as history, not current guidance. Current replay excludes runtime-marked prior turn-support snapshots and supplies fresh support once; it does not delete the original dispatch evidence. Profile and context headings describe stored records, not editable local files; original names and `mod://` provenance remain in receipts rather than model-facing path labels.
 - **Workspace context** helps locate the active project and relevant files.
 - **Memory and handoffs** provide continuity from earlier work.
 - **Tool results** report what an inspection or operation actually returned.
@@ -174,7 +174,9 @@ On releases with Core/mod-managed skills, Core and loaded mods provision their c
 
 ## Generate media only when requested
 
-Discover models with `forge_catalog`. `forge_create_job` can incur cost and requires an operator generation request. Follow `forge_inspect_job` until terminal, then attach succeeded artifacts with `forge_attach_artifact`. Do not claim unsupported modes or tuning are available.
+Discover models with `forge_catalog`. `forge_create_job` can incur cost and requires an operator generation request. In current Core, this native call waits for completion and automatically sends succeeded artifacts as your messages in the current chat. Returned successful attachments are already delivered; do not attach them again. Follow the installed schema on older runtimes that instead return a queued job and require inspection and attachment. Do not claim unsupported modes or tuning are available.
+
+A failed or interrupted wait is not proof that generation stopped or delivery failed. Inspect the durable job and its separate delivery status with `forge_inspect_job` before retrying. A `forge_delivery_failed` result preserves generated artifacts; do not create a second paid generation to repair delivery. Retain the original job and idempotency key. Use `forge_attach_artifact` only for an existing succeeded artifact that actually needs sending to the current authorized conversation; destination identity comes from runtime context. Report the verified outcome rather than promising an automatic later model follow-up.
 
 For saved reference photos, discover `forge_catalog`: it exposes your own `agentReferenceImage`, registered agents with portraits in `agentReferenceImages`, the `operatorReferenceImage`, and each model’s `agentReferenceImage` capability. Inspect a returned `attachmentId` with `attachment_view` when needed. On supported image jobs, use `useAgentReferenceImage: true` for your own photo, `referenceAgentIds` for discovered registered agents, and `useOperatorReferenceImage: true` for the operator photo. Agent selections are deduplicated in first-selection order; the operator photo follows them. Use these selectors only for the operator’s requested generation; never supply image bytes or filesystem paths. Upload alone never starts generation. Missing photos or unsupported models fail without dispatch or silent fallback; follow the installed schema because older runtimes may expose only the own-photo flag.
 

@@ -23,7 +23,7 @@ The effective schema depends on runtime context and enabled integrations. The na
 | Coordination | `spawn_subagent`, `agents_list`, `agent_send_message` | Depth-gated child tasks, native peer discovery and registered-agent messaging |
 | Work records | `tasks_*`, `scheduled_jobs_*` | Task metadata and scheduled prompts |
 | Discovery | `list_skills`, `load_skill`, `mcp_providers`, `mcp_capabilities`, `mcp_call` | Load instructions or discover/invoke integrations |
-| Generation | `forge_*` | Asynchronous media jobs and artifact attachment |
+| Generation | `forge_*` | Native creation waits for generation and delivers artifacts; HTTP jobs remain asynchronous |
 
 Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion.
 

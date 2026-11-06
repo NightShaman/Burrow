@@ -161,3 +161,9 @@ The changed context and host contracts above were checked statically against Bac
 ## 5 November development delta
 
 The changed preference, recall, embedding or shared-guidance contracts above were checked statically against Core `6465a9b200bc550697ddfc41959d671eac9abf33` on **5 November 2026**. No application, database or live-provider tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## Current request replay and bounded pool waits
+
+Checked **6 November 2026**: immutable provider dispatch snapshots remain evidence of the original request. Later replay drops only runtime-provenance-tagged historical support messages and preserves original user/image content; current support is assembled once. It does not strip user text by headings or rewrite the evidence.
+
+Pool eligibility now constrains required owners as well as new turns. Proven portable text/tool continuations can select an eligible alternate before dispatch; signed or otherwise account-bound history stops if its required owner cannot serve. A failed account's `Retry-After` does not delay a healthy alternate. If every destination is blocked, a known short availability deadline can extend the usual recovery delay up to the 30-second cap. Longer or unknown unavailability stops the live request instead of repeatedly probing. These rules retain the original provider failure and existing physical attempt budgets.

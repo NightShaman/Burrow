@@ -265,3 +265,13 @@ Do not immediately repeat Reset. A transport timeout can occur after the databas
 Checked **5 November 2026**: if a mod-owned resident reports that its saved connection or model is unavailable, check that exact connection under **Settings → Connections → Models**, then explicitly select an available provider/model for the resident. Core does not substitute the first catalog entry for a missing resident selection. Treat failed selection saves as failures.
 
 Background Chat refreshes and another send no longer erase a reported error. Read it, inspect any completed effects before retrying, and choose **Dismiss** when you have handled the message. Dismissal is presentation only, not proof of a successful turn. If only conversation search is unavailable, check the separate history-preparation and embedding statuses under **General → Continuity**; an embedding backlog is not the same as a failed chat connection.
+
+## Current chat, quota and Forge checks
+
+Checked **6 November 2026**:
+
+- If `/context` reports no captured request, send a normal message and try again. Both context commands read captured evidence, not current settings. A mismatched request meter is unavailable rather than guessed.
+- At the inclusive five-hour 5% headroom floor, a pool member is ineligible even if it owns a continuation. A portable continuation may move to an eligible alternate; signed/account-bound history cannot. Long quota-reset waits terminate bounded recovery. Inspect the original provider explanation and separate failover blocker before resubmitting work.
+- Use **Load older messages** to inspect compacted chat within the current reset generation, or Archive for reset history. An invalidated cursor requires a fresh newest-page read. A loading conversation is not an empty conversation.
+- A stopped chat may still receive its requested Forge artifact after generation finishes. Inspect job success and `delivery.status` separately. Retry delivery with the original identity/key when appropriate rather than creating another paid job; a reset prevents delivery into the replacement generation.
+- Historical recall backfill now prepares projections before acquiring source/session locks and publishes under a separate 250ms cancellation budget. It uses a 60-second page preparation budget and shrinks timed-out pages, then grows after four full committed pages. Database cancellation/rollback can exceed the nominal publication budget; do not edit checksums or delete history to bypass progress.

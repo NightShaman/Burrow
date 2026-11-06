@@ -106,7 +106,7 @@ The scheduler validates model selection and mod-owner availability before dispat
 
 The curator and Dream subsystems maintain distinct forms of continuity. They are not general task-board workers. Read [Memory](memory.md) and [Dreams](dreams.md) for configuration, lifecycle, and what enters the prompt.
 
-Forge generation is a separate asynchronous job surface: discover available generation models, create a job, inspect it until terminal, then attach a succeeded artifact to the current conversation. Generation may incur provider cost and requires an explicit generation request. The native tool description reports video, arbitrary source attachments, and provider-specific tuning as unsupported; canonical saved photos have a separate explicit reference-image contract rather than guessing support.
+Forge persists generation as a durable job. The operator HTTP/Forge surface creates asynchronously and supports explicit inspection/attachment. Checked **6 November 2026**: native `forge_create_job` instead waits for the job to finish and automatically sends every succeeded artifact to the originating conversation as assistant-authored attachments. It does not require a model polling loop or a second attach call. Cancelling the model waiter does not cancel paid generation; reset-generation fencing prevents delivery into a newly reset conversation. Generation may incur provider cost and requires an explicit generation request. The native tool description reports video, arbitrary source attachments, and provider-specific tuning as unsupported; canonical saved photos have a separate explicit reference-image contract rather than guessing support.
 
 ## Legacy work items and workbench
 
