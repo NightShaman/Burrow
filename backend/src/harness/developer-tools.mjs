@@ -160,20 +160,25 @@ export async function searchFilesEnvelope({ query, dirPath, workspaceRoot, maxDe
     const matches = [];
     let scannedBytes = 0;
     let scanTruncated = false;
+    const scanWarnings = [...listing.warnings];
     const maxScannedBytes = 8_000_000;
     for (const entry of listing.entries) {
       if (entry.type !== 'file' || matches.length >= limit) continue;
       const absolute = path.join(root, entry.path);
-      let stat; try { stat = await fs.stat(absolute); } catch { continue; }
-      if (stat.size > DEFAULT_MAX_FILE_BYTES) continue;
-      if (scannedBytes + stat.size > maxScannedBytes) { scanTruncated = true; continue; }
-      let content; try { content = await fs.readFile(absolute, 'utf8'); } catch { continue; }
+      let stat; try { stat = await fs.stat(absolute); } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); continue; }
+      if (stat.size > DEFAULT_MAX_FILE_BYTES || scannedBytes + stat.size > maxScannedBytes) {
+        scanTruncated = true;
+        scanWarnings.push(`skipped_file:${entry.path}:${stat.size > DEFAULT_MAX_FILE_BYTES ? 'file_too_large' : 'scan_budget_exceeded'}`);
+        continue;
+      }
+      let content; try { content = await fs.readFile(absolute, 'utf8'); } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); continue; }
       scannedBytes += stat.size;
       content.split(/\r?\n/).forEach((line, index) => { if (matches.length < limit && line.includes(String(query))) matches.push({ filePath: entry.path, line: index + 1, text: line.slice(0, 1_000) }); });
     }
     const contentPath = await context.logger.artifact(`${context.prefix}-matches.json`, JSON.stringify(matches, null, 2));
     const truncated = listing.truncated || scanTruncated || matches.length >= limit;
-    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, incomplete: listing.incomplete, warnings: listing.warnings }), truncated, incomplete: listing.incomplete, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: listing.warnings } } });
+    const incomplete = listing.incomplete || scanWarnings.length > 0;
+    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, incomplete, warnings: scanWarnings }), truncated, incomplete, warnings: scanWarnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: scanWarnings } } });
   } catch (error) {
     return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: false, dirPath: root, query: String(query || ''), reason, matches: [], truncated: false, incomplete: true, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
   }
@@ -186,7 +191,7 @@ export async function editFileEnvelope({ filePath, oldText, newText, workspaceRo
     const before = await fs.readFile(target, 'utf8');
     const occurrences = oldText ? before.split(String(oldText)).length - 1 : 0;
     if (occurrences !== 1) throw new Error(occurrences ? 'old_text_not_unique' : 'old_text_not_found');
-    const after = before.replace(String(oldText), String(newText));
+    const after = before.replace(String(oldText), () => String(newText));
     const beforePath = await context.logger.artifact(`${context.prefix}-before.txt`, before);
     await fs.writeFile(target, after, 'utf8');
     const afterPath = await context.logger.artifact(`${context.prefix}-after.txt`, after);
@@ -196,14 +201,18 @@ export async function editFileEnvelope({ filePath, oldText, newText, workspaceRo
   }
 }
 
-async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec, toolCallId = null, executionTarget = 'local', providerId = null, targetId = null }) {
+async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec, abortSignal = null, toolCallId = null, executionTarget = 'local', providerId = null, targetId = null }) {
   const cwd = resolved(dirPath, workspaceRoot);
   const traceDetails = { cwd, reason, toolCallId, executionTarget, providerId, targetId };
   const context = await toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload: traceDetails });
   let result;
   try {
     // Git is the logical tool; its implementation subprocess is not a second call.
-    result = await execute({ executable: 'git', args, cwd, traceLogger: context.logger, emitToolEvents: false, artifactPrefix: `${context.prefix}-shell_exec`, reason });
+    if (abortSignal?.aborted) {
+      result = { ok: false, cancelled: true, killed: false, timedOut: false, error: 'exec_cancelled', exitCode: null, signal: null, stdout: '', stderr: '', artifacts: {} };
+    } else {
+      result = await execute({ executable: 'git', args, cwd, traceLogger: context.logger, emitToolEvents: false, artifactPrefix: `${context.prefix}-shell_exec`, reason, abortSignal });
+    }
   } catch (error) {
     result = { ok: false, error: typeof error?.code === 'string' ? error.code : 'process_dispatch_failed', failureClass: 'tool_dispatch_failed' };
   }

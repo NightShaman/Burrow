@@ -67,6 +67,13 @@ export function useModelConnectionEditor({
   const [oauthIdToken, setOauthIdToken] = useState('');
   const [oauthAccessToken, setOauthAccessToken] = useState('');
   const [oauthRefreshToken, setOauthRefreshToken] = useState('');
+  // Count user edits independently of the saved value: clearing and retyping the
+  // same secret during refresh is still a new draft, not the submitted secret.
+  const secretEdits = useRef([0, 0, 0, 0]);
+  const editSecret = (index: number, setter: (value: string) => void, value: string) => {
+    secretEdits.current[index] += 1;
+    setter(value);
+  };
   const [availableModels, setAvailableModels] = useState<RuntimeModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [manualModel, setManualModel] = useState('');
@@ -153,6 +160,7 @@ export function useModelConnectionEditor({
   };
 
   const connect = async (connection?: OpenAiOAuthConnection, isCurrent = () => true) => {
+    if (writePending.current) return [];
     const discoveryProvider = connection ? (connection.provider ?? 'OpenAI') : provider;
     const discoveryUrl = connection
       ? (connection.baseUrl ?? 'https://chatgpt.com/backend-api')
@@ -225,6 +233,7 @@ export function useModelConnectionEditor({
     }
     writePending.current = true;
     const snapshot = draft;
+    const submittedSecretEdits = [...secretEdits.current];
     const generation = ++editorGeneration.current;
     setRequestState('saving');
     setRequestError('');
@@ -251,12 +260,13 @@ export function useModelConnectionEditor({
           ...(!poolConnection ? { models } : {}),
         }),
       });
+      // Only clear fields untouched since this POST began. An intervening edit
+      // must survive even when the user retypes the exact submitted value.
       if (isEditorCurrent(generation)) {
-        // Clear secrets immediately after the successful write; refresh may be slow or fail.
-        setApiKey('');
-        setOauthIdToken('');
-        setOauthAccessToken('');
-        setOauthRefreshToken('');
+        if (secretEdits.current[0] === submittedSecretEdits[0]) setApiKey('');
+        if (secretEdits.current[1] === submittedSecretEdits[1]) setOauthIdToken('');
+        if (secretEdits.current[2] === submittedSecretEdits[2]) setOauthAccessToken('');
+        if (secretEdits.current[3] === submittedSecretEdits[3]) setOauthRefreshToken('');
       }
       // The write succeeded even if the subsequent inventory refresh fails. Do not
       // retry a POST with consumed credentials or discard edits made while saving.
@@ -281,6 +291,10 @@ export function useModelConnectionEditor({
         return false;
       }
       if (!isEditorCurrent(generation)) return false;
+      // The post-write clear may already have rendered. Compare edit sequence,
+      // not current values, so cleared secrets do not look like fresh changes.
+      if (secretEdits.current.some((count, index) => count !== submittedSecretEdits[index]))
+        return false;
       if (
         JSON.stringify(
           JSON.parse(latestDraft.current).map((value: unknown, index: number) =>
@@ -633,7 +647,7 @@ export function useModelConnectionEditor({
   };
 
   const changeApiType = (next: string) => {
-    if (next === apiType) return;
+    if (next === apiType || writePending.current) return;
     if (isProviderPool(next) && poolConnection) {
       editorGeneration.current += 1;
       setMemberConnectionIds([]);
@@ -652,6 +666,7 @@ export function useModelConnectionEditor({
     setApiType(next);
   };
   const togglePoolMember = (id: string) => {
+    if (writePending.current) return;
     editorGeneration.current += 1;
     setRequestState('idle');
     setRequestError('');
@@ -680,15 +695,15 @@ export function useModelConnectionEditor({
     url,
     setUrl,
     apiKey,
-    setApiKey,
+    setApiKey: (value: string) => editSecret(0, setApiKey, value),
     apiKeyConfigured,
     oauthConnection,
     oauthIdToken,
-    setOauthIdToken,
+    setOauthIdToken: (value: string) => editSecret(1, setOauthIdToken, value),
     oauthAccessToken,
-    setOauthAccessToken,
+    setOauthAccessToken: (value: string) => editSecret(2, setOauthAccessToken, value),
     oauthRefreshToken,
-    setOauthRefreshToken,
+    setOauthRefreshToken: (value: string) => editSecret(3, setOauthRefreshToken, value),
     availableModels,
     manualModel,
     setManualModel,

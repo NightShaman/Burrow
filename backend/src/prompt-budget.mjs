@@ -1,5 +1,7 @@
 import { createModelAdapter } from './model-adapter.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
+import { isChatGptBackendBaseUrl } from './model-adapters/openai-transport.mjs';
+import { isGoogleOpenAICompatible } from './model-adapters/google-wire.mjs';
 
 function estimateTokensFromChars(chars = 0) {
   return Math.ceil(Number(chars || 0) / 4);
@@ -71,6 +73,7 @@ function adapterEstimateProviderRequest({ prompt = null, modelConfig = null, too
       messageCount: messages.length,
       toolCount: normalizedTools(tools).length,
       promptChars: Number(estimate.promptChars || 0),
+      requestedOutputTokens: Number(estimate.requestedOutputTokens || 0),
       api: estimate.api || adapter.api || null,
       model: estimate.model || adapter.model || null,
     };
@@ -89,14 +92,31 @@ export function inspectAssembledPromptBudget({ prompt = null, modelConfig = null
   const effectiveWindow = Number.isFinite(Number(modelConfig?.contextTokens)) && Number(modelConfig.contextTokens) > 0
     ? Number(modelConfig.contextTokens)
     : nativeWindow;
-  const usageRatio = effectiveWindow === null ? null : estimatedTokens / effectiveWindow;
+  // The OpenAI public API's model context is shared by input and requested
+  // output. Anthropic max_input_tokens and Google inputTokenLimit (the source
+  // of their discovered contextWindow) are *input* limits: subtracting output
+  // there rejects valid separate-window requests. The OpenAI family fallback
+  // of 292k without a discovered window is already an input allowance, not a
+  // new claim about a model's total capacity. ChatGPT/Codex strips output caps.
+  const api = String(modelConfig?.api || modelConfig?.mode || '').toLowerCase();
+  const provider = String(modelConfig?.provider || '').toLowerCase();
+  const isOpenAI = !api.includes('anthropic') && !api.includes('google') && (provider.includes('openai') || api.includes('openai-'));
+  const baseUrl = modelConfig?.baseUrl || modelConfig?.apiBaseUrl || modelConfig?.url;
+  const hasTotalWindow = isOpenAI && !isGoogleOpenAICompatible(modelConfig || {}) && !isChatGptBackendBaseUrl(baseUrl) && nativeWindow !== null;
+  const requestedOutputTokens = Math.max(0, Number(estimate.requestedOutputTokens) || 0);
+  const outputReservedTokens = hasTotalWindow && effectiveWindow !== null ? requestedOutputTokens : 0;
+  const inputAllowance = effectiveWindow === null ? null : hasTotalWindow
+    ? Math.max(0, Math.min(effectiveWindow, nativeWindow - outputReservedTokens))
+    : effectiveWindow;
+  const usageRatio = inputAllowance === null ? null : inputAllowance === 0 ? Infinity : estimatedTokens / inputAllowance;
   return {
     source: estimate.source,
     contextWindow: nativeWindow,
-    contextTokens: effectiveWindow,
+    contextTokens: inputAllowance,
+    outputReservedTokens,
     estimatedChars,
     estimatedTokens,
-    remainingTokens: effectiveWindow === null ? null : Math.max(0, effectiveWindow - estimatedTokens),
+    remainingTokens: inputAllowance === null ? null : Math.max(0, inputAllowance - estimatedTokens),
     usageRatio,
     pressure: usageRatio === null ? 'unknown' : contextBudgetPressure(usageRatio),
     sections: prompt?.stats?.sections || [],

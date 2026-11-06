@@ -1,5 +1,5 @@
 import { appendRuntimeProviderTurn } from './runtime-session-writer.mjs';
-import { buildContextForTurn, prepareContextForTurn } from './context-builder.mjs';
+import { buildContextForTurn } from './context-builder.mjs';
 import { plainChatKernel } from './plain-chat-kernel.mjs';
 import os from 'node:os';
 import { isIP } from 'node:net';

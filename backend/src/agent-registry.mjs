@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { mergeAgentContextConfig, normalizeAgentContextConfig } from './agent-context-config.mjs';
+import { normalizeAgentContextConfig } from './agent-context-config.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const DEFAULT_CAPABILITIES = Object.freeze(['chat', 'files', 'skills']);
@@ -56,7 +56,7 @@ function normalizeModAgent(value, { ownerModId = null, partial = false, current 
   return { ownerModId: owner, capabilities: flags('capabilities', MOD_AGENT_CAPABILITIES), visibility: flags('visibility', MOD_AGENT_VISIBILITY) };
 }
 
-function assertAgent(input = {}, { requireName = true } = {}) {
+function assertAgent(input = {}, { requireName = true, allowReserved = false } = {}) {
   const id = text(input.id);
   const name = input.name === undefined ? undefined : text(input.name);
   const enabled = input.enabled === undefined ? undefined : input.enabled === true;
@@ -64,6 +64,8 @@ function assertAgent(input = {}, { requireName = true } = {}) {
   const contextConfig = input.contextConfig === undefined ? undefined : normalizeAgentContextConfig(input.contextConfig, { partial: true });
   const assignedExecutionEnvironment = input.executionEnvironment === undefined ? undefined : executionEnvironment(input.executionEnvironment);
   if (!id || id === '.' || id === '..' || !ID.test(id)) throw new Error('agent_id_invalid');
+  // The shared skill catalog owns workspace/global; never create a new agent there.
+  if (id === 'global' && !allowReserved) throw new Error('agent_id_reserved');
   if (requireName && (!name || name.length > 64)) throw new Error('agent_name_invalid');
   if (name !== undefined && name.length > 64) throw new Error('agent_name_invalid');
   if (availableCapabilities !== undefined && (!availableCapabilities.length || availableCapabilities.some((item) => item.length > 64))) throw new Error('agent_available_capabilities_invalid');
@@ -83,13 +85,20 @@ function row(row) {
   };
 }
 
+// A restored historical "global" agent shares its workspace directory with
+// the global catalog, but must never claim the shared skills as agent-owned.
+function agentSkillsRoot(workspaceRoot, agentId) {
+  return path.join(workspaceRoot, agentId === 'global' ? 'agent-skills' : 'skills');
+}
+
 export async function ensureAgentRoots({ runtimeState, agent } = {}) {
   if (!runtimeState?.workspaceRoot || !agent?.id) throw new Error('agent_runtime_context_required');
   const workspaceRoot = path.resolve(runtimeState.workspaceRoot, agent.id);
   const globalRoot = path.resolve(runtimeState.workspaceRoot, 'global');
   await fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
   await fs.mkdir(globalRoot, { recursive: true, mode: 0o755 });
-  for (const dir of ['skills', 'sessions', 'artifacts', 'tools']) await fs.mkdir(path.join(workspaceRoot, dir), { recursive: true, mode: 0o700 });
+  await fs.mkdir(agentSkillsRoot(workspaceRoot, agent.id), { recursive: true, mode: 0o700 });
+  for (const dir of ['sessions', 'artifacts', 'tools']) await fs.mkdir(path.join(workspaceRoot, dir), { recursive: true, mode: 0o700 });
   return agentRuntimeContext({ runtimeState, agent });
 }
 
@@ -104,7 +113,7 @@ export function agentRuntimeContext({ runtimeState, agent } = {}) {
     contextConfig: normalizeAgentContextConfig(agent.contextConfig || {}),
     agentWorkspaceRoot: workspaceRoot,
     agentDataRoot: dataRoot,
-    skillsRoot: path.join(workspaceRoot, 'skills'),
+    skillsRoot: agentSkillsRoot(workspaceRoot, agent.id),
     // Controller-owned persisted assignment. Null preserves local execution.
     executionEnvironment: agent.executionEnvironment || null,
     // No agent-specific filesystem boundary. Workspaces are context, not cages.

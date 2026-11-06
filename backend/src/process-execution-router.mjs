@@ -41,7 +41,10 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
   if (typeof localExecute !== 'function') throw new Error('local_execute_required');
   return async function executeProcess(request = {}, context = {}) {
     const target = request.target || localExecutionTarget();
-    if (target.kind === 'local') return localExecute(request.process || request, context);
+    if (target.kind === 'local') {
+      const processRequest = request.process || request;
+      return localExecute(context.abortSignal ? { ...processRequest, abortSignal: context.abortSignal } : processRequest, context);
+    }
     if (target.kind !== 'remote') throw new Error('execution_target_invalid');
     if (!remoteController || typeof remoteController.executeProcess !== 'function') throw new Error('remote_process_controller_unavailable');
     const targetId = requiredId(target.targetId, 'target_id');

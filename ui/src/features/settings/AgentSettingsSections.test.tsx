@@ -458,26 +458,19 @@ describe('agent settings sections', () => {
     }
   });
 
-  it.fails(
-    'keeps editable Dream memory controls in primary (known preexisting placement gap)',
-    async () => {
-      const view = mountDreamsWithOverflow();
-      try {
-        await screen.findByDisplayValue('Reflect on the day.');
-        expect
-          .soft(view.container.contains(screen.getByLabelText('Memory prompt override')))
-          .toBe(true);
-        expect
-          .soft(view.overflow.contains(screen.getByLabelText('Memory prompt override')))
-          .toBe(false);
-        expect.soft(view.container.textContent).toContain('Dream memory');
-        expect.soft(view.overflow.textContent).not.toContain('Dream memory');
-      } finally {
-        view.unmount();
-        view.overflow.remove();
-      }
-    },
-  );
+  it('keeps editable Dream memory controls in primary', async () => {
+    const view = mountDreamsWithOverflow();
+    try {
+      await screen.findByDisplayValue('Reflect on the day.');
+      expect(view.container.contains(screen.getByLabelText('Memory prompt override'))).toBe(true);
+      expect(view.overflow.contains(screen.getByLabelText('Memory prompt override'))).toBe(false);
+      expect(view.container.textContent).toContain('Dream memory');
+      expect(view.overflow.textContent).not.toContain('Dream memory');
+    } finally {
+      view.unmount();
+      view.overflow.remove();
+    }
+  });
 
   it('blocks Dream edits until its initial settings request resolves', async () => {
     const load = deferred<{ settings: ReturnType<typeof dreamSettings> }>();

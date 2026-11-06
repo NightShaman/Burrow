@@ -133,6 +133,7 @@ export function ModelConnections({
               <Field label={loadBalancing ? 'Pool type' : 'API type'}>
                 <select
                   value={editor.apiType}
+                  disabled={editor.requestState === 'saving'}
                   onChange={(event) => editor.setApiType(event.target.value)}
                 >
                   {apiTypes.map((type) => (
@@ -332,6 +333,7 @@ function LoadBalancingPools({
             <Field label="Adapter">
               <select
                 value={editor.apiType}
+                disabled={editor.requestState === 'saving'}
                 onChange={(event) => editor.setApiType(event.target.value)}
               >
                 <option value="openai-lb">OpenAI</option>

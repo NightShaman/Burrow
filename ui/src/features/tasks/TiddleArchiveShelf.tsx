@@ -117,7 +117,10 @@ export function TiddleArchiveShelf({
           cause instanceof Error ? cause.message : 'Could not load more card history.',
         );
     } finally {
-      if (!abort.signal.aborted) setTiddleHistoryLoading(false);
+      if (tiddleHistoryRequest.current === abort) {
+        tiddleHistoryRequest.current = null;
+        setTiddleHistoryLoading(false);
+      }
     }
   };
   const loadMoreTiddle = async () => {
@@ -157,6 +160,8 @@ export function TiddleArchiveShelf({
     if (!selectedTiddleCard) return;
     const abort = new AbortController();
     tiddleHistoryRequest.current?.abort();
+    tiddleHistoryRequest.current = null;
+    setTiddleHistoryLoading(false);
     setTiddleHistoryCursor(null);
     setTiddleHistoryHasMore(false);
     setTiddleHistoryError('');

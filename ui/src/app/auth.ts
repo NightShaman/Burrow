@@ -35,10 +35,12 @@ export async function discoverAuthMode(signal?: AbortSignal): Promise<AuthDiscov
     headers: { accept: 'application/json' },
     signal,
   });
-  const body = (await response.json().catch(() => ({}))) as Partial<AuthDiscovery>;
-  if (!response.ok || (body.mode !== 'none' && body.mode !== 'basic'))
+  const body: unknown = await response.json().catch(() => null);
+  const auth = body && typeof body === 'object' && 'auth' in body ? body.auth : null;
+  const mode = auth && typeof auth === 'object' && 'mode' in auth ? auth.mode : null;
+  if (!response.ok || (mode !== 'none' && mode !== 'basic'))
     throw new Error('auth_discovery_failed');
-  return { mode: body.mode };
+  return { mode };
 }
 
 /** Validate credentials against the runtime without committing them to session state. */

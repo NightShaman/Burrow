@@ -217,10 +217,15 @@ function AppContent() {
   } = usePersistedLayout();
   const workspacePanelVisible =
     page === 'chat' &&
-    !leftCollapsed &&
-    (leftRailLayout === 'divided'
-      ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace'
-      : leftSinglePanel === 'workspace');
+    !activeMod &&
+    ((!leftCollapsed &&
+      (leftRailLayout === 'divided'
+        ? leftTopPanel === 'workspace' || leftBottomPanel === 'workspace'
+        : leftSinglePanel === 'workspace')) ||
+      (!rightCollapsed &&
+        (rightRailLayout === 'divided'
+          ? rightTopPanel === 'workspace' || rightBottomPanel === 'workspace'
+          : rightSinglePanel === 'workspace')));
   const { workspaceFiles, openFile, saveFile } = useWorkspaceFiles({
     tabs,
     selectedAgentId,

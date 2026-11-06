@@ -16,11 +16,6 @@ function fileHash(filePath) {
   return createHash('sha256').update(String(filePath || '')).digest('hex').slice(0, 12);
 }
 
-function isInside(child, parent) {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-}
-
 function byteLength(content, encoding) {
   return Buffer.byteLength(String(content ?? ''), encoding);
 }

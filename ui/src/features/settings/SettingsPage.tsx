@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Agent, PanelId, SavedProvider, SettingsTab } from '../../app/types';
 import { api, type SetupStatus } from '../../app/api';
 import { railLayouts, themes, themeDetails } from '../../app/usePersistedLayout';
-import type { PanelDefinition } from '../../app/panelRegistry';
+import { ownerPanelModId, type PanelDefinition } from '../../app/panelRegistry';
 import { RailPanelSettings } from './RailPanelSettings';
 import type { Theme } from '../../app/usePersistedLayout';
 import type { AgentRailPreferences } from '../../app/useAgentRailPreferences';
@@ -155,7 +155,10 @@ export function Settings({
     leftRailLayout === 'divided' ? [leftTopPanel, leftBottomPanel] : [leftSinglePanel]
   )
     .concat(rightRailLayout === 'divided' ? [rightTopPanel, rightBottomPanel] : [rightSinglePanel])
-    .includes('agents');
+    .some(
+      (panel) =>
+        panel === 'agents' || (typeof panel === 'string' && ownerPanelModId(panel) !== null),
+    );
   const [modNavigationColumn, setModNavigationColumn] = useState<HTMLElement | null>(null);
   const [modSelectorColumn, setModSelectorColumn] = useState<HTMLElement | null>(null);
   const [hasModSelector, setHasModSelector] = useState(false);

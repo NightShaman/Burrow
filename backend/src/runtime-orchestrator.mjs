@@ -1,7 +1,6 @@
 import { finalAnswerAfterToolLoopPrompt } from './runtime-final-synthesis-prompt.mjs';
 import { accumulateCompletionEvidence } from './completion-addendum.mjs';
-import { compactSkippedToolActions, skippedToolSummary, executedToolResultPrompt } from './tool-continuation-prompt.mjs';
-import path from 'node:path';
+import { compactSkippedToolActions, executedToolResultPrompt } from './tool-continuation-prompt.mjs';
 import { nativeToolSchemas, parseActionProposal } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
@@ -13,7 +12,7 @@ import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { accumulateToolConsequences, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { inspectRuntimeObject } from './runtime-heap-diagnostics.mjs';
 import { normalizeNativeToolCalls, normalizeProviderMessages } from './provider-messages.mjs';
-import { serializeContinuationEvidence } from './continuation-evidence.mjs';
+import './continuation-evidence.mjs';
 import { inspectionResultSummary, shouldFollowReadOnlyInspection, hasExecutedInspectionEvidence, hasExecutedReadFileEvidence, missingInspectionTargets, shouldForceInspectionEvidence, defaultInspectionFileList, runDefaultReadOnlyInspection, pendingInspectionFallback } from './inspection-evidence.mjs';
 import { CHAT_TOOL_HISTORY_LIMIT, CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, boundedToolArgumentValue, stableJson, fingerprint, toolPlanFingerprint, exactRepeatVerdict, loopReceiptText, appendBoundedChatHistory, appendBoundedMapEntry, compactPromptEvidenceResult, runtimeObservationFacts, materialEvidenceKeys, recordMaterialProgress, repeatedToolCallObservations, semanticInspectionObservations, logChatToolLoopHeapStage, normalizedToolOutcome } from './tool-loop-detection.mjs';
 import { runProposalLoop, runVerificationGate, runCommitGate, completeMutationAfterInspection, completeMutationRepairAfterNoAction, completeMutationRepairAfterToolFailure, completeVerificationAfterMutation, proposalFromNativeToolCalls } from './mutation-gates.mjs';

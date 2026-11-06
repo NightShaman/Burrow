@@ -56,12 +56,6 @@ function requestHeaders(config = {}, { multipart = false } = {}) {
   return multipart ? Object.fromEntries(Object.entries(headers).filter(([key]) => key.toLowerCase() !== 'content-type')) : headers;
 }
 
-function safeError(value, secrets = []) {
-  let result = text(value) || 'provider request failed';
-  for (const secret of secrets.map(text).filter(Boolean)) result = result.split(secret).join('[redacted]');
-  return result;
-}
-
 async function providerError(response, secrets = []) {
   const bounded = await readProviderError(response, secrets);
   return { ...bounded, httpStatus: response.status,

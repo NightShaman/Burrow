@@ -232,7 +232,7 @@ export function createSessionRoutes({
       if (error?.message === 'archive_query_timeout' || owner?.options.signal.reason?.message === 'archive_query_timeout') {
         sendJson(res, 504, { ok: false, error: 'archive_query_timeout' }); return true;
       }
-      if (error?.message === 'session_target_exists') { sendJson(res, 409, { ok: false, error: error.message }); return true; }
+      if (['session_target_exists', 'fork_target_exists', 'rename_target_exists'].includes(error?.message)) { sendJson(res, 409, { ok: false, error: error.message }); return true; }
       if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid', 'archive_limit_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;

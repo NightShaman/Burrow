@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_RESPONSE_BYTES,
   MAX_MODEL_TEXT_CHARS,
   boundedText,
+  providerInputAccounting,
   contextUsageFromRequest,
   contextUsageFromResponse,
   contextUsageCallback,
@@ -490,8 +491,6 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
   const model = config.model;
   if (!model) throw new Error('model is required');
 
-  const imageCountFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((count, message) => count + (Array.isArray(message?.content) ? message.content.filter((part) => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url || part?.input_image).length : 0), 0);
-  const textPromptCharsFor = (messages = []) => (Array.isArray(messages) ? messages : []).reduce((total, message) => total + (typeof message?.content === 'string' ? message.content.length : (Array.isArray(message?.content) ? message.content.reduce((chars, part) => chars + String(part?.text || '').length, 0) : 0)), 0);
 
   // Discovery supplies a ceiling, not a request to use the entire allowance.
   // Retain the usual default (or a smaller capacity); explicit limits still win.
@@ -517,12 +516,13 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       ...(streaming ? { stream: true } : {}),
     };
     const serializedBody = JSON.stringify(body);
-    return { body, serializedBody, promptChars: textPromptCharsFor(sourceTranscript), imageCount: imageCountFor(sourceTranscript), sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest: anthropicMessageManifest(body.messages) };
+    const { promptChars, imageCount } = providerInputAccounting([body.system, body.messages, body.tools]);
+    return { body, serializedBody, promptChars, imageCount, sourceTranscript, resolvedTools, promptCaching, thinking, providerMessageManifest: anthropicMessageManifest(body.messages) };
   };
 
   const estimateRequest = (options = {}) => {
     const request = buildRequest(options);
-    return contextUsageFromRequest({ promptChars: request.promptChars, bodyChars: request.serializedBody.length, imageCount: request.imageCount, model, api: 'anthropic-messages', modelCall: options.modelCall, clock });
+    return { ...contextUsageFromRequest({ promptChars: request.promptChars, bodyChars: request.serializedBody.length, imageCount: request.imageCount, model, api: 'anthropic-messages', modelCall: options.modelCall, clock }), requestedOutputTokens: request.body.max_tokens };
   };
 
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens ?? Math.min(config.outputTokens ?? DEFAULT_MODEL_OUTPUT_TOKENS, DEFAULT_MODEL_OUTPUT_TOKENS), tools = null, traceLogger, signal = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {

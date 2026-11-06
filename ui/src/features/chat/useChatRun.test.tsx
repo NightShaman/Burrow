@@ -816,7 +816,11 @@ describe('Stop retirement', () => {
     });
     expect(result.current.activeRunId).toBe('');
     expect(streamChatMock.mock.calls[0][0].signal.aborted).toBe(true);
-    expect(session.reportError).toHaveBeenCalledWith('Could not stop run: chat_run_not_found');
+    expect(session.reportError).toHaveBeenCalledWith(
+      'Could not stop run: chat_run_not_found',
+      'nigel',
+      'session-1',
+    );
     await act(async () => {
       complete({ terminalType: 'run.completed', finalResult: { answerText: 'Done' } });
       await completion;
@@ -1151,6 +1155,8 @@ it('reports a truncated stream as transport error without fabricating an assista
   expect(session.appendTurn).toHaveBeenCalledTimes(1);
   expect(session.reportError).toHaveBeenCalledWith(
     'Message failed: The stream ended without a terminal event.',
+    'nigel',
+    'session-1',
   );
 });
 
@@ -1292,3 +1298,96 @@ it.each([
     expect(turn?.metadata?.contextReport).toBeUndefined();
   },
 );
+
+describe('UI01/UI02 interrupted-stream ownership', () => {
+  it('reconciles an accepted partial stream that loses its terminal event, without manufacturing a terminal answer', async () => {
+    streamChatMock.mockImplementation(async ({ onAccepted, onEvent }) => {
+      onAccepted?.();
+      onEvent({ type: 'assistant.delta', data: { delta: 'Unconfirmed partial' } });
+      throw new Error('The stream ended without a terminal event.');
+    });
+    const session = createSession();
+    const { result } = renderHook(() =>
+      useChatRun({
+        selectedAgentId: 'nigel',
+        selected: undefined,
+        savedProviders: [],
+        session,
+        setAgentActivity: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+    expect(session.appendTurn).toHaveBeenCalledTimes(1);
+    expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1');
+    expect(session.refreshSessions).toHaveBeenCalledWith('nigel');
+    expect(session.reportError).toHaveBeenCalledWith(
+      'Message failed: The stream ended without a terminal event.',
+      'nigel',
+      'session-1',
+    );
+  });
+
+  it('does not reconcile a request rejected before acceptance', async () => {
+    streamChatMock.mockRejectedValue(new Error('HTTP 503'));
+    const session = createSession();
+    const { result } = renderHook(() =>
+      useChatRun({
+        selectedAgentId: 'nigel',
+        selected: undefined,
+        savedProviders: [],
+        session,
+        setAgentActivity: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+    expect(session.refreshConversation).not.toHaveBeenCalled();
+    expect(session.reportError).toHaveBeenCalledWith(
+      'Message failed: HTTP 503',
+      'nigel',
+      'session-1',
+    );
+  });
+
+  it('attributes late failure and reconciliation to A after switching to B', async () => {
+    let reject!: (error: Error) => void;
+    let accept!: () => void;
+    streamChatMock.mockImplementation(({ onAccepted }) => {
+      accept = () => onAccepted?.();
+      return new Promise((_, failure) => {
+        reject = failure;
+      });
+    });
+    const session = createSession();
+    const { result, rerender } = renderHook(
+      ({ agent }) =>
+        useChatRun({
+          selectedAgentId: agent,
+          selected: undefined,
+          savedProviders: [],
+          session,
+          setAgentActivity: vi.fn(),
+        }),
+      { initialProps: { agent: 'nigel' } },
+    );
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.sendMessage();
+      accept();
+    });
+    rerender({ agent: 'other' });
+    await act(async () => {
+      reject(new Error('lost connection'));
+      await pending;
+    });
+    expect(session.reportError).toHaveBeenCalledWith(
+      'Message failed: lost connection',
+      'nigel',
+      'session-1',
+    );
+    expect(session.refreshConversation).toHaveBeenCalledWith('nigel', 'session-1');
+  });
+});

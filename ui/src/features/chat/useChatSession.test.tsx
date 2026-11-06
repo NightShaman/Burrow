@@ -1615,3 +1615,28 @@ it('clears unacknowledged final turns on local reset, even without dated turns o
   expect(result.current.turns).toEqual([]);
   unmount();
 });
+
+describe('UI02 conversation-scoped error state', () => {
+  it('shows a late A error only when A is selected again, never in B', async () => {
+    apiMock.mockImplementation(async (path) => {
+      if (path === sessionListPath || path === '/api/sessions?agentId=other')
+        return { sessions: [{ id: sessionId }] };
+      if (path === conversationPath || path === `/api/sessions/${sessionId}?agentId=other`)
+        return { session: { id: sessionId, turns: [] } };
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    const { result, rerender } = renderHook(({ selected }) => useChatSession(selected), {
+      initialProps: { selected: agentId },
+    });
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    act(() => result.current.reportError('Message failed: lost connection', agentId, sessionId));
+    expect(result.current.chatError).toBe('Message failed: lost connection');
+    rerender({ selected: 'other' });
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    act(() => result.current.reportError('Message failed: late A failure', agentId, sessionId));
+    expect(result.current.chatError).toBe('');
+    rerender({ selected: agentId });
+    await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+    expect(result.current.chatError).toBe('Message failed: late A failure');
+  });
+});

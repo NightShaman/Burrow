@@ -88,7 +88,6 @@ export function useChatSession(selectedAgentId: string) {
     [attachmentScope],
   );
 
-  const [chatError, setChatError] = useState('');
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const childSessionsRef = useRef(new Set<string>());
   const [, setToolActivityVersion] = useState(0);
@@ -156,6 +155,31 @@ export function useChatSession(selectedAgentId: string) {
   // handoff as loading synchronously, before the empty-session view is eligible.
   const committedAgentIdRef = useRef(selectedAgentId);
   const isSwitchingAgent = committedAgentIdRef.current !== selectedAgentId;
+  const [errorsByConversation, setErrorsByConversation] = useState<Record<string, string>>({});
+  const errorKey = conversationCacheKey(selectedAgentId, sessionId);
+  const chatError = isSwitchingAgent
+    ? ''
+    : (errorsByConversation[errorKey] ??
+      errorsByConversation[conversationCacheKey(selectedAgentId, '')] ??
+      '');
+  // An async run reports against its captured origin, not the currently selected chat.
+  const reportError = useCallback((message: string, agentId?: string, targetSessionId?: string) => {
+    const current = selectedChatRef.current;
+    const key = conversationCacheKey(
+      agentId ?? current.agentId,
+      targetSessionId ?? current.sessionId,
+    );
+    setErrorsByConversation((errors) => ({ ...errors, [key]: message }));
+  }, []);
+  const setChatError = reportError;
+  const clearError = useCallback(() => {
+    const { agentId, sessionId: selectedSessionId } = selectedChatRef.current;
+    setErrorsByConversation((errors) => ({
+      ...errors,
+      [conversationCacheKey(agentId, selectedSessionId)]: '',
+      [conversationCacheKey(agentId, '')]: '',
+    }));
+  }, []);
   const draftKey =
     selectedAgentId && sessionId ? conversationCacheKey(selectedAgentId, sessionId) : '';
   const draft = draftKey ? (draftCache[draftKey]?.value ?? '') : '';
@@ -563,7 +587,6 @@ export function useChatSession(selectedAgentId: string) {
       setTurns([]);
       setIsLoadingConversation(true);
       setIsNewSession(false);
-      setChatError('');
     },
     [selectedAgentId, sessionId, clearActivity],
   );
@@ -581,7 +604,6 @@ export function useChatSession(selectedAgentId: string) {
       setTurns([]);
       setIsLoadingConversation(true);
       setIsNewSession(false);
-      setChatError('');
     },
     [clearActivity, selectedAgentId, sessionId],
   );
@@ -596,7 +618,6 @@ export function useChatSession(selectedAgentId: string) {
       setTurns([]);
       setIsLoadingConversation(true);
       setIsNewSession(false);
-      setChatError('');
     },
     [clearActivity, selectedAgentId, sessionId],
   );
@@ -723,8 +744,6 @@ export function useChatSession(selectedAgentId: string) {
       ),
     [attachmentScope],
   );
-  const reportError = useCallback((message: string) => setChatError(message), []);
-  const clearError = useCallback(() => setChatError(''), []);
 
   return {
     loadOlder,

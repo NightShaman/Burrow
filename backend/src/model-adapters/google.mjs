@@ -1,7 +1,7 @@
 import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { buildProviderMessageManifest } from './adapter-primitives.mjs';
-import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
+import { randomUUID, normalizeProviderMessages, normalizeToolCall, toolOutputText, providerInputAccounting, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, readResponseTextBounded, DEFAULT_MAX_RESPONSE_BYTES } from './adapter-primitives.mjs';
 import { googleNativeBase, googleNativeHeaders, googleModelId } from './google-native-catalog.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback, readProviderChunk, readProviderText } from './provider-fetch.mjs';
 import { providerErrorSecrets, classifyModelFailure, providerFailureResult, markProviderEnvelopeFailure, markProviderStreamTruncated } from '../model-failure.mjs';
@@ -113,7 +113,7 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
     if (tools?.length) body.tools = [{ functionDeclarations: tools.map(t => { const f=t.function || t; return { name: f.name, description: f.description || '', parametersJsonSchema: f.parameters || t.inputSchema || { type: 'object', properties: {} } }; }) }];
     return { body, source };
   };
-  const estimateRequest = options => { const {body}=build(options); const chars=JSON.stringify(body).length; return contextUsageFromRequest({ promptChars:chars, bodyChars:chars, model, api, modelCall:options.modelCall, clock }); };
+  const estimateRequest = options => { const {body}=build(options); const {promptChars,imageCount}=providerInputAccounting([body.systemInstruction,body.contents,body.tools]); return { ...contextUsageFromRequest({ promptChars, bodyChars:JSON.stringify(body).length, imageCount, model, api, modelCall:options.modelCall, clock }), requestedOutputTokens: body.generationConfig.maxOutputTokens || 0 }; };
   const complete = async (options = {}) => {
     const requestId = idFactory(), { traceLogger, signal, onTextDelta, onThoughtDelta, onContextUsage, recoveryContext } = options;
     const modelCall = recoveryContext?.nextModelCall ? await recoveryContext.nextModelCall() : options.modelCall;

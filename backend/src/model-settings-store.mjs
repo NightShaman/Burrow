@@ -1,8 +1,8 @@
 import { safeOperationalError } from './runtime-server-log.mjs';
 import { operationalEvent } from './operational-log.mjs';
 import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
-import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
-import { openaiOAuthIdentity, refreshOpenAiOAuth } from './openai-oauth-login.mjs';
+import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { openaiOAuthIdentity } from './openai-oauth-login.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicModelMetadata, anthropicDiscoveredReasoningEfforts, anthropicThinkingCapabilities } from './anthropic-model-capabilities.mjs';
 
 const AAD_PREFIX = 'burrow-model-secret-v1';
@@ -89,9 +89,6 @@ function codexClientVersionFromCache(cache = {}) {
   return parseSemver(cache.currentVersion)?.raw || parseSemver(cache.lastGoodCatalogVersion)?.raw || CODEX_CLIENT_VERSION_FLOOR;
 }
 
-const AUTH_SECRET_NAME = 'providerAuth';
-const LEGACY_API_KEY_SECRET_NAME = 'apiKey';
-const OAUTH_REFRESH_SKEW_MS = 60_000;
 const ANTHROPIC_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_OAUTH_TOKEN_ENDPOINTS = Object.freeze([
   'https://platform.claude.com/v1/oauth/token',
@@ -105,9 +102,6 @@ const GITHUB_CODEX_LATEST_URL = 'https://api.github.com/repos/openai/codex/relea
 const MODELS_DEV_CATALOG_META_KEY = 'models_dev_catalog';
 export const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 export const MODELS_DEV_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-
-const oauthRefreshes = new Map();
-
 
 export function settingsKeyFromEnvironment(env = process.env) {
   const encoded = normalize(env.BURROW_SETTINGS_KEY);

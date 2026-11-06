@@ -2,25 +2,10 @@ import { providerIdentity, providerUsageValues } from './provider-responsiveness
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback } from './provider-fetch.mjs';
 import { providerErrorSecrets, classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult } from '../model-failure.mjs';
 import { apiMode, isChatGptBackendBaseUrl, isCodexBackendConfig, responsesUrl, completionUrl } from './openai-transport.mjs';
-import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, compactResponseCompletion, mergeStreamToolCall, openAIEnvelopeError } from './openai-transport.mjs';
+import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, openAIEnvelopeError } from './openai-transport.mjs';
 import { redactStructuredJsonText } from '../redaction.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
-import {
-  readResponseTextBounded,
-  toolOutputText,
-  chatToolContinuationMessages,
-  buildProviderMessageManifest,
-  messageContentChars,
-  serializedMessageHash,
-  contextUsageFromRequest,
-  contextUsageFromResponse,
-  contextUsageCallback,
-  providerResponseModel,
-  providerResponseIdentifier,
-  redactHeaders,
-  boundedText,
-  randomUUID,
-} from './adapter-primitives.mjs';
+import { readResponseTextBounded, chatToolContinuationMessages, buildProviderMessageManifest, serializedMessageHash, providerInputAccounting, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, redactHeaders, boundedText, randomUUID } from './adapter-primitives.mjs';
 
 export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
@@ -120,16 +105,17 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       : null;
     const providerMessageCount = Array.isArray(providerMessages) ? providerMessages.length : 1;
     const providerMessageManifest = Array.isArray(providerMessages) ? buildProviderMessageManifest(providerMessages) : [];
-    const providerPromptChars = Array.isArray(providerMessages)
+    const providerPromptChars = (Array.isArray(providerMessages)
       ? textPromptCharsFor(providerMessages)
-      : String(providerMessages || '').length;
+      : String(providerMessages || '').length)
+      + providerInputAccounting([body.tools, body.instructions, body.response_format, body.text]).promptChars;
     const serializedBody = JSON.stringify(body);
     return { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash: serializedMessageHash(stablePrefixMessage), continuation: isToolContinuation, nativeTranscript: continuationMessages || providerContinuationMessages || (mode === 'openai-responses' ? resolvedMessages : null) };
   };
 
   const estimateRequest = (options = {}) => {
     const request = buildRequest({ ...options, streaming: chatGptBackend || Boolean(options.streaming) });
-    return contextUsageFromRequest({ promptChars: request.providerPromptChars, bodyChars: request.serializedBody.length, imageCount: imageCountFor(request.providerMessages), model, api: mode, continuation: request.continuation, modelCall: options.modelCall, clock });
+    return { ...contextUsageFromRequest({ promptChars: request.providerPromptChars, bodyChars: request.serializedBody.length, imageCount: imageCountFor(request.providerMessages), model, api: mode, continuation: request.continuation, modelCall: options.modelCall, clock }), requestedOutputTokens: Number(request.body.max_output_tokens || request.body.max_completion_tokens || request.body.max_tokens) || 0 };
   };
 
   const complete = async ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', traceLogger, signal = null, toolContinuation = null, onTextDelta = null, onThoughtDelta = null, onContextUsage = null, modelCall = null, recoveryContext = null } = {}) => {

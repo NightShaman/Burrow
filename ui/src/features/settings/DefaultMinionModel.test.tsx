@@ -87,24 +87,18 @@ describe('Default minion provider autosave', () => {
     }
   });
 
-  // Known preexisting discrepancy: HEAD's AgentSettings already portals the minion editor
-  // into supporting content. Preserve the primary-editor contract, not that placement.
-  // This bounded autosave change does not authorize moving the shell or its controls.
-  it.fails(
-    'keeps minion controls in primary, not supporting content (known preexisting placement gap)',
-    async () => {
-      const { container, unmount, overflow } = mountDetailsWithOverflow();
-      try {
-        await ready();
-        expect.soft(container.contains(providerSelect())).toBe(true);
-        expect.soft(overflow.contains(providerSelect())).toBe(false);
-        expect.soft(overflow.childElementCount).toBe(0);
-      } finally {
-        unmount();
-        overflow.remove();
-      }
-    },
-  );
+  it('keeps minion controls in primary, not supporting content', async () => {
+    const { container, unmount, overflow } = mountDetailsWithOverflow();
+    try {
+      await ready();
+      expect(container.contains(providerSelect())).toBe(true);
+      expect(overflow.contains(providerSelect())).toBe(false);
+      expect(overflow.childElementCount).toBe(0);
+    } finally {
+      unmount();
+      overflow.remove();
+    }
+  });
 
   it('autosaves complete provider/model and effort choices, then inherit with nulls', async () => {
     vi.mocked(api)

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const AAD_PREFIX = 'burrow-mcp-secret-v1';
 const text = (value) => String(value ?? '').trim();

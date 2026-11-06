@@ -1,4 +1,4 @@
-import { changedPathsFromToolResults, summarizeToolResults } from './runtime-result-shapes.mjs';
+import { changedPathsFromToolResults } from './runtime-result-shapes.mjs';
 
 const MAX_ITEMS = 8;
 const MAX_CHARS = 1_600;

@@ -242,3 +242,153 @@ it('hides disabled assignee choices without losing existing task attribution or 
     expect(writes).toEqual([expect.objectContaining({ assignedAgentId: 'agent' })]),
   );
 });
+
+it.each(['success', 'failure'])(
+  'retains newer task text in the same editor after delayed save %s',
+  async (outcome) => {
+    let finish!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => (finish = resolve));
+    const writes: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/projects'))
+          return response({ projects: [{ id: 'p', name: 'Project' }] });
+        if (url.endsWith('/tasks/a') && init?.method === 'PATCH') {
+          writes.push(JSON.parse(String(init.body)));
+          return pending;
+        }
+        if (url.includes('/tasks/a/')) return response({ activities: [], attachments: [] });
+        return response({ tasks: [a] });
+      }),
+    );
+    render(
+      <ConfirmProvider>
+        <Tasks agents={[]} />
+      </ConfirmProvider>,
+    );
+    fireEvent.click(await screen.findByText('Task A'));
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), {
+      target: { value: 'Submitted' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), {
+      target: { value: 'New unsaved work' },
+    });
+    await act(async () => {
+      finish(
+        outcome === 'success'
+          ? response({ task: { ...a, title: 'Submitted' } })
+          : new Response('failure', { status: 500 }),
+      );
+      await pending;
+    });
+    expect(writes).toEqual([expect.objectContaining({ title: 'Submitted' })]);
+    expect(screen.getByRole('dialog', { name: 'Edit task' })).toBeTruthy();
+    expect(screen.getByDisplayValue('New unsaved work')).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  },
+);
+
+it.each(['success', 'failure'])(
+  'retains newer project text in the same editor after delayed save %s',
+  async (outcome) => {
+    let finish!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => (finish = resolve));
+    const writes: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          writes.push(JSON.parse(String(init.body)));
+          return pending;
+        }
+        if (String(input).endsWith('/projects'))
+          return response({ projects: [{ id: 'p', name: 'Project' }] });
+        return response({ tasks: [a] });
+      }),
+    );
+    render(
+      <ConfirmProvider>
+        <Tasks agents={[]} />
+      </ConfirmProvider>,
+    );
+    await screen.findByText('Task A');
+    fireEvent.click(screen.getByRole('button', { name: 'Manage projects' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Project name/ }), {
+      target: { value: 'Submitted' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save project' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Project name/ }), {
+      target: { value: 'New unsaved work' },
+    });
+    await act(async () => {
+      finish(
+        outcome === 'success'
+          ? response({ project: { id: 'p', name: 'Submitted' } })
+          : new Response('failure', { status: 500 }),
+      );
+      await pending;
+    });
+    expect(writes).toEqual([expect.objectContaining({ name: 'Submitted' })]);
+    expect(screen.getByDisplayValue('New unsaved work')).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Save project' }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  },
+);
+
+it('keeps newer create-task text when a queued document upload fails after creation', async () => {
+  let finish!: (value: Response) => void;
+  const pendingUpload = new Promise<Response>((resolve) => (finish = resolve));
+  let creates = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/projects')) return response({ projects: [{ id: 'p', name: 'Project' }] });
+      if (url.endsWith('/tasks') && init?.method === 'POST') {
+        creates++;
+        return response({ task: { ...a, title: 'Submitted' } });
+      }
+      if (url.endsWith('/attachments') && init?.method === 'POST') return pendingUpload;
+      if (url.includes('/tasks/a/')) return response({ attachments: [], events: [] });
+      return response({ tasks: [] });
+    }),
+  );
+  render(
+    <ConfirmProvider>
+      <Tasks agents={[]} />
+    </ConfirmProvider>,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: /New task/ }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), {
+    target: { value: 'Submitted' },
+  });
+  fireEvent.change(screen.getByLabelText('Attach document'), {
+    target: { files: [new File(['a'], 'doc.txt')] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), {
+    target: { value: 'New unsaved work' },
+  });
+  await vi.waitFor(() =>
+    expect(
+      (fetch as ReturnType<typeof vi.fn>).mock.calls.some(
+        ([input, init]) => String(input).endsWith('/attachments') && init?.method === 'POST',
+      ),
+    ).toBe(true),
+  );
+  await act(async () => {
+    finish(new Response('Upload failed', { status: 500 }));
+    await pendingUpload;
+  });
+  await screen.findByText(/Task saved, but a document/);
+  expect(screen.getByDisplayValue('New unsaved work')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Remove doc.txt' })).toBeTruthy();
+  expect(creates).toBe(1);
+});

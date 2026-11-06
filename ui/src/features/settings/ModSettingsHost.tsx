@@ -4,6 +4,7 @@ import { enabledAgents } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
 import {
   useImperativeUnsavedChanges,
+  useUnsavedChanges,
   useUnsavedNavigation,
   type UnsavedDraft,
 } from '../../app/UnsavedChanges';
@@ -109,6 +110,10 @@ export function DeclarativeSection({
     sectionId: section.id,
     values: definition ? defaultFieldValues(definition) : {},
   });
+  const [actionBusy, setActionBusy] = useState(false);
+  const [baseline, setBaseline] = useState(() =>
+    definition ? defaultFieldValues(definition) : {},
+  );
   const [actionState, setActionState] = useState<{
     id: string;
     status: 'saving' | 'success' | 'error';
@@ -143,6 +148,7 @@ export function DeclarativeSection({
       ),
     );
     previousDefaults.current = { sectionId: section.id, values: defaults };
+    setBaseline(defaults);
     setActionState(null);
     setEditingId(null);
     setSelectedId((current) =>
@@ -151,10 +157,41 @@ export function DeclarativeSection({
         : (definition.items?.[0]?.id ?? ''),
     );
   }, [definition, section.id]);
+  const busy = actionBusy || actionState?.status === 'saving';
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
+  const dirty = Object.keys(values).some((id) => values[id] !== baseline[id]);
+  const fields = [
+    ...(definition?.fields ?? []),
+    ...(definition?.items?.flatMap((item) => item.fields ?? []) ?? []),
+  ];
+  const clearPasswords = (value: Record<string, string | boolean>) =>
+    Object.fromEntries(
+      Object.entries(value).map(([id, item]) => [
+        id,
+        fields.some((field) => field.id === id && field.control === 'password') ? '' : item,
+      ]),
+    );
+  const saveAction =
+    definition?.actions?.find((action) => action.tone === 'primary') ??
+    definition?.actions?.find((action) => action.tone !== 'danger') ??
+    definition?.items
+      ?.flatMap((item) => item.actions ?? [])
+      .find((action) => action.tone === 'primary');
+  useUnsavedChanges({
+    dirty,
+    busy: Boolean(busy),
+    save: async () => (saveAction ? requestAction(saveAction) : false),
+    discard: () => {
+      setValues(baseline);
+      setActionState(null);
+      setEditingId(null);
+    },
+  });
   if (!definition) return null;
   const update = (id: string, value: string | boolean) =>
     setValues((current) => ({ ...current, [id]: value }));
-  const runAction = async (actionId: string) => {
+  const runAction = async (actionId: string): Promise<boolean> => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
     const actionValues = { ...defaultFieldValues(definition), ...values };
     try {
@@ -162,31 +199,37 @@ export function DeclarativeSection({
         throw new Error('The mod does not provide an action handler.');
       await module.handleSettingsAction(actionId, actionValues);
       setActionState({ id: actionId, status: 'success', message: 'Saved.' });
+      const accepted = clearPasswords(actionValues);
+      setBaseline(accepted);
       setValues((current) =>
         Object.fromEntries(
           Object.entries(current).map(([id, value]) => [
             id,
-            [
-              ...(definition.fields ?? []),
-              ...(definition.items?.flatMap((item) => item.fields ?? []) ?? []),
-            ].some((field) => field.id === id && field.control === 'password')
-              ? ''
-              : value,
+            value === actionValues[id] ? accepted[id] : value,
           ]),
         ),
       );
-      if (definition.fields?.length) setEditingId(null);
+      if (
+        definition.fields?.length &&
+        Object.keys(valuesRef.current).every((id) => valuesRef.current[id] === actionValues[id])
+      )
+        setEditingId(null);
+      return Object.keys(valuesRef.current).every(
+        (id) => valuesRef.current[id] === actionValues[id],
+      );
     } catch (cause) {
       setActionState({
         id: actionId,
         status: 'error',
         message: cause instanceof Error ? cause.message : 'The action could not be completed.',
       });
+      return false;
     }
   };
-  const requestAction = async (action: SettingsAction) => {
-    if (actionPending.current) return;
+  const requestAction = async (action: SettingsAction): Promise<boolean> => {
+    if (actionPending.current) return false;
     actionPending.current = true;
+    setActionBusy(true);
     const owner = actionOwner.current;
     try {
       if (
@@ -198,11 +241,12 @@ export function DeclarativeSection({
           tone: action.tone === 'danger' ? 'danger' : 'default',
         }))
       )
-        return;
-      if (!owner || actionOwner.current !== owner) return;
-      await runAction(action.id);
+        return false;
+      if (!owner || actionOwner.current !== owner) return false;
+      return await runAction(action.id);
     } finally {
       actionPending.current = false;
+      setActionBusy(false);
     }
   };
   const actions = (items: SettingsAction[] | undefined) =>
@@ -216,7 +260,7 @@ export function DeclarativeSection({
               className={
                 action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : ''
               }
-              disabled={actionState?.status === 'saving'}
+              disabled={busy}
               key={action.id}
               onClick={() => void requestAction(action)}
             >
@@ -238,10 +282,9 @@ export function DeclarativeSection({
     const editing =
       definition.items?.find((item) => item.id === editingId) ??
       (!definition.fields?.length ? definition.items?.[0] : undefined);
-    const busy = actionState?.status === 'saving';
     const reset = () => {
       setEditingId(null);
-      setValues(defaultFieldValues(definition));
+      setValues(baseline);
       setActionState(null);
     };
     const inventoryContents = definition.items?.length ? (
@@ -376,12 +419,14 @@ export function DeclarativeSection({
           <Field label={field.label} key={field.id}>
             {field.control === 'boolean' ? (
               <input
+                disabled={busy}
                 type="checkbox"
                 checked={values[field.id] === true}
                 onChange={(event) => update(field.id, event.currentTarget.checked)}
               />
             ) : field.control === 'select' ? (
               <select
+                disabled={busy}
                 value={String(values[field.id] ?? '')}
                 onChange={(event) => update(field.id, event.currentTarget.value)}
               >
@@ -393,6 +438,7 @@ export function DeclarativeSection({
               </select>
             ) : (
               <input
+                disabled={busy}
                 type={
                   field.control === 'password'
                     ? 'password'
@@ -424,6 +470,7 @@ export function DeclarativeSection({
           <Field label={field.label} key={field.id}>
             {field.control === 'select' ? (
               <select
+                disabled={busy}
                 value={String(values[field.id] ?? field.value ?? '')}
                 onChange={(event) => update(field.id, event.currentTarget.value)}
               >
@@ -435,12 +482,14 @@ export function DeclarativeSection({
               </select>
             ) : field.control === 'boolean' ? (
               <input
+                disabled={busy}
                 type="checkbox"
                 checked={values[field.id] === true}
                 onChange={(event) => update(field.id, event.currentTarget.checked)}
               />
             ) : (
               <input
+                disabled={busy}
                 type={
                   field.control === 'password'
                     ? 'password'
@@ -466,12 +515,14 @@ export function DeclarativeSection({
             <Field label={field.label} key={field.id}>
               {field.control === 'boolean' ? (
                 <input
+                  disabled={busy}
                   type="checkbox"
                   checked={values[field.id] === true}
                   onChange={(event) => update(field.id, event.currentTarget.checked)}
                 />
               ) : field.control === 'select' ? (
                 <select
+                  disabled={busy}
                   value={String(values[field.id] ?? '')}
                   onChange={(event) => update(field.id, event.currentTarget.value)}
                 >
@@ -483,6 +534,7 @@ export function DeclarativeSection({
                 </select>
               ) : (
                 <input
+                  disabled={busy}
                   type={
                     field.control === 'password'
                       ? 'password'
@@ -505,6 +557,7 @@ export function DeclarativeSection({
                 type="button"
                 className={item.id === selected?.id ? 'active' : ''}
                 aria-current={item.id === selected?.id ? 'page' : undefined}
+                disabled={busy}
                 onClick={() => setSelectedId(item.id)}
                 key={item.id}
               >

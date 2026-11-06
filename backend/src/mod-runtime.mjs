@@ -3,7 +3,7 @@ import { publishModTools, unpublishModTools } from './mod-agent-tools.mjs';
 import { createModCapabilities } from './mod-capabilities.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+
 import { emitModEvent, modLogIdentity, startModHost } from './mod-host.mjs';
 import { manifestManagedSkills } from './managed-skills.mjs';
 

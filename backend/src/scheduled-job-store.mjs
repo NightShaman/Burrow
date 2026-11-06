@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+
 
 export const SCHEDULED_JOB_RUN_STATUSES = Object.freeze(['running', 'completed', 'failed', 'cancelled', 'missed', 'skipped']);
 const text = (value) => String(value ?? '').trim();
@@ -31,8 +31,13 @@ export function cronMatches(expression, date, timezone) { const cron = typeof ex
 export function nextCronOccurrence(expression, timezone, from = new Date()) {
   const cron = typeof expression === 'string' ? parseCron(expression) : expression;
   const start = Math.floor(from.getTime() / 60_000) * 60_000 + 60_000;
-  const limit = start + 366 * 86400_000;
-  if (!Number.isFinite(start)) throw new Error('scheduled_job_next_run_unresolvable');
+  // Gregorian civil dates and weekdays repeat over 400 years (including leap
+  // centuries). Sparse AND-of-fields schedules can wait decades, not 366 days.
+  // Include one extra UTC day for timezone offsets near either boundary.
+  const limitDate = new Date(start);
+  limitDate.setUTCFullYear(limitDate.getUTCFullYear() + 400);
+  const limit = limitDate.getTime() + 86400_000;
+  if (!Number.isFinite(start) || !Number.isFinite(limit)) throw new Error('scheduled_job_next_run_unresolvable');
   formatter(timezone);
   // An IANA civil date is within one day of its UTC date (offset <24h).
   // Reject entire UTC days only when none of those three civil dates is

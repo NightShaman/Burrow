@@ -187,18 +187,94 @@ function hunkBlockFromStructuredPatchLines(lines = []) {
 function hunkBlocksFromStructuredPatchLines(lines = []) {
   const hunks = [];
   let current = [];
+  let scope = null;
   let sawHunkMarker = false;
   for (const line of lines) {
     if (line.startsWith('@@')) {
-      if (current.length) hunks.push(hunkBlockFromStructuredPatchLines(current));
+      if (current.length) hunks.push({ ...hunkBlockFromStructuredPatchLines(current), scope });
       current = [];
+      scope = line.slice(2).trim() || null;
       sawHunkMarker = true;
       continue;
     }
     current.push(line);
   }
-  if (current.length || !sawHunkMarker) hunks.push(hunkBlockFromStructuredPatchLines(current));
+  if (current.length || !sawHunkMarker) hunks.push({ ...hunkBlockFromStructuredPatchLines(current), scope });
   return hunks;
+}
+
+function bracedScopeEnd(content, opening) {
+  let depth = 0;
+  let quote = null;
+  let comment = null;
+  for (let i = opening; i < content.length; i += 1) {
+    const char = content[i];
+    const next = content[i + 1];
+    if (comment === 'line') { if (char === '\n') comment = null; continue; }
+    if (comment === 'block') { if (char === '*' && next === '/') { comment = null; i += 1; } continue; }
+    if (quote) {
+      if (char === '\\') { i += 1; continue; }
+      if (char === quote) quote = null;
+      else if (char === '\n') return { error: 'patch_scope_unsupported' };
+      continue;
+    }
+    if (char === '/' && next === '/') { comment = 'line'; i += 1; continue; }
+    if (char === '/' && next === '*') { comment = 'block'; i += 1; continue; }
+    // Template interpolation and regex literals cannot be bounded safely by
+    // this lightweight matcher. Reject the scoped edit instead of guessing.
+    if (char === '`' || (char === '/' && /[=(,:!]/u.test(content.slice(opening, i).trimEnd().slice(-1)))) return { error: 'patch_scope_unsupported' };
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '{') depth += 1;
+    if (char === '}' && --depth === 0) return { end: i + 1 };
+  }
+  return { error: 'patch_scope_unclosed' };
+}
+
+function uniqueHunkOffset(content, { oldBlock, scope }) {
+  let start = 0;
+  let end = content.length;
+  if (scope) {
+    const scopes = [];
+    let lineStart = 0;
+    while (lineStart < content.length) {
+      const lineEnd = content.indexOf('\n', lineStart);
+      const header = content.slice(lineStart, lineEnd < 0 ? content.length : lineEnd);
+      const trimmed = header.trim();
+      const next = trimmed.slice(scope.length, scope.length + 1);
+      // A function-name scope can be abbreviated before '(' but never into a
+      // different identifier (foo must not select foobar). An exact header is
+      // also accepted; multiple candidate headers remain ambiguous.
+      if (trimmed.startsWith(scope) && (!next || !/[\p{L}\p{N}_$]/u.test(next))) scopes.push({ start: lineStart, header, lineEnd });
+      if (lineEnd < 0) break;
+      lineStart = lineEnd + 1;
+    }
+    if (scopes.length !== 1) return { error: scopes.length ? 'patch_scope_ambiguous' : 'patch_scope_not_found' };
+    const selected = scopes[0];
+    start = selected.start;
+    const indent = selected.header.match(/^\s*/u)[0].length;
+    if (selected.header.includes('{')) {
+      const boundary = bracedScopeEnd(content, selected.start + selected.header.indexOf('{'));
+      if (boundary.error) return boundary;
+      end = boundary.end;
+    } else {
+      let position = selected.lineEnd + 1;
+      while (position > 0 && position < content.length) {
+        const next = content.indexOf('\n', position);
+        const line = content.slice(position, next < 0 ? content.length : next);
+        if (line.trim() && line.match(/^\s*/u)[0].length <= indent) { end = position; break; }
+        position = next < 0 ? content.length : next + 1;
+      }
+    }
+  }
+  const positions = [];
+  let at = content.indexOf(oldBlock, start);
+  while (at !== -1 && at + oldBlock.length <= end) {
+    if ((at === 0 || content[at - 1] === '\n') &&
+        (oldBlock.endsWith('\n') || at + oldBlock.length === content.length || content[at + oldBlock.length] === '\n')) positions.push(at);
+    at = content.indexOf(oldBlock, at + 1);
+  }
+  if (positions.length !== 1) return { error: positions.length ? 'patch_context_ambiguous' : 'patch_context_mismatch' };
+  return { offset: positions[0] };
 }
 
 function structuredPatchFilePath(rawPath = '', baseRoot = process.cwd()) {
@@ -232,17 +308,24 @@ async function applyStructuredPatch({ patch, baseRoot, logger, prefix }) {
       if (operation.type === 'add') {
         const newBlock = hunkBlocksFromStructuredPatchLines(operation.lines).map((hunk) => hunk.newBlock).join('\n');
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
-        await fs.writeFile(targetPath, newBlock.endsWith('\n') ? newBlock : `${newBlock}\n`, 'utf8');
+        // wx is an atomic exclusive create: an existing target (including a
+        // symlink), or one created by a concurrent Add, is never overwritten.
+        const handle = await fs.open(targetPath, 'wx');
         changedFiles.push(relative);
-        const afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, await fs.readFile(targetPath, 'utf8'));
-        operationArtifacts.push({ beforePath: null, afterPath });
+        const receipt = { beforePath: null, afterPath: null, created: true, afterSha256: null };
+        operationArtifacts.push(receipt);
+        try { await handle.writeFile(newBlock.endsWith('\n') ? newBlock : `${newBlock}\n`, 'utf8'); }
+        finally { await handle.close(); }
+        const after = await fs.readFile(targetPath, 'utf8');
+        receipt.afterSha256 = createHash('sha256').update(after).digest('hex');
+        receipt.afterPath = await logger.artifact(`${prefix}-structured-${index}-after.txt`, after);
         continue;
       }
 
       const before = await fs.readFile(targetPath, 'utf8');
       let after = before;
       const hunks = hunkBlocksFromStructuredPatchLines(operation.lines);
-      for (const [hunkIndex, { oldBlock, newBlock }] of hunks.entries()) {
+      for (const [hunkIndex, { oldBlock, newBlock, scope }] of hunks.entries()) {
         // A no-op hunk adds no evidence and must not make an otherwise valid
         // multi-hunk update fail because it cannot be found independently.
         if (oldBlock === newBlock) continue;
@@ -257,11 +340,11 @@ async function applyStructuredPatch({ patch, baseRoot, logger, prefix }) {
             failedHunkIndex: hunkIndex,
           };
         }
-        const indexOf = after.indexOf(oldBlock);
-        if (indexOf < 0) {
+        const located = uniqueHunkOffset(after, { oldBlock, scope });
+        if (located.error) {
           return {
             ok: false,
-            error: `patch_context_mismatch:${operation.file}:hunk-${hunkIndex + 1}`,
+            error: `${located.error}:${operation.file}:hunk-${hunkIndex + 1}`,
             failureClass: 'patch_context_mismatch',
             changedFiles,
             operationArtifacts,
@@ -269,7 +352,7 @@ async function applyStructuredPatch({ patch, baseRoot, logger, prefix }) {
             failedHunkIndex: hunkIndex,
           };
         }
-        after = `${after.slice(0, indexOf)}${newBlock}${after.slice(indexOf + oldBlock.length)}`;
+        after = `${after.slice(0, located.offset)}${newBlock}${after.slice(located.offset + oldBlock.length)}`;
       }
       if (after === before) continue;
       const beforePath = await logger.artifact(`${prefix}-structured-${index}-before.txt`, before);

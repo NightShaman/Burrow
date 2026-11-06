@@ -104,6 +104,19 @@ function recallEligible(entry) {
     && (entry?.entersPrompt ?? true) === true);
 }
 
+// Internal ranking signal: never expose the unbounded original content or score
+// in the operator response. Spread during aggregation retains this symbol.
+const operatorRelevance = Symbol('operatorRelevance');
+
+function operatorRank(left, right, query) {
+  const first = left[operatorRelevance], second = right[operatorRelevance];
+  // Exact content phrase outranks token co-occurrence; the lexical scorer's
+  // existing 1000 exact score can be lower than its 1200+ all-term score.
+  const exact = Number(Boolean(second?.exact)) - Number(Boolean(first?.exact));
+  return exact || (second?.score ?? recallScore(right, query)) - (first?.score ?? recallScore(left, query))
+    || String(right.ts || '').localeCompare(String(left.ts || ''));
+}
+
 function recallScore(entry, query) {
   const content = normalized(entry.metadata?.compressionSummary?.text || entry.content);
   const decisionLanguage = /\b(?:decid(?:e|ed|ing)|agreed|require(?:s|d)?|must|should|need(?:s|ed)?|will|won't|do not|don't|keep|remain|stay|real)\b/iu.test(content);
@@ -177,7 +190,7 @@ async function sessionMatchesForAgent({ conversationStore = null, agent = {}, ro
   const matches = [];
   let totalMatches = 0;
   for (const record of records) {
-    const result = await searchSessionEvidence({ conversationStore, agentId: agent.agentId, rootDir: agent.rootDir, sessionId: record.id, query, role, includeSummaries, limit: 200, since, until });
+    const result = await searchSessionEvidence({ conversationStore, agentId: agent.agentId, rootDir: agent.rootDir, sessionId: record.id, query, role, includeSummaries, limit: 200, since, until, preserveOperatorRelevance: true });
     totalMatches += result.totalMatches || 0;
     for (const entry of result.results) {
       matches.push({
@@ -196,10 +209,7 @@ async function sessionMatchesForAgent({ conversationStore = null, agent = {}, ro
       });
     }
   }
-  matches.sort((left, right) => {
-    const relevance = recallScore(right, query) - recallScore(left, query);
-    return relevance || String(right.ts || '').localeCompare(String(left.ts || ''));
-  });
+  matches.sort((left, right) => operatorRank(left, right, query));
   return { matches: matches.slice(0, parseLimit(limit)), searchedSessionCount: records.length, totalMatches };
 }
 
@@ -224,7 +234,7 @@ async function indexedEvidenceTranscript({ conversationStore, agentId, sessionId
   return entries.reverse().sort((a,b) => String(a.ts || '').localeCompare(String(b.ts || '')));
 }
 
-export async function searchSessionEvidence({ conversationStore = null, agentId = null, rootDir, sessionId = 'default', query = '', role = 'any', sourceId = null, includeSummaries = true, limit = 50, since = null, until = null } = {}) {
+export async function searchSessionEvidence({ conversationStore = null, agentId = null, rootDir, sessionId = 'default', query = '', role = 'any', sourceId = null, includeSummaries = true, limit = 50, since = null, until = null, preserveOperatorRelevance = false } = {}) {
   // Reset snapshots are archive-only human history. Session search may retain
   // compacted predecessors for the active conversation, but never traverses a
   // prior reset generation.
@@ -239,10 +249,14 @@ export async function searchSessionEvidence({ conversationStore = null, agentId 
     .filter((entry) => matchesTime(entry, { since, until }))
     .filter((entry) => matchesQuery(entry, query));
   const rankedEntries = query
-    ? [...entries].sort((left, right) => recallScore(right, query) - recallScore(left, query) || String(right.ts || '').localeCompare(String(left.ts || '')))
+    ? [...entries].sort((left, right) => preserveOperatorRelevance
+      ? operatorRank(left, right, query)
+      : recallScore(right, query) - recallScore(left, query) || String(right.ts || '').localeCompare(String(left.ts || '')))
     : entries;
   const selectedEntries = query ? rankedEntries.slice(0, max) : rankedEntries.slice(-max);
-  const results = selectedEntries.map((entry) => compactEntry(entry, query));
+  const results = selectedEntries.map((entry) => ({ ...compactEntry(entry, query),
+    ...(preserveOperatorRelevance ? { [operatorRelevance]: { score: recallScore(entry, query),
+      exact: Boolean(query && normalized(entry.content || entry.metadata?.compressionSummary?.text).includes(normalized(query).trim())) } } : {}) }));
   const summaries = compressionSummariesFromTranscript(transcript);
   return {
     ok: true,
@@ -462,11 +476,11 @@ export async function searchBurrowSessionEvidence({ conversationStore = null, ag
     .map((agent) => ({ ...agent, agentId: String(agent.agentId || agent.id || '').trim() || null }));
   const perAgent = await Promise.all(normalizedAgents.map((agent) => sessionMatchesForAgent({ conversationStore, agent, query, role, limit: max, includeSummaries, since, until, includeArchived })));
   const matches = perAgent.flatMap((result) => result.matches);
-  matches.sort((left, right) => {
-    const relevance = recallScore(right, query) - recallScore(left, query);
-    return relevance || String(right.ts || '').localeCompare(String(left.ts || ''));
+  matches.sort((left, right) => operatorRank(left, right, query));
+  const results = matches.slice(0, max).map((match) => {
+    const { [operatorRelevance]: _ranking, ...publicMatch } = match;
+    return publicMatch;
   });
-  const results = matches.slice(0, max);
   return {
     ok: true,
     tool: 'operator_session_search',

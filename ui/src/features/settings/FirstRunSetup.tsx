@@ -212,7 +212,6 @@ export function FirstRunSetup({
   onFirstRunComplete,
   onSetupComplete,
 }: AgentToolbarProps) {
-  const firstRun = true;
   const setupOwner = useRef<object>({});
   useEffect(
     () => () => {
@@ -405,8 +404,8 @@ export function FirstRunSetup({
     }
   };
   useEffect(() => {
-    if (firstRun && !showNewAgent) void open();
-  }, [firstRun, showNewAgent]);
+    if (!showNewAgent) void open();
+  }, [showNewAgent]);
   useEffect(() => {
     onFirstRunCompleteRef.current = onFirstRunComplete;
   }, [onFirstRunComplete]);
@@ -467,7 +466,7 @@ export function FirstRunSetup({
     if (avatarInput.current) avatarInput.current.value = '';
   };
   const markSetupComplete = async () => {
-    if (firstRun) await onSetupComplete?.();
+    await onSetupComplete?.();
   };
   const finish = async () => {
     if (setupBusy.current) return;
@@ -600,7 +599,6 @@ export function FirstRunSetup({
         <div
           className={`agent-modal-backdrop${celebrating ? ' agent-wizard-celebrating' : ''}`}
           role="presentation"
-          onMouseDown={() => state === 'idle' && !firstRun && !celebrating && reset()}
         >
           {celebrating ? (
             <section className="agent-wizard-finale" role="status" aria-live="polite">
@@ -626,7 +624,7 @@ export function FirstRunSetup({
               aria-labelledby="new-agent-title"
               onMouseDown={(event) => event.stopPropagation()}
               onClose={() => {
-                if (state === 'idle' && !firstRun && !celebrating && !importing) reset();
+                /* Mandatory onboarding stays open. */
               }}
             >
               <div className="agent-wizard-atmosphere" aria-hidden="true">
@@ -663,7 +661,7 @@ export function FirstRunSetup({
                   type="button"
                   aria-label="Close new agent"
                   onClick={reset}
-                  disabled={state !== 'idle' || firstRun}
+                  disabled
                 >
                   ×
                 </button>
@@ -924,8 +922,7 @@ export function FirstRunSetup({
                           role="dialog"
                           aria-labelledby="wizard-oauth-title"
                           onClose={() => {
-                            if (state === 'idle' && !firstRun && !celebrating && !importing)
-                              reset();
+                            if (oauthBusy === 'idle') setOauthProvider(null);
                           }}
                         >
                           <div className="oauth-modal-header">

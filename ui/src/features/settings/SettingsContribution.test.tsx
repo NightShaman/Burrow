@@ -215,7 +215,7 @@ it('retains the form and inline inventory without an overflow target, including 
   expect(within(view.container).getByText('No saved items yet.')).toBeTruthy();
 });
 
-it('selects credential forms without conflating selection and revoke, and clears secrets on cancel', () => {
+it('selects credential forms without conflating selection and revoke, and clears secrets on cancel', async () => {
   const contribution = validateSettingsContribution({
     sections: [
       {
@@ -249,6 +249,11 @@ it('selects credential forms without conflating selection and revoke, and clears
   fireEvent.click(within(overflow).getByRole('button', { name: 'Revoke' }));
   expect(within(view.container).getByLabelText('Gateway ID')).toBeTruthy();
   fireEvent.click(within(document.body).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() =>
+    expect(
+      (within(overflow).getByRole('button', { name: 'Hatchet' }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
   fireEvent.click(within(overflow).getByRole('button', { name: 'Hatchet' }));
   expect(within(overflow).getByRole('button', { name: 'Hatchet', pressed: true })).toBeTruthy();
   fireEvent.change(within(view.container).getByLabelText('New secret'), {

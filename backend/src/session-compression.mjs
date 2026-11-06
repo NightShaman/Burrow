@@ -1,7 +1,7 @@
 import { conversationAuthority } from './conversation-authority.mjs';
-import { summarizeSessionTurns } from './session-entry.mjs';
+import './session-entry.mjs';
 import { planContextCompression } from './context-compression.mjs';
-import { contextStatesFromTranscript, renderContextStates } from './session-context-state.mjs';
+import { contextStatesFromTranscript } from './session-context-state.mjs';
 import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } from './conversation-message-budget.mjs';
 import { operationalTelemetry } from './operational-telemetry.mjs';
 import { performance } from 'node:perf_hooks';

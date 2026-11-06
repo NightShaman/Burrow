@@ -1,6 +1,5 @@
 import { DefaultMinionModel } from './DefaultMinionModel';
 import { MinionDepthSettings } from './MinionDepthSettings';
-import { createPortal } from 'react-dom';
 import type { Agent, SavedProvider } from '../../app/types';
 import { SettingSection } from './SettingsPrimitives';
 import { AgentDetails } from './AgentDetails';
@@ -58,9 +57,7 @@ export function AgentSettings({
     return (
       <>
         {details}
-        {overflowTarget
-          ? createPortal(<div className="settings-overflow-content">{minion}</div>, overflowTarget)
-          : minion}
+        {minion}
       </>
     );
   if (section === 'profile-documents')

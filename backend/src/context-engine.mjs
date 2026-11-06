@@ -1,5 +1,5 @@
 import { buildConversationContext } from './conversation-context.mjs';
-import { AGENT_PROFILE_KINDS, AgentProfileStore, profileFilesFromDocuments } from './agent-profile-store.mjs';
+import { AGENT_PROFILE_KINDS, profileFilesFromDocuments } from './agent-profile-store.mjs';
 import { assertContextBoundary } from './context-boundary.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { compressionSummariesFromTranscript } from './session-compression.mjs';

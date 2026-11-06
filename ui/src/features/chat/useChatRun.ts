@@ -57,7 +57,7 @@ type ChatRunSession = {
   draft: string;
   setDraft: (value: string) => void;
   clearError: () => void;
-  reportError: (message: string) => void;
+  reportError: (message: string, agentId?: string, sessionId?: string) => void;
   leaveNewSessionForMessage: () => void;
   appendTurn: (agentId: string, sessionId: string, turn: SessionTurn) => void;
   appendTransientTurn: (agentId: string, sessionId: string, turn: SessionTurn) => void;
@@ -210,6 +210,7 @@ export function useChatRun({
     const acceptSubmission = () => {
       if (abortController.signal.aborted || streamAbortRef.current[targetKey] !== abortController)
         return;
+      accepted = true;
       if (onAccepted) onAccepted();
       else {
         session.setDraft('');
@@ -239,6 +240,7 @@ export function useChatRun({
       });
     };
     performance.mark(`chat:${runId}:send`, { startTime: sentAt });
+    let accepted = false;
     let firstUseful = false;
     let streamedAnswer = '';
     let answerModelCall: number | undefined;
@@ -486,6 +488,8 @@ export function useChatRun({
           error instanceof Error
             ? `Could not refresh chat: ${error.message}`
             : 'Could not refresh chat.',
+          target.agentId,
+          target.sessionId,
         ),
       );
     } catch (error) {
@@ -493,10 +497,31 @@ export function useChatRun({
         streamAbortRef.current[targetKey] === abortController &&
         !abortController.signal.aborted &&
         !(error instanceof DOMException && error.name === 'AbortError')
-      )
+      ) {
         session.reportError(
           error instanceof Error ? `Message failed: ${error.message}` : 'Message failed.',
+          target.agentId,
+          target.sessionId,
         );
+        // HTTP acceptance means the server may have committed a run even when
+        // the terminal event was lost. Polling can miss a fast completed run.
+        // Re-read this origin; never manufacture an assistant terminal turn.
+        if (accepted)
+          void Promise.all([
+            session.refreshSessions(target.agentId),
+            ...(transientContextCommand
+              ? []
+              : [session.refreshConversation(target.agentId, target.sessionId)]),
+          ]).catch((refreshError) =>
+            session.reportError(
+              refreshError instanceof Error
+                ? `Could not refresh chat: ${refreshError.message}`
+                : 'Could not refresh chat.',
+              target.agentId,
+              target.sessionId,
+            ),
+          );
+      }
     } finally {
       if (frame) cancelAnimationFrame(frame);
       // A stopped stream may settle after a replacement started in this session.
@@ -574,6 +599,8 @@ export function useChatRun({
       if (!isChatRunNotFoundError(error)) {
         session.reportError(
           error instanceof Error ? `Could not stop run: ${error.message}` : 'Could not stop run.',
+          run.agentId,
+          run.sessionId,
         );
         return;
       }
@@ -590,6 +617,8 @@ export function useChatRun({
         error instanceof Error
           ? `Could not refresh chat: ${error.message}`
           : 'Could not refresh chat.',
+        run.agentId,
+        run.sessionId,
       ),
     );
   };

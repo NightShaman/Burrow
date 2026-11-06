@@ -17,7 +17,7 @@ import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
 import { prepareRuntimeSupportContext } from './runtime-support-context.mjs';
-import { workbenchWorkflow } from './workbench-workflow.mjs';
+import './workbench-workflow.mjs';
 import { buildContinuationPlan, explicitContinueRequested } from './work-item-service.mjs';
 import { prepareRuntimeWorkItemContext } from './runtime-work-item-context.mjs';
 import { agentExecutionWorkspaceRoot, prepareRuntimeSessionContext } from './runtime-session-context.mjs';
@@ -36,11 +36,12 @@ import { persistPlainChatResult } from './runtime-plain-chat-persistence.mjs';
 import { appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
 import { prepareRuntimePromptContext } from './runtime-prompt-context.mjs';
 import { subagentVisibilitySummary, listSubagentRecords } from './subagent-store.mjs';
-import { applyWorkingContextEvents } from './working-context.mjs';
+import './working-context.mjs';
 import { appendTiddleResidueAsync } from './tiddle-continuity.mjs';
+import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { persistChatAttachments } from './attachment-store.mjs';
 
-import { createExecutionContext } from './execution-context.mjs';
+import './execution-context.mjs';
 import { resolveRuntimeTurnTarget } from './runtime-turn-target.mjs';
 import { runtimeHeapStage } from './runtime-heap-diagnostics.mjs';
 import { loadRuntimeMcpCapabilities, createRuntimeExecutionContext } from './runtime-capability-context.mjs';
@@ -279,6 +280,7 @@ async function runAskChatUnserialized({
   };
   let modContinuityAuthority = null;
   let modContinuity = null;
+  let committedTerminalResult = null;
   try {
   const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
   const continuity = await continuityAuthority.claim({
@@ -348,7 +350,7 @@ async function runAskChatUnserialized({
     : onTraceRecord;
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: rememberTelemetryTerminal, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: (result) => { committedTerminalResult = result; rememberTelemetryTerminal(result); }, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentTraceContext = null, parentSignal = null }) => {
     // Ingress is already durable/idempotent before this callback. Each distinct
     // exchange needs a distinct run, while replays retain the same identity.
@@ -390,7 +392,7 @@ async function runAskChatUnserialized({
         onCancellationDeadline: lifecycle?.onCancellationDeadline || null,
         args: { abort_signal: lifecycle?.signal || parentSignal || normalizedArgs.abort_signal || null },
       });
-      return { ok: reply.ok === true, decision: reply.decision || null, answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null };
+      return { ok: reply.ok === true, decision: reply.decision || null, answerText: reply.answerText || null, runId: reply.runId || null, recipientReplyEntryId: reply.assistantTurn?.id || null, error: reply.error || null, ...projectModelRecoveryMetadata(reply) };
     } finally {
       lifecycle?.finish?.();
     }
@@ -631,6 +633,11 @@ async function runAskChatUnserialized({
   } finally {
     try {
       if (stores.steering) await stores.steering.boundary(steeringIdentity, { finish: true });
+    } catch (error) {
+      // A steering cleanup failure cannot turn a durable terminal answer into
+      // a failed transport or trigger a queue retry of completed work.
+      if (!committedTerminalResult) throw error;
+      try { console.warn('postcommit steering cleanup failed', error); } catch {}
     } finally {
       // Finish only after the terminal owner (including its trace writes) has
       // settled. Exceptions and supersession cannot strand a started OTel run.

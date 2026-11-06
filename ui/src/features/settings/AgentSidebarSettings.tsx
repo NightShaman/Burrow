@@ -22,6 +22,7 @@ export function AgentSidebarSettings({
 }) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
   const orderedAgents = useMemo(
     () => orderAgents(agents, preferences.order),
     [agents, preferences.order],
@@ -75,12 +76,42 @@ export function AgentSidebarSettings({
       </Field>
       <div className="agent-sidebar-order" aria-label="Agent order">
         <span className="field-label">Order</span>
-        <p className="hint">Drag agents into the order you want them shown in the sidebar.</p>
-        <div className="agent-sidebar-order-list">
-          {orderedAgents.map((agent) => (
+        <p className="hint">
+          Drag agents to reorder, or focus an agent and press Alt+Up or Alt+Down.
+        </p>
+        <span
+          role="status"
+          aria-label="Agent order update"
+          aria-live="polite"
+          className="agent-sidebar-order-announcement"
+        >
+          {announcement}
+        </span>
+        <div className="agent-sidebar-order-list" role="list" aria-label="Reorder agents">
+          {orderedAgents.map((agent, index) => (
             <div
               key={agent.id}
               draggable
+              role="listitem"
+              tabIndex={0}
+              aria-label={`${agent.name}, move with Alt+Up or Alt+Down, position ${index + 1} of ${orderedAgents.length}`}
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              onKeyDown={(event) => {
+                if (
+                  !event.altKey ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')
+                )
+                  return;
+                event.preventDefault();
+                const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1);
+                if (targetIndex < 0 || targetIndex >= orderedAgents.length) return;
+                reorder(agent.id, orderedAgents[targetIndex].id);
+                setAnnouncement(
+                  `${agent.name} moved to position ${targetIndex + 1} of ${orderedAgents.length}.`,
+                );
+              }}
               className={`${draggedId === agent.id ? 'dragging' : ''} ${dropTargetId === agent.id && draggedId !== agent.id ? 'drop-target' : ''}`}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';

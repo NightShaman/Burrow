@@ -102,9 +102,9 @@ function contextBuildEvent({ phase, budget = null, compression = null, contextTh
 }
 
 function assertPromptFitsProviderBudget({ budget, promptPressureCompression } = {}) {
-  const contextTokens = Number(budget?.contextTokens);
+  const contextTokens = budget?.contextTokens == null ? NaN : Number(budget.contextTokens);
   const estimatedTokens = Number(budget?.estimatedTokens);
-  if (!Number.isFinite(contextTokens) || contextTokens <= 0 || !Number.isFinite(estimatedTokens) || estimatedTokens <= contextTokens) return;
+  if (!Number.isFinite(contextTokens) || contextTokens < 0 || !Number.isFinite(estimatedTokens) || estimatedTokens <= contextTokens) return;
   // The adapter may replay the initial static prefix exactly during a native
   // continuation. Consequently the preparation boundary—not a lossy adapter
   // limiter—owns the final model-window invariant.

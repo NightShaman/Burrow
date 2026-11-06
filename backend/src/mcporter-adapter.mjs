@@ -170,29 +170,41 @@ export function publicMcpFailureDetail(error, protectedValues = []) {
   return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(httpStatus ? { httpStatus } : {}), ...(detail ? { diagnostic: detail } : {}) };
 }
 
-function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [] } = {}) {
+function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [], signal = null } = {}) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const captureLimit = Math.max(1, Number(maxStreamCaptureBytes) || DEFAULT_STREAM_CAPTURE_BYTES);
     const stdoutState = { chunks: [], originalBytes: 0, capturedBytes: 0 };
     const stderrState = { chunks: [], originalBytes: 0, capturedBytes: 0 };
     let settled = false;
     let timedOut = false;
     let killTimer = null;
-    const finish = (fn) => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(killTimer); fn(); };
+    const killGroup = (sig) => {
+      try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig); else child.kill(sig); }
+      catch (error) { if (error?.code !== 'ESRCH') throw error; }
+    };
+    const terminate = () => {
+      killGroup('SIGTERM');
+      killTimer = setTimeout(() => { try { killGroup('SIGKILL'); } catch {} }, Math.max(1, Number(killAfterMs) || 1_000));
+      killTimer.unref?.();
+    };
+    const onAbort = () => terminate();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const finish = (fn) => { if (settled) return; settled = true; signal?.removeEventListener('abort', onAbort); clearTimeout(timer); if (!signal?.aborted && !timedOut) clearTimeout(killTimer); fn(); };
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
-      killTimer = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, Math.max(1, Number(killAfterMs) || 1_000));
-      killTimer.unref?.();
+      terminate();
     }, Math.max(1, Number(timeoutMs) || 20_000));
+    if (signal?.aborted) onAbort();
     child.stdout.on('data', (chunk) => { appendTail(stdoutState, chunk, captureLimit); });
     child.stderr.on('data', (chunk) => { appendTail(stderrState, chunk, captureLimit); });
-    child.once('error', (error) => finish(() => reject(error)));
+    child.once('error', (error) => finish(() => reject(signal?.aborted ? signal.reason : error)));
     child.once('close', (code) => finish(() => {
       const stdout = renderedStream(stdoutState);
       const stderr = renderedStream(stderrState);
-      if (timedOut) reject(runtimeFailure('mcp_runtime_timeout', { stdout, stderr, protectedValues }));
+      if (signal?.aborted) reject(signal.reason || new Error('mcp_runtime_cancelled'));
+      else if (timedOut) reject(runtimeFailure('mcp_runtime_timeout', { stdout, stderr, protectedValues }));
       else code === 0 ? resolve(stdout) : reject(runtimeFailure('mcp_runtime_failed', { stdout, stderr, protectedValues }));
     }));
   });
@@ -217,11 +229,13 @@ function configFor(connection, apiKey, environmentVariables = {}, headers = {}) 
   return { mcpServers: { connection: definition } };
 }
 
-async function withConnectionConfig(connection, apiKey, environmentVariables, headers, operation, { runtimeRoot = null, binary = null, runCommand = run } = {}) {
+async function withConnectionConfig(connection, apiKey, environmentVariables, headers, operation, { runtimeRoot = null, binary = null, runCommand = run, signal = null } = {}) {
+  signal?.throwIfAborted();
   const resolved = resolveMcporterRuntime({ runtimeRoot, binary });
   runtimeRoot = resolved.root; binary = resolved.binary;
   const configRoot = path.join(runtimeRoot, 'runtime');
   await mkdir(configRoot, { recursive: true, mode: 0o700 });
+  signal?.throwIfAborted();
   // Keep-alive servers are keyed by their stable config path in mcporter's
   // daemon. Ephemeral calls retain the old disposable configuration behavior.
   if (connection.lifecycle === 'keep_alive') {
@@ -231,29 +245,34 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, he
     // whether an existing daemon must be replaced.
     const existing = await readFile(configPath, 'utf8').catch(() => null);
     if (existing !== config) await writeFile(configPath, config, { mode: 0o600 });
+    signal?.throwIfAborted();
     if (!['ready', 'unavailable'].includes(providerStates.get(providerId(connection))?.status)) await providerEvent(connection, 'starting', { runtimeRoot });
     try {
       // daemon start is idempotent in mcporter: it both verifies an existing
       // daemon and recreates one that vanished. Never advertise a keep-alive
       // provider merely because its old catalog is cached.
-      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      signal?.throwIfAborted();
+      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, signal, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      signal?.throwIfAborted();
     } catch (error) {
-      await providerEvent(connection, 'unavailable', { runtimeRoot, error });
+      if (!signal?.aborted) await providerEvent(connection, 'unavailable', { runtimeRoot, error });
       throw error;
     }
     try {
+      signal?.throwIfAborted();
       const result = await operation(configPath, { binary, runtimeRoot });
       await providerEvent(connection, 'ready', { runtimeRoot });
       return result;
     } catch (error) {
       // A valid tool error proves the provider answered, not a dependency outage.
-      await providerEvent(connection, publicMcpError(error) === 'mcp_tool_failed' ? 'ready' : 'unavailable', { runtimeRoot, ...(publicMcpError(error) === 'mcp_tool_failed' ? {} : { error }) });
+      if (!signal?.aborted) await providerEvent(connection, publicMcpError(error) === 'mcp_tool_failed' ? 'ready' : 'unavailable', { runtimeRoot, ...(publicMcpError(error) === 'mcp_tool_failed' ? {} : { error }) });
       throw error;
     }
   }
+  signal?.throwIfAborted();
   const temporary = await mkdtemp(path.join(configRoot, 'mcp-'));
   const configPath = path.join(temporary, 'mcporter.json');
-  try { await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables, headers)), { mode: 0o600 }); return await operation(configPath, { binary, runtimeRoot }); } finally { await rm(temporary, { recursive: true, force: true }); }
+  try { signal?.throwIfAborted(); await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables, headers)), { mode: 0o600 }); signal?.throwIfAborted(); return await operation(configPath, { binary, runtimeRoot }); } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
 export async function stopPersistentMcpConnection(connection, { apiKey, environmentVariables = {}, headers = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
@@ -306,7 +325,8 @@ export async function discoverMcpTools(connection, { apiKey, environmentVariable
   } catch (error) { if (error instanceof SyntaxError) throw new Error('mcp_discovery_invalid_response'); throw error; }
 }
 
-export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, headers = {}, toolName, arguments: toolArguments = {}, preserveContentResults = false, binary = null, runtimeRoot = null, runCommand = run } = {}) {
+export async function invokeMcpTool(connection, { apiKey, environmentVariables = {}, headers = {}, toolName, arguments: toolArguments = {}, preserveContentResults = false, binary = null, runtimeRoot = null, runCommand = run, signal = null } = {}) {
+  signal?.throwIfAborted();
   if (!connection?.enabled) throw new Error('mcp_connection_disabled');
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   if (!text(toolName)) throw new Error('mcp_tool_name_invalid');
@@ -318,7 +338,8 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       const args = preserveContentResults
         ? [fileURLToPath(new URL('./mcporter-content-launcher.mjs', import.meta.url)), runtime.binary, configPath, toolName, JSON.stringify(toolArguments), connection.lifecycle || 'ephemeral']
         : ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'];
-      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      signal?.throwIfAborted();
+      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, signal, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     } catch (error) {
       // mcporter deliberately exits non-zero for a valid MCP `{ isError:
       // true }` result, while writing that result to stdout. Parse it before
@@ -327,6 +348,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       launcherFailure = error;
       output = error.stdout;
     }
+    signal?.throwIfAborted();
     // Never turn a truncated image JSON tail into model-visible plain text.
     if (preserveContentResults && /^\[\d+ earlier bytes omitted\]/.test(output)) throw new Error('mcp_response_too_large');
     try {
@@ -344,7 +366,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       if (String(error?.message || error) === 'mcp_tool_failed') throw error;
       return output.trim();
     }
-  }, { runtimeRoot, binary, runCommand });
+  }, { runtimeRoot, binary, runCommand, signal });
 }
 
 export async function diagnoseMcpConnection(connection, { apiKey, environmentVariables = {}, headers = {}, toolName = null, arguments: toolArguments = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {

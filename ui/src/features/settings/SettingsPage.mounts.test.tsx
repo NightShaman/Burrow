@@ -632,8 +632,13 @@ it('scopes scheduling splits while preserving inventory/editor and Dreams portal
     screen.getByLabelText('Dream prompt').closest('.settings-prototype-configuration'),
   ).toBeTruthy();
   expect(
-    screen.getByRole('heading', { name: 'Dream memory' }).closest('.settings-prototype-overflow'),
+    screen
+      .getByRole('heading', { name: 'Dream memory' })
+      .closest('.settings-prototype-configuration'),
   ).toBeTruthy();
+  expect(
+    screen.getByRole('heading', { name: 'Dream memory' }).closest('.settings-prototype-overflow'),
+  ).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Open system statistics' }));
   expect(dreams?.closest('.has-utility-panel')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'MCP tools' }));
@@ -833,3 +838,33 @@ it('places owner-managed entity buttons in the native top row and keeps sections
   expect(selector.querySelectorAll('[data-agent-id]')).toHaveLength(24);
   unmount();
 });
+
+it.each(['owner-only', 'mixed', 'empty'] as const)(
+  'agent options visibility: %s panels',
+  (fixture) => {
+    vi.mocked(api).mockResolvedValue({ wizardStep: 'ready' });
+    const owner = 'owner-agents:example' as const;
+    const left = fixture === 'mixed' ? 'agents' : fixture === 'owner-only' ? owner : 'none';
+    const right = fixture === 'mixed' ? owner : 'none';
+    render(
+      <Settings
+        {...({
+          tab: 'general',
+          setTab: vi.fn(),
+          agents: [],
+          selected: { id: '', name: '' },
+          savedProviders: [],
+          onOperatorProfileChanged: vi.fn(),
+          agentRailPreferences: { view: 'regular', order: [] },
+          setAgentRailPreferences: vi.fn(),
+          leftRailLayout: 'single',
+          leftSinglePanel: left,
+          rightRailLayout: 'single',
+          rightSinglePanel: right,
+        } as unknown as ComponentProps<typeof Settings>)}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Rail panels' }));
+    expect(Boolean(screen.queryByText('Agent panel options'))).toBe(fixture !== 'empty');
+  },
+);

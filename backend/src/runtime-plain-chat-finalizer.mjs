@@ -1,7 +1,7 @@
 import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { toolActivityPresentation } from './tool-activity-labels.mjs';
 import { appendRuntimeActivity, appendRuntimeSessionEntry, appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
-import { appendValidatedRuntimeReceipt, validateCompletedRuntimeInvariantsBeforeSideEffects, validateRuntimeInvariantsBeforeSideEffects } from './runtime-receipt-finalizer.mjs';
+import { appendValidatedRuntimeReceipt, validateRuntimeInvariantsBeforeSideEffects } from './runtime-receipt-finalizer.mjs';
 import { buildOutcome, skippedActionsFromChatToolLoop, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { boundedRedactedValue } from './redaction.mjs';
 import { completionEvidence } from './completion-addendum.mjs';

@@ -73,6 +73,20 @@ function reconcileEditor(current: TaskEditorState | null, task: BoardTask): Task
   }
   return { ...current, task, draft };
 }
+function reconcileSavedDraft(
+  current: TaskEditorState,
+  savedTask: BoardTask,
+  submittedDraft: TaskDraft | undefined,
+  files: File[],
+): TaskEditorState {
+  const previous = submittedDraft ?? taskDraft(current.mode === 'edit' ? current.task : undefined);
+  const draft = taskDraft(savedTask);
+  for (const key of Object.keys(draft) as Array<keyof TaskDraft>) {
+    if (current.draft && current.draft[key] !== previous[key])
+      Object.assign(draft, { [key]: current.draft[key] });
+  }
+  return { mode: 'edit', task: savedTask, owner: current.owner, draft, files };
+}
 type ProjectDraft = {
   owner?: symbol;
   id?: string;
@@ -240,6 +254,7 @@ export function Tasks({
       assignedAgentId: draft.assignedAgentId,
     };
     if (pending.has(owner)) return;
+    const submittedDraft = editorRef.current?.draft;
     const files = [...(editorRef.current?.files ?? [])];
     setSaving(owner, true);
     setError('');
@@ -271,9 +286,22 @@ export function Tasks({
         await uploadTaskDocument(savedTask!.id, files[0]);
         files.shift();
       }
-      if (owns()) setEditor(null);
+      if (owns()) {
+        if (editorRef.current?.draft === submittedDraft) setEditor(null);
+        else
+          setEditor((current) =>
+            current && savedTask
+              ? reconcileSavedDraft(current, savedTask, submittedDraft, files)
+              : current,
+          );
+      }
     } catch (saveError) {
-      if (owns() && savedTask) setEditor({ mode: 'edit', task: savedTask, owner, files });
+      if (owns() && savedTask) {
+        const persistedTask = savedTask;
+        setEditor((current) =>
+          current ? reconcileSavedDraft(current, persistedTask, submittedDraft, files) : current,
+        );
+      }
       owns() &&
         setError(
           `${savedTask ? 'Task saved, but a document could not be attached. Save changes to retry remaining documents' : 'Could not save the task'}: ${(saveError as Error).message}`,
@@ -352,7 +380,8 @@ export function Tasks({
     if (!owner) return;
     const owns = () => projectRef.current?.owner === owner;
     event.preventDefault();
-    if (!projectDraft) return;
+    if (!projectDraft || pending.has(owner)) return;
+    const submittedDraft = projectDraft;
     const body = {
       name: projectDraft.name,
       description: projectDraft.description,
@@ -362,6 +391,7 @@ export function Tasks({
     setSaving(owner, true);
     setError('');
     try {
+      let savedProject: Project;
       if (projectDraft.id) {
         const result = await api<{ project: Project }>(
           `/api/task-board/projects/${encodeURIComponent(projectDraft.id)}`,
@@ -371,6 +401,7 @@ export function Tasks({
             body: JSON.stringify(body),
           },
         );
+        savedProject = result.project;
         setProjects((current) =>
           current.map((project) => (project.id === result.project.id ? result.project : project)),
         );
@@ -380,12 +411,17 @@ export function Tasks({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
         });
+        savedProject = result.project;
         setProjects((current) =>
           [...current, result.project].sort((a, b) => a.name.localeCompare(b.name)),
         );
         if (owns()) setSelectedProjectId(result.project.id);
       }
-      if (owns()) setProjectDraft(null);
+      if (owns()) {
+        if (projectRef.current === submittedDraft) setProjectDraft(null);
+        else
+          setProjectDraft((current) => (current ? { ...current, id: savedProject.id } : current));
+      }
     } catch (saveError) {
       owns() && setError(`Could not save the project: ${(saveError as Error).message}`);
     } finally {

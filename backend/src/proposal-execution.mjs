@@ -448,9 +448,10 @@ export async function executeReviewedProposalActions({ conversationStore = null,
           const grants = await mcp.agentTools(agentId, {availableOnly:true});
           if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !grants.some((grant) => grant.connectionId === selected.connection.id && grant.toolName === action.mcpToolName && grant.enabled)) throw new Error('mcp_tool_not_granted');
         }
+        abortSignal?.throwIfAborted();
         const output = selected.connection.transport === 'mod'
           ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
-          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, headers: selected.connection.headers, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true });
+          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, headers: selected.connection.headers, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true, signal: abortSignal });
         const protectedOutput = selected.connection.transport === 'mod'
           ? protectToolOutput(output, { registry: executionContext?.protectedValues,
             managedIssuer: (declaration) => {

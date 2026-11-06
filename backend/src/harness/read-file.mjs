@@ -50,14 +50,31 @@ export async function readFileEnvelope({
     const offset = Math.max(0, Number.isFinite(Number(offsetBytes)) ? Math.floor(Number(offsetBytes)) : 0);
     const requestedMaxBytes = Math.max(0, Number.isFinite(Number(maxBytes)) ? Math.floor(Number(maxBytes)) : 512_000);
     const available = Math.max(0, stat.size - offset);
-    const size = Math.min(available, requestedMaxBytes);
-    const truncated = offset + size < stat.size;
+    if (available && requestedMaxBytes === 0) throw new Error('max_bytes_must_be_positive');
     handle = await fs.open(resolvedPath, 'r');
-    const buffer = Buffer.alloc(size);
-    await handle.read(buffer, 0, size, offset);
-    const content = buffer.toString(encoding);
+    const buffer = Buffer.alloc(Math.min(available, requestedMaxBytes));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    let consumed = bytesRead;
+    let contentBuffer = buffer.subarray(0, bytesRead);
+    // A byte offset is the original file position, never the length of a
+    // decoded/re-encoded string. Extend UTF8 pages through a partial code point
+    // (at most three extra bytes), so nextOffsetBytes is safe to reuse directly.
+    if (encoding === 'utf8' && consumed && offset + consumed < stat.size) {
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      for (let extra = 0; extra < 3; extra += 1) {
+        try { decoder.decode(contentBuffer); break; } catch {
+          const next = Buffer.alloc(1);
+          const read = await handle.read(next, 0, 1, offset + consumed);
+          if (!read.bytesRead) break;
+          contentBuffer = Buffer.concat([contentBuffer, next]);
+          consumed += read.bytesRead;
+        }
+      }
+    }
+    const truncated = offset + consumed < stat.size;
+    const content = contentBuffer.toString(encoding);
     // Observation state only: this does not confer authority or direct the agent.
-    const contentHash = createHash('sha256').update(buffer).digest('hex').slice(0, 16);
+    const contentHash = createHash('sha256').update(contentBuffer).digest('hex').slice(0, 16);
     const contentPath = await logger.artifact(`${prefix}-content.txt`, content, { encoding });
 
     const result = {
@@ -70,10 +87,10 @@ export async function readFileEnvelope({
       bytes: stat.size,
       modifiedAt: stat.mtime.toISOString(),
       offsetBytes: offset,
-      returnedBytes: Buffer.byteLength(content, encoding),
+      returnedBytes: consumed,
       contentHash,
       truncated,
-      nextOffsetBytes: truncated ? offset + Buffer.byteLength(content, encoding) : null,
+      nextOffsetBytes: truncated ? offset + consumed : null,
       content,
       error: null,
       warnings,

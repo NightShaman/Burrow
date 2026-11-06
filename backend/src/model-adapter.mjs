@@ -1,7 +1,7 @@
 import { createProviderPoolModelAdapter } from './model-adapters/provider-pool.mjs';
 import { googleNativeApi } from './model-adapters/google-native-catalog.mjs';
 import { createGoogleNativeModelAdapter } from './model-adapters/google.mjs';
-import { normalizeChoice, normalizeResponseChoice, responseApiTool, messagesToResponsesInput, toolNames, readResponseSseBounded, compactResponseCompletion, mergeStreamToolCall } from './model-adapters/openai-transport.mjs';
+import { normalizeChoice, normalizeResponseChoice, toolNames, readResponseSseBounded, compactResponseCompletion, mergeStreamToolCall } from './model-adapters/openai-transport.mjs';
 import { apiMode, completionUrl, responsesUrl } from './model-adapters/openai-transport.mjs';
 import { createOpenAICompatibleModelAdapter } from './model-adapters/openai.mjs';
 import { createAnthropicMessagesModelAdapter, __test__ as anthropicTest } from './model-adapters/anthropic.mjs';

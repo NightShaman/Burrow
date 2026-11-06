@@ -35,7 +35,7 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       };
       try {
         await continuityAuthority.interrupt({ rootDir: sessionRoot, sessionId, runId, generation, reason: 'superseded_by_newer_session_run', objective, traceRef, lastCompletedStep: 'Terminal result could not be committed because session ownership changed.', pendingVerification: ['Reconcile durable workspace and tool state before continuing.'], workingContext });
-        await logger?.terminal?.();
+        try { await logger?.terminal?.(); } catch { /* A trace write cannot change the superseded receipt. */ }
       } finally {
         try { onTerminal?.(superseded); } catch {}
       }
@@ -43,14 +43,14 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
     }
     const result = completion.value;
     try {
-      await afterCommitBeforeTraceTerminal?.(result);
-      await logger?.terminal?.();
+      try { await afterCommitBeforeTraceTerminal?.(result); } catch (error) { try { console.warn('postcommit advisory failed', error); } catch {} }
+      try { await logger?.terminal?.(); } catch (error) { try { console.warn('postcommit trace cleanup failed', error); } catch {} }
     } finally {
       // Ownership has already reached a genuine terminal. Advisory/trace
       // cleanup failures must not hide that outcome from lifecycle observers.
       try { onTerminal?.(result); } catch {}
     }
-    void testHooks?.afterTerminalResponse?.({ branch, sessionId, runId, postTerminalCuration: null });
+    try { Promise.resolve(testHooks?.afterTerminalResponse?.({ branch, sessionId, runId, postTerminalCuration: null })).catch(() => {}); } catch { /* Observer only. */ }
     return json ? { ...result, continuity: { ...completion.head, current: true } } : compactAskChatResult(result);
   };
 }

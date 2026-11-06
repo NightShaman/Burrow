@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
+import type { AgentRailPreferences } from '../../app/useAgentRailPreferences';
 import { AgentSidebarSettings } from './AgentSidebarSettings';
 
 const agents: Agent[] = [
@@ -87,4 +88,36 @@ describe('AgentSidebarSettings', () => {
     fireEvent.drop(target, { dataTransfer });
     expect(current.order).toEqual(['hatchet', 'smatchet']);
   });
+});
+
+it('moves visible agents by keyboard with focus, live feedback, and hidden IDs preserved', () => {
+  const Harness = () => {
+    const [preferences, setPreferences] = useState<AgentRailPreferences>({
+      view: 'regular',
+      order: ['hidden', 'smatchet', 'hatchet'],
+    });
+    return (
+      <>
+        <AgentSidebarSettings
+          agents={agents}
+          preferences={preferences}
+          setPreferences={setPreferences}
+        />
+        <output data-testid="order">{preferences.order.join(',')}</output>
+      </>
+    );
+  };
+  render(<Harness />);
+  const hatchet = screen.getByRole('listitem', { name: /Hatchet.*move/i });
+  hatchet.focus();
+  fireEvent.keyDown(hatchet, { key: 'ArrowUp', altKey: true });
+  expect(screen.getByTestId('order').textContent).toBe('hidden,hatchet,smatchet');
+  expect(document.activeElement).toBe(hatchet);
+  expect(screen.getByRole('status', { name: 'Agent order update' }).textContent).toMatch(
+    /Hatchet.*position 1 of 2/i,
+  );
+  fireEvent.keyDown(hatchet, { key: 'ArrowUp', altKey: true });
+  expect(screen.getByTestId('order').textContent).toBe('hidden,hatchet,smatchet');
+  fireEvent.keyDown(hatchet, { key: 'ArrowDown', altKey: true });
+  expect(screen.getByTestId('order').textContent).toBe('hidden,smatchet,hatchet');
 });

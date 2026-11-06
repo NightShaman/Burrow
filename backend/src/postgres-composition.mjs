@@ -42,7 +42,7 @@ import { PostgresModExternalTurnStore } from './postgres-mod-external-turn-store
 import PostgresWorkingMemoryRetentionSettingsStore, { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
 
 import { migratePostgres } from './postgres-migrations.mjs';
-import { POSTGRES_APPLICATION_SCHEMA_SQL } from './postgres-application-schema.mjs';
+import './postgres-application-schema.mjs';
 
 /** Compose PostgreSQL stores around one explicitly owned or borrowed pool.
  * CLI readers use this factory; the UI server composes its own startup stores. */

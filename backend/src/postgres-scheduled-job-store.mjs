@@ -179,7 +179,13 @@ export class PostgresScheduledJobStore {
     const rows = await client.query('SELECT * FROM scheduled_jobs WHERE effective_timezone IS DISTINCT FROM $1 ORDER BY id FOR UPDATE', [zone]);
     for (const row of rows.rows) {
       if (row.effective_timezone === zone) continue;
-      const next = nextOccurrence(jobRow(row), zone, at, row.consumed_at);
+      let next;
+      try { next = nextOccurrence(jobRow(row), zone, at, row.consumed_at); }
+      catch (error) {
+        if (error?.message !== 'scheduled_job_next_run_unresolvable' && error?.message !== 'scheduled_job_cron_invalid') throw error;
+        await this.quarantineSchedule(client, row, at, error);
+        continue;
+      }
       await client.query('UPDATE scheduled_jobs SET effective_timezone=$1,next_run_at=$2 WHERE id=$3', [zone, next, row.id]);
     }
   }
@@ -360,6 +366,42 @@ export class PostgresScheduledJobStore {
     });
   }
 
+  // Persist the canonical terminal outcome in the existing run row before
+  // completing it. A restart can reconcile it without invoking the prompt.
+  async stageRunResult(runId, terminal) {
+    if (!['completed', 'failed', 'cancelled'].includes(terminal?.status)) throw new Error('scheduled_job_run_status_invalid');
+    return this.pool.query(
+      "UPDATE scheduled_job_runs SET result_json=$1::jsonb,updated_at=$2 WHERE id=$3 AND status='running'",
+      [json({ scheduledTerminal: terminal }), timestamp(this.clock), id(runId, 'scheduled_job_run_id')],
+    );
+  }
+  // Only a completed continuity transition plus the exact runtime-owned
+  // terminal receipt and its matching assistant turn can bridge the gap where
+  // chat committed but the scheduler died before staging its own result.
+  // Never classify from answer text, a run-evidence summary or a different
+  // session's latest head. Archived turns remain addressable after compaction.
+  async completedChatTerminal(client, row) {
+    if (!row.run_id || row.task_id) return null;
+    const completed = await client.query(`SELECT 1 FROM continuity_log
+      WHERE agent_id=$1 AND session_id=$2 AND head->>'runId'=$3
+        AND head->>'state'='completed' LIMIT 1`, [row.agent_id, row.session_id, row.run_id]);
+    if (!completed.rowCount) return null;
+    const runKey = Buffer.from(JSON.stringify(row.run_id), 'utf8').toString('hex');
+    const entries = await client.query(`SELECT entry FROM conversation_entries
+      WHERE agent_id=$1 AND session_id=$2 AND run_key=$3
+      UNION ALL SELECT entry FROM conversation_archive_entries
+      WHERE agent_id=$1 AND session_id=$2 AND run_key=$3`, [row.agent_id, row.session_id, runKey]);
+    const receipts = entries.rows.map(item => item.entry).filter(item => item?.type === 'receipt' && item.metadata?.receiptRef?.kind === 'runtime-receipt-ref' && item.metadata.receiptRef.version === 1 && item.metadata.receiptRef.runId === row.run_id);
+    const assistants = entries.rows.map(item => item.entry).filter(item => item?.type === 'message' && item.role === 'assistant' && item.runId === row.run_id && item.metadata?.chatResultVersion === 2);
+    const terminal = receipts[0]?.metadata?.receiptRef;
+    if (!terminal || !['completed', 'failed', 'cancelled'].includes(terminal.terminalStatus) || !terminal.decision ||
+        receipts.some(item => item.metadata.receiptRef.terminalStatus !== terminal.terminalStatus || item.metadata.receiptRef.decision !== terminal.decision) ||
+        !assistants.length || assistants.some(item => item.metadata.terminalStatus !== terminal.terminalStatus || item.metadata.decision !== terminal.decision || typeof item.content !== 'string' || item.content !== assistants[0].content)) return null;
+    const answer = assistants[0].content;
+    return { runId: row.run_id, status: terminal.terminalStatus, ok: terminal.terminalStatus === 'completed', decision: terminal.decision,
+      traceDir: terminal.traceDir || null, error: terminal.terminalStatus === 'completed' ? null : terminal.decision,
+      result: { answerText: answer.slice(0, 12_000) || null, blockers: [], verification: null, completionEvidence: null } };
+  }
   async markMissedRuns({ at: when = this.clock() } = {}) {
     return withPostgresTransaction(this.pool, async client => {
       // A task terminal receipt may have committed just before process loss.
@@ -368,9 +410,12 @@ export class PostgresScheduledJobStore {
       const { rows } = await client.query("SELECT r.*,t.execution_json AS task_execution FROM scheduled_job_runs r LEFT JOIN task_board_tasks t ON t.id=r.task_id WHERE r.status='running' ORDER BY r.id FOR UPDATE OF r");
       for (const row of rows) {
         const task = row.task_execution;
-        const terminal = task && row.run_id && task.runId === row.run_id && task.agentId === row.agent_id && task.sessionId === row.session_id && ['completed','failed','cancelled'].includes(task.status);
-        const outcome = terminal ? classifyRuntimeOutcome(task) : { status: 'missed', ok: false };
-        await client.query('UPDATE scheduled_job_runs SET status=$1,ok=$2,completed_at=$3,error=$4,trace_dir=$5,decision=$6,result_json=$7::jsonb,updated_at=$3 WHERE id=$8', [outcome.status,outcome.ok,when,terminal ? task.error || null : 'scheduler_restart_before_completion',terminal ? task.traceDir || null : null,terminal ? task.decision || null : null,json(terminal ? task.result : {}),row.id]);
+        const taskTerminal = task && row.run_id && task.runId === row.run_id && task.agentId === row.agent_id && task.sessionId === row.session_id && ['completed','failed','cancelled'].includes(task.status);
+        const staged = parseJson(row.result_json).scheduledTerminal;
+        const stagedTerminal = staged && staged.runId === row.run_id && ['completed','failed','cancelled'].includes(staged.status) ? staged : null;
+        const terminal = stagedTerminal || (taskTerminal ? { ...task, ...classifyRuntimeOutcome(task) } : await this.completedChatTerminal(client, row));
+        const outcome = terminal ? classifyRuntimeOutcome(terminal) : { status: 'missed', ok: false };
+        await client.query('UPDATE scheduled_job_runs SET status=$1,ok=$2,completed_at=$3,error=$4,trace_dir=$5,decision=$6,result_json=$7::jsonb,updated_at=$3 WHERE id=$8', [outcome.status,outcome.ok,when,terminal ? terminal.error || null : 'scheduler_restart_before_completion',terminal ? terminal.traceDir || null : null,terminal ? terminal.decision || null : null,json(terminal ? terminal.result : {}),row.id]);
       }
       return rows.length;
     });
@@ -399,22 +444,28 @@ export class PostgresScheduledJobStore {
       for (const row of jobs.rows) {
         const job = await this.resolved(row, client);
         const timezone = await this.effective(job.timezone, client);
-        const cron = job.scheduleKind === 'once' ? null : parseCron(job.cron);
         let scheduled = job.nextRunAt;
-        while (scheduled && new Date(scheduled) < new Date(when)) {
-          await client.query(
-            "INSERT INTO scheduled_job_runs (id,job_id,scheduled_for,status,agent_id,session_id,completed_at,error,created_at,updated_at,task_id) VALUES ($1,$2,$3,'missed',$4,$5,$6,'scheduler_restart_missed_schedule',$6,$6,$7) ON CONFLICT DO NOTHING",
-            [randomUUID(), job.id, scheduled, job.agentId, job.sessionId, when, job.taskId],
-          );
-          scheduled = job.scheduleKind === 'once' ? null : nextCronOccurrence(
-            cron,
-            timezone,
-            new Date(scheduled),
-          );
-          missed += 1;
-          // Preserve one durable receipt per occurrence, but relinquish the
-          // event loop regularly even with immediately-resolved query adapters.
-          if (missed % 128 === 0) await new Promise((resolve) => setImmediate(resolve));
+        try {
+          const cron = job.scheduleKind === 'once' ? null : parseCron(job.cron);
+          while (scheduled && new Date(scheduled) < new Date(when)) {
+            await client.query(
+              "INSERT INTO scheduled_job_runs (id,job_id,scheduled_for,status,agent_id,session_id,completed_at,error,created_at,updated_at,task_id) VALUES ($1,$2,$3,'missed',$4,$5,$6,'scheduler_restart_missed_schedule',$6,$6,$7) ON CONFLICT DO NOTHING",
+              [randomUUID(), job.id, scheduled, job.agentId, job.sessionId, when, job.taskId],
+            );
+            scheduled = job.scheduleKind === 'once' ? null : nextCronOccurrence(
+              cron,
+              timezone,
+              new Date(scheduled),
+            );
+            missed += 1;
+            // Preserve one durable receipt per occurrence, but relinquish the
+            // event loop regularly even with immediately-resolved query adapters.
+            if (missed % 128 === 0) await new Promise((resolve) => setImmediate(resolve));
+          }
+        } catch (error) {
+          if (error?.message !== 'scheduled_job_next_run_unresolvable' && error?.message !== 'scheduled_job_cron_invalid') throw error;
+          await this.quarantineSchedule(client, row, when, error);
+          continue;
         }
         await client.query(
           "UPDATE scheduled_jobs SET next_run_at=$1,enabled=CASE WHEN schedule_kind='once' THEN false ELSE enabled END,consumed_at=CASE WHEN schedule_kind='once' THEN $2 ELSE consumed_at END,updated_at=$2 WHERE id=$3",
@@ -424,6 +475,12 @@ export class PostgresScheduledJobStore {
       return missed;
     });
     return result;
+  }
+  async quarantineSchedule(client, row, when, error) {
+    const reason = String(error?.message || error).slice(0, 1000);
+    await client.query('UPDATE scheduled_jobs SET enabled=false,next_run_at=NULL,updated_at=$1 WHERE id=$2', [when, row.id]);
+    await client.query("INSERT INTO scheduled_job_runs (id,job_id,scheduled_for,status,agent_id,session_id,completed_at,ok,error,created_at,updated_at,task_id) VALUES ($1,$2,$3,'failed',$4,$5,$6,false,$7,$6,$6,$8) ON CONFLICT (job_id,scheduled_for) DO UPDATE SET status='failed',ok=false,error=EXCLUDED.error,completed_at=EXCLUDED.completed_at,updated_at=EXCLUDED.updated_at WHERE scheduled_job_runs.status='missed'",
+      [randomUUID(),row.id,row.next_run_at || when,row.agent_id,row.session_id,when,`scheduled_job_schedule_invalid:${reason}`,row.task_id]);
   }
   async claimDueJobs({ at: when = this.clock(), activeOwnerModIds = [] } = {}) {
     const owners = [
@@ -448,7 +505,13 @@ export class PostgresScheduledJobStore {
         const job = await this.resolved(row, client);
         if (!job.nextRunAt || new Date(job.nextRunAt) > new Date(when))
           continue;
-        const next = job.scheduleKind === 'once' ? null : nextCronOccurrence(job.cron, job.effectiveTimezone, new Date(when));
+        let next;
+        try { next = job.scheduleKind === 'once' ? null : nextCronOccurrence(job.cron, job.effectiveTimezone, new Date(when)); }
+        catch (error) {
+          if (error?.message !== 'scheduled_job_next_run_unresolvable' && error?.message !== 'scheduled_job_cron_invalid') throw error;
+          await this.quarantineSchedule(client, row, when, error);
+          continue;
+        }
         await client.query(
           "UPDATE scheduled_jobs SET next_run_at=$1,last_run_at=$2,enabled=CASE WHEN schedule_kind='once' THEN false ELSE enabled END,consumed_at=CASE WHEN schedule_kind='once' THEN $2 ELSE consumed_at END,updated_at=$2 WHERE id=$3",
           [next, when, job.id],

@@ -123,8 +123,8 @@ function reusedSubagentResult({ record, task, target, request } = {}) {
     ...(result.verification ? { verification: result.verification } : {}),
     verificationTarget: result.verificationTarget || target.root,
     blockers: result.blockers || [],
-    warnings: [...(result.warnings || []), 'subagent_exact_request_reused'],
-    summary: result.summary || 'Reused existing minion receipt.',
+    warnings: [...(result.warnings || []), 'subagent_exact_request_reused', ...(record.status === 'running' ? ['subagent_running_dispatch_state_uncertain'] : [])],
+    summary: result.summary || (record.status === 'running' ? 'Existing minion run may be active or interrupted; reconcile its exact child receipt before retrying work.' : 'Reused existing minion receipt.'),
     spawnRequestKey: request.key,
     record: subagentVisibilitySummary(record),
     queued: null,
@@ -318,39 +318,54 @@ export async function executeSpawnSubagentTool({
   };
   const traceDir = traceLogger?.traceDir ? path.join(traceLogger.traceDir, 'subagents', id) : null;
 
-  // Claim only lookup + durable queued receipt, never the paid child run.
+  // Claim admission and durable queued receipt, never the paid child run.
   const claimRoot = path.join(dataRoot, 'subagents');
   await fs.mkdir(claimRoot, { recursive: true });
+  // Keep admission under the request lock. A queued claim is proof that this
+  // executor has not dispatched: running is written only after idempotent child
+  // initialization succeeds. Retrying a queued claim (including after restart)
+  // therefore resumes setup without creating a second paid child run.
   const claim = await withTraceGuard(path.join(claimRoot, `request-${createHash('sha256').update(spawnRequest.key).digest('hex')}`), async () => {
     const existing = await findSubagentBySpawnRequestKey({ dataRoot, key: spawnRequest.key });
-    if (existing) return { existing };
-    return { queued: await createSubagentRecord({
-      dataRoot,
-      id,
-      owner,
-      minionDepth,
-      purpose: task,
-      label,
-      scope,
-      permissions,
-      status: 'queued',
-      trace: { runId: id, childSessionId, traceDir },
-      spawnRequest,
-      model: modelSelection,
+    if (existing && existing.status !== 'queued') return { existing };
+    const queued = existing || await createSubagentRecord({
+      dataRoot, id, owner, minionDepth, purpose: task, label, scope, permissions,
+      status: 'queued', trace: { runId: id, childSessionId, traceDir },
+      spawnRequest, model: modelSelection,
       provenance: ['spawn-subagent-tool', 'context:isolated'],
-    }) };
+    });
+    const admittedId = queued.id;
+    const admittedSessionId = queued.trace.childSessionId || subagentChildSessionId(admittedId);
+    const admittedTraceDir = queued.trace.traceDir || null;
+    await startSubagentChildSession({ dataRoot, id: admittedId, workerProfile: 'spawn_subagent', purpose: task,
+      owner: queued.owner, minionDepth: queued.minionDepth,
+      trace: { runId: admittedId, childSessionId: admittedSessionId, traceDir: admittedTraceDir },
+      model: queued.model, conversationStore });
+    const spawnedAt = new Date().toISOString();
+    const running = await updateSubagentStatus({ dataRoot, id: admittedId, status: 'running', phase: 'spawned',
+      trace: { runId: admittedId, childSessionId: admittedSessionId, traceDir: admittedTraceDir },
+      activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt },
+      provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
+    // Cancellation can win during child transcript initialization. A rejected
+    // transition is not admission: never dispatch against a cancelled record.
+    if (!running.ok) return { existing: running.record };
+    return { queued, running, admittedId, admittedSessionId, admittedTraceDir };
   });
-  const existing = claim.existing;
-  // Exact retries reuse all statuses, including failures/in-flight work; never duplicate dispatch.
-  if (existing) {
-    const reused = reusedSubagentResult({ record: existing, task, target, request: spawnRequest });
+  if (claim.existing) {
+    const reused = reusedSubagentResult({ record: claim.existing, task, target, request: spawnRequest });
     await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: reused.ok, id: reused.id, childSessionId: reused.childSessionId, status: reused.status, reused: true, spawnRequestKey: spawnRequest.key, record: reused.record });
     return reused;
   }
-  const queued = claim.queued;
-  await startSubagentChildSession({ dataRoot, id, workerProfile: 'spawn_subagent', purpose: task, owner, minionDepth, trace: { runId: id, childSessionId, traceDir }, model: modelSelection, conversationStore });
-  const spawnedAt = new Date().toISOString();
-  const running = await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'spawned', trace: { runId: id, childSessionId, traceDir }, activity: { kind: 'run', status: 'running', phase: 'spawned', label: 'Subagent spawned', sequence: 0, startedAt: spawnedAt, lastActualActivityAt: spawnedAt }, provenance: { source: 'spawn-subagent-tool', reason: 'spawned' } });
+  const { queued, running, admittedId, admittedSessionId, admittedTraceDir } = claim;
+  // Downstream receipt/dispatch must use the original queued identity on retry.
+  const childId = admittedId;
+  const childSession = admittedSessionId;
+  const childTrace = admittedTraceDir;
+  const childModelSelection = queued.model || modelSelection;
+  const childTarget = queued.scope?.target || target;
+  const childTask = queued.purpose || task;
+  const childOwner = queued.owner;
+  const childDepth = queued.minionDepth;
 
   const remoteExecution = resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote';
   // Capture the live spawn-tool carrier before dispatch. In-process children
@@ -370,8 +385,8 @@ export async function executeSpawnSubagentTool({
     abortSignal?.throwIfAborted();
     if (remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
     childRun = remoteExecution || childRunner
-      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id, task, target, dataRoot, childSessionId, owner, minionDepth, modelConfig: childModelConfig, traceDir, executionPolicy, parentExecutionContext: childParentExecutionContext, signal: abortSignal }) }
-      : await runSubagentProcess({ args: { id, task, target, dataRoot, childSessionId, owner, minionDepth, modelConfig: childModelConfig, traceDir, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: parentTraceContext, otelConfiguration: executionContext?.telemetry?.remoteConfiguration?.(parentRunId) || null }, signal: abortSignal });
+      ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id: childId, task: childTask, target: childTarget, dataRoot, childSessionId: childSession, owner: childOwner, minionDepth: childDepth, modelConfig: childModelConfig, traceDir: childTrace, executionPolicy, parentExecutionContext: childParentExecutionContext, signal: abortSignal }) }
+      : await runSubagentProcess({ args: { id: childId, task: childTask, target: childTarget, dataRoot, childSessionId: childSession, owner: childOwner, minionDepth: childDepth, modelConfig: childModelConfig, traceDir: childTrace, executionPolicy, executionBoundaries: executionContext?.executionBoundaries || null, traceContext: parentTraceContext, otelConfiguration: executionContext?.telemetry?.remoteConfiguration?.(parentRunId) || null }, signal: abortSignal });
   } catch (error) {
     const code = compactString(error?.code || error?.message || 'subagent_child_dispatch_failed').split(':')[0];
     childRun = {
@@ -384,12 +399,12 @@ export async function executeSpawnSubagentTool({
   }
   const childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
   const status = abortSignal?.aborted || childRun.cancelled ? 'cancelled' : childRun.ok && childResult.ok ? 'succeeded' : 'failed';
-  const receiptRef = traceDir ? path.join(traceDir, 'receipt.json') : null;
+  const receiptRef = childTrace ? path.join(childTrace, 'receipt.json') : null;
   if (receiptRef) {
     await fs.mkdir(path.dirname(receiptRef), { recursive: true });
-    await fs.writeFile(receiptRef, `${JSON.stringify({ id, parentSessionId, parentConversationId, parentRunId, childSessionId, status, target, model: modelSelection, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, evidenceCount: childResult.evidence?.length || 0 }, null, 2)}\n`, 'utf8');
+    await fs.writeFile(receiptRef, `${JSON.stringify({ id: childId, parentSessionId, parentConversationId, parentRunId, childSessionId: childSession, status, target: childTarget, model: childModelSelection, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, evidenceCount: childResult.evidence?.length || 0 }, null, 2)}\n`, 'utf8');
   }
-  const child = childFrom({ parentSessionId, parentConversationId, parentRunId, childSessionId, receiptRefs: receiptRef ? [receiptRef] : [], dataRoot });
+  const child = childFrom({ parentSessionId, parentConversationId, parentRunId, childSessionId: childSession, receiptRefs: receiptRef ? [receiptRef] : [], dataRoot });
   const result = {
     ok: status === 'succeeded',
     ...projectModelRecoveryMetadata(childResult),
@@ -402,30 +417,30 @@ export async function executeSpawnSubagentTool({
     memoryWrites: childResult.memoryWrites || [],
     sideEffectsApplied: childResult.sideEffectsApplied === true ? true : (childResult.sideEffectsApplied === false ? false : null),
     ...(childResult.verification ? { verification: childResult.verification } : {}),
-    verificationTarget: childResult.verificationTarget || target.root,
+    verificationTarget: childResult.verificationTarget || childTarget.root,
     child,
   };
-  const finished = await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', trace: { runId: id, childSessionId, traceDir }, model: modelSelection, result, provenance: { source: 'spawn-subagent-tool', reason: status } });
-  await finishSubagentChildSession({ dataRoot, sessionId: childSessionId, id, workerProfile: 'spawn_subagent', owner, trace: { runId: id, childSessionId, traceDir }, status, result, model: modelSelection, conversationStore });
-  await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: result.ok, id, childSessionId, status, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, spawnRequestKey: spawnRequest.key, record: subagentVisibilitySummary(finished.record) });
+  const finished = await updateSubagentStatus({ dataRoot, id: childId, status, phase: 'idle', trace: { runId: childId, childSessionId: childSession, traceDir: childTrace }, model: childModelSelection, result, provenance: { source: 'spawn-subagent-tool', reason: status } });
+  await finishSubagentChildSession({ dataRoot, sessionId: childSession, id: childId, workerProfile: 'spawn_subagent', owner: childOwner, trace: { runId: childId, childSessionId: childSession, traceDir: childTrace }, status, result, model: childModelSelection, conversationStore });
+  await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: result.ok, id: childId, childSessionId: childSession, status, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, spawnRequestKey: spawnRequest.key, record: subagentVisibilitySummary(finished.record) });
 
   return {
     tool: 'spawn_subagent',
     ok: result.ok,
     spawned: Boolean(childRun.spawned),
     reused: false,
-    id,
-    task,
-    label,
-    requestedModelProfile: modelSelection.requestedProfile,
-    resolvedModelProfile: modelSelection.resolvedProfile,
-    resolvedModel: modelSelection.resolvedModel,
-    target,
+    id: childId,
+    task: childTask,
+    label: queued.label || label,
+    requestedModelProfile: childModelSelection.requestedProfile,
+    resolvedModelProfile: childModelSelection.resolvedProfile,
+    resolvedModel: childModelSelection.resolvedModel,
+    target: childTarget,
     status,
     parentSessionId,
     parentConversationId,
     parentRunId,
-    childSessionId,
+    childSessionId: childSession,
     transcriptRef: child.transcriptRef,
     receiptRefs: child.receiptRefs,
     retention: child.retention,

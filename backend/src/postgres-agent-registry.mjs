@@ -192,7 +192,7 @@ export class PostgresAgentRegistryStore {
       if (!current) throw Error("agent_not_found");
       const a = assertAgent(
           { ...input, id: current.id },
-          { requireName: false },
+          { requireName: false, allowReserved: true },
         ),
         at = now();
       const r = await c.query(
@@ -229,7 +229,7 @@ export class PostgresAgentRegistryStore {
   // All identity fields are written together, with the ownership comparison
   // under the same row lock (including a concurrent insert of a missing ID).
   async restorePortable(input = {}, { conflictPolicy = 'replace' } = {}) {
-    const a = assertAgent(input, { requireName: false });
+    const a = assertAgent(input, { requireName: false, allowReserved: true });
     const metadata = input.modAgent == null ? null : normalizeModAgent(input.modAgent);
     // Keep regular import's existing bootstrap behavior, but never create a
     // sample identity as a fallback for a missing mod or reserve its ID.
@@ -238,7 +238,9 @@ export class PostgresAgentRegistryStore {
       let locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [a.id]);
       let current = row(locked.rows[0]);
       if (!current) {
-        assertAgent(input); // A newly restored identity must have a name.
+        // Portable backups may contain a historical global agent. Preserve its
+        // identity and content on restoration, but never allow ordinary creates.
+        assertAgent(input, { allowReserved: a.id === 'global' });
         const at = now();
         const inserted = await c.query(`INSERT INTO agents
           (id,name,enabled,available_capabilities,context_config_json,execution_environment_json,mod_agent_json,created_at,updated_at)
@@ -299,7 +301,7 @@ export class PostgresAgentRegistryStore {
       const locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [text(id)]);
       const current = row(locked.rows[0]);
       if (!current || current.modAgent?.ownerModId !== ownerModId) throw Error('mod_owned_agent_not_found');
-      const a = assertAgent({ ...input, id: current.id }, { requireName: false });
+      const a = assertAgent({ ...input, id: current.id }, { requireName: false, allowReserved: true });
       const metadata = normalizeModAgent(input.modAgent || {}, { ownerModId, partial: true, current: current.modAgent });
       const at = now();
       if (modelConnectionId !== undefined || model !== undefined) {

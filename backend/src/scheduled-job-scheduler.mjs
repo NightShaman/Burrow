@@ -31,6 +31,23 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
     lastFailure = { at: clock(), phase, runId: run?.id || null, error: String(error?.message || error).slice(0, 2000) };
     console.error('scheduled_job_scheduler_failure', JSON.stringify(lastFailure));
   }
+  async function persistOutcome(run, terminal) {
+    // The execution outcome is immutable here: persistence errors must never
+    // enter the execution-failure branch or erase a successful answer.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let store;
+      try {
+        store = await openStore();
+        if (store.stageRunResult) await store.stageRunResult(run.id, terminal);
+        return await store.completeRun(run.id, terminal);
+      } catch (error) {
+        reportFailure(error, 'receipt_persistence', run);
+      } finally {
+        if (store) try { await closeStore(store); } catch (error) { reportFailure(error, 'receipt_store_close', run); }
+      }
+    }
+    throw new Error('scheduled_job_receipt_persistence_failed');
+  }
   function launch(job, run) {
     let admit;
     const admission = job.jobKind === 'task' ? new Promise(resolve => { admit = resolve; }) : null;
@@ -90,12 +107,8 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
         const result = await accepted.completion;
         if (!result) throw new Error('scheduled_task_completion_required');
         const outcome = classifyRuntimeOutcome(result); // mirror canonical task terminal outcome
-        const store = await openStore();
         const terminal = { ...outcome, runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : result.error || result.decision || outcome.status, result: boundedResult(result) };
-        try {
-          try { await store.completeRun(run.id, terminal); }
-          catch { await store.completeRun(run.id, terminal); } // same canonical result on an ordinary transient failure
-        } finally { await closeStore(store); }
+        await persistOutcome(run, terminal);
         return;
       }
       const dispatchStore = await openStore();
@@ -115,9 +128,14 @@ export function createScheduledJobScheduler({ storeFactory, closeStore: closeSto
         telemetry,
         runSource: 'scheduled',
       });
+      // A scheduled claim owns only its dispatched chat run; a different run's
+      // success must never be staged as this claim's completed receipt.
+      if (result.runId && result.runId !== runId) throw new Error('scheduled_job_chat_run_mismatch');
       const outcome = classifyRuntimeOutcome(result, { cancelled: controller.signal.aborted });
-      const store = await openStore();
-      try { await store.completeRun(run.id, { ...outcome, runId: result.runId || runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : (result.error || result.blockedReason || result.decision || outcome.status), result: boundedResult(result) }); } finally { await closeStore(store); }
+      const terminal = { ...outcome, runId, dispatchedAt: record.startedAt, traceDir: result.traceDir || null, decision: result.decision || null, error: outcome.ok ? null : (result.error || result.blockedReason || result.decision || outcome.status), result: boundedResult(result) };
+      // Only the execution path above may classify its failure. No later
+      // receipt-write error may replace this canonical result with a failure.
+      try { await persistOutcome(run, terminal); } catch (error) { reportFailure(error, 'receipt_reconciliation', run); }
     } catch (error) {
       admit?.({ ok: false, error: String(error?.message || error), job, run });
       reportFailure(error, 'dispatch', run);

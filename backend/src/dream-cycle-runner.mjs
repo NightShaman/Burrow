@@ -8,8 +8,8 @@ import { createTraceLogger } from './trace-logger.mjs';
 import { resolveModelConfig, resolveRuntimeTraceRoot } from './config.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
-import { nextCronOccurrence } from './scheduled-job-store.mjs';
-import { reconciledDreamCycleState } from './dream-cycle-state.mjs';
+import './scheduled-job-store.mjs';
+import './dream-cycle-state.mjs';
 import { isChatMessage } from './session-entry.mjs';
 import { appendPreferenceSignalAsync, preferenceConversationContext, preferenceRuleReviewIdentity, preferenceRuleReviewPrompt, PREFERENCE_INTENT_INSTRUCTIONS, operatorPreferenceTurn, preferenceBaselineAsync, preferenceOperatorBaselineAt, recoverablePreferenceSignalIds, applyPreferenceUpdateAsync, parsePreferenceAdjudication, preferenceAdjudicationPrompt, preferenceLearningStateAsync, preferenceSignalsAsync, validatePreferenceAdjudication } from './preference-learning.mjs';
 
@@ -21,7 +21,7 @@ export const DREAM_INTERRUPTED_ERROR = 'Dream interrupted by runtime restart bef
 
 function text(value) { return String(value ?? '').trim(); }
 function now() { return new Date().toISOString(); }
-const dreamRuntimeInstanceId = randomUUID();
+
 const activeDreamRunIds = new Set();
 function entryId(agentId, phase, title, content) { return `dream-${phase}-${createHash('sha256').update(JSON.stringify([agentId, phase, title, content])).digest('hex')}`; }
 function clamp(value, limit) { const source = text(value).replace(/\s+/g, ' '); return source.length <= limit ? source : `${source.slice(0, limit).trim()}…`; }
@@ -971,9 +971,11 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     await progress({ step: 'finalizing' });
     const completedAt = now(); const state = await cycleStore.ensureState({ agentId: id, settings: { ...settings, lastRunAt: generatedAt }, at: completedAt });
     const nextRunAt = state.nextRunAt;
-    const hasErrors = phaseResults.some((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError);
-    if (extractionState && needsProcessing && !hasErrors && preferences.disposition !== 'failed') await metadataStore.set(processingKey, { fingerprint, completedAt });
-    const receipt = { ...lifecycle, ok: !hasErrors, error: hasErrors ? phaseResults.map((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError).find(Boolean) : null, status: hasErrors ? (pendingDiaries.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamConnectionCount: savedConnections.length, dreamChangeDisposition, dreamConnectionIds: savedConnections.map(item => item.id), preferences, nextRunAt, completedAt };
+    const phaseError = phaseResults.map((phase) => phase.extractionError || phase.reconciliationError || phase.diaryError).find(Boolean);
+    const preferenceError = preferences.disposition === 'failed' ? preferences.reason || 'preference_adjudication_failed' : null;
+    const hasErrors = Boolean(phaseError || preferenceError);
+    if (extractionState && needsProcessing && !hasErrors) await metadataStore.set(processingKey, { fingerprint, completedAt });
+    const receipt = { ...lifecycle, ok: !hasErrors, error: phaseError || preferenceError || null, status: hasErrors ? (pendingDiaries.length || savedConnections.length ? 'partial' : 'failed') : 'completed', phases: phaseResults, dreamConnectionCount: savedConnections.length, dreamChangeDisposition, dreamConnectionIds: savedConnections.map(item => item.id), preferences, nextRunAt, completedAt };
     receipt.progress = { ...receipt.progress, step: 'finished', updatedAt: completedAt, elapsedMs: Date.parse(completedAt) - Date.parse(startedAt) };
     await cycleStore.write(receipt, completedAt); return receipt;
   } catch (error) {

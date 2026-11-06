@@ -1,7 +1,6 @@
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { ProviderModelFields } from './ProviderModelFields';
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { SavedProvider } from '../../app/types';
 import { api } from '../../app/api';
 import { Field, SettingSection } from './SettingsPrimitives';
@@ -150,7 +149,6 @@ function modelLabel(model: DreamModel, options: { value: string; label: string }
 export function AgentDreams({
   agentId,
   savedProviders,
-  overflowTarget,
 }: {
   agentId: string;
   savedProviders: SavedProvider[];
@@ -766,12 +764,7 @@ export function AgentDreams({
         )}
         {notice && <p role="status">{notice}</p>}
       </SettingSection>
-      {overflowTarget
-        ? createPortal(
-            <div className="settings-overflow-content">{memoryControls}</div>,
-            overflowTarget,
-          )
-        : memoryControls}
+      {memoryControls}
     </>
   );
 }

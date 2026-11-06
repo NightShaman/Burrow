@@ -29,7 +29,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
       parentChild: true,
       model: model || null,
     }) });
-  await authority.append({
+  await authority.appendTurnIfAbsent({
     sessionId,
     type: 'message',
     role: 'user',
@@ -37,7 +37,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     runId: trace.runId || null,
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-delegated-task', parentAgentId: owner.agentId || null, workerProfile, subagentId: id, parentSessionId, parentConversationId, parentRunId: parentRunId || null },
-  });
+  }, { idempotencyKey: `subagent:${id}:delegated-task` });
   await authority.append({
     sessionId,
     type: 'event',
@@ -45,7 +45,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, p
     runId: trace.runId || null,
     parentId: parentRunId || null,
     metadata: { kind: 'subagent-start', workerProfile, subagentId: id, parentSessionId, parentConversationId },
-  });
+  }, { idempotencyKey: `subagent:${id}:start` });
   await conversationStore.updateMetadata({ agentId, sessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId, parentConversationId, parentRunId: parentRunId || null, parentChild: true, subagentId: id, workerProfile }) });
   return sessionId;
 }

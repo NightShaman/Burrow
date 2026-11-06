@@ -62,9 +62,9 @@ function inspectionFor(messages, { modelConfig, tools } = {}) {
 }
 
 function assertFits(inspection, { compacted = false } = {}) {
-  const contextTokens = Number(inspection?.contextTokens);
+  const contextTokens = inspection?.contextTokens == null ? NaN : Number(inspection.contextTokens);
   const estimatedTokens = Number(inspection?.estimatedTokens);
-  if (!Number.isFinite(contextTokens) || contextTokens <= 0 || !Number.isFinite(estimatedTokens) || estimatedTokens <= contextTokens) return;
+  if (!Number.isFinite(contextTokens) || contextTokens < 0 || !Number.isFinite(estimatedTokens) || estimatedTokens <= contextTokens) return;
   const error = new Error('context_preparation_prompt_over_budget');
   error.statusCode = 413;
   error.details = {
@@ -84,7 +84,7 @@ function assertFits(inspection, { compacted = false } = {}) {
 export function prepareNativeToolContinuation({ baseMessages = [], toolCalls = [], toolResults = [], modelConfig = null, tools = null } = {}) {
   const complete = chatToolContinuationMessages({ baseMessages, toolCalls, toolResults });
   const completeInspection = inspectionFor(complete, { modelConfig, tools });
-  if (!Number.isFinite(Number(completeInspection.contextTokens)) || completeInspection.contextTokens <= 0 || completeInspection.estimatedTokens <= completeInspection.contextTokens) {
+  if (completeInspection.contextTokens == null || !Number.isFinite(Number(completeInspection.contextTokens)) || completeInspection.contextTokens < 0 || completeInspection.estimatedTokens <= completeInspection.contextTokens) {
     return { messages: complete, inspection: completeInspection, compacted: false };
   }
 

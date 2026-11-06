@@ -25,6 +25,41 @@ const MAX_SSE_EVENT_CHARS = 1024 * 1024;
 
 const DEFAULT_IMAGE_INPUT_TOKEN_ESTIMATE = 1_024;
 
+// Count the provider-facing JSON fields, but never bill encoded image bytes as
+// ordinary text. This is a heuristic (characters/4 plus a vision allowance),
+// not a provider tokenizer. Preserve structural/tool-input text on the wire.
+function providerInputAccounting(fields = []) {
+  let imageCount = 0;
+  const promptChars = fields.reduce((total, field) => {
+    if (field === undefined || field === null) return total;
+    const text = JSON.stringify(field, (key, value) => {
+      if (key === 'image_url' && typeof value === 'string') {
+        imageCount += 1;
+        return /^data:image\/[^;]+;base64,/i.test(value) ? '[image]' : value;
+      }
+      if (key === 'url' && typeof value === 'string' && /^data:image\/[^;]+;base64,/i.test(value)) {
+        imageCount += 1;
+        return '[image]';
+      }
+      if (key === 'inlineData' && value && typeof value === 'object' && /^image\//i.test(value.mimeType || '')) {
+        imageCount += 1;
+        return { ...value, data: '[image]' };
+      }
+      if (key === 'source' && value && typeof value === 'object' && ['base64', 'url'].includes(value.type)) {
+        imageCount += 1;
+        return value.type === 'base64' ? { ...value, data: '[image]' } : value;
+      }
+      if (key === 'fileData' && value && typeof value === 'object' && /^image\//i.test(value.mimeType || '')) {
+        imageCount += 1;
+        return value;
+      }
+      return value;
+    });
+    return total + text.length;
+  }, 0);
+  return { promptChars, imageCount };
+}
+
 function contextUsageFromRequest({ promptChars = 0, bodyChars = 0, imageCount = 0, model = null, api = null, continuation = false, modelCall = null, clock = () => new Date().toISOString() } = {}) {
   // Data-URI image bytes inflate the wire body but are not text tokens. Keep
   // transport size diagnostic-only and budget vision input explicitly.
@@ -369,11 +404,6 @@ function nativeToolRound({ toolCalls = [], toolResults = [] } = {}) {
   return normalizeProviderMessages(expanded);
 }
 
-function nativeMessageChars(message = {}) {
-  const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-  return messageContentChars(message.content) + calls.reduce((sum, call) => sum + String(call?.function?.name || '').length + String(call?.function?.arguments || '').length, 0);
-}
-
 function chatToolContinuationMessages({ baseMessages = [], toolCalls = [], toolResults = [] } = {}) {
   // Structure only: normalize roles and preserve every complete assistant call
   // ↔ tool-result pair. Context preparation owns every semantic reduction.
@@ -446,6 +476,7 @@ export {
   MAX_MODEL_TEXT_CHARS,
   MAX_SSE_CARRY_CHARS,
   MAX_SSE_EVENT_CHARS,
+  providerInputAccounting,
   contextUsageFromRequest,
   contextUsageFromResponse,
   contextUsageCallback,
