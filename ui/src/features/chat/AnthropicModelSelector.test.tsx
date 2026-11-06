@@ -160,6 +160,48 @@ describe('native chat/main selector', () => {
     expect(screen.queryByRole('button', { name: 'Retry model selection' })).toBeNull();
     expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveProperty('value', 'default');
   });
+  it('keeps the toolbar footprint stable while a native pair is pending and restores it on completion', async () => {
+    let release!: (accepted: boolean) => void;
+    const updateAgent = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const blocked = vi.fn();
+    render(
+      <ChatModelSelector
+        {...props}
+        selected={{ ...agent, thinkingMode: 'default' }}
+        updateAgent={updateAgent}
+        onSelectionBlockedChange={blocked}
+      />,
+    );
+    const mode = screen.getByRole('combobox', { name: 'Thinking' });
+    const toolbar = mode.closest('.workspace-toolbar')!;
+    const children = () =>
+      Array.from(toolbar.children).map((child) => child.tagName + '.' + child.className);
+    const before = children();
+    fireEvent.change(mode, { target: { value: 'adaptive' } });
+    expect(children()).toEqual(before);
+    expect(screen.getByRole('status').classList.contains('sr-only')).toBe(true);
+    expect(screen.getByRole('status').textContent).toBe('Saving model selection…');
+    for (const name of ['Provider', 'Model', 'Thinking', 'Effort']) {
+      const control = screen.getByRole('combobox', { name });
+      expect(control).toHaveProperty('disabled', true);
+      expect(control.getAttribute('data-saving-disabled')).toBe('true');
+    }
+    expect(screen.getByRole('slider')).toHaveProperty('disabled', true);
+    expect(screen.getByRole('slider').getAttribute('data-saving-disabled')).toBe('true');
+    expect(blocked).toHaveBeenLastCalledWith(true);
+    await act(async () => release(true));
+    expect(children()).toEqual(before);
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(screen.getByRole('combobox', { name: 'Thinking' })).toHaveProperty('disabled', false);
+    expect(
+      screen.getByRole('combobox', { name: 'Thinking' }).hasAttribute('data-saving-disabled'),
+    ).toBe(false);
+  });
   it('keeps tuning before session actions inside the existing toolbar', () => {
     render(<ChatModelSelector {...props} selected={{ ...agent, thinkingMode: 'default' }} />);
     const mode = screen.getByRole('combobox', { name: 'Thinking' });

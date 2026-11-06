@@ -140,3 +140,74 @@ it('does not accept an old visit after A→B→A or unlock a newer request', asy
     await fresh;
   });
 });
+
+it.each(['queue_next', 'side_question'] as const)(
+  'preserves ambiguous %s identity across navigation and remount, but not after acceptance',
+  async (intent) => {
+    const { result, rerender, unmount } = renderHook(
+      ({ agent, session, reset }) => useChatInputs(agent, session, reset),
+      { initialProps: { agent: 'agent', session: 'A', reset: 0 } },
+    );
+    await waitFor(() => expect(result.current.generation).toBe(4));
+    const posts: Array<Record<string, unknown>> = [];
+    vi.mocked(api).mockImplementation(async (_path, request) => {
+      if (request?.method !== 'POST') return { generation: 4, inputs: [] } as never;
+      posts.push(JSON.parse(request.body as string));
+      if (posts.length < 4) throw new Error('response lost');
+      return { input } as never;
+    });
+    const send = () => result.current.submit(intent, `retry-${intent}`, [], 'main', 'source');
+    await act(async () => {
+      await expect(send()).rejects.toThrow('response lost');
+    });
+    rerender({ agent: 'other', session: 'B', reset: 0 });
+    rerender({ agent: 'agent', session: 'A', reset: 0 });
+    await waitFor(() => expect(result.current.generation).toBe(4));
+    await act(async () => {
+      await expect(send()).rejects.toThrow('response lost');
+    });
+    unmount();
+    const remount = renderHook(() => useChatInputs('agent', 'A', 0));
+    await waitFor(() => expect(remount.result.current.generation).toBe(4));
+    await act(async () => {
+      await expect(
+        remount.result.current.submit(intent, `retry-${intent}`, [], 'main', 'source'),
+      ).rejects.toThrow('response lost');
+    });
+    expect(posts[1].idempotencyKey).toBe(posts[0].idempotencyKey);
+    expect(posts[2].idempotencyKey).toBe(posts[0].idempotencyKey);
+    await act(async () => {
+      await remount.result.current.submit(intent, `retry-${intent}`, [], 'main', 'source');
+    });
+    await act(async () => {
+      await remount.result.current.submit(intent, `retry-${intent}`, [], 'main', 'source');
+    });
+    expect(posts[3].idempotencyKey).toBe(posts[0].idempotencyKey);
+    expect(posts[4].idempotencyKey).not.toBe(posts[0].idempotencyKey);
+    remount.unmount();
+  },
+);
+
+it('separates changed payloads and server generations from ambiguous attempts', async () => {
+  const { result } = renderHook(() => useChatInputs('agent', 'generation-fence', 0));
+  await waitFor(() => expect(result.current.generation).toBe(4));
+  const posts: Array<Record<string, unknown>> = [];
+  vi.mocked(api).mockImplementation(async (_path, request) => {
+    if (!request?.method) return { generation: posts.length >= 2 ? 5 : 4, inputs: [] } as never;
+    posts.push(JSON.parse(request.body as string));
+    throw new Error('lost');
+  });
+  await act(async () => {
+    await expect(result.current.submit('queue_next', 'payload', [], 'run', null)).rejects.toThrow();
+  });
+  await act(async () => {
+    await expect(
+      result.current.submit('queue_next', 'payload', [], 'other-run', null),
+    ).rejects.toThrow();
+  });
+  await waitFor(() => expect(result.current.generation).toBe(5), { timeout: 4000 });
+  await act(async () => {
+    await expect(result.current.submit('queue_next', 'payload', [], 'run', null)).rejects.toThrow();
+  });
+  expect(new Set(posts.map((post) => post.idempotencyKey)).size).toBe(3);
+});

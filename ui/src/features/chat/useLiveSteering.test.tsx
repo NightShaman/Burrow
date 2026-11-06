@@ -123,3 +123,91 @@ it('ignores old A visit acceptance after A→B→A', async () => {
   expect(result.current.inputs).toEqual([]);
   unmount();
 });
+
+it('retains ambiguous steering identity across navigation/remount, but not after acceptance or for a new reset', async () => {
+  const posts: Array<Record<string, unknown>> = [];
+  vi.mocked(api).mockImplementation(async (_path, request) => {
+    if (request?.method !== 'POST') return { steering: [] } as never;
+    posts.push(JSON.parse(request.body as string));
+    if (posts.length < 4) throw new Error('lost');
+    return { steering: { ...input, status: 'delivered' } } as never;
+  });
+  const props = { agent: 'steer-agent', session: 'A', run: 'run', reset: 0 };
+  const h = renderHook(
+    ({ agent, session, run, reset }) => useLiveSteering(agent, session, run, reset),
+    { initialProps: props },
+  );
+  const send = () =>
+    h.result.current.submit('steer-again', [], { promotedFrom: 'source', generation: 4 });
+  await act(async () => {
+    await expect(send()).rejects.toThrow('lost');
+  });
+  h.rerender({ agent: 'other', session: 'B', run: 'other-run', reset: 0 });
+  h.rerender(props);
+  await act(async () => {
+    await expect(send()).rejects.toThrow('lost');
+  });
+  h.unmount();
+  const remount = renderHook(({ reset }) => useLiveSteering('steer-agent', 'A', 'run', reset), {
+    initialProps: { reset: 0 },
+  });
+  const submit = () =>
+    remount.result.current.submit('steer-again', [], { promotedFrom: 'source', generation: 4 });
+  await act(async () => {
+    await expect(submit()).rejects.toThrow('lost');
+  });
+  expect(posts[0].idempotencyKey).toBe(posts[1].idempotencyKey);
+  expect(posts[0].idempotencyKey).toBe(posts[2].idempotencyKey);
+  await act(async () => {
+    await submit();
+  });
+  await act(async () => {
+    await submit();
+  });
+  expect(posts[3].idempotencyKey).toBe(posts[0].idempotencyKey);
+  expect(posts[4].idempotencyKey).not.toBe(posts[0].idempotencyKey);
+  remount.rerender({ reset: 1 });
+  await act(async () => {
+    await submit();
+  });
+  expect(posts[5].idempotencyKey).not.toBe(posts[4].idempotencyKey);
+  remount.unmount();
+});
+
+it('retries transient terminal polling failures while pending and stops once delivered', async () => {
+  vi.useFakeTimers();
+  const reads: Array<{ steering: (typeof input)[] }> = [
+    { steering: [input] },
+    { steering: [input] },
+    { steering: [{ ...input, status: 'delivered' as const }] },
+  ];
+  let polls = 0;
+  vi.mocked(api).mockImplementation(async () => {
+    polls++;
+    if (polls === 3) throw new Error('offline');
+    return (reads.shift() ?? { steering: [] }) as never;
+  });
+  try {
+    const h = renderHook(({ run }) => useLiveSteering('poll-agent', 'poll-session', run), {
+      initialProps: { run: 'poll-run' },
+    });
+    await act(async () => {});
+    h.rerender({ run: '' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(polls).toBe(3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(polls).toBe(4);
+    expect(h.result.current.inputs[0].status).toBe('delivered');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(polls).toBe(4);
+    h.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});

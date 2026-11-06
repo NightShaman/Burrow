@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientBudgets } from '../../app/clientBudgets';
 import { api } from '../../app/api';
+import { clearConversationCache } from './chatConversationCache';
 import {
   createChatSessionRepository,
   readSessionListCache,
@@ -256,9 +257,7 @@ describe('active scrollback', () => {
       .mockResolvedValueOnce(page(['d'], 'new', reset ? 1 : 0));
     const repo = createChatSessionRepository();
     await repo.loadSession('agent', 'default');
-    expect((await repo.loadOlder('agent', 'default')).turns?.map((t) => t.id)).toEqual(
-      reset ? ['d'] : ['c', 'd'],
-    );
+    expect((await repo.loadOlder('agent', 'default')).turns?.map((t) => t.id)).toEqual(['d']);
     expect(request.mock.calls[2][0]).not.toContain('before=');
   });
   it('keeps current conversation after an older-page network failure', async () => {
@@ -308,7 +307,7 @@ describe('active scrollback', () => {
           ? ['a', 'b', 'c', 'd']
           : order === 'older-first'
             ? ['a', 'b', 'c', 'd', 'e']
-            : ['c', 'd', 'e'],
+            : ['d', 'e'],
       );
       expect(result.nextCursor).toBe(
         order === 'refresh-first' ? 'middle' : order === 'older-first' ? 'oldest' : 'fresh',
@@ -316,6 +315,48 @@ describe('active scrollback', () => {
       if (order === 'refresh-first') expect(request.mock.calls[2][0]).toContain('before=initial');
     },
   );
+
+  it('does not retain rows omitted from a fresh newest page when no older page was fetched', async () => {
+    request
+      .mockResolvedValueOnce(page(['removed', 'kept'], null))
+      .mockResolvedValueOnce(page(['kept'], null));
+    const repo = createChatSessionRepository();
+    await repo.loadSession('agent', 'default');
+    expect((await repo.loadSession('agent', 'default')).turns?.map((t) => t.id)).toEqual(['kept']);
+  });
+
+  it('drops loaded prefixes after explicit browser cache invalidation, even with unchanged reset metadata', async () => {
+    request
+      .mockResolvedValueOnce(page(['new'], 'older'))
+      .mockResolvedValueOnce(page(['old', 'new'], null))
+      .mockResolvedValueOnce(page([], null));
+    const repo = createChatSessionRepository();
+    await repo.loadSession('agent', 'default');
+    expect((await repo.loadOlder('agent', 'default')).turns?.map((t) => t.id)).toEqual([
+      'old',
+      'new',
+    ]);
+    clearConversationCache();
+    expect((await repo.loadSession('agent', 'default')).turns).toEqual([]);
+  });
+
+  it('cannot reinstate a pre-invalidation in-flight response in a subsequent read', async () => {
+    request.mockResolvedValueOnce(page(['old'], null));
+    const repo = createChatSessionRepository();
+    await repo.loadSession('agent', 'default');
+    const delayed = deferred<ReturnType<typeof page>>();
+    request
+      .mockImplementationOnce(() => delayed.promise)
+      .mockResolvedValueOnce(page([], null))
+      .mockResolvedValueOnce(page([], null));
+    const obsolete = repo.loadSession('agent', 'default');
+    clearConversationCache();
+    const fresh = repo.loadSession('agent', 'default');
+    delayed.resolve(page(['old'], null));
+    await obsolete;
+    expect((await fresh).turns).toEqual([]);
+    expect((await repo.loadSession('agent', 'default')).turns).toEqual([]);
+  });
 
   it('orders an in-flight read, reset and new load without resurrecting the old generation', async () => {
     const repo = createChatSessionRepository();
@@ -361,6 +402,6 @@ describe('active scrollback', () => {
     const failed = repo.loadOlder('agent', 'default');
     const next = repo.loadSession('agent', 'default');
     await expect(failed).rejects.toThrow('offline');
-    expect((await next).turns?.map((t) => t.id)).toEqual(['c', 'd']);
+    expect((await next).turns?.map((t) => t.id)).toEqual(['d']);
   });
 });

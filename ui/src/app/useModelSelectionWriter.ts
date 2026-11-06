@@ -4,6 +4,11 @@ import { api } from './api';
 import type { Agent, SavedProvider } from './types';
 
 type Entry = { next: Agent; version: number; waiters: ((accepted: boolean) => void)[] };
+// Overview requests may have started before a successful save. Track only
+// acknowledged writes; failed/pending intents must not mask server snapshots.
+const acknowledgedVersions = new Map<string, number>();
+export const modelSelectionWriteVersion = (agentId: string) =>
+  acknowledgedVersions.get(agentId) ?? 0;
 /** Serialize writes per captured owner and settle callers only after the latest
  * merged intent is acknowledged. Older acknowledgements never replace it. */
 export function useModelSelectionWriter(
@@ -75,6 +80,7 @@ export function useModelSelectionWriter(
               throw new Error('Invalid native model selection acknowledgement.');
             }
             if (version === entry.version) {
+              acknowledgedVersions.set(selected.id, modelSelectionWriteVersion(selected.id) + 1);
               commit(selected.id, {
                 provider: connection.provider,
                 modelConnectionId: connection.id,

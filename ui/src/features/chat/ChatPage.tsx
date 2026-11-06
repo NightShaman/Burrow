@@ -81,6 +81,9 @@ export function ChatModelSelector({
   const temperatureDraft = temperatureDrafts[identity];
   const nativeDraft = drafts[identity];
   const savingNative = savingSelection || nativeDraft?.pending === true;
+  // Preserve native disabled guards, but distinguish transient persistence from
+  // a run lock or an unavailable choice for stable save-only styling.
+  const savingOnly = savingNative && !locked;
   const retryNative = nativeDraft?.failed === true;
   const thinkingMode = nativeDraft?.displayPair
     ? (nativeDraft.patch.thinkingMode ?? null)
@@ -226,6 +229,9 @@ export function ChatModelSelector({
             : void updateAgent({ effort: event.target.value })
         }
         disabled={locked || savingNative || !provider || (native && thinkingMode == null)}
+        data-saving-disabled={
+          (savingOnly && !!provider && (!native || thinkingMode != null)) || undefined
+        }
       >
         {!efforts.includes(effort) && <option value={effort}>Unavailable · {effort}</option>}
         {efforts.map((value) => (
@@ -251,6 +257,13 @@ export function ChatModelSelector({
         disabled={
           locked || Boolean(nativeDraft) || (savingSelection && !temperatureDraft) || !provider
         }
+        data-saving-disabled={
+          (savingOnly &&
+            !!provider &&
+            !temperatureDraft &&
+            (Boolean(nativeDraft) || savingSelection)) ||
+          undefined
+        }
       />
     </label>
   );
@@ -266,6 +279,7 @@ export function ChatModelSelector({
           value={provider?.provider ?? ''}
           onChange={(e) => chooseProvider(e.target.value)}
           disabled={locked || savingNative || !savedProviders.length}
+          data-saving-disabled={(savingOnly && !!savedProviders.length) || undefined}
         >
           {!provider && (
             <option value="">
@@ -289,6 +303,7 @@ export function ChatModelSelector({
           value={model}
           onChange={(e) => chooseModel(e.target.value)}
           disabled={locked || savingNative || !models.length}
+          data-saving-disabled={(savingOnly && !!models.length) || undefined}
         >
           {!models.includes(model) && (
             <option value={model}>{model ? `Unavailable · ${model}` : 'Select model'}</option>
@@ -316,6 +331,7 @@ export function ChatModelSelector({
               value={thinkingMode ?? ''}
               aria-invalid={thinking.modeInvalid || undefined}
               disabled={locked || savingNative || !provider}
+              data-saving-disabled={(savingOnly && !!provider) || undefined}
               onChange={(event) => void saveNative(event.target.value, effort)}
             >
               {thinkingMode == null && <option value="">{thinking.legacyLabel}</option>}
@@ -387,11 +403,9 @@ export function ChatModelSelector({
           {ownerEditor.label}
         </button>
       )}
-      {savingNative && (
-        <span className="model-selection-save-status" role="status">
-          Saving model selection…
-        </span>
-      )}
+      <span className="sr-only" role="status" aria-live="polite">
+        {savingNative ? 'Saving model selection…' : ''}
+      </span>
       {retryNative && (
         <button
           className="new-session"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ChatAttachment } from '../../app/api';
-import { secureUuid } from '../../app/secureUuid';
+import { acknowledgeChatInputRetry, chatInputRetryKey } from './chatInputRetryIdentity';
 import type { ChatInput } from './chatInputs';
 
 type InputScope = { key: string };
@@ -29,11 +29,9 @@ export function useChatInputs(agentId: string, sessionId: string, resetGeneratio
   const mutationVersion = useRef(0);
   const [version, setVersion] = useState(0);
   const busy = useRef<InputScope | null>(null);
-  const retry = useRef<{ signature: string; key: string } | null>(null);
   const [pending, setPending] = useState('');
   useEffect(() => {
     current.current = scope;
-    retry.current = null;
     busy.current = null;
     setPending('');
     return () => {
@@ -103,18 +101,17 @@ export function useChatInputs(agentId: string, sessionId: string, resetGeneratio
       targetRunId: targetRunId || null,
       promotedFrom,
     };
-    const signature = JSON.stringify(body);
-    if (retry.current?.signature !== signature) retry.current = { signature, key: secureUuid() };
+    const retry = chatInputRetryKey('input', body);
     try {
       const response = await api<{ input: ChatInput }>('/api/chat/inputs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...body, idempotencyKey: retry.current.key }),
+        body: JSON.stringify({ ...body, idempotencyKey: retry.key }),
       });
+      acknowledgeChatInputRetry(retry.signature, retry.key);
       if (current.current !== scope) return null;
       mutationVersion.current++;
       merge([response.input]);
-      retry.current = null;
       setVersion((v) => v + 1);
       return response.input;
     } finally {

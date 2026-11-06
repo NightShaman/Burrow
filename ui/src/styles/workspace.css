@@ -78,14 +78,20 @@
   outline: none;
 }
 .workspace-toolbar {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  min-height: 42px;
+  /* Reserve the single-row controls plus horizontal scroll track. */
+  min-height: 52px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.workspace-toolbar > .sr-only {
+  inset: 0 auto auto 0;
 }
 .workspace-toolbar > span {
   margin-right: auto;
@@ -133,11 +139,26 @@
   background: var(--surface-input);
   padding: 0 8px;
 }
+/* A persistence lock still disables interaction, but must not wash out the
+   controls every time a model or temperature write begins and ends. Run locks
+   and unavailable choices keep their ordinary disabled appearance. */
+.workspace-toolbar select:disabled[data-saving-disabled='true'] {
+  opacity: 1;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+  background: var(--surface-input);
+  border-color: var(--line);
+}
+.workspace-toolbar .temperature-control input:disabled[data-saving-disabled='true'] {
+  opacity: 1;
+  accent-color: var(--accent);
+}
 .workspace-toolbar .session-selector-control select {
   field-sizing: content;
   max-width: 24rem;
 }
 .workspace-toolbar .temperature-control {
+  min-height: 29px;
   gap: 7px;
 }
 .workspace-toolbar .temperature-control span {
@@ -147,7 +168,28 @@
 }
 .workspace-toolbar .temperature-control input {
   width: 88px;
+  height: 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--line);
   accent-color: var(--accent);
+}
+.workspace-toolbar .temperature-control input::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.workspace-toolbar .temperature-control input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.workspace-toolbar .temperature-control input:disabled:not([data-saving-disabled='true']) {
+  opacity: 0.5;
 }
 .workspace-toolbar .a2a-default-control {
   gap: 7px;
@@ -428,7 +470,8 @@
 /* Keep native tuning inline with model identity and session actions. */
 .workspace-toolbar.native-model-toolbar {
   flex-wrap: nowrap;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .workspace-toolbar.owner-editor-toolbar {
   flex-wrap: wrap;

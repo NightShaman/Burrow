@@ -32,18 +32,21 @@ export function useChatSession(selectedAgentId: string) {
     { key: '', hasMore: false, loading: false },
   );
   const olderRequest = useRef(false);
+  // A read may finish after navigation. Only its caller, after validating its
+  // scope, may change the pagination state of the displayed conversation.
   const loadSession = useCallback(
-    async (agentId: string, id: string) => {
-      const session = await sessionRepository.loadSession(agentId, id);
-      setOlderState({
-        key: conversationCacheKey(agentId, id),
-        hasMore: Boolean(session.hasMore),
-        loading: false,
-      });
-      return session;
-    },
+    (agentId: string, id: string) => sessionRepository.loadSession(agentId, id),
     [sessionRepository],
   );
+  const showOlderState = useCallback((agentId: string, id: string, session: ChatSession) => {
+    if (selectedChatRef.current.agentId !== agentId || selectedChatRef.current.sessionId !== id)
+      return;
+    setOlderState({
+      key: conversationCacheKey(agentId, id),
+      hasMore: Boolean(session.hasMore),
+      loading: false,
+    });
+  }, []);
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
   const [attachmentState, setAttachmentState] = useState<{
     scope: object;
@@ -179,6 +182,7 @@ export function useChatSession(selectedAgentId: string) {
       });
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
+      if (current()) showOlderState(selectedAgentId, sessionId, session);
       if (
         current() &&
         selectedChatRef.current.agentId === selectedAgentId &&
@@ -330,6 +334,7 @@ export function useChatSession(selectedAgentId: string) {
         );
         conversationCacheRef.current[cacheKey] = nextTurns;
         writeConversationCache(conversationCacheRef.current, cacheKey);
+        showOlderState(selectedAgentId, sessionId, session);
         setTurns(nextTurns);
       })
       .catch(
@@ -379,6 +384,7 @@ export function useChatSession(selectedAgentId: string) {
       });
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
+      showOlderState(agentId, targetSessionId, session);
       const current = selectedChatRef.current;
       if (current.agentId === agentId && current.sessionId === targetSessionId) setTurns(nextTurns);
     },

@@ -51,6 +51,12 @@ it('shows each movement immediately and stays enabled during slow saves, ignorin
   fireEvent.change(slider(), { target: { value: '0.7' } });
   view.rerender(<ChatModelSelector {...props} updateAgent={updateAgent} savingSelection />);
   expect(slider().disabled).toBe(false);
+  expect(slider().hasAttribute('data-saving-disabled')).toBe(false);
+  expect(screen.getByRole('combobox', { name: 'Model' })).toHaveProperty('disabled', true);
+  expect(screen.getByRole('combobox', { name: 'Model' }).getAttribute('data-saving-disabled')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('status').classList.contains('sr-only')).toBe(true);
   expect(slider().value).toBe('0.7');
   fireEvent.change(slider(), { target: { value: '1.4' } });
   expect(slider().value).toBe('1.4');
@@ -113,10 +119,16 @@ it('keeps pending values owner-scoped and does not clear a returned owner with a
 it('retains deliberate locks, unavailable connections and unrelated save locks', () => {
   const view = render(<ChatModelSelector {...props} locked />);
   expect(slider().disabled).toBe(true);
+  expect(slider().hasAttribute('data-saving-disabled')).toBe(false);
+  expect(screen.getByRole('combobox', { name: 'Model' }).hasAttribute('data-saving-disabled')).toBe(
+    false,
+  );
   view.rerender(<ChatModelSelector {...props} savingSelection />);
   expect(slider().disabled).toBe(true);
+  expect(slider().getAttribute('data-saving-disabled')).toBe('true');
   view.rerender(<ChatModelSelector {...props} savedProviders={[]} />);
   expect(slider().disabled).toBe(true);
+  expect(slider().hasAttribute('data-saving-disabled')).toBe(false);
 });
 it('coalesces a continuous drag through the real writer and persists the final value', async () => {
   const first = deferred(),

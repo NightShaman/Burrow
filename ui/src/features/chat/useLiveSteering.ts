@@ -1,4 +1,4 @@
-import { secureUuid } from '../../app/secureUuid';
+import { acknowledgeChatInputRetry, chatInputRetryKey } from './chatInputRetryIdentity';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ChatAttachment } from '../../app/api';
 const emptyInputs: SteeringInput[] = [];
@@ -34,7 +34,9 @@ export function useLiveSteering(
   });
   const trackedRun = useRef('');
   const [submissionVersion, setSubmissionVersion] = useState(0);
-  const retry = useRef<{ signature: string; key: string } | null>(null);
+  const pendingForRun = useRef<{ scope: typeof scope; runId: string; pending: boolean } | null>(
+    null,
+  );
   const busy = useRef(false);
   const merge = (inputs: SteeringInput[]) =>
     setState((previous) => {
@@ -47,8 +49,8 @@ export function useLiveSteering(
   useEffect(() => {
     currentScope.current = scope;
     trackedRun.current = '';
-    retry.current = null;
     busy.current = false;
+    pendingForRun.current = null;
     return () => {
       if (currentScope.current === scope) currentScope.current = { key: 'retired' };
     };
@@ -66,10 +68,22 @@ export function useLiveSteering(
         );
         if (!live) return;
         merge(response.steering);
-        if (activeRunId || response.steering.some((input) => input.status === 'pending'))
+        pendingForRun.current = {
+          scope,
+          runId,
+          pending: response.steering.some((input) => input.status === 'pending'),
+        };
+        if (activeRunId || pendingForRun.current.pending)
           timer = setTimeout(() => void poll(), 1500);
       } catch {
-        if (live && activeRunId) timer = setTimeout(() => void poll(), 3000);
+        if (
+          live &&
+          (activeRunId ||
+            (pendingForRun.current?.scope === scope &&
+              pendingForRun.current.runId === runId &&
+              pendingForRun.current.pending))
+        )
+          timer = setTimeout(() => void poll(), 3000);
       }
     };
     void poll();
@@ -85,15 +99,15 @@ export function useLiveSteering(
   ) => {
     if (busy.current) return null;
     busy.current = true;
-    const signature = JSON.stringify({
+    const retry = chatInputRetryKey('steer', {
       runId: activeRunId,
       agentId,
       sessionId,
       message,
       attachments,
-      promotion,
+      promotion: promotion ?? null,
+      resetGeneration,
     });
-    if (retry.current?.signature !== signature) retry.current = { signature, key: secureUuid() };
     try {
       const response = await api<{ steering: SteeringInput }>(
         `/api/chat/${encodeURIComponent(activeRunId)}/steer`,
@@ -103,18 +117,20 @@ export function useLiveSteering(
           body: JSON.stringify({
             agentId,
             sessionId,
-            idempotencyKey: retry.current.key,
+            idempotencyKey: retry.key,
             ...promotion,
             message,
             ...(attachments.length ? { attachments } : {}),
           }),
         },
       );
+      acknowledgeChatInputRetry(retry.signature, retry.key);
       if (currentScope.current !== scope) return null;
       merge([response.steering]);
+      if (response.steering.status === 'pending')
+        pendingForRun.current = { scope, runId: activeRunId, pending: true };
       trackedRun.current = activeRunId;
       setSubmissionVersion((version) => version + 1);
-      retry.current = null;
       return response.steering;
     } finally {
       if (currentScope.current === scope) busy.current = false;

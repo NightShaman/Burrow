@@ -91,11 +91,20 @@ export function reconcileModelCatalog(agents: Agent[], providers: SavedProvider[
       const provider = providers.find((item) => item.id === agent.modelConnectionId);
       return { ...agent, provider: provider?.provider ?? '' };
     }
-    const provider =
-      providers.find((item) => item.id === agent.modelConnectionId) ??
-      providers.find((item) => item.provider === agent.provider) ??
-      providers[0];
-    const model = provider.models.includes(agent.model) ? agent.model : provider.models[0];
+    // Existing saved identity/model are not catalog defaults: keep them even
+    // when the catalog no longer contains either one, so sending remains blocked.
+    const savedConnection = agent.modelConnectionId;
+    const provider = savedConnection
+      ? providers.find((item) => item.id === savedConnection)
+      : (providers.find((item) => item.provider === agent.provider) ?? providers[0]);
+    if (!provider) return { ...agent, provider: '' };
+    const model = savedConnection
+      ? agent.model
+      : provider.models.includes(agent.model)
+        ? agent.model
+        : provider.models[0];
+    if (savedConnection && !provider.models.includes(model))
+      return { ...agent, provider: provider.provider };
     const efforts = [
       'off',
       ...(provider.modelEfforts?.[model] ?? []).filter((item) => item !== 'off'),

@@ -1447,6 +1447,70 @@ it('retains a reported error across automatic conversation hydration until dismi
   expect(result.current.chatError).toBe('');
 });
 
+it('keeps B pagination visible when a delayed A refresh finishes offscreen', async () => {
+  const a = `/api/sessions/${sessionId}?agentId=${agentId}`;
+  const b = `/api/sessions/session-b?agentId=${agentId}`;
+  const delayed = deferred<{ session: { id: string; turns: never[]; hasMore: boolean } }>();
+  let delayA = false;
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: 'session-b' }] };
+    if (path === a && delayA) return delayed.promise;
+    if (path === a || path === b)
+      return {
+        session: {
+          id: path === b ? 'session-b' : sessionId,
+          turns: [],
+          hasMore: path === b,
+          nextCursor: 'older',
+        },
+      };
+    return { runs: [] };
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  await waitFor(() => expect(result.current.isLoadingConversation).toBe(false));
+  delayA = true;
+  let refresh!: Promise<void>;
+  act(() => {
+    refresh = result.current.refreshConversation();
+  });
+  act(() => result.current.selectSession('session-b'));
+  await waitFor(() => expect(result.current.hasOlder).toBe(true));
+  await act(async () => {
+    delayed.resolve({ session: { id: sessionId, turns: [], hasMore: false } });
+    await refresh;
+  });
+  expect(result.current.sessionId).toBe('session-b');
+  expect(result.current.hasOlder).toBe(true);
+});
+
+it('does not restore removed rows into memory or durable cache after explicit invalidation', async () => {
+  const { clearConversationCache, readConversationCache } = await import('./chatConversationCache');
+  let removed = false;
+  const deleted = {
+    id: 'deleted',
+    role: 'assistant',
+    runId: 'deleted-run',
+    content: 'Removed on server',
+  };
+  apiMock.mockImplementation(async (path) => {
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (path === conversationPath)
+      return { session: { id: sessionId, turns: removed ? [] : [deleted], hasMore: false } };
+    return { runs: [] };
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.turns).toHaveLength(1));
+  removed = true;
+  act(() => clearConversationCache());
+  expect(result.current.turns).toEqual([]);
+  await act(async () => {
+    await result.current.refreshConversation();
+  });
+  expect(result.current.turns).toEqual([]);
+  expect(readConversationCache()[conversationCacheKey(agentId, sessionId)]).toEqual([]);
+});
+
 it('loads older pages on demand and retains them through a newest-page refresh', async () => {
   const turn = (id: string) => ({ id, type: 'message', role: 'user', content: id });
   apiMock.mockImplementation(async (path) => {
