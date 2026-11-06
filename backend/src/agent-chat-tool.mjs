@@ -143,8 +143,9 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const separateInbox = recipientRuntime.agent?.contextConfig?.a2aInDefault === false;
   const incomingSession = separateInbox ? `a2a-${sender}` : 'default';
   const explicitSession = text(targetSessionId);
-  const session = sessionId(explicitSession || implicitReplySession || incomingSession);
-  const peerInbox = separateInbox && !explicitSession && !implicitReplySession;
+  const requestedSession = sessionId(explicitSession || implicitReplySession || incomingSession);
+  const session = separateInbox && requestedSession === 'default' ? incomingSession : requestedSession;
+  const peerInbox = separateInbox && ((!explicitSession && !implicitReplySession) || requestedSession === 'default');
   const sourceMetadata = await conversationStore.getMetadata({ agentId: sender, sessionId: sourceSessionId || 'default' });
   const source = sessionId(sourceMetadata?.contextIsolation?.historySessionId || sourceSessionId || 'default');
   const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
@@ -261,8 +262,18 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       const replyDecision = reply?.decision || null;
       const replyStatus = chatTerminalStatus({ ...reply, ok: reply?.ok !== false });
       const failedPartial = replyDecision !== 'blocked' && replyStatus !== 'completed';
+      // Mirrored final answers are incoming A2A too, not an exception to the
+      // sender's inbox preference. Resolve afresh: the owner may toggle mid-run.
+      const replyRecipientRuntime = await resolveRecipientRuntime(sender);
+      const replySession = source === 'default' && replyRecipientRuntime?.agent?.contextConfig?.a2aInDefault === false
+        ? `a2a-${recipient}` : source;
+      if (replySession !== source) {
+        await conversationStore.updateMetadata({ agentId: sender, sessionId: replySession,
+          update: metadata => ({ ...metadata, a2aPeerAgentId: recipient,
+            label: `A2A - ${text(recipientRuntime.agent?.name) || recipient}` }) });
+      }
       const replyEntry = await appendAgentMessage({
-        conversationStore, agentId: sender, sessionId: source, content: replyText,
+        conversationStore, agentId: sender, sessionId: replySession, content: replyText,
         sender: recipient, senderRuntime: recipientRuntime, recipient: sender,
         sourceSessionId: session, sourceRunId: reply?.runId || null,
         messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
