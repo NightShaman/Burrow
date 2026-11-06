@@ -250,4 +250,32 @@ CREATE TABLE openai_reset_credit_claims (
  PRIMARY KEY(account_key,credit_id), UNIQUE(account_key,request_id)
 );
 ` },
+  { version: 98, name: 'openai-reset-durable-outcomes', sql: `
+ALTER TABLE openai_reset_credit_claims
+ ADD COLUMN expires_at TIMESTAMPTZ,
+ ADD COLUMN outcome TEXT NOT NULL DEFAULT 'unknown' CHECK (outcome IN ('unknown','consumed','retryable','unavailable')),
+ ADD COLUMN retry_at TIMESTAMPTZ,
+ ADD COLUMN code TEXT,
+ ADD COLUMN http_status INTEGER,
+ ADD COLUMN error TEXT;
+CREATE TABLE openai_reset_credit_attempts (
+ account_key TEXT NOT NULL,
+ credit_id TEXT NOT NULL,
+ request_id TEXT NOT NULL,
+ claimed_at TIMESTAMPTZ NOT NULL,
+ expires_at TIMESTAMPTZ,
+ outcome TEXT NOT NULL CHECK (outcome IN ('unknown','consumed','retryable','unavailable')),
+ settled_at TIMESTAMPTZ,
+ retry_at TIMESTAMPTZ,
+ code TEXT,
+ http_status INTEGER,
+ error TEXT,
+ PRIMARY KEY(account_key,request_id),
+ FOREIGN KEY(account_key,credit_id) REFERENCES openai_reset_credit_claims(account_key,credit_id)
+);
+-- Legacy v97 claims have no expiry/outcome evidence: preserve the unknown fence.
+INSERT INTO openai_reset_credit_attempts(account_key,credit_id,request_id,claimed_at,expires_at,outcome)
+ SELECT account_key,credit_id,request_id,claimed_at,NULL,'unknown' FROM openai_reset_credit_claims;
+CREATE INDEX openai_reset_credit_claims_unknown_idx ON openai_reset_credit_claims(account_key) WHERE outcome='unknown';
+` },
 ]);

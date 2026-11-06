@@ -35,7 +35,7 @@ export function anthropicTierMetadata(profile, { unavailable = false } = {}) {
   return metadata;
 }
 
-export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), claimCredit, resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
+export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), resetStore, resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
   let cacheGeneration = openaiUsageGeneration;
   const ANTHROPIC_USAGE_CACHE_MS = 60_000;
   const OPENAI_OAUTH_USAGE_CACHE_MS = 60_000;
@@ -326,20 +326,24 @@ function anthropicConnectionCandidate(connection = {}) {
   }
 
   const resets = createOpenAiResetCreditsService({ resolveSource: resolveOpenAiOauthUsageSource, fetchImpl, clock,
-    claimCredit, resetCreditsUrl, timeoutMs, refreshUsage: openaiOauthUsage, invalidateUsage: () => { openaiOauthUsageCache.clear(); openaiUsageGeneration++; } });
+    resetStore, resetCreditsUrl, timeoutMs, refreshUsage: openaiOauthUsage, invalidateUsage: () => { openaiOauthUsageCache.clear(); openaiUsageGeneration++; } });
   async function pollExpiringResets() {
+    const results = [];
+    const accounts = new Set();
     for (const connection of await modelLookup().list()) {
       if (connection.autoUseExpiringResets !== true || connection.pool || isProviderPool(connection)) continue;
       try {
         const source = await resolveOpenAiOauthUsageSource(connection.id);
-        if (!source || !stableResetAccount(source) || !claimCredit) continue;
-        const snapshot = await resets.openaiResetCredits({ connectionId: connection.id });
-        if (!snapshot.ok) continue;
-        const credit = snapshot.credits.available.filter(c => c.expiresAt && Date.parse(c.expiresAt) > clock() && Date.parse(c.expiresAt) <= clock() + 300_000)
-          .sort((a,b) => a.expiresAt.localeCompare(b.expiresAt))[0];
-        if (credit) await resets.consumeOpenaiResetCredit({ connectionId: connection.id, creditId: credit.id, requestId: `auto:${credit.id}`.slice(0,256) });
-      } catch { /* A failed account must not stop polling other accounts. */ }
+        const account = source && stableResetAccount(source);
+        if (!account || !resetStore || accounts.has(account)) continue;
+        accounts.add(account);
+        // The redemption service owns fresh selection and exact-credit outcome
+        // reconciliation. Never select a replacement after an uncertain POST.
+        const result = await resets.autoConsumeExpiringResetCredit({ connectionId: connection.id });
+        results.push({ connectionId: connection.id, ...result });
+      } catch { results.push({ connectionId: connection.id, ok: false, error: 'openai_reset_poll_failed' }); }
     }
+    return results;
   }
   return { anthropicOauthUsage, openaiOauthUsage, pollExpiringResets, ...resets };
 }

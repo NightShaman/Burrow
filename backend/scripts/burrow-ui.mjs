@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createPostgresOpenAiResetStore } from '../src/postgres-openai-reset-store.mjs';
 import { startOpenAiResetScheduler } from '../src/openai-reset-scheduler.mjs';
 import { activeSessionDetail } from './ui/active-session-detail.mjs';
 import { assertModAgentAvailable } from '../src/mod-agent-runtime.mjs';
@@ -243,10 +244,8 @@ const postgresApplication = await createPostgresApplication({
   connections: async (filter) => postgresApplication.stores.models.list(filter),
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
-const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, pollExpiringResets } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now, claimCredit: async ({ account, creditId, requestId }) => {
-  const result = await modelsStore().pool.query(`INSERT INTO openai_reset_credit_claims(account_key,credit_id,request_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING credit_id`, [account, creditId, requestId]);
-  return result.rows.length === 1;
-}, openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
+const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, pollExpiringResets } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now,
+  resetStore: createPostgresOpenAiResetStore(modelsStore().pool), openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
 await serverLogger.event('database_ready', {}, { component: 'postgres' });
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates, { logger: serverLogger });
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch(() => serverLogger.event('mcp_provider_state_hydration_failed', { errorCode: 'mcp_provider_state_hydration_failed' }, { level: 'warn', component: 'mcp' }));
