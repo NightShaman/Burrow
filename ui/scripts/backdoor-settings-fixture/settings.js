@@ -1,7 +1,8 @@
 /** Operator-facing assignment of Core-owned Backdoor diagnostic and administrative access. */
 export const settingsSections = [
   { id: 'global-access', label: 'Global Access', layout: 'form' },
-  { id: 'admin-access', label: 'Admin Access', layout: 'form-wide' },
+  { id: 'admin-access', label: 'Admin Access', layout: 'form' },
+  { id: 'core-api-access', label: 'Core API Access', layout: 'form' },
 ];
 
 const ADMIN_CAPABILITIES = [
@@ -20,11 +21,19 @@ const sectionConfig = {
   },
   'admin-access': {
     title: 'Burrow administrative access',
-    description: 'Assign mod management and Core API access independently.',
+    description: 'Assign agents that may manage Burrow mods.',
     independence: 'This assignment does not grant or imply global diagnostic access.',
     saveLabel: 'Save admin access',
     savedMessage: 'Admin access saved.',
-    capabilities: ADMIN_CAPABILITIES,
+    capabilities: [ADMIN_CAPABILITIES[0]],
+  },
+  'core-api-access': {
+    title: 'Core API access',
+    description: 'Assign agents that may use the Core API through Backdoor.',
+    independence: 'This assignment does not grant or imply global diagnostic access.',
+    saveLabel: 'Save Core API access',
+    savedMessage: 'Core API access saved.',
+    capabilities: [ADMIN_CAPABILITIES[1]],
   },
 };
 
@@ -86,8 +95,7 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
   const capabilityInputs = new Map();
   const groups = config.capabilities ?? [config];
   const groupBoxes = new Map();
-  const groupContainer = config.capabilities ? el('div', null, 'settings-section-pair') : body;
-  if (groupContainer !== body) body.append(groupContainer);
+  const groupContainer = body;
   for (const group of groups) {
     const box = el('section', null, 'settings-stack');
     box.setAttribute('aria-label', group.title);
@@ -244,7 +252,7 @@ export function mountSettings({ section, primary, overflow, accessApi, agents, s
     setStatus('Saving…');
     try {
       // Core replacements are last-writer-wins. Refresh immediately before saving so
-      // this panel preserves fields owned by the other panel and any unknown grants.
+      // this panel preserves fields owned by other panels and any unknown grants.
       const current = await readCurrent();
       if (!active) return false;
       const nextAccess = { ...current };
