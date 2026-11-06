@@ -239,7 +239,7 @@ export function ModelConnections({
                   Automatically use expiring resets
                 </label>
                 <p id="auto-use-expiring-resets-help" className="settings-help">
-                  Uses banked reset credits within 5 minutes of expiry. Runs in the backend even
+                  Uses banked reset credits within 10 minutes of expiry. Runs in the backend even
                   when your browser is closed. Manual resets stay available.
                 </p>
               </div>

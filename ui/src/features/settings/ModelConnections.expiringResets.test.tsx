@@ -61,7 +61,7 @@ it('shares connection disclosure, defaults off, and retains the mounted draft ac
   expect(toggle()).toBe(hiddenToggle);
   expect(toggle().checked).toBe(false);
   const description = document.getElementById(toggle().getAttribute('aria-describedby')!);
-  expect(description?.textContent).toMatch(/banked reset credits within 5 minutes of expiry/);
+  expect(description?.textContent).toMatch(/banked reset credits within 10 minutes of expiry/);
   expect(description?.textContent).toMatch(/backend even\s+when your browser is closed/);
   expect(description?.textContent).toMatch(/Manual resets stay available/);
   fireEvent.click(toggle());
