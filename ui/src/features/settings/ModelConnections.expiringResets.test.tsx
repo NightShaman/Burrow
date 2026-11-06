@@ -28,6 +28,7 @@ function mount(
   provider = oauth,
   loadBalancing = false,
   refresh = vi.fn().mockResolvedValue(undefined),
+  expand = true,
 ) {
   render(
     <UnsavedChangesProvider>
@@ -41,21 +42,77 @@ function mount(
     </UnsavedChangesProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${provider.provider}`) }));
+  if (expand && !loadBalancing)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
 }
 const toggle = () => screen.getByRole('checkbox', { name: label }) as HTMLInputElement;
 const save = () => fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-it('defaults off and remains visible with collapsed credentials without writing or redeeming', () => {
-  mount();
+it('shares connection disclosure, defaults off, and retains the mounted draft across hide/reopen', () => {
+  mount(oauth, false, undefined, false);
+  const fields = document.getElementById('models-connection-fields')!;
+  const hiddenToggle = screen.getByLabelText(label) as HTMLInputElement;
+  expect(fields.hidden).toBe(true);
+  expect(fields.contains(hiddenToggle)).toBe(true);
+  expect(screen.queryByRole('checkbox', { name: label })).toBeNull();
+  expect(screen.queryByText(/Uses banked reset credits/)?.closest('[hidden]')).toBe(fields);
+  expect(screen.queryByRole('textbox', { name: 'Provider' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
+  expect(toggle()).toBe(hiddenToggle);
   expect(toggle().checked).toBe(false);
-  expect(document.getElementById('models-connection-fields')?.hidden).toBe(true);
   const description = document.getElementById(toggle().getAttribute('aria-describedby')!);
   expect(description?.textContent).toMatch(/banked reset credits within 5 minutes of expiry/);
   expect(description?.textContent).toMatch(/backend even\s+when your browser is closed/);
   expect(description?.textContent).toMatch(/Manual resets stay available/);
   fireEvent.click(toggle());
+  fireEvent.click(screen.getByRole('button', { name: 'Hide connection' }));
+  expect(screen.queryByRole('checkbox', { name: label })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Provider' })).toBeNull();
+  expect(
+    screen.getByRole('button', { name: 'Edit connection' }).getAttribute('aria-expanded'),
+  ).toBe('false');
+  expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Select gpt-test' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
+  expect(toggle()).toBe(hiddenToggle);
   expect(toggle().checked).toBe(true);
   expect(api).not.toHaveBeenCalled();
+});
+
+it('uses recovery disclosure then hides with sibling fields after successful discovery', async () => {
+  vi.mocked(api).mockRejectedValueOnce(new Error('Fixture discovery failure'));
+  mount(oauth, false, undefined, false);
+  expect(screen.queryByRole('checkbox', { name: label })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await screen.findByRole('alert');
+  expect(toggle().closest('[hidden]')).toBeNull();
+  expect(
+    (screen.getByRole('button', { name: 'Hide connection' }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  vi.mocked(api).mockResolvedValueOnce({ models: [{ id: 'gpt-test', selected: true }] });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await waitFor(() => expect(screen.queryByRole('checkbox', { name: label })).toBeNull());
+  expect(screen.queryByRole('textbox', { name: 'Provider' })).toBeNull();
+});
+
+it('resets disclosure on switching saved accounts without leaking the previous account value', () => {
+  const second = { ...oauth, id: 'second', provider: 'Work ChatGPT', autoUseExpiringResets: true };
+  render(
+    <ModelConnections
+      savedProviders={[oauth, second]}
+      onModelConnectionsChanged={async () => {}}
+      mcpConnections={null}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^Personal ChatGPT/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
+  expect(toggle().checked).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: /^Work ChatGPT/ }));
+  expect(screen.queryByRole('checkbox', { name: label })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit connection' }));
+  expect(toggle().checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Add provider' }));
+  expect(screen.queryByRole('checkbox', { name: label })).toBeNull();
 });
 
 it.each([true, false])(

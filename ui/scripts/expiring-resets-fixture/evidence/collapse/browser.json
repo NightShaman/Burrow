@@ -1,0 +1,187 @@
+{
+  "status": "passed",
+  "checks": [
+    "same-shell ba9995c/candidate collapsed and expanded 1366/1000/480",
+    "toggle shares disclosure and retains hidden draft",
+    "switch provider resets disclosure",
+    "default off",
+    "enabled focus",
+    "mocked save failure retains draft",
+    "save/reselect true and false",
+    "dirty guard/discard",
+    "per-account isolation",
+    "no Anthropic/API/LB control",
+    "no redemption requests",
+    "no horizontal page overflow"
+  ],
+  "overflow": [
+    {
+      "width": 1366,
+      "scroll": 1366,
+      "editor": {
+        "x": 672,
+        "y": 16,
+        "width": 664,
+        "height": 860,
+        "top": 16,
+        "right": 1336,
+        "bottom": 876,
+        "left": 672
+      },
+      "toggle": {
+        "x": 672,
+        "y": 300.75,
+        "width": 34,
+        "height": 20,
+        "top": 300.75,
+        "right": 706,
+        "bottom": 320.75,
+        "left": 672
+      }
+    },
+    {
+      "width": 1000,
+      "scroll": 1000,
+      "editor": {
+        "x": 392,
+        "y": 192,
+        "width": 582,
+        "height": 588,
+        "top": 192,
+        "right": 974,
+        "bottom": 780,
+        "left": 392
+      },
+      "toggle": {
+        "x": 392,
+        "y": 544.9375,
+        "width": 34,
+        "height": 20,
+        "top": 544.9375,
+        "right": 426,
+        "bottom": 564.9375,
+        "left": 392
+      }
+    },
+    {
+      "width": 480,
+      "scroll": 480,
+      "editor": {
+        "x": 8,
+        "y": 487.03125,
+        "width": 454,
+        "height": 388.96875,
+        "top": 487.03125,
+        "right": 462,
+        "bottom": 876,
+        "left": 8
+      },
+      "toggle": {
+        "x": 8,
+        "y": 1086.53125,
+        "width": 34,
+        "height": 20,
+        "top": 1086.53125,
+        "right": 42,
+        "bottom": 1106.53125,
+        "left": 8
+      }
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": true,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true,
+            "manual": false,
+            "acceptedInput": [
+              "text"
+            ],
+            "acceptedOutput": [
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": true,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true,
+            "manual": false,
+            "acceptedInput": [
+              "text"
+            ],
+            "acceptedOutput": [
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": false,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true
+          },
+          {
+            "id": "second-model",
+            "selected": true
+          }
+        ]
+      }
+    }
+  ],
+  "exceptions": [],
+  "network": [
+    "http://127.0.0.1:43421/bundle/",
+    "http://127.0.0.1:43421/bundle/assets/index-DMUBQnZY.js",
+    "http://127.0.0.1:43421/bundle/assets/index-2ks4ZrmG.css",
+    "http://127.0.0.1:43421/favicon.ico",
+    "http://127.0.0.1:43421/bundle-before/",
+    "http://127.0.0.1:43421/bundle-before/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:43421/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:43421/bundle/",
+    "http://127.0.0.1:43421/bundle/assets/index-DMUBQnZY.js",
+    "http://127.0.0.1:43421/bundle/assets/index-2ks4ZrmG.css",
+    "http://127.0.0.1:43421/bundle-before/",
+    "http://127.0.0.1:43421/bundle-before/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:43421/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:43421/bundle/",
+    "http://127.0.0.1:43421/bundle/assets/index-DMUBQnZY.js",
+    "http://127.0.0.1:43421/bundle/assets/index-2ks4ZrmG.css",
+    "http://127.0.0.1:43421/bundle-before/",
+    "http://127.0.0.1:43421/bundle-before/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:43421/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:43421/bundle/",
+    "http://127.0.0.1:43421/bundle/assets/index-DMUBQnZY.js",
+    "http://127.0.0.1:43421/bundle/assets/index-2ks4ZrmG.css",
+    "http://127.0.0.1:43421/bundle/",
+    "http://127.0.0.1:43421/bundle/assets/index-DMUBQnZY.js",
+    "http://127.0.0.1:43421/bundle/assets/index-2ks4ZrmG.css"
+  ]
+}

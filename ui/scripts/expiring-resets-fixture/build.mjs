@@ -16,7 +16,7 @@ await build({
               if (id.endsWith('/src/features/settings/ModelConnections.tsx'))
                 return execFileSync(
                   'git',
-                  ['show', '8ce9c0d:src/features/settings/ModelConnections.tsx'],
+                  ['show', 'ba9995c:src/features/settings/ModelConnections.tsx'],
                   { encoding: 'utf8' },
                 );
             },

@@ -95,7 +95,7 @@ try {
     );
     await sleep(80);
   };
-  const out = 'scripts/expiring-resets-fixture/evidence';
+  const out = 'scripts/expiring-resets-fixture/evidence/collapse';
   await mkdir(out, { recursive: true });
   const screenshot = async (name) => {
     const { data } = await c('Page.captureScreenshot', { format: 'png' });
@@ -128,13 +128,40 @@ try {
       await c('Page.navigate', { url: `http://127.0.0.1:${port}/${variant}/` });
       await sleep(400);
       await select('Personal ChatGPT');
-      await screenshot(`${variant}-${width}-off`);
+      await screenshot(`${variant}-${width}-collapsed`);
+      if (variant === 'bundle') {
+        assert(
+          await evaluate(
+            "document.querySelector('#models-connection-fields').hidden && document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').getClientRects().length === 0",
+          ),
+          'collapsed toggle still visible',
+        );
+      }
+      await click('Edit connection');
+      await screenshot(`${variant}-${width}-expanded`);
       if (variant === 'bundle') {
         const dimensions = await evaluate(
           `({width:innerWidth,scroll:document.documentElement.scrollWidth,editor:document.querySelector('.models-editor-column').getBoundingClientRect().toJSON(),toggle:document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').getBoundingClientRect().toJSON()})`,
         );
         overflow.push(dimensions);
         assert(dimensions.scroll <= width, 'page horizontal overflow');
+        const fullWidth = await evaluate(
+          "(()=>{const a=document.querySelector('.models-connection-options').getBoundingClientRect();const b=document.querySelector('.models-connection-fields').getBoundingClientRect();return Math.abs(a.width-b.width)<1})()",
+        );
+        assert(fullWidth, 'connection option lost existing full row width');
+        if (width === 480) {
+          await evaluate(
+            "document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').scrollIntoView({block:'center'})",
+          );
+          await sleep(80);
+          await screenshot('bundle-480-expanded-scrolled');
+          assert(
+            await evaluate(
+              "(()=>{const r=document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight})()",
+            ),
+            'narrow option not scroll reachable',
+          );
+        }
       }
     }
   }
@@ -147,6 +174,7 @@ try {
   await c('Page.navigate', { url: `http://127.0.0.1:${port}/bundle/` });
   await sleep(300);
   await select('Personal ChatGPT');
+  await click('Edit connection');
   assert((await checked()) === false, 'default not off');
   await toggle();
   await sleep(100);
@@ -155,6 +183,16 @@ try {
     "document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').focus()",
   );
   await screenshot('enabled-focus-1366');
+  await click('Hide connection');
+  assert(
+    await evaluate(
+      "document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').getClientRects().length === 0",
+    ),
+    'hidden draft visible',
+  );
+  await screenshot('hidden-draft-1366');
+  await click('Edit connection');
+  assert((await checked()) === true, 'hide lost draft');
   await click('Fail next save');
   await click('Save');
   assert(
@@ -165,6 +203,7 @@ try {
   await screenshot('save-error-1366');
   await click('Save');
   await select('Personal ChatGPT');
+  await click('Edit connection');
   assert((await checked()) === true, 'saved enabled policy not rehydrated');
   await toggle();
   await sleep(100);
@@ -176,13 +215,22 @@ try {
   await screenshot('unsaved-1366');
   await click('Discard');
   await select('Personal ChatGPT');
+  await click('Edit connection');
   assert((await checked()) === true, 'discard changed saved policy');
   await toggle();
   await sleep(100);
   await click('Save');
   await select('Personal ChatGPT');
+  await click('Edit connection');
   assert((await checked()) === false, 'saved disabled policy not rehydrated');
   await select('Work ChatGPT');
+  assert(
+    await evaluate(
+      "document.querySelector('[aria-describedby=auto-use-expiring-resets-help]').getClientRects().length === 0",
+    ),
+    'switch did not collapse',
+  );
+  await click('Edit connection');
   assert((await checked()) === true, 'other account policy lost');
   await select('Claude Max');
   assert((await checked()) === undefined, 'Anthropic exposes auto toggle');
@@ -206,7 +254,9 @@ try {
   const result = {
     status: 'passed',
     checks: [
-      'same-shell before/after 1366/1000/480',
+      'same-shell ba9995c/candidate collapsed and expanded 1366/1000/480',
+      'toggle shares disclosure and retains hidden draft',
+      'switch provider resets disclosure',
       'default off',
       'enabled focus',
       'mocked save failure retains draft',

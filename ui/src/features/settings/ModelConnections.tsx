@@ -226,25 +226,25 @@ export function ModelConnections({
                   </Field>
                 </div>
               )}
+            {editor.canAutoUseExpiringResets && (
+              <div className="models-connection-options">
+                <label className="settings-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={editor.autoUseExpiringResets}
+                    disabled={editor.requestState !== 'idle'}
+                    aria-describedby="auto-use-expiring-resets-help"
+                    onChange={(event) => editor.setAutoUseExpiringResets(event.target.checked)}
+                  />
+                  Automatically use expiring resets
+                </label>
+                <p id="auto-use-expiring-resets-help" className="settings-help">
+                  Uses banked reset credits within 5 minutes of expiry. Runs in the backend even
+                  when your browser is closed. Manual resets stay available.
+                </p>
+              </div>
+            )}
           </div>
-          {editor.canAutoUseExpiringResets && (
-            <div>
-              <label className="settings-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={editor.autoUseExpiringResets}
-                  disabled={editor.requestState !== 'idle'}
-                  aria-describedby="auto-use-expiring-resets-help"
-                  onChange={(event) => editor.setAutoUseExpiringResets(event.target.checked)}
-                />
-                Automatically use expiring resets
-              </label>
-              <p id="auto-use-expiring-resets-help" className="settings-help">
-                Uses banked reset credits within 5 minutes of expiry. Runs in the backend even when
-                your browser is closed. Manual resets stay available.
-              </p>
-            </div>
-          )}
           <div className="model-actions">
             {(editor.editingId || editor.poolConnection) && (
               <button className="secondary" onClick={editor.resetProvider}>

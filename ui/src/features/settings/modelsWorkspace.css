@@ -123,7 +123,8 @@
   display: none;
 }
 .models-connection-fields > .oauth-shortcuts,
-.models-connection-fields > .oauth-token-fields {
+.models-connection-fields > .oauth-token-fields,
+.models-connection-fields > .models-connection-options {
   grid-column: 1 / -1;
 }
 .models-connection-fields > .oauth-shortcuts {
