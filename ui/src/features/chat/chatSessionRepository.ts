@@ -95,6 +95,7 @@ export function createChatSessionRepository(): ChatSessionRepository {
   };
   const epochs = new Map<string, number>();
   const revisions = new Map<string, number>();
+  const olderRequests = new Map<string, object>();
   const resets = new Map<string, Promise<void>>();
   const key = (agentId: string, sessionId: string) => JSON.stringify([agentId, sessionId]);
   const read = async (agentId: string, sessionId: string, before?: string | null) => {
@@ -172,6 +173,8 @@ export function createChatSessionRepository(): ChatSessionRepository {
       const previous = loaded.get(cacheKey);
       if (!previous?.hasMore || !previous.nextCursor)
         return previous ?? this.loadSession(agentId, sessionId);
+      const request = {};
+      olderRequests.set(cacheKey, request);
       try {
         let page = await read(agentId, sessionId, previous.nextCursor);
         // Refresh may have moved the cursor back to the newest page. Walk only
@@ -190,6 +193,7 @@ export function createChatSessionRepository(): ChatSessionRepository {
         const current = loaded.get(cacheKey) ?? previous;
         if (
           cacheGenerationAtStart !== cacheGeneration ||
+          olderRequests.get(cacheKey) !== request ||
           epoch !== (epochs.get(cacheKey) ?? 0) ||
           !sameGeneration(current, page)
         )
@@ -213,9 +217,12 @@ export function createChatSessionRepository(): ChatSessionRepository {
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes('archive_cursor_invalid'))
           throw error;
+        if (olderRequests.get(cacheKey) !== request) return loaded.get(cacheKey) ?? previous;
         // Append/compaction invalidates cursors; a reset instead replaces the
         // generation. Never clear a conversation just because a cursor expired.
         return this.loadSession(agentId, sessionId);
+      } finally {
+        if (olderRequests.get(cacheKey) === request) olderRequests.delete(cacheKey);
       }
     },
     async resetSession(agentId, sessionId) {

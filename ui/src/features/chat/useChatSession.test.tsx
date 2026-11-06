@@ -1644,3 +1644,79 @@ describe('UI02 conversation-scoped error state', () => {
     expect(result.current.chatError).toBe('Message failed: late A failure');
   });
 });
+
+it.each(['session', 'agent', 'return'] as const)(
+  'owns pending older requests across %s navigation and ignores stale completion',
+  async (navigation) => {
+    const pending: ReturnType<typeof deferred<unknown>>[] = [];
+    apiMock.mockImplementation(async (path) => {
+      const url = new URL(String(path), 'http://fixture');
+      if (url.pathname === '/api/sessions') return { sessions: [{ id: sessionId }, { id: 'b' }] };
+      if (url.searchParams.has('before')) {
+        const request = deferred<unknown>();
+        pending.push(request);
+        return request.promise;
+      }
+      return {
+        session: {
+          id: url.pathname.split('/').pop(),
+          turns: [],
+          hasMore: true,
+          nextCursor: 'older',
+        },
+      };
+    });
+    const { result, rerender } = renderHook(({ agent }) => useChatSession(agent), {
+      initialProps: { agent: agentId },
+    });
+    await waitFor(() => expect(result.current.hasOlder).toBe(true));
+    let first!: Promise<void>;
+    act(() => {
+      first = result.current.loadOlder();
+    });
+    expect(result.current.isLoadingOlder).toBe(true);
+    if (navigation === 'agent') rerender({ agent: 'other' });
+    else act(() => result.current.selectSession('b'));
+    await waitFor(() => expect(result.current.hasOlder).toBe(true));
+    expect(result.current.isLoadingOlder).toBe(false);
+    if (navigation === 'return') {
+      act(() => result.current.selectSession(sessionId));
+      await waitFor(() => expect(result.current.hasOlder).toBe(true));
+    }
+    let second!: Promise<void>;
+    act(() => {
+      second = result.current.loadOlder();
+    });
+    expect(pending).toHaveLength(2);
+    // The old request cannot release the new destination's lock or loading flag.
+    await act(async () => {
+      pending[0].resolve({
+        session: {
+          id: sessionId,
+          turns: [{ id: 'stale', role: 'user', content: 'stale' }],
+          hasMore: false,
+        },
+      });
+      await first;
+    });
+    expect(result.current.isLoadingOlder).toBe(true);
+    expect(result.current.turns.some((turn) => turn.content === 'stale')).toBe(false);
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      pending[1].resolve({
+        session: {
+          id: result.current.sessionId,
+          turns: [{ id: 'current', role: 'user', content: 'current' }],
+          hasMore: false,
+        },
+      });
+      await second;
+    });
+    expect(result.current.turns.map((turn) => turn.content)).toEqual(['current']);
+    expect(result.current.isLoadingOlder).toBe(false);
+    expect(result.current.hasOlder).toBe(false);
+  },
+);

@@ -341,3 +341,100 @@ it('excludes disabled group members and mentions without removing their historic
   expect(within(mentions).getByText('@Available colleague')).toBeTruthy();
   expect(screen.getByText('Historical disabled message')).toBeTruthy();
 });
+
+it.each([false, true])(
+  'keeps confirmed send separate from refresh failure and retries only GET (newer draft %s)',
+  async (newerDraft) => {
+    let resolveSend!: (value: unknown) => void;
+    let failRefresh = false;
+    let posts = 0;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      if (path === '/api/settings/identities') return {};
+      if (init?.method === 'POST') {
+        posts++;
+        return new Promise((resolve) => {
+          resolveSend = resolve;
+        });
+      }
+      if (failRefresh) throw new Error('refresh unavailable');
+      return {
+        channel: {
+          id: 'room-1',
+          turns: posts ? [{ id: 'sent', role: 'user', content: 'sent draft' }] : [],
+        },
+      };
+    });
+    render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+    const composer = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(composer, { target: { value: 'sent draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    if (newerDraft) fireEvent.change(composer, { target: { value: 'new unsent draft' } });
+    failRefresh = true;
+    await act(async () => {
+      resolveSend({ ok: true });
+    });
+    expect(screen.queryByText(/Could not send message/)).toBeNull();
+    expect(screen.getByText(/Message sent, but could not refresh group chat/)).toBeTruthy();
+    expect((composer as HTMLTextAreaElement).value).toBe(newerDraft ? 'new unsent draft' : '');
+    expect(posts).toBe(1);
+    // Failed retry and later successful retry both only read the transcript.
+    fireEvent.click(screen.getByRole('button', { name: 'Retry refresh' }));
+    await screen.findByText(/Message sent, but could not refresh group chat/);
+    failRefresh = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry refresh' }));
+    await screen.findByText('sent draft');
+    expect(screen.queryByRole('button', { name: 'Retry refresh' })).toBeNull();
+    expect(posts).toBe(1);
+    expect((composer as HTMLTextAreaElement).value).toBe(newerDraft ? 'new unsent draft' : '');
+  },
+);
+
+it.each(['resolve', 'reject'] as const)(
+  'ignores old post-send refresh %s after navigating away and back',
+  async (outcome) => {
+    let settle!: (value?: unknown) => void;
+    let holdRefresh = false;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      if (path === '/api/settings/identities') return {};
+      if (init?.method === 'POST') {
+        holdRefresh = true;
+        return { ok: true };
+      }
+      if (holdRefresh) {
+        holdRefresh = false;
+        return new Promise((resolve, reject) => {
+          settle = outcome === 'reject' ? () => reject(new Error('stale failure')) : resolve;
+        });
+      }
+      return {
+        channel: {
+          id: 'room-1',
+          turns: [{ id: 'fresh', role: 'user', content: 'Fresh transcript' }],
+        },
+      };
+    });
+    const view = render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+    const composer = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(composer, { target: { value: 'sent draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(settle).toBeTypeOf('function'));
+    view.rerender(<GroupChannelsPage channelId="room-2" agents={[]} />);
+    await screen.findByRole('textbox', { name: 'Message' });
+    view.rerender(<GroupChannelsPage channelId="room-1" agents={[]} />);
+    const returned = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(returned, { target: { value: 'new destination draft' } });
+    await act(async () => {
+      settle({
+        channel: {
+          id: 'room-1',
+          turns: [{ id: 'stale', role: 'user', content: 'Stale transcript' }],
+        },
+      });
+    });
+    expect((returned as HTMLTextAreaElement).value).toBe('new destination draft');
+    expect(screen.queryByText(/stale failure|Stale transcript/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry refresh' })).toBeNull();
+    expect(screen.getByText('Fresh transcript')).toBeTruthy();
+    expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  },
+);

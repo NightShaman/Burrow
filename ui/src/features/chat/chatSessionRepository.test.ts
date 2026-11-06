@@ -405,3 +405,41 @@ describe('active scrollback', () => {
     expect((await next).turns?.map((t) => t.id)).toEqual(['d']);
   });
 });
+
+it('does not let an old same-session older page overwrite the newer request after returning', async () => {
+  const pending: ((value: unknown) => void)[] = [];
+  request.mockImplementation(async (path) => {
+    if (String(path).includes('before=')) return new Promise((resolve) => pending.push(resolve));
+    return {
+      session: {
+        id: 'a',
+        turns: [{ id: 'newest', role: 'user', content: 'newest' }],
+        hasMore: true,
+        nextCursor: 'older',
+      },
+    };
+  });
+  const repo = createChatSessionRepository();
+  await repo.loadSession('agent', 'a');
+  const old = repo.loadOlder('agent', 'a');
+  const current = repo.loadOlder('agent', 'a');
+  pending[1]({
+    session: {
+      id: 'a',
+      turns: [{ id: 'current', role: 'user', content: 'current' }],
+      hasMore: false,
+    },
+  });
+  await current;
+  pending[0]({
+    session: {
+      id: 'a',
+      turns: [{ id: 'stale', role: 'user', content: 'stale' }],
+      hasMore: true,
+      nextCursor: 'stale',
+    },
+  });
+  expect((await old).turns?.map((turn) => turn.id)).toEqual(['current', 'newest']);
+  const loaded = await repo.loadSession('agent', 'a');
+  expect(loaded.turns?.some((turn) => turn.id === 'stale')).toBe(false);
+});

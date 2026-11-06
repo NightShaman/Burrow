@@ -138,6 +138,7 @@ export function GroupChannelsPage({
   const [attached, setAttached] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const scope = useRef({ channelId });
   if (scope.current.channelId !== channelId) scope.current = { channelId };
   const requestNumber = useRef(0);
@@ -153,13 +154,18 @@ export function GroupChannelsPage({
       const owner = scope.current;
       const request = ++requestNumber.current;
       if (!channelId) return;
-      const response = await api<{ channel?: unknown; turns?: unknown; runs?: unknown }>(
-        `/api/group-channels/${encodeURIComponent(channelId)}`,
-        { signal },
-      );
+      let response: { channel?: unknown; turns?: unknown; runs?: unknown };
+      try {
+        response = await api(`/api/group-channels/${encodeURIComponent(channelId)}`, { signal });
+      } catch (reason) {
+        if (mounted.current && scope.current === owner && request === requestNumber.current)
+          throw reason;
+        return;
+      }
       if (!mounted.current || scope.current !== owner || request !== requestNumber.current) return;
       const channelValue = record(response.channel ?? response);
       setError('');
+      setRefreshError('');
       setChannel(
         normalizeChannel({
           ...channelValue,
@@ -175,6 +181,7 @@ export function GroupChannelsPage({
     setAttached([]);
     setSending(false);
     setError('');
+    setRefreshError('');
     setChannel(null);
   }, [load]);
   useEffect(() => {
@@ -206,7 +213,7 @@ export function GroupChannelsPage({
       try {
         await load(signal);
       } catch (reason) {
-        if (!isCancelled() && scope.current === owner)
+        if (!isCancelled() && scope.current === owner && !refreshError)
           setError(`Could not refresh group chat: ${(reason as Error).message}`);
       }
     },
@@ -270,6 +277,17 @@ export function GroupChannelsPage({
     if (event.key === 'Escape') setMentionQuery(null);
     composerHistory.onKeyDown(event);
   }
+  async function refreshSentMessage() {
+    const owner = scope.current;
+    try {
+      await load();
+    } catch (reason) {
+      if (mounted.current && scope.current === owner)
+        setRefreshError(
+          `Message sent, but could not refresh group chat: ${(reason as Error).message}`,
+        );
+    }
+  }
   async function send() {
     // Keep the original composer value intact: the backend owns mention parsing
     // and delivery routing. Only use trim() to decide whether the composer is empty.
@@ -293,7 +311,7 @@ export function GroupChannelsPage({
           ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
         }),
       );
-      if (scope.current !== owner) return;
+      if (!mounted.current || scope.current !== owner) return;
       if (!response.ok) throw new Error(text(record(response).error, 'Message was not accepted'));
       setMessage((current) => (current === submittedMessage ? '' : current));
       // Do not discard files merely because a legacy backend accepted the text.
@@ -310,15 +328,17 @@ export function GroupChannelsPage({
           ));
       if (attachmentsAccepted)
         setAttached((current) => (current === submittedAttachments ? [] : current));
-      await load();
+      await refreshSentMessage();
+      if (!mounted.current || scope.current !== owner) return;
       if (!attachmentsAccepted)
         setError(
           'The message was sent, but the server did not confirm attachment persistence. Files remain attached; do not resend the message automatically.',
         );
     } catch (reason) {
-      if (scope.current === owner) setError(`Could not send message: ${(reason as Error).message}`);
+      if (mounted.current && scope.current === owner)
+        setError(`Could not send message: ${(reason as Error).message}`);
     } finally {
-      if (scope.current === owner) setSending(false);
+      if (mounted.current && scope.current === owner) setSending(false);
     }
   }
   function attachImage(files: File[]) {
@@ -398,6 +418,14 @@ export function GroupChannelsPage({
     <div className="group-page">
       <main className="group-transcript">
         {error && <p className="group-error">{error}</p>}
+        {refreshError && (
+          <div className="group-error" role="alert">
+            <span>{refreshError}</span>{' '}
+            <button type="button" className="secondary" onClick={() => void refreshSentMessage()}>
+              Retry refresh
+            </button>
+          </div>
+        )}
         <div
           className="group-messages"
           ref={messagesRef}
