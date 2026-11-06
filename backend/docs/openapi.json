@@ -15797,6 +15797,11 @@
             "type": "string",
             "description": "Provider protocol, including openai-lb and anthropic-lb for logical OAuth pools."
           },
+          "autoUseExpiringResets": {
+            "type": "boolean",
+            "default": false,
+            "description": "Opt in to consuming available OpenAI OAuth reset credits expiring within five minutes. Direct OAuth connections only; logical load-balancer pools cannot opt in. Defaults to false."
+          },
           "baseUrl": {
             "type": "string"
           },

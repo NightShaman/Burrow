@@ -242,4 +242,12 @@ UPDATE core_mod_authority SET mod_management_agent_ids=admin_agent_ids, core_api
   { version: 94, name: 'background-conversation-embeddings', sql: `ALTER TABLE brain_embedding_settings ADD COLUMN conversation_enabled boolean NOT NULL DEFAULT false;\n` + POSTGRES_CONVERSATION_EMBEDDINGS_SQL },
   { version: 95, name: 'session-recall-projection-repairs', sql: POSTGRES_SESSION_RECALL_REPAIRS_SQL },
   { version: 96, name: 'nonblocking-session-recall', sql: POSTGRES_SESSION_RECALL_NONBLOCKING_SQL },
+  { version: 97, name: 'openai-expiring-reset-claims', sql: `
+ALTER TABLE model_connections ADD COLUMN auto_use_expiring_resets BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE openai_reset_credit_claims (
+ account_key TEXT NOT NULL, credit_id TEXT NOT NULL, request_id TEXT NOT NULL,
+ claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(account_key,credit_id), UNIQUE(account_key,request_id)
+);
+` },
 ]);

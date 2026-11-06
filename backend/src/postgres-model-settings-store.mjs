@@ -218,6 +218,7 @@ export class PostgresModelSettingsStore {
         models = providerPoolModels(poolMembers);
       }
       await client.query(`INSERT INTO model_connections (id,provider,api_type,base_url,accepted_input_json,models_json,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7) ON CONFLICT (id) DO UPDATE SET provider=EXCLUDED.provider,api_type=EXCLUDED.api_type,base_url=EXCLUDED.base_url,accepted_input_json=EXCLUDED.accepted_input_json,models_json=EXCLUDED.models_json,updated_at=EXCLUDED.updated_at`, [id, connection.provider, connection.apiType, connection.baseUrl, JSON.stringify(connection.acceptedInput), JSON.stringify(models), stamp]);
+      await client.query('UPDATE model_connections SET auto_use_expiring_resets=$2 WHERE id=$1', [id, connection.autoUseExpiringResets && auth?.type === 'oauth' && String(auth?.provider || '').toLowerCase() === 'openai']);
       await client.query('UPDATE model_connections SET pool_json=$2 WHERE id=$1', [id, connection.pool ? JSON.stringify(connection.pool) : null]);
       if (supplied) await this.writeAuth(client, id, supplied, connection.provider, stamp, input.auth === undefined);
       for (const reference of references.rows) {

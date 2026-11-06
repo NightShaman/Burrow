@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { startOpenAiResetScheduler } from '../src/openai-reset-scheduler.mjs';
 import { activeSessionDetail } from './ui/active-session-detail.mjs';
 import { assertModAgentAvailable } from '../src/mod-agent-runtime.mjs';
 import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute, createOperatorReferenceImageRoutes } from './ui/agent-reference-image-routes.mjs';
@@ -242,7 +243,10 @@ const postgresApplication = await createPostgresApplication({
   connections: async (filter) => postgresApplication.stores.models.list(filter),
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
-const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now, openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
+const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, pollExpiringResets } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now, claimCredit: async ({ account, creditId, requestId }) => {
+  const result = await modelsStore().pool.query(`INSERT INTO openai_reset_credit_claims(account_key,credit_id,request_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING credit_id`, [account, creditId, requestId]);
+  return result.rows.length === 1;
+}, openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
 await serverLogger.event('database_ready', {}, { component: 'postgres' });
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates, { logger: serverLogger });
 await hydrateMcpProviderStates({ runtimeRoot: process.env.BURROW_MCPORTER_ROOT || path.join(runtimeRoot, 'integrations', 'mcporter') }).catch(() => serverLogger.event('mcp_provider_state_hydration_failed', { errorCode: 'mcp_provider_state_hydration_failed' }, { level: 'warn', component: 'mcp' }));
@@ -3454,6 +3458,7 @@ function closeOnlyProducer(resource) {
   let closing = null;
   return { stop() { closing ||= Promise.resolve().then(() => resource.close()); closing.catch(() => {}); }, close() { this.stop(); return closing; } };
 }
+const openaiResetScheduler = startOpenAiResetScheduler(pollExpiringResets);
 const archiveReadProducer = closeOnlyProducer(archiveReadProcess);
 const skillSyncProducer = closeOnlyProducer(skillGitSync);
 const modDistributionProducer = closeOnlyProducer({ async close() {
@@ -3469,7 +3474,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [archiveReadProducer, skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });

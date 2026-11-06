@@ -155,7 +155,7 @@ export function assertConnection(input = {}) {
   if (!apiType) throw new Error('api_type_required');
   if (!/^https?:\/\//i.test(baseUrl)) throw new Error('base_url_invalid');
   const acceptedInput = [...new Set((Array.isArray(input.acceptedInput) ? input.acceptedInput : []).map(normalize).filter((type) => ['text', 'image'].includes(type)))];
-  return { provider, apiType, baseUrl, acceptedInput, ...(isProviderPool(input) ? { pool: normalizeProviderPool(input.pool) } : {}) };
+  return { provider, apiType, baseUrl, acceptedInput, autoUseExpiringResets: input.autoUseExpiringResets === true && !isProviderPool(input), ...(isProviderPool(input) ? { pool: normalizeProviderPool(input.pool) } : {}) };
 }
 
 const MODEL_INPUT_CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'video', 'file']);
@@ -378,6 +378,7 @@ export function publicConnection(row) {
   const canonical = canonicalizeOauthConnection({ provider: row.provider, apiType: row.api_type, baseUrl: row.base_url }, authPreview);
   return {
     id: row.id, provider: row.provider, apiType: canonical.apiType, baseUrl: row.base_url,
+    autoUseExpiringResets: row.auto_use_expiring_resets === true && !isProviderPool({ apiType: canonical.apiType }),
     ...(isProviderPool({ apiType: canonical.apiType }) ? { pool: parseJson(row.pool_json, null) } : {}),
     acceptedInput: parseJson(row.accepted_input_json, ['text', 'image']),
     models: normalizeModels(parseJson(row.models_json, []), { provider: row.provider, apiType: canonical.apiType }),

@@ -12,6 +12,7 @@ const date = value => {
 };
 
 export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = globalThis.fetch, clock = Date.now,
+  claimCredit,
   resetCreditsUrl = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits', refreshUsage, invalidateUsage = () => {}, timeoutMs = 10_000 } = {}) {
   const headers = source => ({ accept: 'application/json', authorization: `Bearer ${source.token}`, originator: 'burrow',
     ...(source.accountId ? { 'ChatGPT-Account-Id': source.accountId } : {}) });
@@ -43,7 +44,8 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
     const source = await resolveSource(connectionId);
     if (!source) return failure(503, 'openai_oauth_usage_config_missing');
     // Aliases for the same OAuth account share the guard and replay ledger.
-    const account = source.accountId || createHash('sha256').update(source.token).digest('hex');
+    const account = stableResetAccount(source) || (!claimCredit ? createHash('sha256').update(source.token).digest('hex') : null);
+    if (!account) return failure(409, 'reset_credit_stable_identity_required');
     const key = JSON.stringify([account, requestId]);
     const previous = attempts.get(key);
     if (previous) return previous.creditId === creditId ? { ...previous.result, replayed: true } : failure(409, 'reset_credit_request_id_conflict');
@@ -54,6 +56,10 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
       const fresh = await snapshot(source);
       if (!fresh.ok) return fresh;
       if (!fresh.credits.available.some(item => item.id === creditId)) return failure(409, 'reset_credit_unavailable');
+      if (claimCredit) {
+        try { if (!await claimCredit({ account, creditId, requestId })) return failure(409, 'reset_credit_already_claimed', { ambiguous: true }); }
+        catch { return failure(503, 'reset_credit_claim_unavailable'); }
+      }
       let result;
       // Record before dispatch: uncertain responses must never trigger another POST.
       attempts.set(key, { creditId, result: failure(409, 'reset_credit_outcome_unknown', { ambiguous: true }) });
@@ -85,4 +91,14 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
     } finally { activeAccounts.delete(account); }
   }
   return { openaiResetCredits, consumeOpenaiResetCredit };
+}
+
+// Access tokens rotate; only a provider account or stable JWT subject fences work.
+export function stableResetAccount(source) {
+  if (source.accountId) return `account:${source.accountId}`;
+  try {
+    const payload = JSON.parse(Buffer.from(source.token.split('.')[1], 'base64url').toString());
+    if (typeof payload.sub === 'string' && payload.sub.trim()) return `subject:${payload.sub}`;
+  } catch {}
+  return null;
 }
