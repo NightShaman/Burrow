@@ -292,13 +292,15 @@ export function projectChatActivity(
     ];
   });
   const hasLiveSubagents = Boolean(matchingLiveSubagents.length);
-  const shouldRefresh =
-    isChildSession || Boolean(response.runs?.length) || hasLiveSubagents || hadRuns;
+  const hasPendingForgeDeliveries = (response.pendingForgeDeliveries ?? 0) > 0;
+  const hasActivity =
+    Boolean(response.runs?.length) || hasLiveSubagents || hasPendingForgeDeliveries;
+  const shouldRefresh = isChildSession || hasActivity || hadRuns;
   return {
     runtimeRun: projectedRuntimeRun,
     childActivities,
     a2aActivities: activities.slice(-12),
     shouldRefresh,
-    hadRuns: Boolean(response.runs?.length) || hasLiveSubagents,
+    hadRuns: hasActivity,
   };
 }

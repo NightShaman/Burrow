@@ -410,6 +410,8 @@ export type ActiveChatRunsResponse = {
   ok: boolean;
   runs: ActiveChatRun[];
   subagents?: ActiveSubagent[];
+  /** Pending Forge deliveries for the requested agent/session, not active model runs. */
+  pendingForgeDeliveries?: number;
 };
 
 export type SessionAttachment = {
@@ -598,6 +600,7 @@ export type ChatSession = {
     a2aPeerAgentId?: string;
     conversationId?: string;
     transcriptGeneration?: string;
+    updatedAt?: string;
     resetAt?: string;
     resetGeneration?: number;
     resetOperationId?: string | null;

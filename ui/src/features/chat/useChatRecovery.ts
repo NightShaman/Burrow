@@ -111,8 +111,8 @@ export function useChatRecovery({
         setActivity(projection);
         if (hadRuns && !projection.hadRuns) terminalRefreshNeeded.current.add(terminalScopeKey);
         hadRuns = projection.hadRuns;
-        // Child workers persist outside the active-run registry; also refresh
-        // after the last active run disappears to pick up terminal writes.
+        // Child workers and Forge deliveries persist outside the active-run registry;
+        // also refresh after the last activity disappears to pick up terminal writes.
         const settledRetired = [...retiredRefreshNeeded.current].filter((key) => {
           const [retiredAgentId, retiredSessionId] = JSON.parse(key) as [string, string, string];
           return (

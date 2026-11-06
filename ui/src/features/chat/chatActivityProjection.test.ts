@@ -331,3 +331,35 @@ it('recovers compaction status from the owning run progress', () => {
     'compaction-completed',
   );
 });
+
+it('keeps pending Forge delivery refreshable without inventing a live run, then reconciles once on settlement', () => {
+  const response = { ok: true, runs: [], pendingForgeDeliveries: 1 };
+  const pending = projectChatActivity(response, selection);
+  expect(pending).toEqual({
+    runtimeRun: null,
+    childActivities: [],
+    a2aActivities: [],
+    shouldRefresh: true,
+    hadRuns: true,
+  });
+  const settled = projectChatActivity(
+    { ...response, pendingForgeDeliveries: 0 },
+    { ...selection, hadRuns: pending.hadRuns },
+  );
+  expect(settled).toMatchObject({ shouldRefresh: true, hadRuns: false, runtimeRun: null });
+  expect(
+    projectChatActivity(
+      { ...response, pendingForgeDeliveries: 0 },
+      { ...selection, hadRuns: settled.hadRuns },
+    ).shouldRefresh,
+  ).toBe(false);
+});
+
+it.each([undefined, 0, -1])(
+  'does not refresh an idle chat for pendingForgeDeliveries=%s',
+  (count) => {
+    expect(
+      projectChatActivity({ ok: true, runs: [], pendingForgeDeliveries: count }, selection),
+    ).toMatchObject({ shouldRefresh: false, hadRuns: false, runtimeRun: null });
+  },
+);

@@ -1,7 +1,8 @@
 import { useChatRecovery } from './useChatRecovery';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isWithinAttachmentBudget } from '../../app/clientBudgets';
+import { clientBudgets, isWithinAttachmentBudget } from '../../app/clientBudgets';
 import {
+  api,
   textFromChatValue,
   type ChatAttachment,
   type ChatSession,
@@ -32,13 +33,32 @@ export function useChatSession(selectedAgentId: string) {
     { key: '', hasMore: false, loading: false },
   );
   const olderRequest = useRef(false);
+  const olderBySession = useRef(new Map<string, boolean>());
   // A read may finish after navigation. Only its caller, after validating its
   // scope, may change the pagination state of the displayed conversation.
   const loadSession = useCallback(
     (agentId: string, id: string) => sessionRepository.loadSession(agentId, id),
     [sessionRepository],
   );
+  const navigationReads = useRef(new Map<string, Promise<ChatSession>>());
+  const loadNavigationSession = useCallback(
+    (agentId: string, id: string) => {
+      const key = JSON.stringify([conversationCacheGeneration, agentId, id]);
+      const existing = navigationReads.current.get(key);
+      if (existing) return existing;
+      const pending = loadSession(agentId, id);
+      navigationReads.current.set(key, pending);
+      void pending
+        .finally(() => {
+          if (navigationReads.current.get(key) === pending) navigationReads.current.delete(key);
+        })
+        .catch(() => undefined);
+      return pending;
+    },
+    [loadSession],
+  );
   const showOlderState = useCallback((agentId: string, id: string, session: ChatSession) => {
+    olderBySession.current.set(conversationCacheKey(agentId, id), Boolean(session.hasMore));
     if (selectedChatRef.current.agentId !== agentId || selectedChatRef.current.sessionId !== id)
       return;
     setOlderState({
@@ -90,6 +110,20 @@ export function useChatSession(selectedAgentId: string) {
     },
     [],
   );
+  // Disk snapshots are restoration/reconciliation input only. Only snapshots
+  // confirmed during this mounted workspace can paint an instant return.
+  const liveSnapshots = useRef(new Map<string, string>());
+  const staleSnapshots = useRef(new Set<string>());
+  const rememberLiveSnapshot = useCallback((key: string, version: string) => {
+    liveSnapshots.current.delete(key);
+    liveSnapshots.current.set(key, version);
+    staleSnapshots.current.delete(key);
+    while (liveSnapshots.current.size > clientBudgets.conversationCacheEntries) {
+      const oldest = liveSnapshots.current.keys().next().value!;
+      liveSnapshots.current.delete(oldest);
+      staleSnapshots.current.delete(oldest);
+    }
+  }, []);
   const cacheInitialized = useRef(false);
   if (!cacheInitialized.current) {
     conversationCacheRef.current = readConversationCache();
@@ -99,6 +133,9 @@ export function useChatSession(selectedAgentId: string) {
     const invalidate = () => {
       conversationCacheRef.current = {};
       pendingTurnsRef.current.clear();
+      liveSnapshots.current.clear();
+      staleSnapshots.current.clear();
+      olderBySession.current.clear();
       setTurns([]);
     };
     window.addEventListener(conversationCacheInvalidated, invalidate);
@@ -180,6 +217,7 @@ export function useChatSession(selectedAgentId: string) {
         delete recoveredProgress[turn.runId];
         return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
       });
+      rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       if (current()) showOlderState(selectedAgentId, sessionId, session);
@@ -209,13 +247,16 @@ export function useChatSession(selectedAgentId: string) {
     // prevents the chat frame from showing the old transcript while the new
     // agent's session list is hydrating.
     setSessionId('');
-    // Cached transcripts are reconciliation input, not evidence that the
-    // incoming conversation is current. Never paint another agent's history.
+    // The session effect restores only a live, validated snapshot for this
+    // destination. Persisted snapshots must not masquerade as current history.
     setTurns([]);
     // The session list must resolve before the new agent's conversation can
     // load. Mark that whole handoff as loading so an empty-state logo only
     // represents a deliberate new/reset session, never an agent switch.
-    const cachedSessions = readSessionListCache(selectedAgentId);
+    const rememberedSession = sessionIdByAgentRef.current[selectedAgentId];
+    const cachedSessions =
+      readSessionListCache(selectedAgentId) ??
+      (rememberedSession ? [{ id: rememberedSession }] : null);
     if (cachedSessions) {
       setSessions(cachedSessions);
       setIsLoadingConversation(
@@ -307,10 +348,20 @@ export function useChatSession(selectedAgentId: string) {
     const generationAtRequestStart = conversationCacheGeneration;
     const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
     const cachedTurns = conversationCacheRef.current[cacheKey];
-    setTurns([]);
-    setIsLoadingConversation(true);
+    const live =
+      liveSnapshots.current.has(cacheKey) &&
+      !staleSnapshots.current.has(cacheKey) &&
+      cachedTurns !== undefined;
+    setTurns(live ? cachedTurns : []);
+    setIsLoadingConversation(!live);
+    if (live)
+      setOlderState({
+        key: cacheKey,
+        hasMore: olderBySession.current.get(cacheKey) ?? false,
+        loading: false,
+      });
     // Background/session hydration must not erase a reported failure.
-    loadSession(selectedAgentId, sessionId)
+    loadNavigationSession(selectedAgentId, sessionId)
       .then((session) => {
         if (
           cancelled ||
@@ -323,6 +374,7 @@ export function useChatSession(selectedAgentId: string) {
           session,
           conversationCacheRef.current[cacheKey] ?? [],
         );
+        rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
         conversationCacheRef.current[cacheKey] = nextTurns;
         writeConversationCache(conversationCacheRef.current, cacheKey);
         showOlderState(selectedAgentId, sessionId, session);
@@ -373,6 +425,7 @@ export function useChatSession(selectedAgentId: string) {
           ? { ...normalizedTurn, metadata: { ...normalizedTurn.metadata, toolActivity: activity } }
           : normalizedTurn;
       });
+      rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
       conversationCacheRef.current[cacheKey] = nextTurns;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       showOlderState(agentId, targetSessionId, session);
@@ -381,6 +434,88 @@ export function useChatSession(selectedAgentId: string) {
     },
     [selectedAgentId, sessionId, sessionRepository],
   );
+
+  // Keep visited transcripts warm even while another agent is selected. The
+  // incremental session listing is a coarse invalidation signal, never a
+  // transcript revision. Re-read changed conversations through the same owner
+  // used by navigation/recovery, with generation and local-write guards.
+  useEffect(() => {
+    let stopped = false;
+    let timer: number | undefined;
+    // Use server timestamps, not the browser clock. Scope the lightweight
+    // invalidation reads to visited agents rather than enumerate every agent.
+    const poll = async () => {
+      const generation = conversationCacheGeneration;
+      try {
+        if (!liveSnapshots.current.size) return;
+        const agents = [
+          ...new Set(
+            Object.keys(conversationCacheRef.current)
+              .filter((key) => liveSnapshots.current.has(key))
+              .map((key) => key.slice(0, key.indexOf(':'))),
+          ),
+        ];
+        await Promise.all(
+          agents.map(async (agentId) => {
+            try {
+              if (stopped || generation !== conversationCacheGeneration) return;
+              const versions = [...liveSnapshots.current.entries()]
+                .filter(([key, version]) => key.startsWith(`${agentId}:`) && version)
+                .map(([, version]) => version)
+                .sort();
+              const oldest = Date.parse(versions[0] ?? '');
+              const since = Number.isFinite(oldest)
+                ? new Date(oldest - 1).toISOString()
+                : '1970-01-01T00:00:00.000Z';
+              const { sessions: changed } = await api<{ sessions: SessionSummary[] }>(
+                `/api/sessions?agentId=${encodeURIComponent(agentId)}&updatedSince=${encodeURIComponent(since)}`,
+              );
+              if (stopped || generation !== conversationCacheGeneration) return;
+              for (const summary of changed) {
+                const key = conversationCacheKey(agentId, summary.id);
+                const version = liveSnapshots.current.get(key);
+                if (version === undefined || (summary.updatedAt && summary.updatedAt === version))
+                  continue;
+                const cached = conversationCacheRef.current[key];
+                // Mark known-stale memory before awaiting the fresh page. Selecting
+                // it in this interval must not display the obsolete snapshot.
+                staleSnapshots.current.add(key);
+                try {
+                  const session = await loadNavigationSession(agentId, summary.id);
+                  if (stopped || generation !== conversationCacheGeneration) return;
+                  if (conversationCacheRef.current[key] !== cached) continue;
+                  const next = reconcileSnapshot(key, session, cached ?? []);
+                  conversationCacheRef.current[key] = next;
+                  rememberLiveSnapshot(key, session.metadata?.updatedAt ?? summary.updatedAt ?? '');
+                  writeConversationCache(conversationCacheRef.current, key);
+                  showOlderState(agentId, summary.id, session);
+                  const current = selectedChatRef.current;
+                  if (current.agentId === agentId && current.sessionId === summary.id) {
+                    setTurns(next);
+                    setIsLoadingConversation(false);
+                  }
+                } catch {
+                  // Keep invalidated entries retryable without presenting them as fresh.
+                  throw new Error('Background transcript refresh failed');
+                }
+              }
+            } catch {
+              // A failed agent read must not stall other visited conversations.
+            }
+          }),
+        );
+      } catch {
+        // Navigation owns visible errors. Versions remain unchanged for retry.
+      } finally {
+        if (!stopped) timer = window.setTimeout(poll, 2000);
+      }
+    };
+    timer = window.setTimeout(poll, 2000);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [loadNavigationSession, reconcileSnapshot, showOlderState, rememberLiveSnapshot]);
 
   const loadOlder = useCallback(async () => {
     if (olderRequest.current || !selectedAgentId || !sessionId) return;
@@ -401,7 +536,7 @@ export function useChatSession(selectedAgentId: string) {
       conversationCacheRef.current[cacheKey] = next;
       writeConversationCache(conversationCacheRef.current, cacheKey);
       setTurns(next);
-      setOlderState({ key: cacheKey, hasMore: Boolean(session.hasMore), loading: false });
+      showOlderState(selectedAgentId, sessionId, session);
     } catch (error) {
       if (attachmentScopeRef.current === scope)
         setChatError(`Could not load older messages: ${(error as Error).message}`);
@@ -472,6 +607,9 @@ export function useChatSession(selectedAgentId: string) {
   const resetSession = useCallback(async () => {
     if (!selectedAgentId) return false;
     const resetSessionId = sessionId || 'default';
+    navigationReads.current.delete(
+      JSON.stringify([conversationCacheGeneration, selectedAgentId, resetSessionId]),
+    );
     await sessionRepository.resetSession(selectedAgentId, resetSessionId);
     if (!isAttachmentScopeCurrent()) return false;
     setComposerResetGeneration((value) => value + 1);
@@ -479,6 +617,7 @@ export function useChatSession(selectedAgentId: string) {
     sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
     const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
     pendingTurnsRef.current.delete(cacheKey);
+    liveSnapshots.current.delete(cacheKey);
     conversationCacheRef.current[cacheKey] = [];
     writeConversationCache(conversationCacheRef.current, cacheKey);
     setTurns([]);
@@ -591,6 +730,8 @@ export function useChatSession(selectedAgentId: string) {
     loadOlder,
     hasOlder:
       !isNewSession &&
+      !isLoadingConversation &&
+      !isSwitchingAgent &&
       olderState.key === conversationCacheKey(selectedAgentId, sessionId) &&
       olderState.hasMore,
     isLoadingOlder: olderState.loading,
