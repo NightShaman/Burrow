@@ -1295,16 +1295,18 @@ export class PostgresSessionStore {
 
   async projection({ agentId, sessionId, visibility, limit, predicate = null, transactionClient = null, indexedVisibility = false }) {
     // Display reads use the existing conservative GIN candidate projection, then
-    // compare only a lossless lexical scalar before hydrating matching entries.
-    // Native entry->'visibility' is NOT safe: unrelated NUL/surrogate escapes can
-    // fail extraction. NULL grams stay eligible, and the lexical scanner handles
-    // escaped keys/values and duplicate members with JS's last-member semantics.
+    // compare the visibility scalar before hydrating matching entries.
+    // Validate before native extraction: unrelated NUL/surrogate escapes or
+    // JSONB-incompatible numbers must use the lossless lexical fallback. Both
+    // paths preserve escaped keys/values and JS's last-member semantics. NULL
+    // grams stay eligible. Normal payloads avoid a PL/pgSQL scan of every body.
     // Keep the older generic path for callers on pre-Archive schemas.
     const aid = required(agentId, 'agentId'); const sid = required(sessionId, 'sessionId');
     const grams = indexedVisibility ? [...new Set(Array.from({ length: visibility.length - 2 }, (_, i) => visibility.slice(i, i + 3)))] : null;
     const candidate = indexedVisibility ? `AND (search_grams IS NULL OR search_grams @> $5::text[])
         AND CASE WHEN search_grams IS NULL OR search_grams @> $5::text[] THEN
-          burrow_history_key((burrow_json_members(entry,ARRAY['visibility']))[1]::text)=burrow_history_text($6)
+          CASE WHEN pg_input_is_valid(entry::text,'jsonb') THEN entry::jsonb->'visibility'=to_jsonb($6::text)
+            ELSE burrow_history_key((burrow_json_members(entry,ARRAY['visibility']))[1]::text)=burrow_history_text($6) END
           ELSE false END` : '';
     const size = limitValue(limit); const matches = []; let before = null;
     while (matches.length < size) {

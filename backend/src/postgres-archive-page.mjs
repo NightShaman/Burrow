@@ -184,6 +184,11 @@ function snapshotPageSQL(kind) {
      WHERE (${compactWindow} OR (a.agent_id=$1 AND a.session_id=$2 AND a.archive_id=$3 AND a.kind='reset'))
        AND ${match}
      ORDER BY rank DESC,a.generation DESC,n.source_id DESC,n.ordinal LIMIT 1)`);
+  // Keep candidate identity as one scalar per row: inlining this subquery
+  // repeats the coercion in every prior/winner branch. Ordered OFFSET 0 is an
+  // evaluation barrier, not pagination; it retains the streaming keyset LIMIT.
+  // Only live rows can prefilter visibility: their first occurrence is also
+  // their terminal winner. Compacted positions may have a later visible winner.
   return `WITH candidates AS (
     SELECT e.entry,e.entry_id,e.entry_key,e.has_payload_id,${ordinal} AS ordinal,
       ${live ? "'live'::text AS source_store,e.sequence::text AS source_id" : 'e.source_store,e.source_id'},
@@ -191,6 +196,8 @@ function snapshotPageSQL(kind) {
     FROM ${table} e WHERE e.agent_id=$1 AND e.session_id=$2 ${whereSource}
       AND $6::text IS NOT DISTINCT FROM $6::text AND $7::bigint IS NOT DISTINCT FROM $7::bigint
       AND ($8::bigint IS NULL OR ${ordinal}<$8::bigint)
+      ${live ? 'AND (NOT e.archive_chat_projected OR e.archive_chat_visible)' : ''}
+    ORDER BY ${ordinal} DESC OFFSET 0
   ) SELECT c.ordinal::text AS ordinal,w.store,w.source_store,w.source_id,w.ordinal::text AS winner_ordinal,
       COALESCE('p:' || c.payload_key,'o:' || NULLIF(c.entry_id,''),
         'r:' || json_build_array(c.source_store,c.source_id,c.ordinal::text)::text) AS display_key
