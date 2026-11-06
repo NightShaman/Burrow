@@ -432,3 +432,16 @@ it('shows inventory only for Installed skills and restores it on return', async 
   view.unmount();
   overflow.remove();
 });
+
+it('uses a visible primary action for creating a new skill', async () => {
+  mocked.mockResolvedValue({ skills: [] } as never);
+  render(<SkillsSettings section="text" agents={agents} agentId={agents[0].id} />);
+  const create = await screen.findByRole('button', { name: 'Create skill' });
+  expect(create.classList.contains('primary')).toBe(true);
+  expect(create).toHaveProperty('disabled', true);
+  fireEvent.change(screen.getByRole('textbox', { name: 'ID' }), { target: { value: 'new-skill' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'New skill' },
+  });
+  expect(create).toHaveProperty('disabled', false);
+});

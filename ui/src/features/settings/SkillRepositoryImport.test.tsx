@@ -53,6 +53,9 @@ it('previews without creating a placeholder, derives metadata and installs the e
   expect(
     screen.getByRole('button', { name: 'Preview skill' }).classList.contains('settings-action'),
   ).toBe(true);
+  expect(
+    screen.getByRole('button', { name: 'Preview skill' }).classList.contains('secondary'),
+  ).toBe(true);
   expect(screen.queryByRole('textbox', { name: 'Install ID' })).toBeNull();
   enterSource();
   await screen.findByRole('button', { name: 'Install skill' });

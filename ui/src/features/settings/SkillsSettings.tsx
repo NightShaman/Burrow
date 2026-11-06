@@ -429,6 +429,7 @@ export function SkillsSettings({
         <div className="model-actions">
           <button
             type="button"
+            className="primary"
             disabled={busy || !draft.id.trim() || !draft.name.trim()}
             onClick={() => void save()}
           >

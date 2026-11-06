@@ -219,7 +219,7 @@ export function SkillRepositoryImport({
         </details>
         <button
           type="button"
-          className="settings-action"
+          className="secondary settings-action"
           disabled={!valid}
           onClick={() => void run(false)}
         >
