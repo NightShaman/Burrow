@@ -1,3 +1,4 @@
+import { contextReport, type ContextReport } from './contextReport';
 import {
   chatInputLabel,
   pendingChatInput,
@@ -112,7 +113,10 @@ export const ChatTranscript = memo(function ChatTranscript({
           chatTerminalMetadata(turn.metadata)?.terminalStatus !== undefined &&
           chatTerminalMetadata(turn.metadata)?.terminalStatus !== 'completed') ||
         turn.metadata?.attachments?.length ||
-        turn.metadata?.outputArtifacts?.length) &&
+        turn.metadata?.outputArtifacts?.length ||
+        (turn.role === 'assistant' &&
+          turn.metadata?.kind === 'context-command-report' &&
+          contextReport(turn.metadata.contextReport))) &&
       (turn.role === 'user' || turn.role === 'assistant' || turn.role === 'agent') &&
       !(
         turn.role === 'user' &&
@@ -315,6 +319,11 @@ export const ChatTranscript = memo(function ChatTranscript({
                 streamedAnswer={
                   turn.role === 'assistant' ? turn.metadata?.streamedAnswer : undefined
                 }
+                report={
+                  turn.role === 'assistant' && turn.metadata?.kind === 'context-command-report'
+                    ? contextReport(turn.metadata.contextReport)
+                    : undefined
+                }
                 activityLive={
                   turn.role === 'assistant' &&
                   turn.runId === activeRunId &&
@@ -481,6 +490,39 @@ function Markdown({ children }: { children: string }) {
     <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
       {children}
     </ReactMarkdown>
+  );
+}
+
+function ContextCommandReport({ report }: { report: ContextReport }) {
+  return (
+    <div className="context-report">
+      {report.blocks.map((block, index) =>
+        block.collapsed ? (
+          <details className="streamed-answer context-report-details" key={index}>
+            <summary>
+              <span>{block.title || 'Technical details'}</span>
+              <svg
+                className="streamed-answer-chevron"
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+              >
+                <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            </summary>
+            <div className="streamed-answer-body">
+              <Markdown>{block.markdown}</Markdown>
+            </div>
+          </details>
+        ) : (
+          <section className="context-report-block" key={index}>
+            {block.title && <h3>{block.title}</h3>}
+            <Markdown>{block.markdown}</Markdown>
+          </section>
+        ),
+      )}
+    </div>
   );
 }
 
@@ -889,6 +931,7 @@ export function ChatMessage({
   activity,
   progress,
   streamedAnswer,
+  report,
   terminal,
   activityLive,
   attachments = [],
@@ -913,6 +956,7 @@ export function ChatMessage({
   activity?: ToolActivity;
   progress?: RunProgress;
   streamedAnswer?: string;
+  report?: ContextReport;
   terminal?: ChatTerminalMetadata;
   activityLive?: boolean;
   attachments?: SessionAttachment[];
@@ -978,9 +1022,9 @@ export function ChatMessage({
           <ProgressCard items={progress.items} status={progress.status} />
         ) : null}
         {hasTerminalError && terminal ? <TerminalErrorCard terminal={terminal} /> : null}
-        {text && (
+        {(text || report) && (
           <div className="message-bubble final-answer">
-            <Markdown>{text}</Markdown>
+            {report ? <ContextCommandReport report={report} /> : <Markdown>{text}</Markdown>}
           </div>
         )}
         {chatInput && side === 'operator' && (

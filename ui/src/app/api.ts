@@ -456,6 +456,7 @@ export type SessionTurn = {
     outputArtifacts?: GeneratedArtifact[];
     progress?: RunProgress;
     streamedAnswer?: string;
+    contextReport?: import('../features/chat/contextReport').ContextReport;
     chatResultVersion?: number;
     terminalStatus?: import('../features/chat/chatTerminal').ChatTerminalStatus;
     modelFailure?: import('../features/chat/chatTerminal').ModelFailure;

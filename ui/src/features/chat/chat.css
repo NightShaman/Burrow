@@ -1289,3 +1289,41 @@
 .chat-error > button {
   flex-shrink: 0;
 }
+
+.context-report-block + .context-report-block {
+  margin-top: 20px;
+}
+.context-report-block > :first-child {
+  margin-top: 0;
+}
+.context-report-block > :last-child {
+  margin-bottom: 0;
+}
+.context-report-block h3 {
+  margin: 0 0 8px;
+  font-size: 1em;
+}
+.context-report .context-report-details {
+  width: 100%;
+  margin: 12px 0 0;
+  color: var(--text);
+}
+.context-report-details summary {
+  padding: 8px 10px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.context-report-details summary > span:first-child {
+  color: inherit;
+  font-size: inherit;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.context-report-details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+.context-report-details .streamed-answer-chevron {
+  flex-shrink: 0;
+}

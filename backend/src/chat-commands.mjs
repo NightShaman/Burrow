@@ -1,6 +1,6 @@
 export const CHAT_COMMANDS = Object.freeze([
   Object.freeze({ name: 'help', usage: '/help', description: 'List available chat commands.' }),
-  Object.freeze({ name: 'context', usage: '/context [full]', description: 'Show context capacity, or the full role-structured provider context for the current session meter.' }),
+  Object.freeze({ name: 'context', usage: '/context [full]', description: 'Show a readable captured-request overview, or its full contents in provider-message order.' }),
   Object.freeze({ name: 'compact', usage: '/compact', description: 'Compact conversation context now; originals remain archived. No model inference.' }),
   Object.freeze({ name: 'status', usage: '/status', description: 'Show compact runtime and active-run status.' }),
   Object.freeze({ name: 'new', usage: '/new', description: 'Start a fresh conversation generation in this session; prior history is archived.' }),

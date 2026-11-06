@@ -1,4 +1,5 @@
 import { chatProvider, isNativeThinkingProvider } from '../../app/modelSelectionOptions';
+import { contextReportFromResult } from './contextReport';
 import { chatToolIdentity } from './chatToolIdentity';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -440,8 +441,13 @@ export function useChatRun({
           answer !== streamedAnswer
             ? trimStreamedAnswer(streamedAnswer, answer) || undefined
             : undefined;
+        const report =
+          transientContextCommand && runStatus === 'complete'
+            ? contextReportFromResult(finalResult)
+            : undefined;
         const metadata = {
           ...terminal,
+          ...(report ? { kind: 'context-command-report', contextReport: report } : {}),
           ...(activity?.items?.length ? { toolActivity: activity } : {}),
           ...(progress ? { progress } : {}),
           ...(retainedStream ? { streamedAnswer: retainedStream } : {}),

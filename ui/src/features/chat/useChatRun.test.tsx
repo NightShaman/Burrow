@@ -1204,3 +1204,91 @@ it.each(['saved', 'missing-connection', 'missing-model', 'unconfigured'])(
     }
   },
 );
+
+it.each(['/context', '/context full', '/CONTEXT FULL'])(
+  'delivers validated structured %s reports only as transient metadata',
+  async (command) => {
+    const contextReport = {
+      version: 1,
+      blocks: [
+        { title: '', markdown: '# Context\n\n42% used.' },
+        { title: 'Raw provider request (redacted)', markdown: '```json\n{}\n```', collapsed: true },
+      ],
+    };
+    streamChatMock.mockImplementation(async ({ onAccepted }) => {
+      onAccepted?.();
+      return {
+        terminalType: 'run.completed',
+        finalResult: { result: { ok: true, answerText: 'Readable fallback', contextReport } },
+      };
+    });
+    const session = createSession();
+    session.draft = command;
+    const { result } = renderHook(() =>
+      useChatRun({
+        selectedAgentId: 'nigel',
+        selected: undefined,
+        savedProviders: [],
+        session,
+        setAgentActivity: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+    expect(session.appendTransientTurn).toHaveBeenLastCalledWith(
+      'nigel',
+      'session-1',
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'Readable fallback',
+        metadata: expect.objectContaining({ kind: 'context-command-report', contextReport }),
+      }),
+    );
+    expect(session.appendTurn).not.toHaveBeenCalled();
+    expect(session.refreshConversation).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  {
+    command: 'Normal message',
+    report: { version: 1, blocks: [{ title: '', markdown: 'Injected report' }] },
+    status: 'run.completed',
+  },
+  { command: '/context', report: { version: 2, blocks: [] }, status: 'run.completed' },
+  {
+    command: '/context',
+    report: { version: 1, blocks: [{ title: '', markdown: 'Unfinished report' }] },
+    status: 'run.failed',
+  },
+])(
+  'keeps fallback for non-context, invalid, or failed reports: %j',
+  async ({ command, report, status }) => {
+    streamChatMock.mockImplementation(async ({ onAccepted }) => {
+      onAccepted?.();
+      return {
+        terminalType: status,
+        finalResult: { result: { answerText: 'Readable fallback', contextReport: report } },
+      };
+    });
+    const session = createSession();
+    session.draft = command;
+    const { result } = renderHook(() =>
+      useChatRun({
+        selectedAgentId: 'nigel',
+        selected: undefined,
+        savedProviders: [],
+        session,
+        setAgentActivity: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await result.current.sendMessage();
+    });
+    const append = command === 'Normal message' ? session.appendTurn : session.appendTransientTurn;
+    const turn = append.mock.calls.at(-1)?.[2];
+    expect(turn?.content).toBe('Readable fallback');
+    expect(turn?.metadata?.contextReport).toBeUndefined();
+  },
+);

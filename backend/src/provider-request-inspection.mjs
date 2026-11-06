@@ -22,7 +22,7 @@ function isInternalRequest(record) {
  * from the context meter: a later internal curation/planner request is not the
  * agent's running chat context and must not win `/context full` selection.
  */
-export async function latestProviderRequest({ traceSessionRoot, sessionId = 'default', runId = null } = {}) {
+export async function latestProviderRequest({ traceSessionRoot, sessionId = 'default', runId = null, requestId = null } = {}) {
   if (!traceSessionRoot) throw new Error('trace_session_root_required');
   let entries;
   try { entries = await fs.readdir(traceSessionRoot, { withFileTypes: true }); }
@@ -34,7 +34,7 @@ export async function latestProviderRequest({ traceSessionRoot, sessionId = 'def
   for (const run of runs) {
     if (runId && run.name !== runId) continue;
     const requests = (await readJsonLines(path.join(run.runDir, 'model.jsonl')))
-      .filter((record) => record?.sessionId === sessionId && record?.payload?.stage === 'model-request' && !isInternalRequest(record))
+      .filter((record) => record?.sessionId === sessionId && record?.payload?.stage === 'model-request' && !isInternalRequest(record) && (!requestId || record.payload?.requestId === requestId))
       .reverse();
     for (const record of requests) {
       const artifactPath = record.payload?.providerRequestArtifact || null;

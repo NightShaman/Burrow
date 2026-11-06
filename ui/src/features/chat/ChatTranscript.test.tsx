@@ -1334,3 +1334,97 @@ it('renders provider prose literally, never as executable markup', () => {
   expect(screen.getByText(prose)).toBeTruthy();
   expect(container.querySelector('script')).toBeNull();
 });
+
+it('renders ordered readable context blocks, closed technical disclosures, and existing code copy without raw HTML', async () => {
+  const writeText = vi.fn(async () => {});
+  const secureContext = window.isSecureContext;
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const { container } = show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: 'Readable fallback',
+        metadata: {
+          kind: 'context-command-report',
+          contextReport: {
+            version: 1,
+            blocks: [
+              { title: '', markdown: '# Context report\n\n**Source:** saved portrait · 12 KB' },
+              { title: '1. system — instructions', markdown: 'System text\n\n- One\n- Two' },
+              { title: '2. user — operator', markdown: 'User text <script>alert(1)</script>' },
+              { title: 'Tool schemas', markdown: 'Technical schema', collapsed: true },
+              {
+                title: 'Raw provider request (redacted)',
+                markdown: '```json\n{"messages": []}\n```',
+                collapsed: true,
+              },
+            ],
+          },
+        },
+      },
+    ],
+    parent,
+  );
+  expect(screen.queryByText('Readable fallback')).toBeNull();
+  expect([...container.querySelectorAll('h3')].map((n) => n.textContent)).toEqual([
+    '1. system — instructions',
+    '2. user — operator',
+  ]);
+  expect(container.querySelectorAll('li')).toHaveLength(2);
+  const details = [...container.querySelectorAll('details')];
+  expect(details).toHaveLength(2);
+  expect(details.every((node) => !node.open)).toBe(true);
+  expect(container.querySelector('script')).toBeNull();
+  fireEvent.click(screen.getByText('Raw provider request (redacted)'));
+  expect(details[1].open).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy code block' }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('{"messages": []}'));
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: secureContext });
+});
+
+it.each([
+  { contextReport: { version: 1, blocks: [{ title: '', markdown: 'Untrusted report' }] } },
+  { kind: 'context-command-report', contextReport: { version: 2, blocks: [] } },
+])('preserves normal Markdown fallback for unmarked or malformed metadata: %j', (metadata) => {
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '**Readable fallback**',
+        metadata: metadata as never,
+      },
+    ],
+    parent,
+  );
+  expect(screen.getByText('Readable fallback').tagName).toBe('STRONG');
+  expect(screen.queryByText('Untrusted report')).toBeNull();
+});
+
+it('allows a context report with an empty fallback but never replaces operator messages', () => {
+  const contextReport = {
+    version: 1 as const,
+    blocks: [{ title: '', markdown: 'Report without fallback' }],
+  };
+  show(
+    [
+      {
+        type: 'message',
+        role: 'assistant',
+        content: '',
+        metadata: { kind: 'context-command-report', contextReport },
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: 'Operator message',
+        metadata: { kind: 'context-command-report', contextReport },
+      },
+    ],
+    parent,
+  );
+  expect(screen.getAllByText('Report without fallback')).toHaveLength(1);
+  expect(screen.getByText('Operator message')).toBeTruthy();
+});
