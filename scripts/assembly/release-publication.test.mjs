@@ -18,3 +18,16 @@ test('normal latest release targets immutable assembled commit with install payl
   assert.doesNotMatch(release, /--prerelease|--draft/);
   assert.match(release, /--repo "\$GITHUB_REPOSITORY"/);
 });
+
+test('exact backend CI SHA is attested and owned real PostgreSQL tests gate assembly before build and publishing', () => {
+  const attestation = workflow.indexOf('- name: Require trusted component CI for exact resolved SHAs');
+  const checkout = workflow.indexOf('repository: NightShaman/Burrow-Backend');
+  const sql = workflow.indexOf('- name: Gate development assembly on real owned PostgreSQL invariants');
+  const build = workflow.indexOf('- name: Stamp and build generated development assembly');
+  assert.ok(attestation > 0 && attestation < checkout && checkout < sql && sql < build);
+  const gate = workflow.slice(sql, build);
+  assert.match(gate, /BURROW_TEST_DISPOSABLE_POSTGRES: '1'/);
+  assert.match(gate, /postgres-r12-transactions.integration.test.mjs/);
+  assert.match(gate, /postgres-http-routes.integration.test.mjs/);
+  assert.match(gate, /postgres-session-rename.integration.test.mjs/);
+});

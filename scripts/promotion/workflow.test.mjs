@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 const workflow = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml', import.meta.url), 'utf8');
 test('freeze assembly and component identities from the same checkout', () => {
   assert.match(workflow, /burrow=\$\(git -C orchestrator rev-parse HEAD\)/);
@@ -34,7 +37,7 @@ test('complete validation stays bounded and gives serial backend validation room
 });
 
 test('artifact handoff wraps the validated tree and checks restored executable modes before any publication', () => {
-  const bundle = workflow.indexOf('tar -cpf public-promotion.tar staged sources.json plan.json release-notes executable-modes.json');
+  const bundle = workflow.indexOf('tar -cpf public-promotion.tar staged sources.json plan.json release-notes release-assets executable-modes.json tested-image.json tested-image.tar.gz tested-image.tar.gz.sha256');
   const upload = workflow.indexOf('uses: actions/upload-artifact@v4');
   const download = workflow.indexOf('uses: actions/download-artifact@v4');
   const extract = workflow.indexOf('tar -xpf public-promotion.tar');
@@ -52,4 +55,49 @@ test('promotion changes run installer, assembly and promotion regressions on pus
   assert.equal(installerWorkflow.match(/'scripts\/promotion\/\*\*'/g)?.length, 2);
   assert.equal(installerWorkflow.match(/'\.github\/workflows\/daily-public-promotion\.yml'/g)?.length, 2);
   assert.match(installerWorkflow, /node --test scripts\/install\/\*\.test\.mjs scripts\/assembly\/\*\.test\.mjs scripts\/promotion\/\*\.test\.mjs/);
+});
+
+test('existing Node Goblin release must carry both frozen assets before promotion continues', () => {
+  const start = workflow.indexOf('      - name: Publish component releases with coordinated notes');
+  const step = workflow.slice(start, workflow.indexOf('      - uses: docker/setup-buildx-action@v3', start));
+  const shell = step.slice(step.indexOf('        run: |\n') + '        run: |\n'.length)
+    .trimEnd().split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  const root = mkdtempSync(join(tmpdir(), 'burrow-release-assets-'));
+  try {
+    const bin = join(root, 'bin');
+    const assets = join(root, 'release-assets/nodeGoblin');
+    mkdirSync(bin); mkdirSync(assets, { recursive: true });
+    writeFileSync(join(assets, 'node-goblin-2026.11.06.tar.gz'), 'frozen archive');
+    writeFileSync(join(assets, 'node-goblin-2026.11.06.tar.gz.sha256'), 'frozen checksum');
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh
+case "$1 $2" in
+  'release view') exit 0 ;;
+  'release download')
+    pattern=''; destination=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --pattern) pattern=$2; shift 2 ;;
+        --dir) destination=$2; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ "$RELEASE_ASSET_CASE" != missing ] || [ "${'${pattern##*.}'}" = gz ] || exit 1
+    if [ "$RELEASE_ASSET_CASE" = wrong ] && [ "${'${pattern##*.}'}" = sha256 ]; then
+      printf 'stale checksum' > "$destination/$pattern"
+    else
+      cp "release-assets/nodeGoblin/$pattern" "$destination/$pattern"
+    fi ;;
+  *) echo 'unexpected gh invocation' >&2; exit 2 ;;
+esac
+` , { mode: 0o755 });
+    for (const [assetCase, expected] of [['matching', 0], ['missing', 1], ['wrong', 1]]) {
+      const result = spawnSync('bash', ['-e', '-c', shell], {
+        cwd: root, encoding: 'utf8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PUBLIC_OWNER: 'GoblinKing-Burrow', VERSION: '2026.11.06', RELEASE_ASSET_CASE: assetCase },
+      });
+      assert.equal(result.status === 0 ? 0 : 1, expected, `${assetCase}: ${result.stderr}`);
+      if (expected) assert.match(result.stderr, /Node Goblin public release asset missing or differs/);
+    }
+    assert.ok(workflow.indexOf('      - name: Publish Burrow snapshot and coordinated release last') > start);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

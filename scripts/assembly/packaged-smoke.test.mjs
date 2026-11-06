@@ -13,12 +13,13 @@ test('index must reference actual JS and CSS assets', () => {
  assert.deepEqual(assetPaths('<script src="/assets/index.js"></script><link href="/assets/index.css">'), ['/assets/index.js','/assets/index.css']);
  assert.throws(()=>assetPaths('<html>fixture</html>'));
 });
-test('development assembly publishes a smoke-tested dev image while complete validation stays in daily promotion', () => {
+test('development assembly requires scoped owned SQL gate and smoke-tested dev image; complete validation stays in daily promotion', () => {
  const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml',import.meta.url),'utf8');
  const promotion = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml',import.meta.url),'utf8');
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-Backend/);
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-UI/);
- assert.doesNotMatch(workflow,/npm test|apt-get|DISPOSABLE_POSTGRES/);
+ assert.match(workflow,/BURROW_TEST_DISPOSABLE_POSTGRES: '1'/);
+ assert.match(workflow,/postgres-http-routes\.integration\.test\.mjs/);
  assert.match(workflow,/docker\/build-push-action/);
  assert.match(workflow,/packaged-smoke\.mjs burrow-development:tested/);
  assert.match(workflow,/for tag in latest dev/);

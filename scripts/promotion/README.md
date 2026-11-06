@@ -26,6 +26,14 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   `.N` authoring versions remain in NightShaman only. The four official skills
   must match their `PUBLIC_RELEASE.json`; only the version field is rewritten.
 - Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. Node Goblin changes do not create a Burrow release.
+  Its checksum-validated release asset is built once from the frozen staged
+  source and carried unchanged through the artifact boundary, with the public
+  bootstrap's repository authority checked before publishing.
+- The public Burrow image is smoke-tested once, archived with its image ID and
+  checksum, restored in the publish job, and pushed under both tags without a
+  rebuild. Local tested-image ID and remote per-tag manifest digests are checked
+  and written to the promotion run summary; do not confuse image ID with manifest
+  digest. This is a single-platform image, not a multiarch index.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
 - GSS, Skills, Backdoor, Tutor, Theater, and Switchboard own their public source snapshots.
 - Complete Backend, UI, Node Goblin, GSS/Core integration, Backdoor/Core integration, installer, assembly, and packaged-image validation runs here against the frozen source set before publication. NightShaman push workflows remain fast development gates.

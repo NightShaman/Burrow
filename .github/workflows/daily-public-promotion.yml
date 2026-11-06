@@ -260,12 +260,33 @@ jobs:
       - name: Build and smoke the public Burrow image
         if: steps.plan.outputs.validation_required == 'true'
         run: |
-          docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" -t burrow-public-candidate staged/Burrow
+          set -euo pipefail
+          docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" \
+            --label org.opencontainers.image.source=https://github.com/GoblinKing-Burrow/Burrow \
+            --label org.opencontainers.image.url=https://github.com/GoblinKing-Burrow/Burrow \
+            --label org.opencontainers.image.version="${{ steps.plan.outputs.release_date }}" \
+            -t burrow-public-candidate staged/Burrow
           node staged/Burrow/scripts/assembly/packaged-smoke.mjs burrow-public-candidate staged/Burrow
+          # Persist the exact image just smoked, including its immutable local ID.
+          image_id=$(docker image inspect --format '{{.Id}}' burrow-public-candidate)
+          test "${#image_id}" -eq 71
+          printf '{"schemaVersion":1,"imageId":"%s"}\n' "$image_id" > tested-image.json
+          docker save burrow-public-candidate | gzip -1 > tested-image.tar.gz
+          sha256sum tested-image.tar.gz > tested-image.tar.gz.sha256
+          test -s tested-image.tar.gz
           for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor Burrow-Tutor Burrow-Theater Burrow-Switchboard; do
             test ! -d "staged/$target/.git"
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
+      - name: Build and verify Node Goblin release asset from the frozen staged source
+        if: steps.plan.outputs.validation_required == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.release_date }}
+        run: |
+          set -eu
+          mkdir -p release-assets/nodeGoblin
+          SOURCE_DATE_EPOCH=0 sh staged/Node-Goblin/gateway/deploy/build-release.sh release-assets/nodeGoblin
+          node orchestrator/scripts/promotion/verify-node-goblin-asset.mjs staged release-assets/nodeGoblin "$VERSION"
       - name: Bundle validated snapshots with executable permissions
         if: steps.plan.outputs.validation_required == 'true'
         run: |
@@ -275,7 +296,7 @@ jobs:
           node orchestrator/scripts/promotion/executable-modes.mjs record staged executable-modes.json
           # Uploading loose files strips modes (and can omit hidden files).
           # Tar preserves the entire already-allowlisted tree across that boundary.
-          tar -cpf public-promotion.tar staged sources.json plan.json release-notes executable-modes.json
+          tar -cpf public-promotion.tar staged sources.json plan.json release-notes release-assets executable-modes.json tested-image.json tested-image.tar.gz tested-image.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         if: steps.plan.outputs.validation_required == 'true'
         with:
@@ -308,6 +329,8 @@ jobs:
           node orchestrator/scripts/promotion/executable-modes.mjs verify staged executable-modes.json
           test -x staged/Burrow/install.sh
           test -x staged/Node-Goblin/install.sh
+          node orchestrator/scripts/promotion/verify-node-goblin-asset.mjs staged release-assets/nodeGoblin "${{ needs.stage.outputs.release_date }}"
+          sha256sum -c tested-image.tar.gz.sha256
       - name: Publish immutable Git snapshots
         env:
           PUBLIC_GITHUB_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
@@ -321,11 +344,6 @@ jobs:
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Tutor staged/Burrow-Tutor "$VERSION" "Release Burrow Tutor $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Theater staged/Burrow-Theater "$VERSION" "Release Burrow Theater $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Switchboard staged/Burrow-Switchboard "$VERSION" "Release Burrow Switchboard $VERSION"
-      - name: Build Node Goblin release assets
-        env:
-          VERSION: ${{ needs.stage.outputs.release_date }}
-        run: |
-          SOURCE_DATE_EPOCH=0 sh staged/Node-Goblin/gateway/deploy/build-release.sh staged/Node-Goblin/gateway/dist
       - name: Publish component releases with coordinated notes
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
@@ -334,12 +352,27 @@ jobs:
           set -eu
           create_release() {
             repo=$1; notes=$2; shift 2
-            if gh release view "v$VERSION" --repo "$PUBLIC_OWNER/$repo" >/dev/null 2>&1; then return; fi
-            gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes-file "$notes" "$@"
+            if ! gh release view "v$VERSION" --repo "$PUBLIC_OWNER/$repo" >/dev/null 2>&1; then
+              gh release create "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --title "$repo $VERSION" --notes-file "$notes" "$@"
+            fi
+            if [ "$repo" = Node-Goblin ]; then
+              # A prior attempt may have created the release but failed halfway
+              # through asset upload. Never accept an existing partial/stale asset.
+              asset_check=$(mktemp -d)
+              for name in "node-goblin-$VERSION.tar.gz" "node-goblin-$VERSION.tar.gz.sha256"; do
+                if ! gh release download "v$VERSION" --repo "$PUBLIC_OWNER/$repo" --dir "$asset_check" --pattern "$name" ||
+                   ! cmp -s "release-assets/nodeGoblin/$name" "$asset_check/$name"; then
+                  rm -rf -- "$asset_check"
+                  echo "Node Goblin public release asset missing or differs: $name" >&2
+                  exit 1
+                fi
+              done
+              rm -rf -- "$asset_check"
+            fi
           }
           create_release Node-Goblin release-notes/nodeGoblin.md \
-            "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz" \
-            "staged/Node-Goblin/gateway/dist/node-goblin-$VERSION.tar.gz.sha256"
+            "release-assets/nodeGoblin/node-goblin-$VERSION.tar.gz" \
+            "release-assets/nodeGoblin/node-goblin-$VERSION.tar.gz.sha256"
           create_release Goblin-Secret-Store release-notes/goblinSecretStore.md
           create_release Burrow-Skills release-notes/burrowSkills.md
           create_release Burrow-Backdoor release-notes/burrowBackdoor.md
@@ -352,20 +385,17 @@ jobs:
           registry: ghcr.io
           username: GoblinKing-Burrow
           password: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
-      - name: Publish Burrow container image
-        uses: docker/build-push-action@v6
-        with:
-          context: staged/Burrow
-          push: true
-          build-args: |
-            BURROW_UI_SHA=${{ needs.stage.outputs.ui_sha }}
-          tags: |
-            ghcr.io/goblinking-burrow/burrow:latest
-            ghcr.io/goblinking-burrow/burrow:${{ needs.stage.outputs.release_date }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/GoblinKing-Burrow/Burrow
-            org.opencontainers.image.url=https://github.com/GoblinKing-Burrow/Burrow
-            org.opencontainers.image.version=${{ needs.stage.outputs.release_date }}
+      - name: Publish exact smoke-tested Burrow image and verify public tag digests
+        env:
+          VERSION: ${{ needs.stage.outputs.release_date }}
+        run: |
+          set -euo pipefail
+          sha256sum -c tested-image.tar.gz.sha256
+          gzip -dc tested-image.tar.gz > tested-image.tar
+          # docker load restores the validated image; never rebuild after smoke.
+          # The only public image publication code checks the restored image ID,
+          # tag IDs and remote per-tag manifest digests before release proceeds.
+          node orchestrator/scripts/promotion/publish-tested-image.mjs "$VERSION" tested-image.json
       - name: Verify image repository association
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}

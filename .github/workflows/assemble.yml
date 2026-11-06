@@ -40,30 +40,8 @@ jobs:
           INPUT_BACKEND_SHA: ${{ inputs.backend_sha }}
           INPUT_UI_SHA: ${{ inputs.ui_sha }}
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
-        run: |
-          set -eu
-          if [ "${{ github.event_name }}" = "repository_dispatch" ] && [ "$EVENT_REF" != "main" ]; then
-            echo 'Automatic assembly requires source_ref=main' >&2
-            exit 1
-          fi
-          backend_ref="$INPUT_BACKEND_SHA"
-          ui_ref="$INPUT_UI_SHA"
-          if [ "$EVENT_SOURCE" = "NightShaman/Burrow-Backend" ] && [ -n "$EVENT_SHA" ]; then backend_ref="$EVENT_SHA"; fi
-          if [ "$EVENT_SOURCE" = "NightShaman/Burrow-UI" ] && [ -n "$EVENT_SHA" ]; then ui_ref="$EVENT_SHA"; fi
-          if [ -z "$backend_ref" ]; then backend_ref=main; fi
-          if [ -z "$ui_ref" ]; then ui_ref=main; fi
-          # Resolve even explicitly supplied refs before comparing, gating or checkout.
-          backend_ref=$(gh api "repos/NightShaman/Burrow-Backend/commits/$backend_ref" --jq .sha)
-          ui_ref=$(gh api "repos/NightShaman/Burrow-UI/commits/$ui_ref" --jq .sha)
-          # A queued older dispatch must never roll a recorded component backward.
-          for item in "backend NightShaman/Burrow-Backend $backend_ref" "ui NightShaman/Burrow-UI $ui_ref"; do
-            set -- $item; recorded=$(awk -v key="Burrow-${1^}" '$1==key {print $2}' assembled/SOURCE_VERSIONS 2>/dev/null || true)
-            if [ -n "$recorded" ] && [ "$recorded" != "$3" ]; then
-              status=$(gh api "repos/$2/compare/$recorded...$3" --jq .status)
-              [ "$status" = ahead ] || { echo "Refusing non-forward $1 pin: $recorded -> $3 ($status)" >&2; exit 1; }
-            fi
-          done
-          printf 'backend=%s\nui=%s\n' "$backend_ref" "$ui_ref" >> "$GITHUB_OUTPUT"
+          EVENT_NAME: ${{ github.event_name }}
+        run: node assembled/scripts/assembly/resolve-revisions.mjs assembled/SOURCE_VERSIONS
       - name: Require trusted component CI for exact resolved SHAs
         env:
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
@@ -95,6 +73,28 @@ jobs:
         run: |
           node --test assembled/scripts/assembly/*.test.mjs
           (cd ui-source && npm ci --no-audit --no-fund)
+      - name: Install PostgreSQL 17 with pgvector for owned SQL component gate
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          sudo install -d /usr/share/postgresql-common/pgdg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
+          . /etc/os-release
+          echo "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
+      - name: Gate development assembly on real owned PostgreSQL invariants
+        env:
+          BURROW_TEST_DISPOSABLE_POSTGRES: '1'
+          BURROW_TEST_TIMEOUT_MS: '300000'
+        timeout-minutes: 10
+        run: |
+          set -eu
+          (cd backend-source && npm ci --no-audit --no-fund && npm run test:files -- \
+            tests/postgres-r12-transactions.integration.test.mjs \
+            tests/postgres-http-routes.integration.test.mjs \
+            tests/postgres-session-rename.integration.test.mjs)
       - name: Stamp and build generated development assembly
         id: build
         run: |

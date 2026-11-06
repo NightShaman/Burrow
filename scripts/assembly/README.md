@@ -29,7 +29,8 @@ supersedes earlier evidence. Queries paginate so history is not arbitrarily cut.
 Run gate regressions: `node --test scripts/assembly/component-gate.test.mjs`.
 
 Assembly does not rerun comprehensive component suites. After the exact-SHA
-trusted component gate, it builds the deployment image once with `load: true`,
+trusted component gate and a scoped owned PostgreSQL SQL gate, it builds the
+deployment image once with `load: true`,
 `push: false`, and the UI SHA build argument. The real packaged launcher starts
 with the image's bundled managed PostgreSQL in a disposable named container and
 volume on a random localhost port. Smoke validates `/health` version, all release
@@ -59,3 +60,14 @@ The existing UTC build version identifies the release. Assets contain the exact
 committed installable assembly, SOURCE_VERSIONS and SHA256SUMS; notes link the
 workflow, source revisions and immutable image. This is independent of public
 promotion/releases under GoblinKing-Burrow (no prerelease flag or manual pinning).
+
+## Assembly SQL gate
+
+Before any development image build or generated commit, the serialized assembly
+validates immutable component CI evidence and runs a scoped backend PostgreSQL
+gate against a runner-owned disposable PostgreSQL 17 cluster with pgvector. This
+covers HTTP persistence, transaction authority and session rename/rollback.
+The independent daily public promotion still runs the complete frozen-source
+test suites. Automatic dispatch requires an exact canonical source repository,
+immutable SHA, main ref, and forward-only canonical Backend/UI pins; incomplete
+SOURCE_VERSIONS metadata fails closed.

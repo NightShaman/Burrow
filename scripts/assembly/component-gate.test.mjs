@@ -19,8 +19,7 @@ test('assembly gates immutable pins before component checkout for both triggers'
  const {readFile}=await import('node:fs/promises');
  const yaml=await readFile(new URL('../../.github/workflows/assemble.yml',import.meta.url),'utf8');
  assert(yaml.indexOf('Require trusted component CI')<yaml.indexOf('repository: NightShaman/Burrow-Backend'));
- assert.match(yaml,/backend_ref=\$\(gh api "repos\/NightShaman\/Burrow-Backend\/commits\/\$backend_ref" --jq .sha\)/);
- assert.match(yaml,/ui_ref=\$\(gh api "repos\/NightShaman\/Burrow-UI\/commits\/\$ui_ref" --jq .sha\)/);
- assert.match(yaml,/Refusing non-forward/);
+ assert.match(yaml,/resolve-revisions\.mjs assembled\/SOURCE_VERSIONS/);
+ assert.match(yaml,/EVENT_NAME: \$\{\{ github.event_name \}\}/);
  assert.match(yaml,/workflow_dispatch:/);
 });
