@@ -17,7 +17,7 @@ import { executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './
 import { conversationAuthority } from './conversation-authority.mjs';
 import { updateSubagentStatus } from './subagent-store.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
-import { prepareNativeToolContinuation } from './native-continuation-preparation.mjs';
+import { prepareNativeToolContinuationAsync } from './native-continuation-preparation.mjs';
 import { changedPathsFromToolResults, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { boundedRedactedValue } from './redaction.mjs';
 import { chatToolActivity } from './runtime-plain-chat-finalizer.mjs';
@@ -745,16 +745,18 @@ async function runRegisteredSpawnSubagentChild({
     const continuationTools = subagentToolSchemas({ minionDepth: parentExecutionContext.minionDepth });
     let next;
     try {
-      const preparedContinuation = nativeContinuation
-        ? prepareNativeToolContinuation({
-            baseMessages: messages,
-            toolCalls,
-            toolResults: batch.results,
-            modelConfig,
-            tools: continuationTools,
-          })
-        : null;
-      if (preparedContinuation) applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
+      const compatibilityMessages = nativeContinuation ? null : normalizeProviderMessages([
+        ...messages,
+        { role: 'user', content: followupPromptWithEvidence({ prompt, toolResults, latestResults: batch.results, allowMoreTools }) },
+      ]);
+      const preparedContinuation = await prepareNativeToolContinuationAsync({
+        baseMessages: nativeContinuation ? messages : compatibilityMessages,
+        ...(nativeContinuation ? { toolCalls, toolResults: batch.results } : {}),
+        modelConfig,
+        tools: continuationTools,
+        contextThreshold: modelConfig?.contextCompression?.contextThreshold,
+      }, { adapter, signal, traceLogger: modelTrace });
+      if (nativeContinuation) applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
       next = nativeContinuation
         ? await callModel('continueWithToolResults', {
             previousModel: current,
@@ -767,10 +769,7 @@ async function runRegisteredSpawnSubagentChild({
             signal,
           })
         : await callModel('complete', { sessionId: childSessionId, previousModel: current,
-            messages: normalizeProviderMessages([
-              ...messages,
-              { role: 'user', content: followupPromptWithEvidence({ prompt, toolResults, latestResults: batch.results, allowMoreTools }) },
-            ]),
+            messages: preparedContinuation.messages,
             ...(continuationTools ? { tools: continuationTools, toolChoice: 'auto' } : {}),
             traceLogger: modelTrace,
             signal,

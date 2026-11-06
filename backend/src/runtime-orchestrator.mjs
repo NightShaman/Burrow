@@ -16,7 +16,7 @@ import './continuation-evidence.mjs';
 import { inspectionResultSummary, shouldFollowReadOnlyInspection, hasExecutedInspectionEvidence, hasExecutedReadFileEvidence, missingInspectionTargets, shouldForceInspectionEvidence, defaultInspectionFileList, runDefaultReadOnlyInspection, pendingInspectionFallback } from './inspection-evidence.mjs';
 import { CHAT_TOOL_HISTORY_LIMIT, CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, boundedToolArgumentValue, stableJson, fingerprint, toolPlanFingerprint, exactRepeatVerdict, loopReceiptText, appendBoundedChatHistory, appendBoundedMapEntry, compactPromptEvidenceResult, runtimeObservationFacts, materialEvidenceKeys, recordMaterialProgress, repeatedToolCallObservations, semanticInspectionObservations, logChatToolLoopHeapStage, normalizedToolOutcome } from './tool-loop-detection.mjs';
 import { runProposalLoop, runVerificationGate, runCommitGate, completeMutationAfterInspection, completeMutationRepairAfterNoAction, completeMutationRepairAfterToolFailure, completeVerificationAfterMutation, proposalFromNativeToolCalls } from './mutation-gates.mjs';
-import { prepareNativeToolContinuation } from './native-continuation-preparation.mjs';
+import { prepareNativeToolContinuationAsync } from './native-continuation-preparation.mjs';
 import { adapterOutputArtifactsFromResult } from './model-output-artifacts.mjs';
 
 // facts for the agent and operator; they are not instructions or tool gates.
@@ -537,21 +537,26 @@ export async function runPlainModelTurn({
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-continuation-prompt-build', { iteration, followupPrompt: useNativeContinuation ? '[provider-native tool continuation]' : followupPrompt, followupInput, chatToolLoop, promptEvidenceResults });
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', { iteration, followupInput, chatToolLoop, promptEvidenceResults });
+      const pendingSteering = await steeringMessages();
       const nativeContinuation = useNativeContinuation
-        ? prepareNativeToolContinuation({
+        ? await prepareNativeToolContinuationAsync({
             baseMessages: normalizeProviderMessages(nativeTranscript),
             toolCalls: nativeToolCalls,
             toolResults: rawToolResults,
             modelConfig,
             tools: continuationToolSchemas(),
-          })
+            contextThreshold,
+            pendingSteering,
+          }, { adapter, signal: abortSignal, traceLogger })
         : null;
-      const pendingSteering = await steeringMessages();
-      if (pendingSteering.length) {
-        if (nativeContinuation) nativeContinuation.messages.push(...pendingSteering);
-        else {
+      if (!nativeContinuation) {
+        if (pendingSteering.length) {
           followupInput.messages = [...(followupInput.messages || [{ role: 'user', content: followupInput.prompt }]), ...pendingSteering];
           followupInput.prompt = null;
+        }
+        if (followupInput.messages) {
+          const prepared = await prepareNativeToolContinuationAsync({ baseMessages: followupInput.messages, modelConfig, tools: toolLoopNoProgress ? [] : continuationToolSchemas(), contextThreshold }, { adapter, signal: abortSignal, traceLogger });
+          followupInput.messages = prepared.messages;
         }
       }
       if (nativeContinuation?.compacted) await traceLogger?.event?.('native-continuation-prepared', {

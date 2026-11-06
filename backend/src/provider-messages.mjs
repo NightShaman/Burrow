@@ -133,6 +133,11 @@ function compactReceiptFact(round = []) {
     const resultText = renderedContent(result?.content).replace(/\s+/g, ' ').trim();
     const name = String(call?.function?.name || 'tool').slice(0, 120);
     const callId = String(call?.id || result?.tool_call_id || '').slice(0, 80);
+    if (['spawn_subagent', 'finish_subagent', 'load_skill'].includes(name)) {
+      // Delegation ownership and loaded instructions cannot become clipped
+      // prose. Keep the exact receipt when moving its protocol round.
+      return `- ${name}: ${renderedContent(result?.content)}`;
+    }
     if (name === 'agents_list') {
       // Peer IDs and pagination cursors are identities, not prose excerpts.
       // Keep the public receipt atomic even when a later round displaces it.
@@ -171,9 +176,11 @@ function exchangeEvidenceMessage(rounds = [], priorEvidence = '', maxChars = 0) 
   const used = lines.join('\n').length;
   const priorLines = String(priorEvidence || '').split('\n').filter((line) => line.startsWith('- '));
   const candidates = [...priorLines, ...facts];
+  const atomic = candidates.filter(fact => /^- (?:spawn_subagent|finish_subagent|load_skill):/u.test(fact));
+  lines.push(...atomic);
   const factBudget = Math.max(0, budget - used - (candidates.length ? 1 : 0));
   const perFactBudget = candidates.length ? Math.floor(factBudget / candidates.length) : 0;
-  for (const fact of candidates) {
+  for (const fact of candidates.filter(fact => !atomic.includes(fact))) {
     const clipped = clipEvidenceFact(fact, perFactBudget);
     if (clipped) lines.push(clipped);
   }
@@ -207,10 +214,13 @@ export function pruneProviderToolResults(messages = [], { maxChars, maxToolRound
   if (!starts.length) return withoutPriorEvidence;
   const baseEnd = starts[0];
   const rounds = starts.map((start, index) => withoutPriorEvidence.slice(start, starts[index + 1] ?? withoutPriorEvidence.length));
+  // Steering, instructions, and assistant conclusions between protocol rounds
+  // are conversation state, not volatile tool output. Never displace them.
+  const protocolRounds = rounds.map(round => [round[0], ...round.slice(1).filter(message => message.role === 'tool')]);
   let remaining = Math.max(0, Number(maxChars) || 0);
   const retained = [];
   const displaced = [];
-  for (const round of [...rounds].reverse()) {
+  for (const round of [...protocolRounds].reverse()) {
     const chars = toolRoundChars(round);
     if (retained.length < Math.max(0, Number(maxToolRounds) || 0) && (chars <= remaining || !retained.length)) {
       retained.unshift(round);
@@ -220,7 +230,7 @@ export function pruneProviderToolResults(messages = [], { maxChars, maxToolRound
     }
   }
   return insertEvidenceBeforeCurrentTask(
-    [...withoutPriorEvidence.slice(0, baseEnd), ...retained.flat()],
+    [...withoutPriorEvidence.slice(0, baseEnd), ...rounds.flatMap((round, index) => retained.includes(protocolRounds[index]) ? round : round.slice(1).filter(message => message.role !== 'tool'))],
     exchangeEvidenceMessage(displaced, priorEvidence, remaining),
   );
 }
