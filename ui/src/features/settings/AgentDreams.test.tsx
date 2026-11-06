@@ -767,3 +767,53 @@ it('retains older failed scopes after an unrelated successful save and failed re
     promoteToMemory: false,
   });
 });
+
+it('keeps memory controls inline without a third-column target and styles preview actions as buttons', async () => {
+  memoryApi();
+  const view = render(<AgentDreams agentId="nigel" savedProviders={[]} />);
+  await readyMemory();
+  expect(view.container.contains(screen.getByLabelText('Memory prompt override'))).toBe(true);
+  expect(screen.getAllByRole('heading', { name: 'Dream memory' })).toHaveLength(1);
+  const preview = screen.getByRole('button', { name: 'Preview memories' });
+  expect(preview.classList.contains('secondary')).toBe(true);
+  fireEvent.click(preview);
+  await screen.findByText('Grounded memory');
+  expect(
+    screen.getByRole('button', { name: 'Preview new sample' }).classList.contains('secondary'),
+  ).toBe(true);
+  expect(vi.mocked(api).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+});
+
+it('keeps portal preview read-only with unsaved memory text and clears it on agent change', async () => {
+  memoryApi();
+  const overflow = document.createElement('div');
+  document.body.append(overflow);
+  const view = render(
+    <AgentDreams agentId="nigel" savedProviders={[]} overflowTarget={overflow} />,
+  );
+  try {
+    await readyMemory();
+    const override = screen.getByLabelText('Memory prompt override');
+    expect(overflow.contains(override)).toBe(true);
+    fireEvent.change(override, { target: { value: 'Unsaved memory instructions' } });
+    const preview = screen.getByRole('button', { name: 'Preview memories' });
+    fireEvent.blur(override, { relatedTarget: preview });
+    fireEvent.click(preview);
+    await screen.findByText('Grounded memory');
+    expect(overflow.contains(screen.getByRole('region', { name: 'Memory preview results' }))).toBe(
+      true,
+    );
+    expect(JSON.parse(previewCalls()[0][1]!.body as string).memoryPromptOverride).toBe(
+      'Unsaved memory instructions',
+    );
+    expect(vi.mocked(api).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    view.rerender(<AgentDreams agentId="hatchet" savedProviders={[]} overflowTarget={overflow} />);
+    await readyMemory();
+    expect(screen.queryByText('Grounded memory')).toBeNull();
+    expect(screen.getAllByRole('heading', { name: 'Dream memory' })).toHaveLength(1);
+  } finally {
+    view.unmount();
+    expect(overflow.textContent).toBe('');
+    overflow.remove();
+  }
+});

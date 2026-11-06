@@ -458,14 +458,14 @@ describe('agent settings sections', () => {
     }
   });
 
-  it('keeps editable Dream memory controls in primary', async () => {
+  it('places Dream memory controls in the third-column target', async () => {
     const view = mountDreamsWithOverflow();
     try {
       await screen.findByDisplayValue('Reflect on the day.');
-      expect(view.container.contains(screen.getByLabelText('Memory prompt override'))).toBe(true);
-      expect(view.overflow.contains(screen.getByLabelText('Memory prompt override'))).toBe(false);
-      expect(view.container.textContent).toContain('Dream memory');
-      expect(view.overflow.textContent).not.toContain('Dream memory');
+      expect(view.container.contains(screen.getByLabelText('Memory prompt override'))).toBe(false);
+      expect(view.overflow.contains(screen.getByLabelText('Memory prompt override'))).toBe(true);
+      expect(view.container.textContent).not.toContain('Dream memory');
+      expect(view.overflow.textContent).toContain('Dream memory');
     } finally {
       view.unmount();
       view.overflow.remove();

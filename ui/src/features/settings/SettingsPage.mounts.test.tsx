@@ -635,10 +635,13 @@ it('scopes scheduling splits while preserving inventory/editor and Dreams portal
     screen
       .getByRole('heading', { name: 'Dream memory' })
       .closest('.settings-prototype-configuration'),
-  ).toBeTruthy();
+  ).toBeNull();
   expect(
     screen.getByRole('heading', { name: 'Dream memory' }).closest('.settings-prototype-overflow'),
-  ).toBeNull();
+  ).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: 'Preview memories' }).classList.contains('secondary'),
+  ).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Open system statistics' }));
   expect(dreams?.closest('.has-utility-panel')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'MCP tools' }));

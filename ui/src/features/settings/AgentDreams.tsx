@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
 import { ProviderModelFields } from './ProviderModelFields';
 import { useEffect, useRef, useState } from 'react';
@@ -149,6 +150,7 @@ function modelLabel(model: DreamModel, options: { value: string; label: string }
 export function AgentDreams({
   agentId,
   savedProviders,
+  overflowTarget,
 }: {
   agentId: string;
   savedProviders: SavedProvider[];
@@ -568,6 +570,7 @@ export function AgentDreams({
               type="button"
               data-dream-independent-action
               disabled={disabled || previewBusy || sourceInvalid}
+              className="secondary"
               aria-describedby="dream-memory-preview-help"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void generatePreview()}
@@ -580,6 +583,7 @@ export function AgentDreams({
                 data-dream-independent-action
                 disabled={disabled || previewBusy}
                 onMouseDown={(event) => event.preventDefault()}
+                className="secondary"
                 onClick={() => void generatePreview(true)}
               >
                 Preview new sample
@@ -764,7 +768,12 @@ export function AgentDreams({
         )}
         {notice && <p role="status">{notice}</p>}
       </SettingSection>
-      {memoryControls}
+      {overflowTarget
+        ? createPortal(
+            <div className="settings-overflow-content">{memoryControls}</div>,
+            overflowTarget,
+          )
+        : memoryControls}
     </>
   );
 }
