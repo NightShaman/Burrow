@@ -19,6 +19,7 @@ const labels = {
   'retained-conversation': 'Retained conversation',
 };
 const friendly = value => String(value || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
+const recordLabel = name => friendly(String(name).replace(/\.(?:md|txt)$/i, '')).toLowerCase().replace(/(^|\s)\S/g, match => match.toUpperCase());
 const inline = value => String(value ?? '').replace(/[\\`*_[\]<>|]/g, '\\$&').replace(/\r?\n/g, ' ');
 const fence = (value, language = '') => {
   const text = String(value ?? '');
@@ -51,14 +52,45 @@ function structured(value, depth = 0) {
   return Object.entries(value).map(([key, item]) => field(inline(friendly(key)), item)).join('\n');
 }
 
-function readableText(text) {
-  // Decode only complete JSON values or mod-owned record bodies, not arbitrary
-  // JSON-looking fragments in someone's prose. Record names/paths already come
-  // from the owning mod: Core has no Menagerie-specific field knowledge.
-  try { return structured(JSON.parse(text)); } catch { /* ordinary Markdown */ }
-  return text.replace(/(^## [^\n]+\nPath: mod:\/\/[^\n]+\n\n)([\s\S]*?)(?=\n\n---\n\n|^# |$(?![\s\S]))/gm, (whole, header, content) => {
-    try { return header + structured(JSON.parse(content)); } catch { return whole; }
+// Legacy captures have Path lines; new captures use clean headings and a
+// record divider distinct from the prompt's section divider. Do not mistake
+// headings or horizontal rules *inside* a Soul body for sibling records.
+function capturedRecords(text) {
+  const candidates = [...text.matchAll(/^## ([^\n]+)\n(?:Path: ([^\n]+)\n)?\n/gm)];
+  const accepted = [];
+  for (const match of candidates) {
+    const before = text.slice(0, match.index);
+    const sectionStart = [...before.matchAll(/^# (profile-files|mod-profile-files|mod-context|mod-shared-context)\n/gm)].at(-1);
+    const section = sectionStart ? before.slice(sectionStart.index) : '';
+    const legacy = Boolean(match[2]);
+    const inRecordSection = /^# (?:profile-files|mod-profile-files|mod-context|mod-shared-context)\n/.test(section);
+    if (!legacy && !inRecordSection) continue;
+    if (!legacy && !(/(?:^|\n\n)----\n\n$/.test(before)
+      || !/^## /m.test(section))) continue;
+    accepted.push({ name: match[1], path: match[2], start: match.index, bodyStart: match.index + match[0].length });
+  }
+  return accepted.map((record, index) => {
+    const next = accepted[index + 1]?.start ?? text.length;
+    const sectionEnd = text.slice(record.bodyStart).search(/\n\n---\n\n# [a-z][a-z0-9-]*\n/);
+    const end = sectionEnd < 0 ? next : Math.min(next, record.bodyStart + sectionEnd);
+    const raw = text.slice(record.bodyStart, end);
+    const content = raw.replace(/\n\n(?:----|---)\n\n$/, '').trim();
+    return { ...record, content, end: record.bodyStart + raw.length };
   });
+}
+
+function readableText(text) {
+  try { return structured(JSON.parse(text)); } catch { /* ordinary Markdown */ }
+  const found = capturedRecords(text);
+  // Convert only complete structured record bodies, never JSON-looking prose.
+  for (const record of found.reverse()) {
+    try {
+      const parsed = structured(JSON.parse(record.content));
+      const source = text.slice(record.bodyStart, record.end);
+      text = text.slice(0, record.bodyStart) + source.replace(record.content, parsed) + text.slice(record.end);
+    } catch { /* ordinary Markdown or capture with omission markers */ }
+  }
+  return text;
 }
 
 function readableContent(content) {
@@ -77,19 +109,14 @@ function readableContent(content) {
 
 function records(content) {
   const texts = typeof content === 'string' ? [content] : Array.isArray(content) ? content.map(part => typeof part === 'string' ? part : part?.text || '') : [];
-  return texts.flatMap(text => {
-    const matches = [...text.matchAll(/^## ([^\n]+)\nPath: ([^\n]+)\n/gm)];
-    return matches.map((match, index) => {
-      const end = matches[index + 1]?.index ?? text.length;
-      const body = text.slice(match.index + match[0].length, end).split(/\n\n---\n\n# [a-z][a-z0-9-]*\n/)[0].replace(/\n\n---\s*$/, '').trim();
-      let description;
-      try {
-        const value = JSON.parse(body);
-        description = Array.isArray(value) ? `${value.length} entr${value.length === 1 ? 'y' : 'ies'}` : 'Structured record';
-      } catch { description = /^[\[{]/.test(body) ? 'Structured record (capture may contain omission markers)' : body.split('\n').map(line => line.replace(/^#+\s*/, '').trim()).find(Boolean) || 'Empty record'; }
-      return { name: match[1], path: match[2], chars: body.length, description: description.slice(0, 140) };
-    });
-  });
+  return texts.flatMap(text => capturedRecords(text).map(record => {
+    let description;
+    try {
+      const value = JSON.parse(record.content);
+      description = Array.isArray(value) ? `${value.length} entr${value.length === 1 ? 'y' : 'ies'}` : 'Structured record';
+    } catch { description = /^[\[{]/.test(record.content) ? 'Structured record (capture may contain omission markers)' : 'Text record'; }
+    return { name: recordLabel(record.name), chars: record.content.length, description };
+  }));
 }
 
 export function contextReport({ request, agentRuntime, sessionId, status = {}, full = false }) {
@@ -115,23 +142,25 @@ export function contextReport({ request, agentRuntime, sessionId, status = {}, f
   const correlated = Boolean(meter.requestId && request.payload?.requestId === meter.requestId);
   const header = [
     `# Context${full ? ' — full' : ''}`,
-    `**Agent:** ${inline(agentRuntime.agentId)} · **Session:** ${inline(sessionId)}`,
-    `**Captured request:** ${inline(request.payload?.requestId || 'ID unavailable')} · **Sent:** ${inline(request.ts || 'time unavailable')}`,
-    `**Run:** ${inline(request.runId)} · **Model:** ${inline(body.model || meter.model || 'unknown')} · **API:** ${inline(request.payload?.api || 'unknown')}`,
+    `**Agent:** ${inline(agentRuntime.agentId)} · **Model:** ${inline(body.model || meter.model || 'unknown')}`,
     correlated ? `**Usage:** ${meter.percent == null ? 'unknown' : `${meter.percent}%`} · **${meter.source === 'provider-input-tokens' ? 'Reported input tokens' : 'Estimated tokens'}:** ${meter.estimatedTokens ?? 'unknown'} / ${meter.capacityTokens ?? 'unknown'}` : '**Usage:** unavailable for this capture (no matching request meter).',
-    `**Compaction:** ${status.compaction?.active ? 'active' : 'idle'} · **Provider messages:** ${sourceMessages.length}${entries.length !== sourceMessages.length ? `, plus ${entries.length - sourceMessages.length} top-level context field(s)` : ''}`,
-    'This is the last captured provider request, not a live preview of the next turn. Both context views use this capture. Content reflects capture-time redaction and any pre-existing omission markers.',
-    ...(body.previous_response_id ? ['**Provider-held history:** this request references an earlier response. That remote history is not contained in this capture.'] : []),
-    ...(body.conversation ? ['**Provider conversation:** additional server-held history may not be contained in this capture.'] : []),
     '', '## What was included',
     ...[...groups].flatMap(([source, group]) => [
       `- **${inline(labels[source] || friendly(source))}** — ${group.count} message${group.count === 1 ? '' : 's'}, ${group.chars.toLocaleString('en-US')} chars`,
       ...group.records.map(record => `  - **${inline(record.name)}** — ${record.chars.toLocaleString('en-US')} chars · ${inline(record.description)}`),
     ]),
     ...(entries.length ? [] : ['No context messages were found in the captured body. Inspect the raw request for this provider format.']),
-    ...(!full ? ['', 'Use `/context full` to read the contents in provider-message order.'] : []),
+    ...(!full ? ['', 'Use `/context full` to inspect each captured message.'] : []),
   ].join('\n\n');
-  const blocks = [{ title: '', markdown: header }];
+  const details = [
+    `**Session:** ${inline(sessionId)} · **Captured request:** ${inline(request.payload?.requestId || 'ID unavailable')} · **Sent:** ${inline(request.ts || 'time unavailable')}`,
+    `**Run:** ${inline(request.runId)} · **API:** ${inline(request.payload?.api || 'unknown')}`,
+    `**Compaction:** ${status.compaction?.active ? 'active' : 'idle'} · **Provider messages:** ${sourceMessages.length}${entries.length !== sourceMessages.length ? `, plus ${entries.length - sourceMessages.length} top-level context field(s)` : ''}`,
+    'This is the last captured provider request, not a live preview of the next turn. Both context views use this capture. Content reflects capture-time redaction and any pre-existing omission markers.',
+    ...(body.previous_response_id ? ['**Provider-held history:** this request references an earlier response. That remote history is not contained in this capture.'] : []),
+    ...(body.conversation ? ['**Provider conversation:** additional server-held history may not be contained in this capture.'] : []),
+  ].join('\n\n');
+  const blocks = [{ title: '', markdown: header }, { title: 'Capture details', markdown: details, collapsed: true }];
   if (full) {
     entries.forEach((entry, index) => {
       const { message, role, source, state, content } = entry;
@@ -145,22 +174,21 @@ export function contextReport({ request, agentRuntime, sessionId, status = {}, f
         try { args = JSON.parse(args); } catch { /* not JSON */ }
         toolCalls.push(`**Tool call — ${inline(message.name)} (${inline(message.call_id)})**\n\n${structured(args)}`);
       }
-      const technical = ['reasoning', 'compaction'].includes(message.type);
       const markdown = [
         `**Source:** ${inline(source)} · **Selection:** ${inline(state)} · **Size:** ${entry.chars.toLocaleString('en-US')} chars`,
         ...(message.tool_call_id || message.type === 'function_call_output' ? [`**Tool call ID:** ${inline(message.tool_call_id || message.call_id)}`] : []),
         readableContent(content), ...toolCalls,
         ...(!content && !toolCalls.length ? [structured(message)] : []),
       ].filter(Boolean).join('\n\n');
-      blocks.push({ title: `${index + 1}. ${role} — ${labels[source] || friendly(source)}`, markdown, ...(technical ? { collapsed: true } : {}) });
+      blocks.push({ title: `${index + 1}. ${role} — ${labels[source] || friendly(source)}`, markdown, collapsed: true });
     });
     const options = Object.fromEntries(Object.entries(body).filter(([key]) => !['messages', 'input', 'contents', 'system', 'instructions', 'systemInstruction'].includes(key)));
     blocks.push({ title: 'Technical details — tool schemas and provider options', markdown: 'Provider options affect behavior; tool definitions are separate from conversation messages. This is the captured, redacted representation.\n\n' + fence(JSON.stringify(options, null, 2), 'json'), collapsed: true });
     blocks.push({ title: 'Raw provider request (redacted)', markdown: 'Explicit debug view of this same capture. Use Copy code to export it. Capture-time redaction/omission markers are preserved; this is not an unredacted wire-body export.\n\n' + fence(JSON.stringify(body, null, 2), 'json'), collapsed: true });
   }
   const report = { version: 1, blocks };
-  // Plain clients get readable content without the raw debug dump. Structured
-  // clients display all blocks, including closed technical disclosures.
-  const text = blocks.filter(block => !block.collapsed).map(block => `${block.title ? `## ${block.title}\n\n` : ''}${block.markdown}`).join('\n\n');
+  // Plain clients get the full readable message contents, not the raw dump.
+  // Structured clients start with the compact inventory and closed disclosures.
+  const text = blocks.filter(block => full ? !['Technical details — tool schemas and provider options', 'Raw provider request (redacted)'].includes(block.title) : !block.collapsed).map(block => `${block.title ? `## ${block.title}\n\n` : ''}${block.markdown}`).join('\n\n');
   return { report, text };
 }

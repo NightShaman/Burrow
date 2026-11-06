@@ -198,7 +198,7 @@ function nativeToolReceipt(result = {}) {
   // durable receipt summary. Provider-budget preparation owns any projection.
   const forgeFields = {
     forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults', 'agentReferenceImage', 'agentReferenceImages', 'operatorReferenceImage'],
-    forge_create_job: ['job', 'replayed'],
+    forge_create_job: ['job', 'replayed', 'attachments'],
     forge_list_jobs: ['jobs'],
     forge_inspect_job: ['job'],
     forge_attach_artifact: ['attachment'],

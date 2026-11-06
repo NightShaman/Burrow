@@ -5,6 +5,7 @@ import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { findSessionReplay, PostgresSessionStore } from './postgres-session-store.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import {
@@ -120,10 +121,12 @@ function publicJob(job) {
     referenceImage,
     referenceImages,
     referenceActorAgentId,
+    chatDelivery,
     ...safe
   } = job;
   return {
     ...safe,
+    ...(chatDelivery ? { delivery: { status: chatDelivery.status, ...(chatDelivery.error ? { error: chatDelivery.error } : {}) } } : {}),
     artifacts: (job.artifacts || []).map(({ storageReference: ref, ...a }) => ({
       ...a,
       previewUrl: `/api/forge/jobs/${job.id}/artifacts/${a.id}`,
@@ -440,7 +443,7 @@ export class PostgresForgeStore {
           )))
     );
   }
-  async create(body, {agentId = null, ownerModId = null, referenceImages: privateReferences = null} = {}) {
+  async create(body, {agentId = null, ownerModId = null, referenceImages: privateReferences = null, chatDelivery = null} = {}) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       fail("forge_request_invalid");
     if ("attachments" in body || "sourceAttachments" in body)
@@ -585,10 +588,16 @@ export class PostgresForgeStore {
         );
         if (found.rows.length && !matching) fail("idempotency_conflict", 409);
         if (matching) {
-          return {
-            job: publicJob(parse(matching.record)),
-            replayed: true,
-          };
+          const job = parse(matching.record);
+          if (chatDelivery) {
+            if (job.chatDelivery && (job.chatDelivery.agentId !== chatDelivery.agentId || job.chatDelivery.sessionId !== chatDelivery.sessionId || job.chatDelivery.resetGeneration !== chatDelivery.resetGeneration)) fail('idempotency_conflict', 409);
+            if (!job.chatDelivery) {
+              if (['queued', 'running'].includes(job.status)) fail('idempotency_conflict', 409);
+              job.chatDelivery = { ...chatDelivery, status: 'pending' };
+              await client.query("UPDATE forge_jobs SET record=jsonb_set(record,'{chatDelivery}',$2::jsonb) WHERE id=$1", [job.id, JSON.stringify(job.chatDelivery)]);
+            }
+          }
+          return { job: publicJob(job), replayed: true };
         }
         if (!model?.available) fail("forge_model_unavailable", 409);
         if (dispatch) {
@@ -609,6 +618,7 @@ export class PostgresForgeStore {
           updatedAt: at(),
           error: null,
           artifacts: [],
+          ...(chatDelivery ? { chatDelivery: { ...chatDelivery, status: 'pending' } } : {}),
         };
         await client.query(
           "INSERT INTO forge_jobs(id,agent_id,idem,owner_id,owner_token,request,record,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8)",
@@ -639,7 +649,9 @@ export class PostgresForgeStore {
         sameRequest(parse(row.request), request, request),
       );
       if (!matching) fail("idempotency_conflict", 409);
-      result = { job: publicJob(parse(matching.record)), replayed: true };
+      const job = parse(matching.record);
+      if (chatDelivery && (!job.chatDelivery || job.chatDelivery.agentId !== chatDelivery.agentId || job.chatDelivery.sessionId !== chatDelivery.sessionId || job.chatDelivery.resetGeneration !== chatDelivery.resetGeneration)) fail('idempotency_conflict', 409);
+      result = { job: publicJob(job), replayed: true };
     }
     if (!result.replayed) {
       const task = Promise.resolve()
@@ -660,6 +672,68 @@ export class PostgresForgeStore {
       this.pending.add(task);
     }
     return { job: result.job, replayed: result.replayed };
+  }
+  // Native chat calls wait here, not in a model tool loop. The destination is
+  // committed with the paid claim, so cancelling the caller cannot lose it.
+  async createAndDeliver(body, { agentId, sessionId, signal } = {}) {
+    if (typeof agentId !== 'string' || !agentId || typeof sessionId !== 'string' || !sessionId) fail('forge_context_unavailable', 409);
+    signal?.throwIfAborted();
+    await this.attachmentDestination({ agentId, sessionId });
+    const metadata = await new PostgresSessionStore({ pool: this.pool }).getMetadata({ agentId, sessionId });
+    const resetGeneration = Number(metadata?.resetGeneration || 0);
+    const created = await this.create(body, { agentId, chatDelivery: { agentId, sessionId, resetGeneration } });
+    const job = await this.waitForCompletion(created.job.id, { signal });
+    if (job.status !== 'succeeded') return { ...created, ok: false, error: job.error || 'generation_interrupted', job: this.public(job) };
+    const attachments = await this.deliverChat(job.id);
+    return { ...created, job: this.public(await this.get(job.id)), attachments };
+  }
+  async waitForCompletion(id, { signal } = {}) {
+    for (;;) {
+      if (signal?.aborted) fail('forge_wait_interrupted', 409);
+      const job = await this.get(id);
+      const visible = this.public(job);
+      if (['succeeded', 'failed', 'interrupted'].includes(visible.status)) return { ...job, status: visible.status, error: visible.error };
+      try { await delay(500, undefined, signal ? { signal } : {}); }
+      catch (error) { if (signal?.aborted) fail('forge_wait_interrupted', 409); throw error; }
+    }
+  }
+  async deliverChat(id) {
+    const job = await this.get(id);
+    if (!job.chatDelivery || job.status !== 'succeeded') fail('forge_job_not_succeeded', 409);
+    const { agentId, sessionId, resetGeneration } = job.chatDelivery;
+    try {
+      const attachments = [];
+      for (const artifact of job.artifacts) attachments.push(await this.attach(id, { agentId, sessionId, artifactId: artifact.id }, { role: 'assistant', expectedResetGeneration: resetGeneration }));
+      if (!attachments.length) fail('forge_artifact_not_found', 404);
+      await this.pool.query("UPDATE forge_jobs SET record=jsonb_set(record,'{chatDelivery}',$2::jsonb) WHERE id=$1", [id, JSON.stringify({ agentId, sessionId, resetGeneration, status: 'delivered', completedAt: at() })]);
+      return attachments;
+    } catch {
+      // A delivery failure is NOT a generation failure. Keep generated bytes
+      // and the original destination for idempotent recovery, without retrying
+      // the paid provider operation or exposing private driver diagnostics.
+      await this.pool.query("UPDATE forge_jobs SET record=jsonb_set(record,'{chatDelivery}',$2::jsonb) WHERE id=$1 AND record->'chatDelivery'->>'status' IS DISTINCT FROM 'delivered'", [id, JSON.stringify({ agentId, sessionId, resetGeneration, status: 'failed', error: 'forge_delivery_failed' })]);
+      fail('forge_delivery_failed', 409);
+    }
+  }
+  async pendingChatDeliveryCount({ agentId, sessionId } = {}) {
+    if (!agentId || !sessionId) return 0;
+    const result = await this.pool.query("SELECT count(*)::int AS count FROM forge_jobs WHERE status IN ('queued','running','succeeded') AND record->'chatDelivery'->>'agentId'=$1 AND record->'chatDelivery'->>'sessionId'=$2 AND record->'chatDelivery'->>'status'='pending' AND NOT (id=ANY($3::text[]))", [agentId, sessionId, [...this.backgroundFailures.keys()]]);
+    return result.rows[0]?.count || 0;
+  }
+  async reconcileChatDeliveries() {
+    const result = await this.pool.query("SELECT id FROM forge_jobs WHERE status='succeeded' AND record ? 'chatDelivery' AND record->'chatDelivery'->>'status' IS DISTINCT FROM 'delivered' ORDER BY ordinal");
+    let delivered = 0, failed = 0;
+    for (const { id } of result.rows) {
+      try { await this.deliverChat(id); delivered++; } catch { failed++; }
+    }
+    return { delivered, failed };
+  }
+  async attachmentDestination(body) {
+    if (typeof body.agentId !== 'string' || !body.agentId || typeof body.sessionId !== 'string' || !/^[A-Za-z0-9._-]{1,120}$/.test(body.sessionId) || ['.', '..'].includes(body.sessionId) || body.sessionId.startsWith('-') || body.sessionId.endsWith('-')) fail('forge_request_invalid');
+    const destination = await this.resolveAgent(body.agentId);
+    if (!destination?.agentWorkspaceRoot || destination.agentId !== body.agentId) fail('session_not_found', 404);
+    if (!(await new PostgresSessionStore({ pool: this.pool }).getMetadata(body))) fail('session_not_found', 404);
+    return destination;
   }
   async run(job, owner, dispatch = null) {
     let stage = "configuration",
@@ -765,6 +839,10 @@ export class PostgresForgeStore {
       job.errorDetails = diagnostic(error, stage, config);
       await this.save(job);
     }
+    if (job.status === 'succeeded' && job.chatDelivery) {
+      // Background delivery survives a cancelled/disconnected model waiter.
+      try { await this.deliverChat(job.id); } catch { /* durable delivery state remains recoverable */ }
+    }
   }
   async artifact(id, artifactId) {
     const job = await this.get(id);
@@ -781,7 +859,8 @@ export class PostgresForgeStore {
     if (!resolved) fail("forge_artifact_not_found", 404);
     return { owner, job, artifact, resolved };
   }
-  async attach(id, body) {
+  async attach(id, body, { role = 'user', expectedResetGeneration } = {}) {
+    if (!['user', 'assistant'].includes(role)) fail('forge_request_invalid');
     if (
       !body ||
       Object.keys(body).some(
@@ -796,23 +875,16 @@ export class PostgresForgeStore {
       body.sessionId.endsWith("-")
     )
       fail("forge_request_invalid");
-    const destination = await this.resolveAgent(body.agentId);
-    if (
-      !destination?.agentWorkspaceRoot ||
-      destination.agentId !== body.agentId
-    )
-      fail("session_not_found", 404);
+    const destination = await this.attachmentDestination(body);
     const { job, artifact, resolved } = await this.artifact(
       id,
       body.artifactId,
     );
     if (job.status !== "succeeded") fail("forge_job_not_succeeded", 409);
     const conversations = new PostgresSessionStore({ pool: this.pool });
-    const scope = { agentId: body.agentId, sessionId: body.sessionId };
-    if (!(await conversations.getMetadata(scope))) fail("session_not_found", 404);
     // Serialize delivery by job/destination. Retries reuse both the existing turn
     // and its attachment file, not merely the underlying generated artifact.
-    const key = `forge:${job.id}:${artifact.id}`;
+    const key = role === 'assistant' ? `forge:assistant:${job.id}:${artifact.id}` : `forge:${job.id}:${artifact.id}`;
     let copiedPath;
     let entry;
     try {
@@ -820,22 +892,29 @@ export class PostgresForgeStore {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`forge-delivery:${body.agentId}:${body.sessionId}:${key}`]);
         const live = await client.query('SELECT 1 FROM forge_jobs WHERE id=$1 FOR SHARE', [id]);
         if (!live.rowCount) fail('forge_job_not_found', 404);
-        await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
+        const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
+        if (!session.rowCount || (expectedResetGeneration !== undefined && Number(session.rows[0].metadata?.resetGeneration || 0) !== expectedResetGeneration)) fail('session_not_found', 404);
         const prior = await findSessionReplay(client, body.agentId, body.sessionId, null, key);
         if (prior) return prior.entry;
         const bytes = await fs.readFile(resolved.filePath);
         const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: postgresTransactionContext(client), resolveOriginal: ref => conversations.resolveOriginal(ref), searchHistory: input => conversations.history(input) }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
         const { content, ...metadata } = stored;
         copiedPath = path.join(destination.agentWorkspaceRoot, metadata.artifactPath);
-        const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role:'user',content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
+        const value = buildSessionEntry({sessionId:body.sessionId,type:'message',role,content:'',metadata:{attachments:[metadata],idempotencyKey:key}});
         await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
         await client.query('INSERT INTO conversation_entries(agent_id,session_id,entry_id,idempotency_key,entry,created_at) VALUES($1,$2,$3,$4,$5::json,$6)',[body.agentId,body.sessionId,value.id,key,JSON.stringify(value),value.ts]);
         await client.query('UPDATE conversation_sessions SET updated_at=$3 WHERE agent_id=$1 AND session_id=$2',[body.agentId,body.sessionId,value.ts]);
         return value;
       });
     } catch (error) {
-      if (copiedPath) await fs.unlink(copiedPath).catch(() => {});
-      throw error;
+      let replay;
+      try { replay = await findSessionReplay(this.pool, body.agentId, body.sessionId, null, key); }
+      catch { throw error; } // Unknown commit state: don't delete potentially linked bytes.
+      if (replay) entry = replay.entry;
+      else {
+        if (copiedPath) await fs.unlink(copiedPath).catch(() => {});
+        throw error;
+      }
     }
     const a = entry.metadata.attachments[0];
     return { id: a.artifactPath, ...a, sessionId: body.sessionId };

@@ -411,7 +411,7 @@ function compactPromptEvidenceResult(result = {}) {
   const payloadFields = {
     mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
     forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults'],
-    forge_create_job: ['job', 'replayed'], forge_list_jobs: ['jobs'],
+    forge_create_job: ['job', 'replayed', 'attachments'], forge_list_jobs: ['jobs'],
     forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'],
     agent_send_message: ['reply'],
   };

@@ -95,14 +95,21 @@ export function createContextBuildReceipt({ sections = [], text = '', stats = {}
   };
 }
 
+// Profile and mod records are stored data, not files shown to the model.
+// Paths and original names remain in receipts for provenance, not in prompts.
+export function recordHeading(name) {
+  const label = String(name || 'Profile').replace(/\.(?:md|txt)$/i, '').replace(/[-_]+/g, ' ').trim();
+  return label ? label.toLowerCase().replace(/(^|\s)\S/g, match => match.toUpperCase()) : 'Profile';
+}
+
 function renderProfileFileBlock(file = {}) {
-  return [`## ${file.name || 'profile file'}`, `Path: ${file.path || 'unknown'}`, '', String(file.content || '').trim()].join('\n');
+  return [`## ${recordHeading(file.name)}`, '', String(file.content || '').trim()].join('\n');
 }
 
 function renderProfileFilesBudgeted(profileFiles = null, { totalBudget = 8_000, perFileBudget = 4_000 } = {}) {
   const files = profileFiles?.files || [];
   if (!files.length) return { text: '', included: [], omitted: [], usedChars: 0 };
-  const blocks = ['Editable Burrow profile files. These shape voice, preferences, product framing, and environment facts. Runtime safety/evidence gates still override when they conflict.'];
+  const blocks = ['Burrow profile records shape voice, preferences, product framing, and environment facts. Runtime safety/evidence gates still override when they conflict.'];
   const included = [];
   const omitted = [];
   let used = blocks[0].length;
@@ -117,7 +124,7 @@ function renderProfileFilesBudgeted(profileFiles = null, { totalBudget = 8_000, 
     blocks.push(body);
     used += body.length;
   }
-  return { text: blocks.join('\n\n---\n\n'), included, omitted, usedChars: used };
+  return { text: blocks.join('\n\n----\n\n'), included, omitted, usedChars: used };
 }
 
 // Mod records are supplied by the owning mod, not files in the Burrow
@@ -185,9 +192,10 @@ function modRecordPath(ownerModId, kind, name) {
 function renderModRecords(records, { ownerModId, kind, totalBudget = Infinity, perFileBudget = Infinity } = {}) {
   if (!records.length) return { text: '', included: [], omitted: [], omittedChars: 0 };
   const preamble = kind === 'profile'
-    ? 'Mod-supplied agent profile. The paths below identify records supplied by the owning mod, not editable Burrow files.'
-    : 'Current-turn mod-supplied context. The paths below identify records supplied by the owning mod, not local files.';
-  const separator = '\n\n---\n\n';
+    ? 'Mod-supplied agent profile records.'
+    : 'Current-turn mod-supplied context records.';
+  // Separate records from headings and horizontal rules inside their content.
+  const separator = '\n\n----\n\n';
   const limit = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : Infinity;
   const total = limit(totalBudget);
   const perFile = limit(perFileBudget);
@@ -198,7 +206,7 @@ function renderModRecords(records, { ownerModId, kind, totalBudget = Infinity, p
   for (const record of records) {
     const filePath = modRecordPath(ownerModId, kind, record.name);
     const content = record.content.trim();
-    const header = `## ${record.name}\nPath: ${filePath}${content ? '\n\n' : ''}`;
+    const header = `## ${recordHeading(record.name)}${content ? '\n\n' : ''}`;
     const original = `${header}${content}`;
     const remaining = Math.max(0, Math.min(perFile, total - used - separator.length));
     let body = '';
@@ -207,8 +215,8 @@ function renderModRecords(records, { ownerModId, kind, totalBudget = Infinity, p
       body = original;
       includedContentChars = content.length;
     } else if (header.length < remaining) {
-      // Never emit a partial path/provenance label. If even the truncation
-      // marker will not fit, omit the record and receipt it as such instead.
+      // Never emit a partial heading. If even the truncation marker
+      // will not fit, omit the record and receipt it as such instead.
       const available = remaining - header.length;
       const prefix = content.slice(0, Math.max(0, available - 32)).trimEnd();
       const marker = `[truncated ${content.length - prefix.length} chars]`;
@@ -235,7 +243,7 @@ function renderModRecords(records, { ownerModId, kind, totalBudget = Infinity, p
 }
 
 function renderModPromptBoundary(ownerModId) {
-  return `Burrow tools: Use only tools offered for this turn and follow their schemas. If offered, mod_agent_tool({name, arguments}) calls a tool provided by the owning mod (${ownerModId}). Tool results report actual outcomes; do not invent evidence or effects.\nThe latest current-message is the task. Conversation and earlier support snapshots are history; current mod context supersedes earlier snapshots. mod:// paths identify mod-supplied records, not local files.`;
+  return `Burrow tools: Use only tools offered for this turn and follow their schemas. If offered, mod_agent_tool({name, arguments}) calls a tool provided by the owning mod (${ownerModId}). Tool results report actual outcomes; do not invent evidence or effects.\nThe latest current-message is the task. Conversation and earlier support snapshots are history; current mod context supersedes earlier snapshots. Profile and context sections contain mod-supplied records, not local files.`;
 }
 
 function renderAttachmentManifest(attachments = [], { artifactRoot = null } = {}) {
@@ -377,7 +385,7 @@ function renderWorkingContext(context = null, maxChars = 0) {
   if (!workspace && !targets.length && !referents.length && !warmCount && !readEvidence.length && !interruptedRun && !activeProject) return '';
   const lines = [
     'Working Context. Preserves conversational continuity only. This reference ledger never selects the execution root, cwd, safety policy, continuity-scope authority, identity, role, persona, or task.',
-    'Profile files and the latest user turn outrank Working Context. Absence of handoff, rolling continuity, or memory search results is never evidence that profile identity, role, persona, or current-task context is absent.',
+    'Profile records and the latest user turn outrank Working Context. Absence of handoff, rolling continuity, or memory search results is never evidence that profile identity, role, persona, or current-task context is absent.',
   ];
   if (activeProject) {
     lines.push('', 'Conversation active project. Explicitly selected by the operator through the project context control; refreshed from TaskBoard for this turn. These references orient work but do not authorize changes or prove that a path still exists.', `Project: ${activeProject.name || 'unknown'} (${activeProject.id || 'unknown'})`);

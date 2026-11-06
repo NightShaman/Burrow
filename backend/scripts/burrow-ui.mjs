@@ -3013,7 +3013,7 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
     }
   }
   runs.sort((a, b) => a.agentId.localeCompare(b.agentId) || a.depth - b.depth);
-  return { runs, subagents: childRecords };
+  return { runs, subagents: childRecords, pendingForgeDeliveries: await postgresApplication.stores.forge.pendingChatDeliveryCount({ agentId, sessionId }) };
 }
 
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
@@ -3534,6 +3534,8 @@ server.listen(port, host, () => {
       disabled: loadedMods.filter(mod => mod.status === 'disabled').length, failed: loadedMods.filter(mod => mod.status === 'failed').length },
   });
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
+  const forgeDelivery = await postgresApplication.stores.forge.reconcileChatDeliveries();
+  if (forgeDelivery.failed) await serverLogger.event('forge_delivery_recovery_failed', forgeDelivery, { level: 'warn', component: 'forge' });
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
   if (shuttingDown) return;
   if (backgroundSchedulersEnabled()) {

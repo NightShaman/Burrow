@@ -11315,6 +11315,11 @@
               "$ref": "#/components/schemas/SubagentTreeEntry"
             },
             "description": "Scoped descendant tree including ended ancestors needed by visible/live descendants. Includes metadata-only live children when durable records are absent."
+          },
+          "pendingForgeDeliveries": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Pending Forge deliveries for the selected agent and session, including generation after chat cancellation. Not an active model run."
           }
         },
         "additionalProperties": true
