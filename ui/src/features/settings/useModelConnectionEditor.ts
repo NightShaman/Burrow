@@ -64,6 +64,14 @@ export function useModelConnectionEditor({
   const [apiKey, setApiKey] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [oauthConnection, setOauthConnection] = useState(false);
+  const [autoUseExpiringResets, setAutoUseExpiringResets] = useState(false);
+  const canAutoUseExpiringResets = Boolean(
+    editingId &&
+      !loadBalancing &&
+      !poolConnection &&
+      oauthConnection &&
+      apiType === 'openai-responses',
+  );
   const [oauthIdToken, setOauthIdToken] = useState('');
   const [oauthAccessToken, setOauthAccessToken] = useState('');
   const [oauthRefreshToken, setOauthRefreshToken] = useState('');
@@ -96,6 +104,7 @@ export function useModelConnectionEditor({
     oauthAccessToken,
     oauthRefreshToken,
     availableModels,
+    autoUseExpiringResets,
   ]);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
@@ -114,6 +123,7 @@ export function useModelConnectionEditor({
       '',
       '',
       [],
+      false,
     ]),
   );
 
@@ -131,6 +141,7 @@ export function useModelConnectionEditor({
     setApiKey('');
     setApiKeyConfigured(false);
     setOauthConnection(false);
+    setAutoUseExpiringResets(false);
     setOauthIdToken('');
     setOauthAccessToken('');
     setOauthRefreshToken('');
@@ -153,6 +164,7 @@ export function useModelConnectionEditor({
         '',
         '',
         [],
+        false,
       ]),
     );
     resetClaudeLogin();
@@ -245,6 +257,7 @@ export function useModelConnectionEditor({
           ...(editingId ? { id: editingId } : {}),
           provider: provider.trim(),
           apiType,
+          ...(canAutoUseExpiringResets ? { autoUseExpiringResets } : {}),
           ...(poolConnection ? { pool } : { baseUrl: url.trim() }),
           ...(!poolConnection && apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
           ...(!poolConnection &&
@@ -340,6 +353,7 @@ export function useModelConnectionEditor({
     setApiKey('');
     setApiKeyConfigured(Boolean(connection.apiKeyConfigured || connection.authConfigured));
     setOauthConnection(Boolean(connection.authConfigured));
+    setAutoUseExpiringResets(connection.autoUseExpiringResets === true);
     const models = selectedRuntimeModels(connection.models).map((model) => ({
       ...model,
       selected: true,
@@ -360,6 +374,7 @@ export function useModelConnectionEditor({
         '',
         '',
         models,
+        connection.autoUseExpiringResets === true,
       ]),
     );
   };
@@ -522,6 +537,7 @@ export function useModelConnectionEditor({
     setOauthRefreshToken('');
     setApiKeyConfigured(item.apiKeyConfigured === true);
     setOauthConnection(isOpenAiOAuthConnection(item));
+    setAutoUseExpiringResets(item.autoUseExpiringResets === true);
     const models =
       item.connectionModels ??
       item.models.map((id) => {
@@ -562,6 +578,7 @@ export function useModelConnectionEditor({
         '',
         '',
         models,
+        item.autoUseExpiringResets === true,
       ]),
     );
     setRequestError('');
@@ -602,7 +619,9 @@ export function useModelConnectionEditor({
     busy: requestState !== 'idle',
     save: () => saveProvider(),
     discard: () => {
-      const [id, name, type, enabled, members, baseUrl, , , , , models] = JSON.parse(baseline) as [
+      const [id, name, type, enabled, members, baseUrl, , , , , models, autoResets] = JSON.parse(
+        baseline,
+      ) as [
         string | null,
         string,
         string,
@@ -614,6 +633,7 @@ export function useModelConnectionEditor({
         string,
         string,
         RuntimeModel[],
+        boolean,
       ];
       editorGeneration.current += 1;
       setEditingId(id);
@@ -623,6 +643,7 @@ export function useModelConnectionEditor({
       setPoolEnabled(enabled);
       setMemberConnectionIds(members);
       setUrl(baseUrl);
+      setAutoUseExpiringResets(autoResets);
       setAvailableModels(models);
       setApiKey('');
       setOauthIdToken('');
@@ -698,6 +719,9 @@ export function useModelConnectionEditor({
     setApiKey: (value: string) => editSecret(0, setApiKey, value),
     apiKeyConfigured,
     oauthConnection,
+    canAutoUseExpiringResets,
+    autoUseExpiringResets,
+    setAutoUseExpiringResets,
     oauthIdToken,
     setOauthIdToken: (value: string) => editSecret(1, setOauthIdToken, value),
     oauthAccessToken,

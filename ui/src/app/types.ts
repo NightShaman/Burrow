@@ -129,6 +129,7 @@ export type PanelId =
   | `owner-agents:${string}`;
 export type PanelSlot = 'top' | 'bottom';
 export type SavedProvider = {
+  autoUseExpiringResets?: boolean;
   pool?: import('./api').ProviderPool;
   id: string;
   provider: string;

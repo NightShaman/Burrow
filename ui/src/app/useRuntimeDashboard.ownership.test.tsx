@@ -117,3 +117,33 @@ it('does not poll an external account inventory on mount or after the old refres
     vi.useRealTimers();
   }
 });
+
+it.each([undefined, false, true])(
+  'hydrates auto-use reset policy %s from the connection inventory',
+  async (policy) => {
+    vi.mocked(api).mockImplementation(async (path) =>
+      path === '/api/settings/model-connections'
+        ? {
+            connections: [
+              {
+                id: 'oauth-reset',
+                provider: 'Personal ChatGPT',
+                apiType: 'openai-responses',
+                baseUrl: 'https://chatgpt.com/backend-api',
+                models: [{ id: 'm', selected: true }],
+                auth: { type: 'oauth', provider: 'openai' },
+                ...(policy === undefined ? {} : { autoUseExpiringResets: policy }),
+              },
+            ],
+          }
+        : { operator: { name: 'Operator', avatar: 'OP' } },
+    );
+    const runtimeProviders = { current: [] as any[] };
+    const options = { runtimeProviders, setAgents: vi.fn(), reportError: vi.fn() };
+    const hook = renderHook(() => useRuntimeDashboard(options));
+    await waitFor(() => expect(hook.result.current.savedProviders[0]?.id).toBe('oauth-reset'));
+    expect(hook.result.current.savedProviders[0].autoUseExpiringResets).toBe(policy === true);
+    expect(runtimeProviders.current[0].autoUseExpiringResets).toBe(policy === true);
+    hook.unmount();
+  },
+);

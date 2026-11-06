@@ -11,6 +11,7 @@ export type ClaudeCodeLogin = {
 };
 
 export type OpenAiOAuthConnection = {
+  autoUseExpiringResets?: boolean;
   id: string;
   provider?: string;
   apiType?: string;

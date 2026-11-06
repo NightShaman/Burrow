@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../../app/api';
 import { conversationCacheKey, useChatSession } from './useChatSession';
 
@@ -7,6 +7,10 @@ vi.mock('../../app/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../app/api')>()),
   api: vi.fn(),
 }));
+
+// Vitest globals are disabled, so RTL cannot auto-register its afterEach hook.
+// Unmount every hook before jsdom teardown to stop the background pollers.
+afterEach(cleanup);
 
 const apiMock = vi.mocked(api);
 const agentId = 'luna';

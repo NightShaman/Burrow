@@ -213,6 +213,7 @@ export type ProviderPool = {
 };
 
 export type ModelConnection = {
+  autoUseExpiringResets?: boolean;
   id: string;
   provider: string;
   apiType: string;

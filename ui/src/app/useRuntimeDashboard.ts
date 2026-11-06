@@ -31,6 +31,7 @@ const asSavedProvider = (connection: ModelConnection): SavedProvider => ({
   apiKey: '',
   apiKeyConfigured: connection.apiKeyConfigured,
   auth: connection.auth,
+  autoUseExpiringResets: connection.autoUseExpiringResets === true,
   oauthConfigured:
     connection.auth?.type === 'oauth' ||
     connection.auth?.source === 'oauth' ||

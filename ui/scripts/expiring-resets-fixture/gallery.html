@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expiring resets — UI acceptance</title>
+  <style>
+    body {
+      margin: 24px;
+      color: #eee;
+      background: #17171b;
+      font: 16px system-ui;
+    }
+    main {
+      max-width: 1500px;
+      margin: auto;
+    }
+    section {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    figure {
+      margin: 0;
+    }
+    img {
+      display: block;
+      width: 100%;
+      border: 1px solid #555;
+    }
+    figcaption {
+      padding: 8px 0;
+    }
+    a {
+      color: #ed9ff8;
+    }
+    @media (max-width: 700px) {
+      section {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <main>
+    <h1>Automatically use expiring resets</h1>
+    <p>Isolated UI fixture. Mocked settings only; no reset redemption or live settings changes.</p>
+    <p>
+      <a href="evidence/browser.json">Browser checks</a> ·
+      <a href="evidence/acceptance.md">Acceptance record</a> ·
+      <a href="bundle/">Interactive fixture</a>
+    </p>
+    <h2>Desktop — before / after</h2>
+    <section>
+      <figure>
+        <img src="evidence/bundle-before-1366-off.png" alt="Desktop before the toggle" />
+        <figcaption>Before · 1366 × 900</figcaption>
+      </figure>
+      <figure>
+        <img
+          src="evidence/bundle-1366-off.png"
+          alt="Desktop with the default-off expiring resets switch"
+        />
+        <figcaption>After · 1366 × 900</figcaption>
+      </figure>
+    </section>
+    <h2>Medium — before / after</h2>
+    <section>
+      <figure>
+        <img src="evidence/bundle-before-1000-off.png" alt="Medium viewport before" />
+        <figcaption>Before · 1000 × 800</figcaption>
+      </figure>
+      <figure>
+        <img src="evidence/bundle-1000-off.png" alt="Medium viewport after" />
+        <figcaption>After · 1000 × 800</figcaption>
+      </figure>
+    </section>
+    <h2>Narrow — before / after</h2>
+    <section>
+      <figure>
+        <img src="evidence/bundle-before-480-off.png" alt="Narrow viewport before" />
+        <figcaption>Before · 480 × 900</figcaption>
+      </figure>
+      <figure>
+        <img src="evidence/bundle-480-off.png" alt="Narrow viewport after" />
+        <figcaption>After · 480 × 900</figcaption>
+      </figure>
+    </section>
+    <h2>Interaction states</h2>
+    <section>
+      <figure>
+        <img src="evidence/enabled-focus-1366.png" alt="Enabled switch with keyboard focus" />
+        <figcaption>Enabled + keyboard focus</figcaption>
+      </figure>
+      <figure>
+        <img src="evidence/save-error-1366.png" alt="Failed mocked save retaining the draft" />
+        <figcaption>Save failure retains draft</figcaption>
+      </figure>
+      <figure>
+        <img src="evidence/unsaved-1366.png" alt="Shared unsaved changes guard" />
+        <figcaption>Unsaved changes</figcaption>
+      </figure>
+      <figure>
+        <img src="evidence/pool-no-toggle-1366.png" alt="Load balancing without the toggle" />
+        <figcaption>Load balancing exclusion</figcaption>
+      </figure>
+    </section>
+  </main>
+</html>

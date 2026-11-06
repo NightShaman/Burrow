@@ -1,0 +1,185 @@
+{
+  "status": "passed",
+  "checks": [
+    "same-shell before/after 1366/1000/480",
+    "default off",
+    "enabled focus",
+    "mocked save failure retains draft",
+    "save/reselect true and false",
+    "dirty guard/discard",
+    "per-account isolation",
+    "no Anthropic/API/LB control",
+    "no redemption requests",
+    "no horizontal page overflow"
+  ],
+  "overflow": [
+    {
+      "width": 1366,
+      "scroll": 1366,
+      "editor": {
+        "x": 672,
+        "y": 16,
+        "width": 664,
+        "height": 860,
+        "top": 16,
+        "right": 1336,
+        "bottom": 876,
+        "left": 672
+      },
+      "toggle": {
+        "x": 672,
+        "y": 54.1875,
+        "width": 34,
+        "height": 20,
+        "top": 54.1875,
+        "right": 706,
+        "bottom": 74.1875,
+        "left": 672
+      }
+    },
+    {
+      "width": 1000,
+      "scroll": 1000,
+      "editor": {
+        "x": 392,
+        "y": 192,
+        "width": 582,
+        "height": 588,
+        "top": 192,
+        "right": 974,
+        "bottom": 780,
+        "left": 392
+      },
+      "toggle": {
+        "x": 392,
+        "y": 230.1875,
+        "width": 34,
+        "height": 20,
+        "top": 230.1875,
+        "right": 426,
+        "bottom": 250.1875,
+        "left": 392
+      }
+    },
+    {
+      "width": 480,
+      "scroll": 480,
+      "editor": {
+        "x": 8,
+        "y": 487.03125,
+        "width": 454,
+        "height": 388.96875,
+        "top": 487.03125,
+        "right": 462,
+        "bottom": 876,
+        "left": 8
+      },
+      "toggle": {
+        "x": 8,
+        "y": 525.21875,
+        "width": 34,
+        "height": 20,
+        "top": 525.21875,
+        "right": 42,
+        "bottom": 545.21875,
+        "left": 8
+      }
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": true,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true,
+            "manual": false,
+            "acceptedInput": [
+              "text"
+            ],
+            "acceptedOutput": [
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": true,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true,
+            "manual": false,
+            "acceptedInput": [
+              "text"
+            ],
+            "acceptedOutput": [
+              "text"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/settings/model-connections",
+      "body": {
+        "id": "first",
+        "provider": "Personal ChatGPT",
+        "apiType": "openai-responses",
+        "autoUseExpiringResets": false,
+        "baseUrl": "https://example.invalid",
+        "models": [
+          {
+            "id": "shared-model",
+            "selected": true
+          },
+          {
+            "id": "second-model",
+            "selected": true
+          }
+        ]
+      }
+    }
+  ],
+  "exceptions": [],
+  "network": [
+    "http://127.0.0.1:40457/bundle/",
+    "http://127.0.0.1:40457/bundle/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:40457/bundle/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/favicon.ico",
+    "http://127.0.0.1:40457/bundle-before/",
+    "http://127.0.0.1:40457/bundle-before/assets/index-M_1WuV79.js",
+    "http://127.0.0.1:40457/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle/",
+    "http://127.0.0.1:40457/bundle/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:40457/bundle/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle-before/",
+    "http://127.0.0.1:40457/bundle-before/assets/index-M_1WuV79.js",
+    "http://127.0.0.1:40457/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle/",
+    "http://127.0.0.1:40457/bundle/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:40457/bundle/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle-before/",
+    "http://127.0.0.1:40457/bundle-before/assets/index-M_1WuV79.js",
+    "http://127.0.0.1:40457/bundle-before/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle/",
+    "http://127.0.0.1:40457/bundle/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:40457/bundle/assets/index-Bi3S4ZJW.css",
+    "http://127.0.0.1:40457/bundle/",
+    "http://127.0.0.1:40457/bundle/assets/index-dIr_1gM1.js",
+    "http://127.0.0.1:40457/bundle/assets/index-Bi3S4ZJW.css"
+  ]
+}
