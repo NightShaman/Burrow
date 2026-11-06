@@ -1428,3 +1428,57 @@ it('allows a context report with an empty fallback but never replaces operator m
   expect(screen.getAllByText('Report without fallback')).toHaveLength(1);
   expect(screen.getByText('Operator message')).toBeTruthy();
 });
+
+it('offers jump to latest only away from the bottom and resumes following after a jump', () => {
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'King', avatar: 'K' },
+    isNewSession: false,
+    turns: [message('History')],
+    isLoading: false,
+    error: '',
+    isSending: true,
+    activeRunId: 'run',
+    liveProgress: [],
+    liveAnswer: '',
+  };
+  const view = render(<ChatTranscript {...props} />);
+  const scroller = view.container.querySelector('.chat-messages') as HTMLDivElement;
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: 1200 },
+    clientHeight: { configurable: true, value: 400 },
+  });
+  scroller.scrollTop = 800;
+  fireEvent.scroll(scroller);
+  expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
+  scroller.scrollTop = 200;
+  fireEvent.scroll(scroller);
+  const jump = screen.getByRole('button', { name: 'Jump to latest message' });
+  expect(jump.getAttribute('type')).toBe('button');
+  expect(scroller.contains(jump)).toBe(false);
+  view.rerender(<ChatTranscript {...props} liveAnswer="New streamed content" />);
+  expect(scroller.scrollTop).toBe(200);
+  fireEvent.click(jump);
+  expect(scroller.scrollTop).toBe(1200);
+  expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
+  Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1400 });
+  view.rerender(<ChatTranscript {...props} liveAnswer="More streamed content" />);
+  expect(scroller.scrollTop).toBe(1400);
+});
+
+it('hides jump to latest when manually returning near the bottom and never shows it for a short chat', () => {
+  const view = show([message('A short chat')], parent);
+  const scroller = view.container.querySelector('.chat-messages') as HTMLDivElement;
+  expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: 1200 },
+    clientHeight: { configurable: true, value: 400 },
+  });
+  scroller.scrollTop = 0;
+  fireEvent.scroll(scroller);
+  expect(screen.getByRole('button', { name: 'Jump to latest message' })).toBeTruthy();
+  scroller.scrollTop = 780;
+  fireEvent.scroll(scroller);
+  expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
+});
