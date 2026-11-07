@@ -1,3 +1,4 @@
+import { POSTGRES_AGENT_RUN_FEED_SQL } from './postgres-agent-run-feed.mjs';
 import { POSTGRES_SESSION_RECALL_NONBLOCKING_SQL } from './postgres-session-recall-nonblocking.mjs';
 import { POSTGRES_SESSION_RETRIEVAL_SQL } from './postgres-session-retrieval.mjs';
 import { POSTGRES_SESSION_RECALL_REPAIRS_SQL } from './postgres-session-recall-repairs.mjs';
@@ -278,4 +279,5 @@ INSERT INTO openai_reset_credit_attempts(account_key,credit_id,request_id,claime
  SELECT account_key,credit_id,request_id,claimed_at,NULL,'unknown' FROM openai_reset_credit_claims;
 CREATE INDEX openai_reset_credit_claims_unknown_idx ON openai_reset_credit_claims(account_key) WHERE outcome='unknown';
 ` },
+  { version: 99, name: 'agent-run-completion-feed', sql: POSTGRES_AGENT_RUN_FEED_SQL },
 ]);

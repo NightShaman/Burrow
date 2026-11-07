@@ -1,3 +1,4 @@
+import { PostgresAgentRunFeed } from './postgres-agent-run-feed.mjs';
 import { createSessionRecallBackfillWorker } from './postgres-session-recall-backfill.mjs';
 import { PostgresConversationEmbeddings } from './postgres-conversation-embeddings.mjs';
 import { PostgresAgentReferenceImageStore } from './postgres-agent-reference-image-store.mjs';
@@ -73,6 +74,7 @@ export async function createPostgresApplication({
     const referenceImages = new PostgresAgentReferenceImageStore({ pool: sharedPool, runtimeRoot, logger });
     const stores = {
     referenceImages,
+    agentRuns: new PostgresAgentRunFeed(common),
     steering: new PostgresLiveRunSteering({ ...common, ...(clock ? { clock } : {}) }),
     brains: new PostgresBrainStore(common),
     agents: new PostgresAgentRegistryStore({ ...common, bootstrapSampleIdentities, referenceImages }),

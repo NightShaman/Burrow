@@ -75,7 +75,7 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, modManagement = null, coreApi = null, modAuthority = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, activeAgentRuns = null, pendingHttpRuns = null, modManagement = null, coreApi = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
@@ -381,6 +381,26 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       await projectOwned(await injected.agents.get(id));
       if (!injected.referenceImages) throw new Error('reference_images_unavailable');
       return injected.referenceImages.remove(id);
+    },
+    async listAgentRunCompletions(input) {
+      if (!injected.agentRuns) throw new Error('agent_run_feed_unavailable');
+      const value = exactKeys(plain(input), ['cursor','limit']);
+      return injected.agentRuns.list(value);
+    },
+    async readAgentRunActivity(input) {
+      const value = exactKeys(plain(input), ['agentIds']);
+      if (value.agentIds !== undefined && (!Array.isArray(value.agentIds) || value.agentIds.length > 100 || value.agentIds.some(agentId => !agentId || typeof agentId !== 'string' || agentId.length > 96))) invalid();
+      const allowed = value.agentIds === undefined ? null : new Set(value.agentIds);
+      const live = [...(activeAgentRuns?.values?.() || [])]
+        .filter(run => !allowed || allowed.has(run.agentId))
+        .map(run => ({ agentId: run.agentId, sessionId: run.sessionId, runId: run.runId,
+          startedAt: run.startedAt, status: run.controller?.signal?.aborted || run.cancelled ? 'cancelling' : 'running', source: run.source || 'operator-chat' }));
+      const liveIds = new Set(live.map(run => JSON.stringify([run.agentId, run.runId])));
+      const pending = typeof pendingHttpRuns === 'function' ? pendingHttpRuns() : [];
+      return { runs: [...live, ...pending.filter(run => (!allowed || allowed.has(run.agentId))
+        && !liveIds.has(JSON.stringify([run.agentId, run.runId])))
+        .map(({ agentId, sessionId, runId, startedAt, source }) => ({ agentId, sessionId, runId, startedAt,
+          status: 'response_pending', source }))] };
     },
     async listAgents() {
       return await withStore('agents', async (store) => (await store.list()).filter(agent => !agent.modAgent || agent.modAgent.visibility.agents).map(({ id, name, enabled }) => ({ id, name, enabled })));

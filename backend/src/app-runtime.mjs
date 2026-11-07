@@ -1,3 +1,4 @@
+import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { operatorPreferenceTurn } from './preference-learning.mjs';
 import { resolveTurnMinionDepth } from './minion-depth.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
@@ -86,22 +87,55 @@ export function finishRuntimeSessionExecutionSupersession(token) {
 }
 
 export async function runAskChat(options = {}) {
-  // Internal regression seam: stale-commit tests exercise the cross-process
-  // continuity guard directly. Production callers always serialize here.
-  if (options.testHooks?.bypassSessionExecutionQueue) return runAskChatUnserialized(options);
-  const latencyTiming = { ...(options.latencyTiming || {}), runtimeQueuedMs: performance.now() };
-  return serializeSessionExecution(options, async () => {
-    try {
-      return await runAskChatUnserialized({ ...options, latencyTiming: { ...latencyTiming, runtimeAdmittedMs: performance.now() } });
-    } catch (error) {
-      // Preserve interrupted-run evidence after execution unwinds but before a
-      // successor can claim continuity. Retirement never detaches live work.
-      if ((options.args?.abort_signal || options.args?.abortSignal)?.aborted) {
-        await options.onCancellationDeadline?.();
-      }
-      throw error;
+  const feed = options.stores?.agentRuns;
+  let startedAt;
+  const completionState = {};
+  const source = options.incomingAgentMessage ? 'a2a' : options.externalTurnMetadata ? 'mod/external'
+    : options.completionEvent ? 'workflow-event' : options.chatInput ? 'queue_next'
+      : options.runSource || options.turnSource || options.command || 'chat';
+  const origin = source === 'a2a' ? 'agent' : source === 'mod/external' ? 'mod'
+    : ['operator-chat','queue_next'].includes(source) ? 'operator' : 'background';
+  let result, failure, admitted = false;
+  try {
+    // Internal regression seam: stale-commit tests exercise the cross-process
+    // continuity guard directly. Production callers always serialize here.
+    if (options.testHooks?.bypassSessionExecutionQueue) { admitted = true; startedAt = new Date().toISOString(); result = await runAskChatUnserialized({ ...options, completionState, completionMetadata: { source, origin, startedAt } }); }
+    else {
+      const latencyTiming = { ...(options.latencyTiming || {}), runtimeQueuedMs: performance.now() };
+      result = await serializeSessionExecution(options, async () => {
+        admitted = true;
+        startedAt = new Date().toISOString();
+        try {
+          return await runAskChatUnserialized({ ...options, completionState, completionMetadata: { source, origin, startedAt }, latencyTiming: { ...latencyTiming, runtimeAdmittedMs: performance.now() } });
+        } catch (error) {
+          // Preserve interrupted-run evidence after execution unwinds but before a
+          // successor can claim continuity. Retirement never detaches live work.
+          if ((options.args?.abort_signal || options.args?.abortSignal)?.aborted) await options.onCancellationDeadline?.();
+          throw error;
+        }
+      });
     }
-  });
+    return result;
+  } catch (error) { failure = error; throw error; }
+  finally {
+    // Only a Core-supplied store can publish; no serialized input controls
+    // source/origin or peer metadata. Never include objectives or transcript.
+    if (admitted && feed && options.agentRuntime?.agentId && options.runId && options.sessionId) {
+      const completedAt = new Date().toISOString();
+      const cancelled = Boolean((options.args?.abort_signal || options.args?.abortSignal)?.aborted);
+      const outcome = failure ? cancelled ? 'cancelled' : 'failed' : classifyRuntimeOutcome(result, { cancelled }).status;
+      try {
+        const receipt = completionState.event
+          ? { event: completionState.event, added: true }
+          : await feed.record({ agentId: options.agentRuntime.agentId, sessionId: options.sessionId,
+              runId: options.runId, source, origin, peerAgentId: options.incomingAgentMessage?.senderAgentId || null,
+              startedAt, completedAt, durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)), outcome }, { notify: false });
+        // Notification is intentionally after the shared runtime has unwound;
+        // transport and activity gates in the server additionally delay delivery.
+        if (receipt?.added) feed.publish?.(receipt.event);
+      } catch (error) { console.warn('agent_run_feed_persistence_failed', error); }
+    }
+  }
 }
 
 async function subagentDebugSnapshot({ dataRoot, legacyDataRoot = null, sessionId, compatibilityObserver = null, limit = 20 } = {}) {
@@ -174,6 +208,8 @@ async function runAskChatUnserialized({
   // Signals that this run's durable steering identity exists. Active-run
   // projections must not advertise steering before this boundary completes.
   onSteeringReady = null,
+  completionState = null,
+  completionMetadata = null,
   // Trusted server-side lifecycle hook for nested A2A recipient runs. This lets
   // transports publish real recipient work without coupling core to a UI registry.
   registerNestedAgentRun = null,
@@ -350,7 +386,21 @@ async function runAskChatUnserialized({
     : onTraceRecord;
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger, onTerminal: (result) => { committedTerminalResult = result; rememberTelemetryTerminal(result); }, testHooks });
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger,
+    onCompletionTransaction: completionState && stores.agentRuns?.recordInTransaction && completionMetadata
+      ? async (client, value, completedAt) => {
+          const outcome = classifyRuntimeOutcome(value).status;
+          const receipt = await stores.agentRuns.recordInTransaction(client, {
+            agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,
+            source: completionMetadata.source, origin: completionMetadata.origin,
+            peerAgentId: incomingAgentMessage?.senderAgentId || null,
+            startedAt: completionMetadata.startedAt, completedAt,
+            durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(completionMetadata.startedAt)), outcome,
+          });
+          return receipt.added ? receipt.event : null;
+        } : null,
+    onCompletionCommitted: event => { completionState.event = event; },
+    onTerminal: (result) => { committedTerminalResult = result; rememberTelemetryTerminal(result); }, testHooks });
   const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentTraceContext = null, parentSignal = null }) => {
     // Ingress is already durable/idempotent before this callback. Each distinct
     // exchange needs a distinct run, while replays retain the same identity.

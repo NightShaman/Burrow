@@ -119,6 +119,7 @@ import { logAuthFailure, startAuthLoginTelemetry, observeAuthEnvironmentOverride
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { contextReport } from '../src/context-report.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
+import { createAgentRunCompletionDispatch } from '../src/agent-run-completion-dispatch.mjs';
 import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
 import { toolActivityPresentation } from '../src/tool-activity-labels.mjs';
 import { executionBoundaryStatus, readExecutionBoundaries, saveExecutionBoundaries } from '../src/execution-boundaries.mjs';
@@ -197,7 +198,14 @@ const configuredRunCancellationGraceMs = Number(process.env.BURROW_RUN_CANCELLAT
 const RUN_CANCELLATION_GRACE_MS = Number.isFinite(configuredRunCancellationGraceMs) ? Math.max(1_000, configuredRunCancellationGraceMs) : 5_000;
 const authorityConfig = httpAuthorityConfig({ host, port });
 browserOriginConfig(); // Validate optional environment override at startup.
-const activeChatRuns = new Map();
+let completionDispatch = null;
+const activeChatRuns = new class extends Map {
+  delete(key) {
+    const removed = super.delete(key);
+    if (removed) queueMicrotask(() => completionDispatch?.activityChanged());
+    return removed;
+  }
+}();
 const executionProviders = createExecutionProviderRegistry();
 const sessionContinuityHeads = new Map();
 // The continuity head rejects stale writes, but browser requests sharing a
@@ -2722,6 +2730,7 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
   correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
   if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
   const controller = new AbortController();
+  completionDispatch?.trackHttp(agentRuntime.agentId, runId, res, { sessionId, source: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat', startedAt: new Date().toISOString() });
   const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), objective: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
   const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
   sessionContinuityHeads.set(headKey, record);
@@ -3096,7 +3105,7 @@ const coreApi = createCoreApiDispatcher({
     sessionId: actor?.caller.sessionId, runId: actor?.caller.runId,
   }, { component: 'api' }),
 });
-const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, activeAgentRuns: activeChatRuns, pendingHttpRuns: () => completionDispatch?.pendingHttpRuns() || [], resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -3186,6 +3195,8 @@ await migrateLegacyExecutionProviderApproval({
   agents: await agentsStore().list({ includeDisabled: true }),
 });
 loadedMods = await loadMods(modLoadOptions);
+completionDispatch = createAgentRunCompletionDispatch({ feed: postgresApplication.stores.agentRuns,
+  activeRuns: activeChatRuns, getHosts: () => loadedMods.filter(mod => mod.status === 'loaded').map(mod => mod.host) });
 await managedSkillSynchronizer.tick();
 await applyOtelConfigurationToNodeGoblins();
 modsStarting = false;

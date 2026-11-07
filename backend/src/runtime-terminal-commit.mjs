@@ -2,7 +2,7 @@ import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { compactAskChatResult } from './runtime-result-assembly.mjs';
 import { persistSessionWorkingContext } from './working-context.mjs';
 
-export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, logger = null, onTerminal = null, testHooks } = {}) {
+export function createTerminalCommitter({ stores = null, agentId, continuityAuthority = null, rootDir, sessionRoot, sessionId, runId, generation, command, json, initialWorkingContext, objective = null, traceRef = null, logger = null, onTerminal = null, onCompletionTransaction = null, onCompletionCommitted = null, testHooks } = {}) {
   if (!stores?.conversations) throw new Error('runtime_stores_required');
   if (!continuityAuthority?.commit || !continuityAuthority?.interrupt) throw new Error('runtime_continuity_authority_required');
   return async function commitTerminalResult({ workingContext = initialWorkingContext, finalize, afterCommitBeforeTraceTerminal = null, branch = 'terminal' } = {}) {
@@ -12,6 +12,7 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
       sessionId,
       runId,
       generation,
+      onCompleted: onCompletionTransaction,
       commit: async () => {
         const finalized = await finalize();
         const result = { ...finalized, ok: classifyRuntimeOutcome(finalized).ok };
@@ -19,6 +20,7 @@ export function createTerminalCommitter({ stores = null, agentId, continuityAuth
         return result;
       },
     });
+    if (completion.completionEvent) onCompletionCommitted?.(completion.completionEvent);
     if (completion.stale) {
       const superseded = {
         ...(completion.value || {}),

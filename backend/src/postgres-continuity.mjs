@@ -135,17 +135,21 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
    let value;
    try {value=typeof args.commit==='function'?await args.commit(head):null;}
    catch(error){await this.interrupt({...args,reason:'terminal_finalization_failed'});throw error;}
-   let completed=false;
-   await updateMetadata({...scope(args.sessionId),update:metadata=>{
+   let completed=false, completionEvent=null;
+   await updateMetadata({...scope(args.sessionId),update:async (metadata,client)=>{
     if(!matches(metadata.continuityHead,args,'finalizing')){head=metadata.continuityHead;return metadata;}
-    const at=clock();head={...metadata.continuityHead,state:'completed',latestRunId:String(args.runId),completedAt:at};completed=true;
+    const at=clock();
+    // Completion receipt and continuity terminal share a single transaction.
+    // A rollback leaves neither one visible to consumers.
+    if (args.onCompleted) completionEvent = await args.onCompleted(client,value,at);
+    head={...metadata.continuityHead,state:'completed',latestRunId:String(args.runId),completedAt:at};completed=true;
     const manualRecovery=metadata.recoveryQueue?.manualInputId && metadata.recoveryQueue.claimedByRunId===String(args.runId);
     const recovered=classifyRuntimeOutcome(value || {}).ok;
     return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at,...(manualRecovery ? {
       recoveryQueue:{...metadata.recoveryQueue,status:recovered?'completed':'failed',autoResume:false,completedAt:at,result:value?.decision || (recovered?'completed':'failed')},
       ...(recovered && metadata.interruptedRun ? {interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:String(args.runId)}} : {})} : {})};
    }});
-   return {ok:completed,stale:!completed,head,value};
+   return {ok:completed,stale:!completed,head,value,completionEvent};
    }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,args.sessionId])}`));
   },
  };
