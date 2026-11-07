@@ -17,6 +17,14 @@ function fixture(t, options = {}) {
   write(join(source,'ui/dist/index.html'), 'real-ui-fixture');
   write(join(source,'backend/scripts/runtime-integrations.json'), '{"mcporter":{"version":"1"},"claude-code":{"version":"2"}}');
   write(join(source,'SOURCE_VERSIONS'),'Burrow-Build-Version test-version\n');
+  // The assembled backend carries the canonical launcher's exact bytes.
+  const launcher = resolve('backend/deploy/installer/burrow');
+  if (script.includes('backend/deploy/installer/burrow')) assert.ok(existsSync(launcher), 'assembled canonical launcher is required');
+  if (existsSync(launcher)) {
+    mkdirSync(join(source,'backend/deploy/installer'), {recursive:true});
+    copyFileSync(launcher, join(source,'backend/deploy/installer/burrow'));
+    chmodSync(join(source,'backend/deploy/installer/burrow'), 0o755);
+  }
   copyFileSync(installer,join(source,'install.sh'));
   chmodSync(join(source,'install.sh'),0o755);
   const envfile=join(target,'burrow.env');

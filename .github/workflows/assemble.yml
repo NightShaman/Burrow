@@ -119,6 +119,8 @@ jobs:
           rm -rf backend ui Dockerfile docker-entrypoint.sh compose.yml .dockerignore install.sh install-node-goblin.sh SOURCE_VERSIONS
           mkdir backend ui
           for path in bin global-skills public scripts src; do cp -a "../backend-source/$path" "backend/$path"; done
+          install -d backend/deploy/installer
+          cp -a ../backend-source/deploy/installer/burrow backend/deploy/installer/burrow
           cp -a ../backend-source/package.json ../backend-source/package-lock.json backend/
           # The running /api/openapi.json route reads this contract from its
           # backend root. Do not ship the canonical source's entire docs tree.

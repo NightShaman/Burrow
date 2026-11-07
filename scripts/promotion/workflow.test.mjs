@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 const workflow = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml', import.meta.url), 'utf8');
 test('freeze assembly and component identities from the same checkout', () => {
@@ -61,9 +61,6 @@ test('promotion changes run installer, assembly and promotion regressions on pus
 
 test('existing Node Goblin release must carry both frozen assets before promotion continues', () => {
   const start = workflow.indexOf('      - name: Publish component releases with coordinated notes');
-  const step = workflow.slice(start, workflow.indexOf('      - uses: docker/setup-buildx-action@v3', start));
-  const shell = step.slice(step.indexOf('        run: |\n') + '        run: |\n'.length)
-    .trimEnd().split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const root = mkdtempSync(join(tmpdir(), 'burrow-release-assets-'));
   try {
     const bin = join(root, 'bin');
@@ -93,12 +90,12 @@ case "$1 $2" in
 esac
 ` , { mode: 0o755 });
     for (const [assetCase, expected] of [['matching', 0], ['missing', 1], ['wrong', 1]]) {
-      const result = spawnSync('bash', ['-e', '-c', shell], {
+      const result = spawnSync('sh', [resolve('scripts/promotion/publish-release.sh'), 'GoblinKing-Burrow/Node-Goblin', '2026.11.06', 'release-notes/nodeGoblin.md', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz.sha256'], {
         cwd: root, encoding: 'utf8',
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PUBLIC_OWNER: 'GoblinKing-Burrow', VERSION: '2026.11.06', RELEASE_ASSET_CASE: assetCase },
       });
       assert.equal(result.status === 0 ? 0 : 1, expected, `${assetCase}: ${result.stderr}`);
-      if (expected) assert.match(result.stderr, /Node Goblin public release asset missing or differs/);
+      if (expected) assert.match(result.stderr, /Node-Goblin public release asset missing or differs/);
     }
     assert.ok(workflow.indexOf('      - name: Publish Burrow snapshot and coordinated release last') > start);
   } finally { rmSync(root, { recursive: true, force: true }); }

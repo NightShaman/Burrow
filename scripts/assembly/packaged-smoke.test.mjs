@@ -30,7 +30,7 @@ test('development assembly requires scoped owned SQL gate and smoke-tested dev i
  assert.match(promotion,/Build and smoke the public Burrow image/);
  assert.match(promotion,/packaged-smoke\.mjs/);
  assert.match(promotion,/ghcr\.io\/goblinking-burrow\/burrow/);
- assert.match(promotion,/gh release create/);
+ assert.match(promotion,/scripts\/promotion\/publish-release\.sh/);
  assert.match(promotion,/Burrow-Backdoor/);
 });
 
