@@ -11,7 +11,8 @@ import type {
   SessionTurn,
   ToolActivity,
 } from '../../app/api';
-import { ChatComposer, ChatMessage } from '../chat/ChatPage';
+import { ChatComposer } from '../chat/ChatComposer';
+import { ChatMessage } from '../chat/ChatTranscript';
 import { usePolling } from '../../app/usePolling';
 import { useComposerHistory } from '../chat/useComposerHistory';
 import { isWithinAttachmentBudget } from '../chat/attachmentValidation';

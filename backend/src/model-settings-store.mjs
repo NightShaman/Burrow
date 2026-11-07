@@ -1,11 +1,10 @@
 import { safeOperationalError } from './runtime-server-log.mjs';
 import { operationalEvent } from './operational-log.mjs';
 import { googleNativeApi, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
-import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+export { settingsKeyFromEnvironment } from './settings-key.mjs';
+export { encrypt, decrypt } from './model-secret-codec.mjs';
 import { openaiOAuthIdentity } from './openai-oauth-login.mjs';
 import { anthropicSupportsTemperature, isAnthropicMessagesConnection, normalizeAnthropicModelMetadata, anthropicDiscoveredReasoningEfforts, anthropicThinkingCapabilities } from './anthropic-model-capabilities.mjs';
-
-const AAD_PREFIX = 'burrow-model-secret-v1';
 
 // These are producer-owned whole codes, not a grammar for accepting provider
 // prose. The legacy code:status form is accepted only for these exact HTTP
@@ -101,14 +100,6 @@ const GITHUB_CODEX_LATEST_URL = 'https://api.github.com/repos/openai/codex/relea
 const MODELS_DEV_CATALOG_META_KEY = 'models_dev_catalog';
 export const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 export const MODELS_DEV_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-
-export function settingsKeyFromEnvironment(env = process.env) {
-  const encoded = normalize(env.BURROW_SETTINGS_KEY);
-  if (!encoded) throw new Error('settings_encryption_key_missing');
-  const key = Buffer.from(encoded, 'base64');
-  if (key.length !== 32) throw new Error('settings_encryption_key_invalid');
-  return key;
-}
 
 export function isProviderPool(connection = {}) { return ['openai-lb', 'anthropic-lb'].includes(connection.apiType); }
 
@@ -335,27 +326,6 @@ export function normalizeReasoningEffort(value) {
   const effort = normalize(value || 'off').toLowerCase();
   if (!['off', 'minimal', 'low', 'medium', 'high', 'ultra', 'xhigh', 'max'].includes(effort)) throw new Error('model_reasoning_effort_invalid');
   return effort;
-}
-
-function aad(secretId, connectionId, name) { return Buffer.from(`${AAD_PREFIX}|${secretId}|connection|${connectionId}|${name}`); }
-export function encrypt(key, secretId, connectionId, name, value) {
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  cipher.setAAD(aad(secretId, connectionId, name));
-  const ciphertext = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
-  return { ciphertext, nonce, authTag: cipher.getAuthTag() };
-}
-export function decrypt(key, row) {
-  let lastError;
-  for (const prefix of [AAD_PREFIX, 'hatchetclaw-model-secret-v1']) {
-    try {
-      const decipher = createDecipheriv('aes-256-gcm', key, row.nonce);
-      decipher.setAAD(Buffer.from(`${prefix}|${row.id}|connection|${row.connection_id}|${row.name}`));
-      decipher.setAuthTag(row.auth_tag);
-      return Buffer.concat([decipher.update(row.ciphertext), decipher.final()]).toString('utf8');
-    } catch (error) { lastError = error; }
-  }
-  throw lastError;
 }
 
 export function assertIdentity(input = {}) {

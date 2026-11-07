@@ -1,5 +1,5 @@
 import { normalizePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { sealSettingsSecret, openSettingsSecret } from './settings-secret.mjs';
 import { normalizeCompletionEventSettingsPatch } from './completion-event-settings.mjs';
 

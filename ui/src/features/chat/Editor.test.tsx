@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { Editor } from './ChatPage';
+import { Editor } from './WorkspaceEditor';
 afterEach(cleanup);
 it.each([undefined, false])('disables Edit until loaded (%s)', (fileLoaded) => {
   render(

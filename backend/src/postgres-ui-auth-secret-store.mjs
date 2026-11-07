@@ -1,7 +1,7 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { encryptUiAuthSecret, decryptUiAuthSecret, OIDC_CLIENT_SECRET_NAME } from './ui-auth-secrets.mjs';
 
 export const POSTGRES_UI_AUTH_SECRET_SCHEMA_SQL = `

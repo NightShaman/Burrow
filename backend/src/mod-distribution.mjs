@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
 import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { isSecretReference } from './secret-references.mjs';
 
 const execFileAsync = promisify(execFile);

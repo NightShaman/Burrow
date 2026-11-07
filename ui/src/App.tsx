@@ -37,7 +37,9 @@ import {
 } from './features/workspace/WorkspaceRail';
 import { RightRail } from './features/panels/RightRail';
 import { AccountStatus } from './features/panels/AccountStatus';
-import { Chat, ChatModelSelector, Editor } from './features/chat/ChatPage';
+import { Chat } from './features/chat/ChatPage';
+import { ChatModelSelector } from './features/chat/ChatModelSelector';
+import { Editor } from './features/chat/WorkspaceEditor';
 import { useChatRun } from './features/chat/useChatRun';
 import { useChatComposers } from './features/chat/useChatComposers';
 import { ChatComposerDialogs } from './features/chat/ChatComposerDialogs';

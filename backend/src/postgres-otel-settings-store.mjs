@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { normalizePostgresPool, closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { mergeDestination, normalizeDestination } from './otel-destinations.mjs';
 
 const ROW_ID = 'operator';

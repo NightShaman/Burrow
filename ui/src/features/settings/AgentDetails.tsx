@@ -4,7 +4,7 @@ import { api } from '../../app/api';
 import { isAgentEnabled } from '../../app/agentCatalog';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
-import { optimizeAvatar } from './OperatorProfile';
+import { optimizeAvatar } from '../../app/avatar';
 import { AgentReferencePhoto } from './AgentReferencePhoto';
 import { Field, SettingSection } from './SettingsPrimitives';
 

@@ -1,7 +1,7 @@
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { closePostgresPool } from './postgres-foundation.mjs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 
 export const POSTGRES_MOD_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS mod_settings (

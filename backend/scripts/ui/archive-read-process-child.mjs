@@ -7,7 +7,7 @@ import { PostgresSessionStore } from '../../src/postgres-session-store.mjs';
 import { PostgresAgentRegistryStore } from '../../src/postgres-agent-registry.mjs';
 import { isChatMessage, summarizeSessionTurns } from '../../src/session-entry.mjs';
 import { compactChatTurn } from '../../src/compact-chat-turn.mjs';
-import { settingsKeyFromEnvironment } from '../../src/model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from '../../src/settings-key.mjs';
 import { resolveRuntimeTracePath } from '../../src/config.mjs';
 import { createArchiveAgentContext } from './archive-agent-context.mjs';
 import { createArchiveService } from './archive-service.mjs';

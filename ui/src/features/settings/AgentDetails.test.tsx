@@ -5,11 +5,11 @@ import type { Agent } from '../../app/types';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { AgentSettings } from './AgentSettings';
-import { optimizeAvatar } from './OperatorProfile';
+import { optimizeAvatar } from '../../app/avatar';
 
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
-vi.mock('./OperatorProfile', () => ({ optimizeAvatar: vi.fn() }));
+vi.mock('../../app/avatar', () => ({ optimizeAvatar: vi.fn() }));
 vi.mock('./DefaultMinionModel', () => ({ DefaultMinionModel: () => null }));
 vi.mock('./MinionDepthSettings', () => ({ MinionDepthSettings: () => null }));
 const agent = {

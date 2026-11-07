@@ -1,7 +1,7 @@
 import { createPostgresApplication } from './postgres-composition.mjs';
 import { resolvePostgresRuntimeEnv } from './postgres-startup.mjs';
 import { postgresConfig } from './postgres-foundation.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { loadRuntimeConfig } from './runtime-config-loader.mjs';
 
 // CLI readers connect to the running authority; they do not start PostgreSQL.

@@ -72,11 +72,11 @@ vi.mock('./features/chat/useChatSession', () => ({
     draft: 'Keep my draft',
   }),
 }));
-vi.mock('./features/chat/ChatPage', async (original) => {
-  const actual = await original<typeof import('./features/chat/ChatPage')>();
+vi.mock('./features/chat/ChatPage', () => ({ Chat: () => null }));
+vi.mock('./features/chat/ChatModelSelector', async (original) => {
+  const actual = await original<typeof import('./features/chat/ChatModelSelector')>();
   return {
     ...actual,
-    Chat: () => null,
     ChatModelSelector: (props: Parameters<typeof actual.ChatModelSelector>[0]) => {
       mocks.onReset = props.onNewSession;
       return <actual.ChatModelSelector {...props} />;

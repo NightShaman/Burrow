@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolveModelConfig } from './config.mjs';
 import { PostgresModelSettingsStore } from './postgres-model-settings-store.mjs';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { readFile } from 'node:fs/promises';
 import { runSpawnSubagentChild } from './subagent-worker-runner.mjs';
 import { createPostgresPool } from './postgres-foundation.mjs';

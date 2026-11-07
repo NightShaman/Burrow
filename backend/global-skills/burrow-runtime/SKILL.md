@@ -243,4 +243,3 @@ Be concise. Traces and receipts exist for diagnostics; they do not need to be na
 
 Use Burrow to discover, inspect, act, verify, and preserve continuity. Keep authority tied to the user's request, keep claims tied to evidence, and keep runtime plumbing out of the user's way.
 
-

@@ -1,7 +1,7 @@
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { DeclarativeSection } from './ModSettingsHost';
+import { DeclarativeSection } from './DeclarativeSection';
 import { validateSettingsContribution } from './SettingsContribution';
 
 describe('settings contribution list-detail items', () => {

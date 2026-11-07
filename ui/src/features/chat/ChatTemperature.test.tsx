@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { ChatModelSelector } from './ChatPage';
+import { ChatModelSelector } from './ChatModelSelector';
 import { useModelSelectionWriter } from '../../app/useModelSelectionWriter';
 import { api } from '../../app/api';
 import type { Agent, SavedProvider } from '../../app/types';

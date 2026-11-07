@@ -1,6 +1,6 @@
 import { isChatMessage } from './session-entry.mjs';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { settingsKeyFromEnvironment } from './model-settings-store.mjs';
+import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { MOD_CAPABILITY_RESULT_MAX_BYTES, modCapabilityResultBytes } from './mod-capability-envelope.mjs';
 
 // Domain-separated from encryption and archive cursors; the runtime settings key
