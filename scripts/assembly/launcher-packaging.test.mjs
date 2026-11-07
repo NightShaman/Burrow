@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, rmSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { TARGETS } from '../promotion/stage-snapshots.mjs';
 
 test('assembly copies only launcher with its bytes and executable mode into archived public backend path', t => {
-  const workflow = readFileSync(resolve('.github/workflows/assemble.yml'), 'utf8');
+  const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml', import.meta.url), 'utf8');
   const lines = workflow.split('\n').filter(x => /(?:install -d backend\/deploy\/installer|cp -a \.\.\/backend-source\/deploy\/installer\/burrow )/.test(x));
   assert.equal(lines.length, 2);
   assert.ok(TARGETS.burrow.paths.includes('backend'));
