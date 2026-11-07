@@ -12,7 +12,7 @@ import type {
   ToolActivity,
 } from '../../app/api';
 import { ChatComposer } from '../chat/ChatComposer';
-import { ChatMessage } from '../chat/ChatTranscript';
+import { ChatMessage } from '../chat/ChatMessage';
 import { usePolling } from '../../app/usePolling';
 import { useComposerHistory } from '../chat/useComposerHistory';
 import { isWithinAttachmentBudget } from '../chat/attachmentValidation';

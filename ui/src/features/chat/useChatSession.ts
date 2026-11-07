@@ -1,10 +1,10 @@
 import { useChatRecovery } from './useChatRecovery';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { clientBudgets, isWithinAttachmentBudget } from '../../app/clientBudgets';
+import { clientBudgets } from '../../app/clientBudgets';
+import { useChatComposer } from './useChatComposer';
 import {
   api,
   textFromChatValue,
-  type ChatAttachment,
   type ChatSession,
   type SessionSummary,
   type SessionTurn,
@@ -18,7 +18,6 @@ import {
   writeConversationCache,
   type ConversationCache,
 } from './chatConversationCache';
-import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 import { cachedTurnsForSession, reconcileSessionTurns } from './chatTurnReconciliation';
 import { finalizeThoughtProgress } from './chatThoughtProgress';
 import { chatTerminalMetadata } from './chatTerminal';
@@ -26,7 +25,7 @@ import { createChatSessionRepository, readSessionListCache } from './chatSession
 
 export { conversationCacheKey } from './chatConversationCache';
 
-/** Owns durable chat-session state, draft retention, and runtime reconciliation. */
+/** Owns conversation freshness, navigation, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string) {
   const sessionRepository = useMemo(() => createChatSessionRepository(), []);
   const [olderState, setOlderState] = useState<{ key: string; hasMore: boolean; loading: boolean }>(
@@ -67,12 +66,6 @@ export function useChatSession(selectedAgentId: string) {
       loading: olderRequest.current !== null,
     });
   }, []);
-  const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
-  const [attachmentState, setAttachmentState] = useState<{
-    scope: object;
-    files: ChatAttachment[];
-  } | null>(null);
-  const [composerResetGeneration, setComposerResetGeneration] = useState(0);
   const [isNewSession, setIsNewSession] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
@@ -84,11 +77,20 @@ export function useChatSession(selectedAgentId: string) {
     olderRequest.current = null;
   }
   const attachmentScope = attachmentScopeRef.current;
-  const attached = attachmentState?.scope === attachmentScope ? attachmentState.files : [];
   const isAttachmentScopeCurrent = useCallback(
     () => attachmentScopeRef.current === attachmentScope,
     [attachmentScope],
   );
+  const {
+    draft,
+    setDraft,
+    attached,
+    setAttachment,
+    clearAttachment,
+    removeAttachment,
+    composerResetGeneration,
+    noteComposerReset,
+  } = useChatComposer(selectedAgentId, sessionId, attachmentScope, isAttachmentScopeCurrent);
 
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const childSessionsRef = useRef(new Set<string>());
@@ -182,28 +184,6 @@ export function useChatSession(selectedAgentId: string) {
       [conversationCacheKey(agentId, '')]: '',
     }));
   }, []);
-  const draftKey =
-    selectedAgentId && sessionId ? conversationCacheKey(selectedAgentId, sessionId) : '';
-  const draft = draftKey ? (draftCache[draftKey]?.value ?? '') : '';
-
-  const setDraft = useCallback(
-    (value: string) => {
-      if (!draftKey) return;
-      setDraftCache((current) => {
-        if (!value) {
-          if (!current[draftKey]) return current;
-          const { [draftKey]: _, ...remaining } = current;
-          return remaining;
-        }
-        return { ...current, [draftKey]: { value, updatedAt: Date.now() } };
-      });
-    },
-    [draftKey],
-  );
-
-  useEffect(() => {
-    writeDraftCache(draftCache);
-  }, [draftCache]);
   useEffect(() => {
     selectedChatRef.current = { agentId: selectedAgentId, sessionId };
   }, [selectedAgentId, sessionId]);
@@ -642,7 +622,7 @@ export function useChatSession(selectedAgentId: string) {
     );
     await sessionRepository.resetSession(selectedAgentId, resetSessionId);
     if (!isAttachmentScopeCurrent()) return false;
-    setComposerResetGeneration((value) => value + 1);
+    noteComposerReset();
     setSessionId(resetSessionId);
     sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
     const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
@@ -654,7 +634,7 @@ export function useChatSession(selectedAgentId: string) {
     setIsNewSession(true);
     setChatError('');
     return true;
-  }, [selectedAgentId, sessionId, sessionRepository, isAttachmentScopeCurrent]);
+  }, [selectedAgentId, sessionId, sessionRepository, isAttachmentScopeCurrent, noteComposerReset]);
   const leaveNewSessionForMessage = useCallback(() => {
     if (isNewSession) skipNextConversationLoadRef.current = true;
     setIsNewSession(false);
@@ -722,37 +702,6 @@ export function useChatSession(selectedAgentId: string) {
       setToolActivityVersion((version) => version + 1);
     }
   }, []);
-  const setAttachment = useCallback(
-    (attachments: ChatAttachment[]) => {
-      if (!isAttachmentScopeCurrent()) return;
-      setAttachmentState((current) => {
-        const files = [...(current?.scope === attachmentScope ? current.files : [])];
-        for (const attachment of attachments)
-          if (
-            isWithinAttachmentBudget(
-              files.map((item) => item.size),
-              attachment.size,
-            )
-          )
-            files.push(attachment);
-        return { scope: attachmentScope, files };
-      });
-    },
-    [attachmentScope, isAttachmentScopeCurrent],
-  );
-  const clearAttachment = useCallback(() => setAttachmentState(null), []);
-  const removeAttachment = useCallback(
-    (index: number) =>
-      setAttachmentState((current) =>
-        current?.scope === attachmentScope
-          ? {
-              ...current,
-              files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index),
-            }
-          : current,
-      ),
-    [attachmentScope],
-  );
 
   return {
     loadOlder,

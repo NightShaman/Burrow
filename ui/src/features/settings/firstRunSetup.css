@@ -1,0 +1,420 @@
+/* First-run setup should feel like arrival, not an admin form. */
+.agent-modal-backdrop:has(.agent-wizard) {
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 38%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--surface-sunken) 92%, #090a0f),
+      #11131b 55%,
+      color-mix(in srgb, var(--accent) 7%, #11131b)
+    );
+  backdrop-filter: blur(10px);
+}
+.agent-modal.agent-wizard {
+  position: relative;
+  isolation: isolate;
+  width: min(900px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: 22px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--surface-raised) 96%, #17101d),
+    var(--surface-raised)
+  );
+  box-shadow:
+    0 28px 90px rgb(0 0 0 / 0.52),
+    0 0 0 1px rgb(255 255 255 / 0.04),
+    0 0 70px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.agent-wizard-atmosphere {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 190px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.22;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 14%, transparent),
+    transparent
+  );
+}
+.agent-wizard-atmosphere::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 15%, var(--surface-raised) 96%);
+  content: '';
+}
+.agent-wizard-atmosphere img {
+  position: absolute;
+  right: -30px;
+  top: -100px;
+  width: 390px;
+  filter: drop-shadow(0 0 28px var(--accent-glow-strong));
+  transform: rotate(8deg);
+}
+.agent-wizard-atmosphere span {
+  position: absolute;
+  left: 30px;
+  bottom: 42px;
+  color: var(--accent);
+  font-family: 'Avenir Next', 'Montserrat', 'Century Gothic', ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(17px, 2vw, 25px);
+  font-style: italic;
+  font-weight: 850;
+  letter-spacing: 0.01em;
+  transform: skewX(-5deg);
+}
+.agent-wizard > header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 30px 34px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.agent-wizard > header h2 {
+  margin: 7px 0 0;
+  font-size: clamp(25px, 4vw, 39px);
+  letter-spacing: -0.035em;
+  line-height: 1.03;
+}
+.agent-wizard-lede {
+  max-width: 470px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.agent-wizard .agent-wizard-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 16px;
+  padding: 28px 34px 18px;
+  overflow: auto;
+}
+.agent-wizard .agent-wizard-body > * {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.agent-wizard .field {
+  gap: 7px;
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.agent-wizard .field input,
+.agent-wizard .field select,
+.agent-wizard .field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-input) 88%, transparent);
+  color: var(--text);
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+.agent-wizard .field input,
+.agent-wizard .field select {
+  height: 46px;
+  padding: 0 13px;
+}
+.agent-wizard .field textarea {
+  min-height: 180px;
+  padding: 13px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.agent-wizard .field input:focus,
+.agent-wizard .field select:focus,
+.agent-wizard .field textarea:focus {
+  border-color: var(--accent);
+  outline: 0;
+  background: var(--surface-raised);
+  box-shadow:
+    0 0 0 3px var(--accent-subtle),
+    0 0 20px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.agent-wizard .agent-wizard-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 34px 28px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+@media (max-width: 620px) {
+  .agent-modal.agent-wizard {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    border-radius: 16px;
+  }
+  .agent-wizard > header {
+    padding: 24px 22px 16px;
+  }
+  .agent-wizard .agent-wizard-body {
+    padding: 22px;
+  }
+  .agent-wizard .agent-wizard-footer {
+    padding: 16px 22px 22px;
+  }
+  .agent-wizard-atmosphere img {
+    right: -100px;
+  }
+  .agent-wizard-atmosphere span {
+    left: 22px;
+    font-size: 17px;
+  }
+}
+
+/* First-run provider setup stays in the wizard: setup should feel like a path, not a trapdoor. */
+.wizard-provider-empty {
+  gap: 12px;
+  padding: 24px;
+  text-align: left;
+  border: 1px dashed color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 9%, var(--surface-sunken)),
+    var(--surface-sunken)
+  );
+}
+.wizard-provider-empty .primary {
+  align-self: flex-start;
+}
+.wizard-provider-setup {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 4px 0 18px;
+  padding: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 16px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 8%, var(--surface-sunken)),
+    var(--surface-sunken)
+  );
+  box-shadow: inset 0 1px rgb(255 255 255 / 0.04);
+}
+.wizard-provider-setup > div:first-child,
+.wizard-provider-setup .field:nth-of-type(2),
+.wizard-provider-setup .settings-request-error,
+.wizard-provider-actions {
+  grid-column: 1 / -1;
+}
+.wizard-provider-setup h3 {
+  margin: 3px 0 5px;
+  font-size: 17px;
+}
+.wizard-provider-setup p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.wizard-provider-setup .field {
+  margin: 0;
+}
+.wizard-provider-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+@media (max-width: 600px) {
+  .wizard-provider-setup {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+  .wizard-provider-setup > div:first-child,
+  .wizard-provider-setup .field:nth-of-type(2),
+  .wizard-provider-setup .settings-request-error,
+  .wizard-provider-actions {
+    grid-column: auto;
+  }
+  .wizard-provider-actions {
+    justify-content: stretch;
+  }
+  .wizard-provider-actions button {
+    flex: 1;
+  }
+}
+
+/* First-run finale: five seconds of earned drama, then the app takes the stage. */
+.wizard-model-later {
+  display: grid;
+  gap: 7px;
+  padding: 24px;
+  text-align: left;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 8%, var(--surface-sunken)),
+    var(--surface-sunken)
+  );
+}
+.agent-wizard-celebrating {
+  background: radial-gradient(
+    circle at 50% 48%,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    rgb(8 7 13 / 0.92) 55%,
+    rgb(4 4 8 / 0.98)
+  );
+  backdrop-filter: blur(18px);
+}
+.agent-wizard-finale {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: min(660px, calc(100vh - 32px));
+  width: min(720px, calc(100vw - 32px));
+  overflow: hidden;
+  padding: 48px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--line));
+  border-radius: 28px;
+  background: radial-gradient(
+    circle at 50% 35%,
+    color-mix(in srgb, var(--accent) 18%, var(--surface-raised)),
+    var(--surface-raised) 64%
+  );
+  box-shadow:
+    0 0 120px color-mix(in srgb, var(--accent) 36%, transparent),
+    0 30px 100px rgb(0 0 0 / 0.6);
+  text-align: center;
+  animation: finale-arrive 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.agent-wizard-finale > img {
+  width: 150px;
+  filter: drop-shadow(0 0 30px var(--accent-glow-strong));
+  animation: finale-float 2.2s ease-in-out infinite;
+}
+.agent-wizard-finale .eyebrow {
+  margin-top: 30px;
+  color: var(--accent);
+}
+.agent-wizard-finale h2 {
+  margin: 8px 0 0;
+  font-size: clamp(34px, 6vw, 58px);
+  letter-spacing: -0.055em;
+}
+.agent-wizard-finale p {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 16px;
+}
+.wizard-finale-countdown {
+  margin-top: 30px;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: finale-pulse 1.3s ease-in-out infinite;
+}
+.wizard-confetti {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wizard-confetti i {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: 9px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--accent);
+  opacity: 0;
+  transform: rotate(calc(var(--i) * 31deg));
+  animation: confetti-pop 1.4s cubic-bezier(0.15, 0.8, 0.25, 1) calc(var(--i) * -45ms) infinite;
+}
+.wizard-confetti i:nth-child(3n) {
+  background: #fbbf24;
+}
+.wizard-confetti i:nth-child(3n + 1) {
+  background: #67e8f9;
+}
+.wizard-confetti i:nth-child(4n) {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+@keyframes finale-arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.78) rotate(-3deg);
+    filter: blur(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes finale-float {
+  50% {
+    transform: translateY(-12px) rotate(4deg);
+  }
+}
+@keyframes finale-pulse {
+  50% {
+    opacity: 0.42;
+    letter-spacing: 0.2em;
+  }
+}
+@keyframes confetti-pop {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0) rotate(0);
+  }
+  15% {
+    opacity: 1;
+  }
+  75%,
+  100% {
+    opacity: 0;
+    transform: translate(calc((var(--i) - 12) * 20px), calc(-120px + (var(--i) % 5) * 72px))
+      scale(1) rotate(calc(var(--i) * 62deg));
+  }
+}
+@media (max-width: 620px) {
+  .agent-wizard-finale {
+    min-height: calc(100vh - 20px);
+    width: calc(100vw - 20px);
+    padding: 28px 20px;
+    border-radius: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-wizard-finale,
+  .agent-wizard-finale > img,
+  .wizard-finale-countdown,
+  .wizard-confetti i {
+    animation: none;
+  }
+}

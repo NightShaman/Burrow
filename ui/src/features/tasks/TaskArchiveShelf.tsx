@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
 import type { Agent } from '../../app/types';
 import { TaskActivity } from './TaskActivity';
-import type { BoardTask, Project } from './TasksPage';
+import type { BoardTask, Project } from './taskDomain';
 
 export function taskArchiveDate(value?: string | null) {
   if (!value) return '';

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import css from './settings.css?raw';
+import css from './settingsFoundation.css?raw';
 import postcss from 'postcss';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';

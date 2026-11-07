@@ -11,6 +11,8 @@
 @import './features/tasks/archive-proof.css';
 @import './styles/responsive.css';
 @import './features/workspace/workspace-rail.css';
+@import './features/settings/settingsFoundation.css';
+@import './features/settings/firstRunSetup.css';
 @import './features/settings/settings.css';
 @import './features/groups/group-channels.css';
 @import './app/provider-pool-metrics.css';

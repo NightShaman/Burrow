@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import { generatedArtifactPath, textFromChatValue, type SessionTurn } from '../../app/api';
 import { chatInputLabel } from '../chat/chatInputs';
-import { ChatMessage, TerminalErrorCard } from '../chat/ChatTranscript';
+import { ChatMessage, TerminalErrorCard } from '../chat/ChatMessage';
 import { chatTerminalDiagnostic, chatTerminalMetadata } from '../chat/chatTerminal';
 import { archiveTurnId, reconcileArchiveTurns } from './archiveTurns';
 import { useArchiveBodies } from './useArchiveBodies';
