@@ -3,7 +3,7 @@ import { createTraceLogger } from './trace-logger.mjs';
 import { redactProtectedText } from './redaction.mjs';
 import { memoryExpressionSettings } from './dream-memory-prompt.mjs';
 import { DREAM_EXTRACTION_CONTRACT_VERSION, dreamSourceIdentity } from './dream-incremental-extraction.mjs';
-import { sessionWindow, reconcileDreamCandidates } from './dream-cycle-runner.mjs';
+import { sessionWindow, reconcileDreamCandidates } from './dream-read-only.mjs';
 import { resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 

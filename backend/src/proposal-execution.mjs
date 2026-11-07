@@ -1,14 +1,7 @@
+import { createNativeToolExecutor } from './native-tool-executor.mjs';
 import { REFERENCE_IMAGE_ATTACHMENT_PREFIX, OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX } from './postgres-agent-reference-image-store.mjs';
 import { searchAgentRunEvidence } from './run-evidence.mjs';
 import { executeBrainTool } from './brain-tool-executor.mjs';
-import { redactText } from './redaction.mjs';
-import { runExec } from './harness/exec.mjs';
-import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
-import { createNativeFilesystemExecutionRouter, resolveNativeFilesystemExecutionTarget } from './native-filesystem-execution-router.mjs';
-import { readFileEnvelope } from './harness/read-file.mjs';
-import { writeFileEnvelope } from './harness/write-file.mjs';
-import { applyPatchEnvelope } from './harness/apply-patch.mjs';
-import { editFileEnvelope, gitDiffEnvelope, gitStatusEnvelope, globEnvelope, listFilesEnvelope, searchFilesEnvelope, statPathEnvelope } from './harness/developer-tools.mjs';
 import { executeSpawnSubagentTool } from './subagent-spawn-execution.mjs';
 import { listAgentPeers } from './agent-directory-tool.mjs';
 import { sendAgentMessage } from './agent-chat-tool.mjs';
@@ -21,20 +14,13 @@ import { compactToolReceipts } from './runtime-result-shapes.mjs';
 import { persistMcpImages } from './mcp-image-content.mjs';
 import { readAttachmentArtifact } from './attachment-store.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
-import { invokeMcpTool, publicMcpError, publicMcpFailureDetail } from './mcporter-adapter.mjs';
-import { grantedMcpTool, mcpCapabilitiesReceipt, mcpProvidersReceipt } from './mcp-menu.mjs';
-import { activeModToolConnection } from './mod-agent-tools.mjs';
+import { invokeMcpTool } from './mcporter-adapter.mjs';
+import { executeMcpTool } from './mcp-tool-executor.mjs';
 import { activeModAgentProvider, executeModAgentTool } from './mod-agent-runtime.mjs';
 import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
-import { credentialProducer, protectMcpOutput, protectToolOutput, resolveManagedProtectedBindings } from './protected-values.mjs';
+import { protectToolOutput } from './protected-values.mjs';
 import { executeSkillTool } from './skill-tool-executor.mjs';
 import path from 'node:path';
-
-function workspacePath(filePath, workspaceRoot, rootDir) {
-  if (!filePath) return filePath;
-  if (path.isAbsolute(filePath)) return filePath;
-  return path.resolve(workspaceRoot || rootDir || process.cwd(), filePath);
-}
 
 function withExecutionProvenance(result, target, executionContext, toolCallId) {
   if (!result || typeof result !== 'object') return result;
@@ -72,32 +58,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
     : executionContext?.workspaceRoot || workspaceRoot || rootDir || process.cwd();
   const toolResults = [];
   const skipped = [];
-  const routeFilesystem = createNativeFilesystemExecutionRouter({
-    localExecute: async ({ tool, arguments: args }) => {
-      if (tool === 'files_read') return readFileEnvelope(args);
-      if (tool === 'files_list') return listFilesEnvelope(args);
-      if (tool === 'files_find') return globEnvelope(args);
-      if (tool === 'files_inspect') return statPathEnvelope(args);
-      if (tool === 'files_search') return searchFilesEnvelope(args);
-      if (tool === 'files_write') return writeFileEnvelope(args);
-      if (tool === 'files_edit') return editFileEnvelope(args);
-      if (tool === 'files_patch') return applyPatchEnvelope(args);
-      throw new Error('native_filesystem_tool_unsupported');
-    },
-    remoteController: executionContext?.processExecutionController || null,
-  });
-  const executeFilesystem = async (action, args) => {
-    const target = resolveNativeFilesystemExecutionTarget(executionContext || {});
-    const result = await routeFilesystem({ target, operation: { tool: action.tool, arguments: args } }, {
-      parentRunId: executionContext?.parentRunId || traceLogger?.runId,
-      toolCallId: action.toolCallId,
-      // The remote router starts the Core tool span before resolving its carrier.
-      telemetry: executionContext?.telemetry || null,
-      traceContext: executionContext?.traceContext || null,
-      abortSignal,
-    });
-    return withExecutionProvenance(result, target, executionContext, action.toolCallId);
-  };
+  const executeNativeTool = createNativeToolExecutor({ executionContext, executionRoot, rootDir, traceLogger, artifactPrefix, abortSignal, agentId, sessionId, resolvedConversationId });
 
   // Validate the whole batch before dispatch: conflicting immutable IDs must
   // not partially execute, and identical repeats are one provider operation.
@@ -206,139 +167,12 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       continue;
     }
 
-    if (action.tool === 'shell_exec') {
-      const target = resolveProcessExecutionTarget(executionContext || {});
-      const traceDetails = {
-        command: redactText(action.command).slice(0, 2000),
-        cwd: redactText(action.cwd ? path.resolve(action.cwd) : executionRoot).slice(0, 1000),
-        reason: typeof action.reason === 'string' ? action.reason.slice(0, 500) : null,
-        providerId: target.kind === 'remote' ? target.providerId : null,
-      };
-      const started = await traceLogger?.toolStart?.({
-        ...traceDetails,
-        tool: 'shell_exec',
-        toolCallId: action.toolCallId || null,
-        targetId: target.kind === 'remote' ? target.targetId : null,
-        executionTarget: target.kind,
-      });
-      // The authoritative backend resolves protected references. Remote values
-      // are passed only to the authenticated process controller, never embedded
-      // in command text or ordinary process environment fields.
-      const protectedInput = await resolveManagedProtectedBindings(action.protectedBindings, executionContext?.protectedValues, {
-        caller: { agentId, sessionId, conversationId: resolvedConversationId },
-        authorize: async (entry) => {
-          const mod = activeModToolConnection(entry.providerId);
-          if (!mod || mod !== entry.mod || !mod.tools.some((tool) => tool.name === entry.toolName)) return false;
-          const mcp = executionContext?.stores?.mcp;
-          if (!mcp) return false;
-          const connection = await mcp.get(entry.providerId);
-          const grants = await mcp.agentTools(agentId, {availableOnly:true});
-          return Boolean(connection?.enabled && (mod.tools.find((tool) => tool.name === entry.toolName)?.availability === 'mod-authorized' || grants.some((grant) => grant.connectionId === entry.providerId && grant.toolName === entry.toolName && grant.enabled)));
-        },
-      });
-      if (protectedInput.errors.length) {
-        const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
-        toolResults.push(result);
-        await (traceLogger?.toolEnd || traceLogger?.tool)?.({
-          ...traceDetails,
-          tool: 'shell_exec',
-          ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
-          toolCallId: action.toolCallId || null,
-          targetId: target.kind === 'remote' ? target.targetId : null,
-          executionTarget: target.kind,
-          ok: false,
-          error: result.error,
-        });
-        continue;
-      }
-      const process = {
-        command: action.command,
-        cwd: action.cwd ? path.resolve(action.cwd) : executionRoot,
-        env: protectedInput.env,
-        traceLogger,
-        // This proposal boundary owns the one logical shell tool activity.
-        // runExec still writes its usual stdout/stderr/result artifacts.
-        emitToolEvents: !traceLogger,
-        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-shell_exec`,
-        reason: action.reason,
-        abortSignal,
-        protectedValues: Object.values(protectedInput.env),
-      };
-      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
-        localExecute: runExec,
-        remoteController: executionContext?.processExecutionController || null,
-      });
-      let result;
-      try {
-        result = await routeProcess({ target, process, protectedBindings: action.protectedBindings,
-          ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
-          parentRunId: executionContext?.parentRunId || traceLogger?.runId,
-          toolCallId: action.toolCallId,
-          telemetry: executionContext?.telemetry || null,
-          traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
-          abortSignal,
-        });
-      } catch (error) {
-        const code = typeof error?.code === 'string' ? error.code : 'process_dispatch_failed';
-        result = { tool: 'shell_exec', ok: false, command: action.command, cwd: process.cwd, error: code, failureClass: 'tool_dispatch_failed' };
-      }
-      if (protectedInput.bindings.length) result.protectedBindings = protectedInput.bindings;
-      result = withExecutionProvenance(result, target, executionContext, action.toolCallId);
+    if (['shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_write', 'files_edit', 'files_patch', 'git_status', 'git_diff'].includes(action.tool)) {
+      const { result, finishTrace } = await executeNativeTool(action, { observedToolResults: [...observedToolResults, ...toolResults] });
       toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({
-        ...traceDetails,
-        exitCode: result.exitCode ?? null,
-        signal: result.signal || null,
-        timedOut: result.timedOut === true,
-        cancelled: result.cancelled === true,
-        durationMs: result.durationMs,
-        stdoutBytes: Buffer.byteLength(result.stdout || ''),
-        stderrBytes: Buffer.byteLength(result.stderr || ''),
-        stdoutTruncated: result.stdoutTruncated,
-        stderrTruncated: result.stderrTruncated,
-        artifacts: result.artifacts,
-        operationId: result.execution?.operationId || result.operationId || null,
-        tool: 'shell_exec',
-        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}),
-        toolCallId: action.toolCallId || null,
-        targetId: target.kind === 'remote' ? target.targetId : null,
-        executionTarget: target.kind,
-        ok: result.ok,
-        error: result.error || null,
-      });
+      await finishTrace?.();
       continue;
     }
-
-    if (action.tool === 'files_read') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), workspaceRoot: executionRoot, rootDir, traceLogger, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`, reason: action.reason, offsetBytes: action.offsetBytes ?? 0, ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}) })); continue; }
-    if (action.tool === 'files_list') { toolResults.push(await executeFilesystem(action, { dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-list`, reason: action.reason })); continue; }
-    if (action.tool === 'files_find') { toolResults.push(await executeFilesystem(action, { pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason })); continue; }
-    if (action.tool === 'files_inspect') { toolResults.push(await executeFilesystem(action, { path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason })); continue; }
-    if (action.tool === 'files_search') { toolResults.push(await executeFilesystem(action, { query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason })); continue; }
-    if (action.tool === 'git_status' || action.tool === 'git_diff') {
-      const target = resolveProcessExecutionTarget(executionContext || {});
-      const routeProcess = executionContext?.processExecutionRouter || createProcessExecutionRouter({
-        localExecute: runExec,
-        remoteController: executionContext?.processExecutionController || null,
-      });
-      const execute = (process) => routeProcess({ target, process }, {
-        parentRunId: executionContext?.parentRunId || traceLogger?.runId,
-        toolCallId: action.toolCallId,
-        telemetry: executionContext?.telemetry || null,
-        traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
-        abortSignal,
-      });
-      const envelope = action.tool === 'git_status' ? gitStatusEnvelope : gitDiffEnvelope;
-      const result = await envelope({
-        dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, traceLogger, rootDir,
-        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-${action.tool}`, reason: action.reason, execute,
-        toolCallId: action.toolCallId || null, executionTarget: target.kind,
-        providerId: target.kind === 'remote' ? target.providerId : null,
-        targetId: target.kind === 'remote' ? target.targetId : null,
-      });
-      toolResults.push(withExecutionProvenance(result, target, executionContext, action.toolCallId));
-      continue;
-    }
-    if (action.tool === 'files_edit') { toolResults.push(await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason })); continue; }
 
     if (action.tool === 'scheduled_jobs_create') {
       const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
@@ -419,78 +253,10 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       continue;
     }
 
-    if (action.tool === 'mcp_providers') {
-      const result = mcpProvidersReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, agentId });
+    if (['mcp_providers', 'mcp_capabilities', 'mcp_call'].includes(action.tool)) {
+      const { result, finishTrace } = await executeMcpTool({ action, executionContext, agentId, sessionId, conversationId, resolvedConversationId, workspaceRoot, rootDir, abortSignal, traceLogger, invokeMcp });
       toolResults.push(result);
-      continue;
-    }
-
-    if (action.tool === 'mcp_capabilities') {
-      const result = mcpCapabilitiesReceipt({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, query: action.query, cursor: action.cursor, limit: action.limit });
-      toolResults.push(result);
-      continue;
-    }
-
-    if (action.tool === 'mcp_call') {
-      const selected = grantedMcpTool({ connections: executionContext?.mcpConnections, grants: executionContext?.mcpTools, provider: action.mcpProvider, toolName: action.mcpToolName });
-      const started = await traceLogger?.toolStart?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null });
-      let result;
-      try {
-        if (selected.error) throw new Error(selected.error);
-        if (selected.connection.transport === 'mod') {
-          // Reviews and discovery are snapshots. A revoked grant must fail even
-          // when a queued action executes later in the same turn.
-          const mcp = executionContext?.stores?.mcp;
-          if (!mcp) throw new Error('mcp_store_required');
-          const liveMod = activeModToolConnection(selected.connection.id);
-          const connection = await mcp.get(selected.connection.id);
-          if (!liveMod || liveMod !== selected.connection.mod || !liveMod.tools.some((tool) => tool.name === action.mcpToolName) || !connection?.enabled) throw new Error('mcp_provider_not_available');
-          const grants = await mcp.agentTools(agentId, {availableOnly:true});
-          if (liveMod.tools.find((tool) => tool.name === action.mcpToolName)?.availability !== 'mod-authorized' && !grants.some((grant) => grant.connectionId === selected.connection.id && grant.toolName === action.mcpToolName && grant.enabled)) throw new Error('mcp_tool_not_granted');
-        }
-        abortSignal?.throwIfAborted();
-        const output = selected.connection.transport === 'mod'
-          ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
-          : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, headers: selected.connection.headers, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true, signal: abortSignal });
-        const protectedOutput = selected.connection.transport === 'mod'
-          ? protectToolOutput(output, { registry: executionContext?.protectedValues,
-            managedIssuer: (declaration) => {
-              if (!agentId || !executionContext?.protectedValues || typeof selected.connection.resolveProtectedReference !== 'function') return null;
-              return { managed: true, reference: declaration.reference, version: declaration.version,
-                providerId: selected.connection.id,
-                toolName: action.mcpToolName, mod: selected.connection.mod,
-                caller: { agentId, sessionId, conversationId: resolvedConversationId },
-                resolve: (reference, caller) => selected.connection.resolveProtectedReference(action.mcpToolName, reference, caller) };
-            } })
-          : protectMcpOutput(output, { provider: selected.connection.name, toolName: action.mcpToolName, mcpArguments: action.mcpArguments, registry: executionContext?.protectedValues });
-        const withheld = protectedOutput.protection.status === 'withheld';
-        const imageResult = await persistMcpImages(protectedOutput.safeOutput, {
-          agentWorkspaceRoot: executionContext?.agentWorkspaceRoot || workspaceRoot || rootDir,
-          retentionDays: executionContext?.stores?.albdruck ? (await executionContext.stores.albdruck.readRetention()).attachmentDays : 30,
-        });
-        const isError = imageResult.output?.isError === true;
-        result = {
-          tool: 'mcp_call', ok: !withheld && !isError, provider: selected.connection.name, mcpToolName: action.mcpToolName, connectionId: selected.connection.id,
-          output: imageResult.output,
-          ...(imageResult.attachments.length ? { attachments: imageResult.attachments } : {}),
-          ...(isError ? { error: 'mcp_tool_failed' } : {}),
-          protection: protectedOutput.protection,
-          ...(withheld ? { error: 'mcp_sensitive_response_withheld' } : {}),
-          ...(protectedOutput.protectedValues.length ? { protectedValues: protectedOutput.protectedValues } : {}),
-        };
-      } catch (error) {
-        const sensitiveProducer = credentialProducer({ provider: selected.connection?.name || action.mcpProvider, toolName: action.mcpToolName, mcpArguments: action.mcpArguments });
-        result = {
-          tool: 'mcp_call', ok: false, provider: action.mcpProvider, mcpToolName: action.mcpToolName, connectionId: selected.connection?.id || null,
-          error: selected.connection?.transport === 'mod' ? (error?.message === 'mcp_tool_not_granted' ? 'mcp_tool_not_granted' : 'mcp_tool_failed') : publicMcpError(error, 'mcp_tool_failed'),
-          // Credential providers may place retrieved values in an isError text
-          // payload. That payload has not crossed the protection adapter, so do
-          // not project free-form diagnostics from it into model-visible state.
-          ...(selected.connection?.transport === 'mod' || sensitiveProducer ? {} : publicMcpFailureDetail(error, [selected.connection?.apiKey, ...Object.values(selected.connection?.environmentVariables || {}), ...Object.values(selected.connection?.headers || {})])),
-        };
-      }
-      toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'mcp_call', toolCallId: action.toolCallId || null, ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, provider: result.provider, mcpToolName: result.mcpToolName, connectionId: result.connectionId, error: result.error || null });
+      await finishTrace?.();
       continue;
     }
 
@@ -623,30 +389,6 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const result = await updateOwnToolsProfile({ agentId, markdown: action.profileToolsContent, store: executionContext?.stores?.profiles });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agent_update_tools_profile', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, agentId: agentId || null, document: result.document || null, error: result.error || null });
-      continue;
-    }
-
-    if (action.tool === 'files_write') {
-      toolResults.push(await executeFilesystem(action, {
-        filePath: workspacePath(action.filePath, executionRoot, rootDir),
-        content: action.content,
-        workspaceRoot: executionRoot,
-        traceLogger,
-        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-write`,
-      }));
-      continue;
-    }
-
-    if (action.tool === 'files_patch') {
-      toolResults.push(await executeFilesystem(action, {
-        patch: action.patch,
-        workspaceRoot: executionRoot,
-        baseRoot: executionRoot,
-        rootDir,
-        traceLogger,
-        artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-patch`,
-        observedToolResults: [...observedToolResults, ...toolResults],
-      }));
       continue;
     }
 
