@@ -1,9 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { api, fetchApi } from './api';
 
-export function localRuntimeKey(available = true) {
-  return available ? 'local' : 'unavailable';
-}
 /** Captures a mounted local resource owner and cancels/fences its requests on unmount. */
 export function useOwnedApi(available = true) {
   const owner = useMemo(() => ({ available, retired: false, abort: new AbortController() }), []);

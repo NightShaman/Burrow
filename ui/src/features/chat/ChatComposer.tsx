@@ -32,10 +32,6 @@ export function projectContextQuery(value: string): string | null {
   return match ? (match[1] ?? '').trim() : null;
 }
 
-export function isProjectContextDraft(value: string): boolean {
-  return projectContextQuery(value) !== null;
-}
-
 type ChatComposerProps = {
   draft: string;
   setDraft: (value: string) => void;

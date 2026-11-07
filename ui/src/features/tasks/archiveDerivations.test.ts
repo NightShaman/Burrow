@@ -2,13 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   archiveSessionDate,
   buildCalendarDays,
-  buildDateBuckets,
   filterArchiveSessions,
-  filterDreamEntries,
   formatDayKey,
-  groupDreamEntries,
 } from './archiveDerivations';
-import type { ArchiveSession, DreamEntry } from './archiveTypes';
+import type { ArchiveSession } from './archiveTypes';
 
 function session(overrides: Partial<ArchiveSession> = {}): ArchiveSession {
   return {
@@ -27,20 +24,6 @@ function session(overrides: Partial<ArchiveSession> = {}): ArchiveSession {
     kind: 'main',
     lastRole: 'assistant',
     lastRunId: null,
-    ...overrides,
-  };
-}
-
-function dream(overrides: Partial<DreamEntry> = {}): DreamEntry {
-  return {
-    id: 'dream-1',
-    agentId: 'smatchet',
-    agentName: 'Smatchet',
-    entryDate: '2026-07-31',
-    phase: 'light',
-    narrative: 'Magenta interface dreams',
-    sourceRefs: [],
-    createdAt: '2026-08-04T08:00:00',
     ...overrides,
   };
 }
@@ -65,50 +48,6 @@ describe('archive derivations', () => {
     expect(
       filterArchiveSessions(sessions, 'smatchet', '2026-08-03').map((item) => item.id),
     ).toEqual(['session-default']);
-  });
-
-  it('filters dreams using recorded time rather than diary entryDate', () => {
-    const dreams = [
-      dream(),
-      dream({
-        id: 'dream-2',
-        agentId: 'hatchet',
-        agentName: 'Hatchet',
-        narrative: 'Backend smoke',
-      }),
-    ];
-
-    expect(
-      filterDreamEntries(dreams, 'smatchet', ' MAGENTA ', '2026-08-04').map((entry) => entry.id),
-    ).toEqual(['dream-1']);
-    expect(filterDreamEntries(dreams, 'smatchet', '', '2026-07-31')).toEqual([]);
-  });
-
-  it('groups dreams by agent and recorded day, orders phases, and sorts newest groups first', () => {
-    const groups = groupDreamEntries([
-      dream({ id: 'rem', phase: 'REM' }),
-      dream({ id: 'unknown', phase: 'liminal' }),
-      dream({ id: 'deep', phase: 'deep' }),
-      dream({ id: 'newer', phase: 'light', createdAt: '2026-08-05T08:00:00' }),
-    ]);
-
-    expect(groups.map((group) => group.day)).toEqual(['2026-08-05', '2026-08-04']);
-    expect(groups[1].entries.map((entry) => entry.id)).toEqual(['deep', 'rem', 'unknown']);
-  });
-
-  it('builds sorted date buckets for the active archive kind', () => {
-    const sessions = [session(), session({ id: 'same-day', sessionId: 'planning' })];
-    const dreams = [dream(), dream({ id: 'dream-2', createdAt: '2026-08-05T08:00:00' })];
-
-    expect(
-      buildDateBuckets('chat', sessions, dreams).map(({ key, count }) => ({ key, count })),
-    ).toEqual([{ key: '2026-08-03', count: 2 }]);
-    expect(
-      buildDateBuckets('dreams', sessions, dreams).map(({ key, count }) => ({ key, count })),
-    ).toEqual([
-      { key: '2026-08-05', count: 1 },
-      { key: '2026-08-04', count: 1 },
-    ]);
   });
 
   it('builds a padded leap-month calendar with data counts', () => {

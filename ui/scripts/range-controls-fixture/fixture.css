@@ -1,0 +1,38 @@
+html,
+body,
+#root {
+  height: auto;
+  overflow: auto;
+}
+body {
+  padding: 20px;
+}
+main {
+  max-width: 1500px;
+  margin: auto;
+}
+h1 {
+  font-size: 20px;
+}
+h2 {
+  font-size: 15px;
+}
+main > section,
+.fixture-grid > section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.fixture-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+@media (max-width: 1000px) {
+  .fixture-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

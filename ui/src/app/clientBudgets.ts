@@ -5,7 +5,7 @@
  *
  * Attachment caps bound a single read and aggregate preview memory. Conversation
  * limits bound localStorage parse/stringify work and avoid one session monopolizing
- * storage. Archive caps bound restored list/detail payload work. The 30s request
+ * storage. Archive caps bound restored session-list payload work. The 30s request
  * deadline is a recovery bound for ordinary JSON/body parsing; chat streams are
  * exempt because their duration is user-driven. Session resets have a separate
  * 120s deadline to allow long transcripts to be archived atomically.
@@ -26,7 +26,6 @@ type BudgetName =
   | 'conversationCacheTextBytesPerTurn'
   | 'conversationCacheTotalTextBytes'
   | 'archiveSessionCacheEntries'
-  | 'archiveDetailCacheEntries'
   | 'archiveSessionRowsPerQuery'
   | 'requestDeadlineMs'
   | 'sessionResetDeadlineMs';
@@ -45,7 +44,6 @@ const defaults: Record<BudgetName, number> = {
   conversationCacheTextBytesPerTurn: 256 * 1024,
   conversationCacheTotalTextBytes: 8 * 1024 * 1024,
   archiveSessionCacheEntries: 12,
-  archiveDetailCacheEntries: 24,
   archiveSessionRowsPerQuery: 500,
   requestDeadlineMs: 30_000,
   sessionResetDeadlineMs: 120_000,

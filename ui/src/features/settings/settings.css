@@ -3539,12 +3539,8 @@ button:disabled {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: 180px repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  width: 100%;
-  height: calc(100dvh - 111px);
   min-height: 0;
   grid-template-rows: minmax(0, 1fr);
-  padding: 22px;
 }
 .settings-blank-slate > .settings-blank-column {
   min-height: 0;
@@ -3613,7 +3609,6 @@ button:disabled {
 
 /* Blank-slate step 3: the existing Agent selector spans working columns 2–4. */
 .settings-blank-slate.has-agent-selector {
-  height: calc(100dvh - 111px);
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -3841,8 +3836,6 @@ button:disabled {
 /* Four-column Settings workspace: one interface, four owned panes. */
 .settings-blank-slate {
   grid-template-columns: minmax(0, 0.434fr) minmax(0, 0.434fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0;
-  padding: 22px;
   overflow: hidden;
   border: 0;
   border-radius: 0;
@@ -3960,9 +3953,6 @@ button:disabled {
   border-radius: 0 10px 10px 0;
   background: var(--panel);
 }
-.settings-prototype-agent-selector {
-  margin: 0 0 12px 12px;
-}
 .settings-prototype-agent-selector .agent-toolbar {
   border-radius: 8px;
 }
@@ -3980,11 +3970,6 @@ button:disabled {
 }
 
 /* Settings prototype visual pass: four related cards directly on the app background. */
-.settings-blank-slate {
-  gap: 14px;
-  padding: 22px;
-  background: transparent;
-}
 .settings-blank-column,
 .settings-prototype-menu,
 .settings-prototype-sections,

@@ -68,47 +68,6 @@ export type ArchiveDetail = {
   chatTurns?: SessionTurn[];
   session?: { turns?: SessionTurn[] };
 };
-export type DreamEntry = {
-  id: string;
-  agentId: string;
-  agentName: string;
-  entryDate: string;
-  phase: string;
-  narrative: unknown;
-  sourceRefs: string[];
-  createdAt: string;
-};
-export type ArchiveDream = {
-  id: string;
-  kind: 'dream';
-  agentId: string;
-  agentName: string;
-  entryDate: string;
-  phase: string;
-  title: string;
-  excerpt: string;
-  createdAt: string;
-};
-export type ArchiveDreamDocument = {
-  document: {
-    id: string;
-    kind: 'dream';
-    agentId: string;
-    agentName: string;
-    title: string;
-    subtitle: string;
-    phase: string;
-    markdown: string;
-    createdAt: string;
-  };
-};
-export type DreamGroup = {
-  key: string;
-  agentId: string;
-  agentName: string;
-  day: string;
-  entries: DreamEntry[];
-};
 export type DateBucket = {
   key: string;
   year: string;

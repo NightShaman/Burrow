@@ -1,0 +1,77 @@
+/* One native range control across chat, Settings and mod surfaces. Style the
+   track, not the input box: thumbs need room at both ends and a usable hit area. */
+input[type='range'] {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Keep vendor selectors separate: unsupported pseudo-elements invalidate a
+   selector list in browsers that do not implement them. */
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 50%, var(--surface-input));
+}
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 50%, var(--surface-input));
+}
+input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+input[type='range']:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
+}
+input[type='range']:disabled {
+  cursor: not-allowed;
+}
+input[type='range']:disabled:not([data-saving-disabled='true']) {
+  opacity: 0.5;
+}
+
+/* Let the OS supply high-contrast control colors and native affordances. */
+@media (forced-colors: active) {
+  input[type='range'] {
+    appearance: auto;
+  }
+  input[type='range']::-webkit-slider-runnable-track {
+    background: CanvasText;
+  }
+  input[type='range']::-moz-range-track {
+    background: CanvasText;
+  }
+  input[type='range']::-webkit-slider-thumb {
+    appearance: auto;
+    margin-top: 0;
+    background: Highlight;
+  }
+  input[type='range']::-moz-range-thumb {
+    background: Highlight;
+  }
+}

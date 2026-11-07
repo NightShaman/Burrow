@@ -3,12 +3,10 @@ import type {
   ArchiveDetail,
   DreamArchiveGroup,
   DreamGroupSummary,
-  ArchiveDreamDocument,
   ArchiveSession,
   ArchiveWorkflowEvent,
   ContinuityCard,
   ContinuityCardGroup,
-  DreamEntry,
 } from './archiveTypes';
 
 export type ArchivePage<T> = { items: T[]; nextCursor: string | null; hasMore: boolean };
@@ -147,13 +145,6 @@ export function createArchiveRepository(request: typeof api = api) {
       )
         throw new Error('Invalid dream group response.');
       return response.group;
-    },
-    async loadDream(entry: DreamEntry, signal?: AbortSignal) {
-      const response = await request<ArchiveDreamDocument>(
-        `/api/archive/dreams/${encodeURIComponent(entry.agentId)}/${encodeURIComponent(entry.id)}`,
-        { signal },
-      );
-      return { ...entry, narrative: response.document.markdown };
     },
     async listContinuityCards(
       agentId = '',
