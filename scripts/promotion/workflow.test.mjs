@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 const workflow = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml', import.meta.url), 'utf8');
 test('freeze assembly and component identities from the same checkout', () => {
@@ -90,7 +91,7 @@ case "$1 $2" in
 esac
 ` , { mode: 0o755 });
     for (const [assetCase, expected] of [['matching', 0], ['missing', 1], ['wrong', 1]]) {
-      const result = spawnSync('sh', [resolve('scripts/promotion/publish-release.sh'), 'GoblinKing-Burrow/Node-Goblin', '2026.11.06', 'release-notes/nodeGoblin.md', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz.sha256'], {
+      const result = spawnSync('sh', [fileURLToPath(new URL('./publish-release.sh', import.meta.url)), 'GoblinKing-Burrow/Node-Goblin', '2026.11.06', 'release-notes/nodeGoblin.md', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz', 'release-assets/nodeGoblin/node-goblin-2026.11.06.tar.gz.sha256'], {
         cwd: root, encoding: 'utf8',
         env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, PUBLIC_OWNER: 'GoblinKing-Burrow', VERSION: '2026.11.06', RELEASE_ASSET_CASE: assetCase },
       });
