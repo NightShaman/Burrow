@@ -3145,7 +3145,7 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     loadedMods = installed
       ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
       : loadedMods.filter((entry) => entry.id !== modId);
-    await reconcileRuntimeManagedSkills();
+    await managedSkillSynchronizer.tick();
     return;
   }
   if (reactivate && old) {
@@ -3175,7 +3175,9 @@ async function transitionMod({ modId, enabled, installed, action, reactivate = f
     throw error;
   }
   if (old) await cleanupMods([old], { logger: serverLogger });
-  await reconcileRuntimeManagedSkills();
+  // Skill delivery is auxiliary: its synchronizer owns failure diagnostics and
+  // periodic retries. A missing upstream skill must not undo a valid mod update.
+  await managedSkillSynchronizer.tick();
   await modLoadOptions.onExecutionProviderActivated?.(modId);
 }
 const modDistribution = createModDistribution({
