@@ -8,7 +8,7 @@ Use a registered agent for a persistent identity and configuration. Use a minion
 
 ## Registered agents
 
-An agent record supplies an ID, display name, enabled state, available capabilities, context configuration, and optional execution-environment assignment. IDs are validated; a display name is not a replacement for durable identity.
+An agent record supplies an ID, display name, enabled state, available capabilities, context configuration, and optional execution-environment assignment. IDs are validated; a display name is not a replacement for durable identity. New agents cannot use the reserved `global` ID. Historical `global` agents remain editable/restorable; their private skill root is kept distinct from the shared global skill directory.
 
 Agent workspace/data roots are derived from the runtime workspace root and agent ID. The runtime creates `skills`, `sessions`, `artifacts`, and `tools` directories below that root. Directory existence does not mean those directories own conversation persistence: current conversation authority is PostgreSQL.
 
@@ -96,7 +96,7 @@ The child must call `finish_subagent` with `status` and `summary`. Optional stru
 
 The parent receives bounded evidence, a summary, resolved target, lineage, and receipt references. Changed files, artifacts, memory writes, and all-run consequences are now aggregated even when older tool receipts leave the retained window; `omittedToolResults` reports omitted receipts. `sideEffectsApplied` is true for observed mutations, false for known non-mutating outcomes, or null when effects are uncertain. Large raw outputs belong to trace artifacts. Inspect actual receipts when side effects matter.
 
-Identical structural spawn requests within the same parent lineage can reuse an existing record. This is mechanical deduplication, not semantic task matching. The identity includes the requested model, resolved model and connection, and model profile, as well as parent lineage, target and normalized task. A guarded claim makes exact retries reuse existing records across all statuses, including failed or in-flight work. Inspect `reused` and the resolved-model receipt.
+Identical structural spawn requests within the same parent lineage can reuse an existing record. This is mechanical deduplication, not semantic task matching. The identity includes the requested model, resolved model and connection, and model profile, as well as parent lineage, target and normalized task. A guarded claim resumes an existing queued admission with its original child identity after an interrupted setup. Existing running and terminal records are reused without another dispatch. A running record may represent active or interrupted work; `subagent_running_dispatch_state_uncertain` requires reconciliation of that exact child receipt, not a blind retry. Cancellation during admission prevents dispatch. Inspect `reused` and the resolved-model receipt.
 
 ## Peer agent messages
 
@@ -112,7 +112,7 @@ The directory returns only exact `{id, name, enabled}` cards, with enabled agent
 | `request_reply` | Execute one recipient response and mirror the response back; the sender may deliberately message again |
 | `request_reply_complete` | Execute one recipient response, mirror it back, and remove peer messaging from the sender's continuation tool surface |
 
-The default mode is `request_reply`. Current Core routes new implicit deliveries to `default` when the recipient's **A2A in default** preference is on (the default), or to the recipient's reusable `a2a-<canonical-sender-id>` inbox when off. Explicit target sessions and runtime-attested reply routes take precedence; changing the preference does not redirect an exchange already in flight. Self-send is rejected. Concurrent reply requests to the same recipient session are serialized, and wait-graph cycles are rejected before new transcript ingress. Reply-mode deliveries use durable claims to reuse terminal results on exact retries rather than wake the recipient twice; cancellation is checked before queued ingress and execution.
+The default mode is `request_reply`. Current Core routes incoming default-session deliveries to `default` when the recipient's **A2A in default** preference is on (the default), or to the recipient's reusable `a2a-<canonical-sender-id>` inbox when off. With the preference off, this includes an explicit `targetSessionId: "default"`, trusted default return routes and mirrored final answers. Explicit nondefault targets and trusted nondefault return routes remain intact. Final answers consult the receiving agent's current preference, including a change made during the exchange; existing messages are not moved. Self-send is rejected. Concurrent reply requests to the same recipient session are serialized, and wait-graph cycles are rejected before new transcript ingress. Reply-mode deliveries use durable claims to reuse terminal results on exact retries rather than wake the recipient twice; cancellation is checked before queued ingress and execution.
 
 ```json
 {
@@ -173,3 +173,7 @@ Dedicated peer inboxes are created on first implicit contact, not when toggling 
 ## Mod-owned native peers
 
 Current Core can expose a mod-owned agent through native A2A only when its `a2a` capability is enabled and its owning context provider is live. `agents_list` filters these peers accordingly; `agent_send_message` rechecks both participants before dispatch. A display name or retained directory result is not proof that a provider is still available. This remains native same-Core routing, independent of Backdoor discovery. See [the host contract](../development/extensions.md#mod-owned-native-agents). Statically reviewed against Core `32dde3266a231777ddfec6dba141d6b9972a21fd` on **3 November 2026**.
+
+## 7 November peer-result safety
+
+Failed, cancelled and incomplete peer partials remain visible and attributed but do not enter the sender's later model prompt. A deliberate blocked response remains an eligible attributed answer. Cancellation is checked before queued transcript ingress and again after participant checks. These contracts and disabled-default routing were checked statically against the current Core; no live peer turn was run.

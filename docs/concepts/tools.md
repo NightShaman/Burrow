@@ -126,3 +126,9 @@ The immutable links below record earlier public evidence. Current contracts were
 ## 29 October development delta
 
 Native directory and minion-depth changes were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. No application/provider tests or revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+
+## File read and patch safeguards
+
+Checked **7 November 2026**: paginated file reads report byte offsets from the original file. UTF-8 pages may extend by up to three bytes to complete a code point; reuse `nextOffsetBytes` rather than recomputing it from text length. A zero-byte limit on remaining content is rejected.
+
+Structured patch additions use exclusive creation and will not overwrite an existing target. Update hunks require a unique matching context; an optional scope must resolve uniquely, and unsupported or ambiguous scope syntax is rejected rather than guessed. Inspect partial-operation receipts after failure before retrying: these safeguards do not make a multi-file patch an atomic transaction.

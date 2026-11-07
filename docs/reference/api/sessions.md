@@ -154,3 +154,9 @@ The changed context and host contracts above were checked statically against Bac
 Checked **6 November 2026**: `GET /api/sessions/{id}` accepts `limit` (default 200) and `before` for human-facing display. Its `session` includes `hasMore`, `nextCursor` and `historyStatus`; older pages include compacted predecessors only within the active reset generation and deduplicate overlap. Archive snapshot IDs are not accepted as active sessions. Prompt readers continue to use active context rather than this reconstructed display.
 
 The newest page, current metadata, live chat-input extras and activity are read in one database snapshot. Older display pages do not reconstruct activity or non-prompt inputs. Cursors are snapshot-bound; concurrent changes may return `archive_cursor_invalid`, requiring a newest-page restart. Retention/deletion still bounds history. See [conversation display](../../concepts/conversation-history.md#active-chat-scrollback-after-compaction).
+
+## Enforced A2A default-session preference
+
+Checked **7 November 2026**: when the receiving agent disables **A2A in default**, incoming default routes, including explicit `default`, trusted default returns and mirrored final replies, go to its canonical per-sender `a2a-<sender-id>` inbox. Nondefault explicit/attested routes are preserved. Final replies consult the receiver's current preference; no existing messages are moved. See [peer routing](../../concepts/agents-minions.md#peer-agent-messages).
+
+Session rename/fork destination conflicts return HTTP 409 with the specific conflict code and preserve the original sessions. Unexpected storage failures remain server errors, not misleading conflict responses.

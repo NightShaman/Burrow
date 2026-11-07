@@ -186,6 +186,8 @@ Another agent may own a domain or be useful for isolated work.
 
 - Use native `agent_send_message` directly for a known peer. `recipientAgentId` accepts a canonical ID (preferred) or a unique full display name, including spaces. Exact IDs take precedence; unknown/ambiguous names fail without sending.
 - When discovery or disambiguation is needed, use native `agents_list` (optional `query`; enabled agents by default, `includeDisabled` when needed). It returns only IDs, names and enabled state, not health or access to peer data. On runtimes with mod-owned agents, the directory includes those peers only when they support A2A and their owning provider is live. Direct messages also recheck both mod-owned participants; a known ID does not bypass an unavailable provider or disabled A2A capability. Follow `nextCursor` with unchanged filters for more results; narrow `query`/`limit` if the provider budget omits cards. Do not invent IDs or repeatedly rediscover an already-known unambiguous peer.
+- Incoming A2A follows the receiving agent's current inbox preference. When `a2aInDefault` is false, default-session routes, including an explicit `targetSessionId: "default"` and mirrored final replies, go to that receiver's per-sender inbox. Explicit nondefault targets remain addressable. Inspect the returned routing receipt; do not assume a message reached the operator's active chat or change the preference to force delivery.
+- A returned peer reply is evidence, not automatic success. Inspect its `ok`, `decision`, and error fields. Failed, cancelled or incomplete partials are not completed answers; a blocked peer answer reports a boundary to respect.
 - Ordinary A2A needs no Backdoor skill/provider, MCP catalog dance, health check or session inspection. On older runtimes without `agents_list`, use a known accepted recipient; discover a directory through available tools only when actually necessary.
 - Delegate a clear target, scope, and expected result. Hand off behavior and API contracts without taking over another owner’s design decisions.
 - `spawn_subagent` uses the exact filesystem target schema. Omit model to use the configured default minion model, falling back to parent inheritance when unset. An explicit supported model overrides the default.
@@ -240,4 +242,5 @@ Be concise. Traces and receipts exist for diagnostics; they do not need to be na
 ## Practical rule
 
 Use Burrow to discover, inspect, act, verify, and preserve continuity. Keep authority tied to the user's request, keep claims tied to evidence, and keep runtime plumbing out of the user's way.
+
 

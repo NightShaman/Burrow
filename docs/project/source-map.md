@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.05.4` | `1952f88ff182ef465370209f3f1969cbdfbd79e6` |
-| Core / Backend | `6465a9b200bc550697ddfc41959d671eac9abf33` |
-| UI | `4f7f58f682a0cffe83290276307c66631a361de3` |
-| Skills | `46e26a8242f3f38c59c502391c6a4c4c73f10d12` |
+| Assembled Burrow, build `2026.11.07.5` | `c057b5e4369c9c2758c8a8ead784d59ff2e1a5db` |
+| Core / Backend | `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1` |
+| UI | `9e53442cdb1c8bbb882195d9f3de10419938a6b2` |
+| Skills | `11ad645e8f893affcb7f500a8db23835b6563ca9` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -115,3 +115,9 @@ The full page review remains dated **1 November**; unchanged pages retain that e
 Compared the 5 November baseline with assembly `e8acb74a168970eb5dbfdd463745144976811b19` (**2026.11.06.8**), Core `4e5a505c12b236ed394b09a577a2d583b409a69f` and UI `aa759fbf429cebd5fe070d3eb28491f63bf5fc77`. Source areas inspected include `context-report.mjs`, `provider-turn-replay.mjs`, provider pool/recovery and error projection, active-session display/archive paging, recall backfill, Forge store/tools, Chat transcript/navigation/cache/input ownership and regression test definitions. Affected guides describe current implementation; unchanged sections keep their prior full-review evidence.
 
 No runtime tests, live provider calls, migrations or installed-package checks were performed. Public links remain historical immutable references; source hashes record the inspected development revisions without exposing private source URLs.
+
+## 7 November ordinary delta review
+
+Inspected assembly **2026.11.07.5**, commit `c057b5e4369c9c2758c8a8ead784d59ff2e1a5db`, records Core `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1` and UI `9e53442cdb1c8bbb882195d9f3de10419938a6b2`. This pass reconciles enforced A2A default-session preferences, interrupted child admission, active continuation recaps, opt-in expiring OAuth resets and durable outcomes, mod completion/activity metadata, scheduler recovery, UI ownership/refresh warnings and application migrations 97–99. Managed-skill failure no longer undoes a completed mod disable/uninstall.
+
+Unchanged sections inherit the **1 November** full review. Source and test definitions were inspected statically; no application tests, provider calls, database migrations, runtime changes or release promotions were performed. Public mirrors and installed versions may lag these source pins. Menagerie now has a separately maintained public-release guide; older dated placeholder statements describe their original review date only.

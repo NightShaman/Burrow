@@ -104,3 +104,11 @@ The changed preference, recall, embedding or shared-guidance contracts above wer
 ## Temporary mod lifecycle directories
 
 Checked **6 November 2026**: discovery ignores distribution-owned backup/uninstall siblings matching the lifecycle naming contract, including uninstall recovery directories, even though those folders retain the original manifest. They are not separate installed mods. This does not authorize deleting recovery data or bypassing normal update/uninstall reconciliation. Ordinary installed-mod validation and duplicate-ID checks remain in force.
+
+## Durable agent-run completion metadata
+
+Checked **7 November 2026**: `context.agents.runs.onCompleted(handler)` registers one activation-time callback. Its `{ cursor }` is an advisory wake-up, not an HTTP route or a full event. Catch up at activation and on each wake using `context.agents.runs.list({ cursor, limit? })`, starting with `cursor: null`; limits are 1–100, default 50. Page `{ events, nextCursor, hasMore }` to completion. Persist the last processed cursor with any reserved work in the mod's own serialized durable decision. Wakes can be lost/replayed, so downstream admission and idempotency remain the mod's responsibility.
+
+Events contain only `cursor`, `agentId`, `sessionId`, `runId`, `source`, `origin`, `peerAgentId`, `startedAt`, `completedAt`, `durationMs` and `outcome`. They exclude messages, objectives, tool results, transcripts and credentials. Source/origin and incoming peer identity are Core-derived, not parsed from user prose. Completion is inserted alongside terminal continuity where that path is reached; admitted failures without a terminal commit receive best-effort records. A duplicate agent/run cannot publish a second completion.
+
+`context.agents.runs.activity({ agentIds? })` returns bounded `{ runs }` metadata with statuses `running`, `cancelling` and `response_pending`. The last means the model has retired but the HTTP answer has not finished. Notifications wait for HTTP finish and model retirement, but another wake can discover an already-readable row sooner. Include transport readiness in follow-on work policy. Activity is an observation, not a reservation. Completion rows are not time-pruned and a checkpoint does not delete them; operator-directed retention still needs an explicit lifecycle policy.

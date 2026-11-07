@@ -275,3 +275,14 @@ Checked **6 November 2026**:
 - Use **Load older messages** to inspect compacted chat within the current reset generation, or Archive for reset history. An invalidated cursor requires a fresh newest-page read. A loading conversation is not an empty conversation.
 - A stopped chat may still receive its requested Forge artifact after generation finishes. Inspect job success and `delivery.status` separately. Retry delivery with the original identity/key when appropriate rather than creating another paid job; a reset prevents delivery into the replacement generation.
 - Historical recall backfill now prepares projections before acquiring source/session locks and publishes under a separate 250ms cancellation budget. It uses a 60-second page preparation budget and shrinks timed-out pages, then grows after four full committed pages. Database cancellation/rollback can exceed the nominal publication budget; do not edit checksums or delete history to bypass progress.
+
+## Newer-source recovery checks
+
+Checked **7 November 2026**:
+
+- **Group message sent but refresh failed:** use **Retry refresh**. Do not resend an accepted message just to reload the transcript.
+- **Automatic reset outcome unknown:** inspect the exact account/credit outcome; do not remove its fence. Expiry or disappearance does not prove redemption. See [reset guidance](../guide/models.md#automatically-use-expiring-resets).
+- **Minion remains running after interruption:** `subagent_running_dispatch_state_uncertain` requires reconciliation of the exact child receipt. A reused record is not permission to repeat its external work.
+- **Continuation recap fails:** `continuation_summary_invalid` means the summary could not be safely used. `context_preparation_prompt_over_budget` means the irreducible request still cannot fit. These are not evidence that original conversation history was deleted.
+- **Schedule disabled after an invalid occurrence:** inspect its failed schedule receipt and correct the schedule deliberately. Other valid jobs continue; missed occurrences are not replayed.
+- **Mod disabled/uninstalled but skill sync warns:** inspect the completed mod transition separately from managed-skill health. A synchronization failure no longer implies rollback.

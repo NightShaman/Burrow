@@ -133,3 +133,9 @@ The changed preference, recall, embedding or shared-guidance contracts above wer
 ## Active chat scrollback after compaction
 
 Checked **6 November 2026**: active Chat pages through retained compacted predecessors in the current reset generation, with overlap deduplicated. **Load older messages** retrieves older display pages; **Jump to latest message** returns from scrolled-up history. This display projection does not reinsert recovered turns into model context. Explicit reset is a separate boundary, and retention/deletion still limits what can be recovered. Snapshot-bound cursors may become invalid after concurrent history changes; restart at the newest page rather than interpreting invalidation as lost history.
+
+## Same-run lossy recaps and operator search
+
+Checked **7 November 2026**: [active continuation compaction](../architecture/runtime.md#active-run-continuation-compaction) is a separate, request-local semantic recap of older assistant prose. It does not replace the durable compression/rotation behavior described above or delete retained originals. It can incur extra model calls; user tasks and steering remain explicit, while tool evidence uses protocol-safe projection rather than semantic summarization.
+
+Operator session search ranks an exact original-content phrase ahead of token-only matches before compacting and limiting results across sessions/agents. Returned snippets remain bounded and do not expose internal ranking scores. Agent `session_search` retains its separate retrieval ranking contract.

@@ -29,3 +29,9 @@ Development assembly now also publishes a versioned source archive of the exact 
 Current promotion packages the validated source trees inside a tar archive before the Actions artifact handoff. Uploading loose files at that boundary loses executable modes. After extraction, promotion verifies the recorded executable-file manifest and checks both Burrow and Node Goblin installers before publishing snapshots, assets or images.
 
 This fixes the packaging boundary for subsequent promotions; it does not repair an already downloaded tree or replace immutable older tags. If a native install fails because the downloaded source's `install.sh` is not executable, record the source version and inspect its file mode. Use a corrected, verified release snapshot rather than assuming that invoking the outer installer with `bash` repairs the downloaded source. See [installation troubleshooting](../operations/troubleshooting.md#downloaded-installer-is-not-executable).
+
+## Coordinated public promotion and tested image identity
+
+Checked **7 November 2026**: a change in the frozen source set now triggers one coordinated release of all configured public targets in dependency order, under a plain UTC `YYYY.MM.DD` identity. A release already published for that UTC day remains immutable; later changes wait for the next day. Components retain their own source and asset ownership. A Node Goblin change can trigger the coordinated release without moving its installers or archives into Burrow's release.
+
+The public Burrow image is smoke-tested, archived with its image ID and checksum, restored for publication and pushed without rebuilding. The tested local image ID and remote tag manifest digests are different identifiers; verify the recorded provenance rather than equating them. Publication remains separate from updating an installed instance.

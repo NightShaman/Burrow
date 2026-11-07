@@ -347,3 +347,13 @@ Startup does not scan or embed all retained history. Broad session recall remain
 Checked **6 November 2026** against Core `4e5a505c12b236ed394b09a577a2d583b409a69f`: additive migration **96** leaves 93–95 unchanged and scans no retained source rows. Structurally irrelevant records bypass expensive content folding/ranking while keeping logical identity, clock and eligibility, so newer ineligible occurrences still shadow older dialogue correctly. The lexical extractor preserves lossless JSON/Unicode handling without a content-length cutoff.
 
 Backfill prepares transaction-local projections before row locks, then uses a short parent-before-source publication window with version rechecks. Trigger projections win; changed unresolved occurrences retry the page instead of being skipped. Default preparation/page budget is 60 seconds, publication ownership budget 250ms, and inter-page yield 100ms. Timeout shrinks the active page size to a minimum of one; four consecutive committed full pages grow it by one toward configured `pageSize` (default 16). Status distinguishes `pageSize` and `activePageSize`. This is source review; no migration or database test was run.
+
+## 7 November migration additions
+
+| Version | Migration | Purpose |
+|---|---|---|
+| 97 | `openai-expiring-reset-claims` | Default-false connection preference and durable account/credit reset claims. |
+| 98 | `openai-reset-durable-outcomes` | Exact credit expiry, outcome and retry metadata plus per-attempt records; legacy claim-only rows retain unknown fences. |
+| 99 | `agent-run-completion-feed` | Durable bounded agent-run completion metadata for mod catch-up, without transcript content. |
+
+These additive application migrations were inspected against Core `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1`; this documentation run executed no database migration or application test. Existing published migration bodies remain unchanged. Use supported lifecycle operations, not direct edits to claims, completion cursors or the migration ledger.

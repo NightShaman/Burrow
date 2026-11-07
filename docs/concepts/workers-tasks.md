@@ -91,7 +91,7 @@ flowchart LR
 
 The scheduler's default interval is 30 seconds, and starting it also performs an immediate tick. Due-claim policy is owned by the store. Dispatch is asynchronous: `scheduled_jobs_run_now` returning successfully means a run was dispatched, not that it finished. Inspect `scheduled_job_runs` for the terminal result.
 
-Due claims are transactional and use row locks plus a unique job/occurrence identity. If the same job already has a `running` run, that due occurrence is recorded as `skipped`. A delayed tick advances the next occurrence from the current time; it does not replay every interval between ticks. At server startup, unfinished run records and past missed occurrences are marked `missed` before scheduling resumes, rather than replayed as a catch-up queue. These outcomes are different from a dispatched run that failed.
+Due claims are transactional and use row locks plus a unique job/occurrence identity. If the same job already has a `running` run, that due occurrence is recorded as `skipped`. A delayed tick advances the next occurrence from the current time; it does not replay every interval between ticks. At server startup, exact staged or runtime-owned terminal evidence can reconcile an interrupted run without invoking its prompt again. Unresolved interrupted runs and past missed occurrences are recorded as `missed`, not replayed as a catch-up queue. These outcomes are different from a dispatched run that failed.
 
 The scheduler validates model selection and mod-owner availability before dispatch. It prevents a second manual trigger while a running record is found. Cancelling a locally active run aborts its signal; stopping the scheduler timer does not itself cancel active runs.
 

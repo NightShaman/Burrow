@@ -138,3 +138,7 @@ Checked **5 November 2026**: **Installed mods → Refresh catalog** checks confi
 ## Temporary mod lifecycle directories
 
 Checked **6 November 2026**: discovery ignores distribution-owned backup/uninstall siblings matching the lifecycle naming contract, including uninstall recovery directories, even though those folders retain the original manifest. They are not separate installed mods. This does not authorize deleting recovery data or bypassing normal update/uninstall reconciliation. Ordinary installed-mod validation and duplicate-ID checks remain in force.
+
+## Mod transitions and skill synchronization
+
+Checked **7 November 2026**: an auxiliary managed-skill synchronization failure is reported separately and no longer rolls back a completed mod disable or uninstall. Inspect mod status and skill-sync health independently; do not assume a missing managed skill means the mod transition failed. Actual activation failures still reject the transition. See [managed skill guidance](skills-and-memory.md).

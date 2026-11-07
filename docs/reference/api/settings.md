@@ -176,3 +176,7 @@ Changed contracts above were checked statically against Backend `4057b50a5d5a9b1
 ## Retention form reads
 
 `GET /api/settings/retention` (and compatibility alias `GET /api/retention`) returns `{ok:true,policy,state}` from PostgreSQL, without scanning trace directories, resolving an execution context or computing a cleanup preview. PUT saves the policy and returns that same shape. Only the explicit `/preview` action computes deletion candidates. `/preview` and `/run` require the exact current policy snapshot; a stale or missing snapshot returns 409 `retention_policy_changed`. Opening Settings does not run cleanup.
+
+## Automatic expiring reset preference
+
+Checked **7 November 2026**: model-connection writes accept `autoUseExpiringResets`, returned on reads and defaulting to `false`. Only literal `true` enables it, and only for a direct OpenAI OAuth connection, not a logical load-balancer pool. The backend polls at startup and every minute for an available credit expiring within ten minutes. It requires stable account identity and a durable claim, then pins the exact credit/expiry. Definite rejection or `nothing_to_reset` may retry that same credit after one minute; ambiguous transport/provider outcomes preserve an account-wide unknown fence. See [operator controls and recovery](../../guide/models.md#automatically-use-expiring-resets). This is not a new HTTP route or a request to edit reset tables.

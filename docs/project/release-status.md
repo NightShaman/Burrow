@@ -101,3 +101,9 @@ The full page review remains dated **1 November**; unchanged pages retain that e
 Inspected assembly **2026.11.06.8**, commit `e8acb74a168970eb5dbfdd463745144976811b19`, records Core `4e5a505c12b236ed394b09a577a2d583b409a69f` and UI `aa759fbf429cebd5fe070d3eb28491f63bf5fc77`. This ordinary source delta reconciles retained compacted scrollback, captured context reports, provider explanation/copy fidelity, the inclusive five-hour pool headroom floor, bounded unavailable-pool waits, nonblocking recall rollout/migration 96, current chat navigation and native Forge wait/assistant delivery. The operator Forge HTTP surface remains asynchronous.
 
 The full-page review remains dated **1 November**. This is static source and test-file inspection with documentation checks, not executed application/provider tests, runtime deployment, release promotion or verification of an installed build. Menagerie remains a coming-soon placeholder.
+
+## 7 November ordinary delta review
+
+Inspected assembly **2026.11.07.5**, commit `c057b5e4369c9c2758c8a8ead784d59ff2e1a5db`, records Core `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1` and UI `9e53442cdb1c8bbb882195d9f3de10419938a6b2`. This pass reconciles enforced A2A default-session preferences, interrupted child admission, active continuation recaps, opt-in expiring OAuth resets and durable outcomes, mod completion/activity metadata, scheduler recovery, UI ownership/refresh warnings and application migrations 97–99. Managed-skill failure no longer undoes a completed mod disable/uninstall.
+
+Unchanged sections inherit the **1 November** full review. Source and test definitions were inspected statically; no application tests, provider calls, database migrations, runtime changes or release promotions were performed. Public mirrors and installed versions may lag these source pins. Menagerie now has a separately maintained public-release guide; older dated placeholder statements describe their original review date only.

@@ -138,3 +138,7 @@ Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-
 ## 27 October delta review
 
 Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4c9ec18266d4c09` on **2026-10-27**. This does not recertify unchanged historical sections or report live API/provider tests.
+
+## Scheduler outcome reconciliation
+
+Checked **7 November 2026**: the scheduler stages the exact terminal result before completing a run receipt. Restart reconciliation can use that staged result, an exact task terminal, or matching committed chat continuity, runtime receipt and assistant turn. Answer wording or a different session's latest result is not completion proof, and receipt-write failures do not turn a committed successful chat into a new execution failure. Without matching evidence, work is marked missed rather than automatically rerun. An invalid or unresolvable stored schedule is disabled with a failed schedule receipt so other jobs can continue; inspect and repair its schedule deliberately.
