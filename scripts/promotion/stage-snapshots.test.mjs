@@ -164,3 +164,10 @@ test('public skill stamping rejects missing or duplicate frontmatter versions be
     assert.equal(fs.existsSync(path.join(root, 'PUBLIC_RELEASE.json')), false);
   }
 });
+
+test('Burrow public assembly surface keeps smoke runner without development tests or workflows', () => {
+  const paths = TARGETS.burrow.paths;
+  assert.ok(paths.includes('scripts/assembly/packaged-smoke.mjs'));
+  assert.ok(!paths.includes('scripts/assembly'));
+  assert.ok(!paths.includes('.github/workflows/assemble.yml'));
+});

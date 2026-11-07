@@ -53,6 +53,8 @@ test('artifact handoff wraps the validated tree and checks restored executable m
 test('promotion changes run installer, assembly and promotion regressions on push and PR', () => {
   const installerWorkflow = readFileSync(new URL('../../.github/workflows/native-installer.yml', import.meta.url), 'utf8');
   assert.equal(installerWorkflow.match(/'scripts\/promotion\/\*\*'/g)?.length, 2);
+  assert.equal(installerWorkflow.match(/'scripts\/assembly\/\*\*'/g)?.length, 2);
+  assert.equal(installerWorkflow.match(/'\.github\/workflows\/assemble\.yml'/g)?.length, 2);
   assert.equal(installerWorkflow.match(/'\.github\/workflows\/daily-public-promotion\.yml'/g)?.length, 2);
   assert.match(installerWorkflow, /node --test scripts\/install\/\*\.test\.mjs scripts\/assembly\/\*\.test\.mjs scripts\/promotion\/\*\.test\.mjs/);
 });

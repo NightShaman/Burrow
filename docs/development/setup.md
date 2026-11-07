@@ -14,6 +14,28 @@ Backend/UI source repositories may require repository access. Do not infer acces
 
 For documentation-only work, use [the documentation workflow](documentation.md). Do not install or start the runtime simply to edit prose.
 
+## Checks available in a public assembled snapshot
+
+The public snapshot intentionally omits development assembly workflow tests and
+private workflow inputs. From its root, run the self-contained installer contracts:
+
+```sh
+node --test scripts/install/*.test.mjs
+```
+
+For an already built image matching that snapshot, the packaged smoke runner is:
+
+```sh
+node scripts/assembly/packaged-smoke.mjs IMAGE ASSEMBLED_ROOT
+```
+
+It requires Docker and creates/removes its own temporary container and volume;
+`ASSEMBLED_ROOT` is the absolute snapshot path. It checks runtime/source identity,
+served UI/API documentation and a disposable native install, not a live deployment.
+The full `scripts/assembly/*.test.mjs` contracts belong to the development
+assembly repository, where their private workflow inputs exist. The contributor
+commands below apply to the separate source repositories, not the public payload.
+
 ## Backend contributor environment
 
 Use Node24+ and npm. In an authorized Backend checkout:

@@ -1,10 +1,10 @@
 name: Native installer
 on:
   pull_request:
-    paths: ['install.sh', 'scripts/install/**', 'scripts/promotion/**', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
+    paths: ['install.sh', 'scripts/install/**', 'scripts/assembly/**', 'scripts/promotion/**', '.github/workflows/assemble.yml', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
   push:
     branches: [main]
-    paths: ['install.sh', 'scripts/install/**', 'scripts/promotion/**', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
+    paths: ['install.sh', 'scripts/install/**', 'scripts/assembly/**', 'scripts/promotion/**', '.github/workflows/assemble.yml', '.github/workflows/native-installer.yml', '.github/workflows/daily-public-promotion.yml']
 permissions:
   contents: read
 jobs:

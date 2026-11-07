@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 export const TARGETS = {
   burrow: {
-    paths: ['.github/workflows/docs.yml', '.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly', 'scripts/docs', 'scripts/install', 'ui'],
+    paths: ['.github/workflows/docs.yml', '.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly/packaged-smoke.mjs', 'scripts/docs', 'scripts/install', 'ui'],
     excludes: []
   },
   nodeGoblin: {
@@ -149,19 +149,7 @@ function stampBackdoor(root, version, sources) {
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
 }
 
-function stampTutor(root, version, sources) {
-  stampJson(path.join(root, 'burrow.mod.json'), version);
-  stampJson(path.join(root, 'package.json'), version);
-  writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
-}
-
-function stampTheater(root, version, sources) {
-  stampJson(path.join(root, 'burrow.mod.json'), version);
-  stampJson(path.join(root, 'package.json'), version);
-  writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
-}
-
-function stampSwitchboard(root, version, sources) {
+function stampSimpleMod(root, version, sources) {
   stampJson(path.join(root, 'burrow.mod.json'), version);
   stampJson(path.join(root, 'package.json'), version);
   writeJson(path.join(root, 'PUBLIC_RELEASE.json'), { schemaVersion: 1, releaseDate: version, sources });
@@ -185,9 +173,9 @@ export function stageSnapshots({ roots, outputRoot, releaseDate, sources }) {
   stampGss(staged.goblinSecretStore, releaseDate, sources);
   stampSkills(staged.burrowSkills, releaseDate, sources);
   stampBackdoor(staged.burrowBackdoor, releaseDate, sources);
-  stampTutor(staged.burrowTutor, releaseDate, sources);
-  stampTheater(staged.burrowTheater, releaseDate, sources);
-  stampSwitchboard(staged.burrowSwitchboard, releaseDate, sources);
+  stampSimpleMod(staged.burrowTutor, releaseDate, sources);
+  stampSimpleMod(staged.burrowTheater, releaseDate, sources);
+  stampSimpleMod(staged.burrowSwitchboard, releaseDate, sources);
   return staged;
 }
 

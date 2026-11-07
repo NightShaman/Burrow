@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const DATE = /^\d{4}\.\d{2}\.\d{2}$/;
 const SHA = /^[0-9a-f]{40}$/;
 
 export function utcReleaseDate(now = new Date()) {

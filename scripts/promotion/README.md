@@ -17,15 +17,15 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
 
 - Freeze exact 40-character development SHAs once per run.
 - Compare them with the last public `PUBLIC_RELEASE.json` manifest.
-- Release only changed targets, in dependency order, under one plain UTC
-  `YYYY.MM.DD` identity. Never allocate `.N` revisions.
-- A target already published that UTC day is immutable; later changes wait for
+- When any frozen source changes, release all targets together in dependency order
+  under one plain UTC `YYYY.MM.DD` identity. Never allocate `.N` revisions.
+- A coordinated release already published that UTC day is immutable; later changes wait for
   the next UTC day.
 - Public skill `SKILL.md` frontmatter versions are stamped with that same plain
   release date during staging, before validation and publication. Development
   `.N` authoring versions remain in NightShaman only. The four official skills
   must match their `PUBLIC_RELEASE.json`; only the version field is rewritten.
-- Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. Node Goblin changes do not create a Burrow release.
+- Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. A Node Goblin change triggers the coordinated release, including Burrow, without transferring asset ownership.
   Its checksum-validated release asset is built once from the frozen staged
   source and carried unchanged through the artifact boundary, with the public
   bootstrap's repository authority checked before publishing.
@@ -71,7 +71,11 @@ node --test scripts/promotion/*.test.mjs
 node scripts/promotion/validate-public-readiness.mjs ..
 ```
 
-`targets.json` declares dependency fingerprints. `plan.mjs` creates the
-immutable release plan. `stage-snapshots.mjs` materializes explicit public trees.
+`targets.json` describes target repositories, provenance source subsets and asset
+metadata. `plan.mjs` compares the complete frozen source set once: any change
+stages every target together (unless that UTC date is already published).
+Per-target fields are descriptive plan/artifact metadata, not independent
+publication gates; the workflow consumes the overall `publishable` decision
+and release date. `stage-snapshots.mjs` materializes explicit public trees.
 `publish-snapshot.sh` replaces only a destination snapshot and refuses to move an
 existing release tag.

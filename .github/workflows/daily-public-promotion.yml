@@ -28,7 +28,6 @@ jobs:
       publishable: ${{ steps.plan.outputs.publishable }}
       validation_required: ${{ steps.plan.outputs.validation_required }}
       release_date: ${{ steps.plan.outputs.release_date }}
-      ui_sha: ${{ steps.plan.outputs.ui_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,7 +90,6 @@ jobs:
           printf 'publishable=%s\n' "$publishable" >> "$GITHUB_OUTPUT"
           printf 'validation_required=%s\n' "$validation_required" >> "$GITHUB_OUTPUT"
           printf 'release_date=%s\n' "$(node -p "require('./plan.json').releaseDate")" >> "$GITHUB_OUTPUT"
-          printf 'ui_sha=%s\n' "$(node -p "require('./sources.json').burrowUi")" >> "$GITHUB_OUTPUT"
       - name: Expose frozen SHAs for checkouts
         if: steps.plan.outputs.validation_required == 'true'
         id: frozen
