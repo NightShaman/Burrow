@@ -1,0 +1,38 @@
+/* Shared skills in the four-column Settings frame. */
+.skill-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--text);
+  font-size: 13px;
+}
+.settings-prototype-overflow > .setting-section {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Keep connection/model controls together; wrap based on available column width. */
+.field-pair.provider-model-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  min-width: 0;
+  align-items: start;
+}
+.provider-model-fields > .field,
+.provider-model-fields select {
+  min-width: 0;
+  width: 100%;
+}
+.dream-schedule-fields > .provider-model-fields,
+.curator-model-row > .provider-model-fields {
+  grid-column: 1/-1;
+}
+
+/* Compact checkbox rows: never inherit text-field sizing or stack the label. */
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}

@@ -2,11 +2,12 @@ import { PostgresProviderPoolMetrics } from './postgres-provider-pool-metrics.mj
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
-import {
-  assertConnection, canonicalizeOauthConnection, decrypt, encrypt, normalizeAuth, mergeOpenAiOAuthTokens,
-  publicConnection, secretPreview, normalizeModels, mergeModelMetadata, normalizeReasoningEffort, normalizeTemperature, assertIdentity,
-  refreshAnthropicOauth, discoverModels, isProviderPool, assertProviderPoolMembers, providerPoolModels, modelSettingsFailureDiagnostic,
-} from './model-settings-store.mjs';
+import { decrypt, encrypt } from './model-secret-codec.mjs';
+import { assertConnection, publicConnection, normalizeModels, mergeModelMetadata, normalizeReasoningEffort, normalizeTemperature, assertIdentity } from './model-settings-normalization.mjs';
+import { canonicalizeOauthConnection, normalizeAuth, mergeOpenAiOAuthTokens, secretPreview, refreshAnthropicOauth } from './model-settings-auth.mjs';
+import { isProviderPool, assertProviderPoolMembers, providerPoolModels } from './provider-pool-settings.mjs';
+import { discoverModels } from './model-catalog-service.mjs';
+import { modelSettingsFailureDiagnostic } from './model-settings-diagnostics.mjs';
 import { refreshOpenAiOAuth } from './openai-oauth-login.mjs';
 import { operationalEvent } from './operational-log.mjs';
 import { isAnthropicMessagesConnection, normalizeAnthropicThinkingMode, validateAnthropicThinkingSelection } from './anthropic-model-capabilities.mjs';

@@ -1,0 +1,26 @@
+/* Execution boundaries inventory selects the editor without nesting an interactive card. */
+.boundary-inventory-select {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.boundary-inventory-select:hover strong {
+  text-decoration: underline;
+}
+.boundary-inventory-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.boundary-inventory-select strong,
+.boundary-inventory-select small {
+  overflow-wrap: anywhere;
+}

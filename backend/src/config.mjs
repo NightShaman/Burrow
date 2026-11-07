@@ -1,4 +1,4 @@
-import { isProviderPool, assertProviderPoolMembers } from './model-settings-store.mjs';
+import { isProviderPool, assertProviderPoolMembers } from './provider-pool-settings.mjs';
 import { createProviderUsageService } from './provider-usage-service.mjs';
 import path from 'node:path';
 import { normalizeContextCompressionConfig } from './context-compression.mjs';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { safeOperationalError } from './runtime-server-log.mjs';
-import { modelSettingsFailureDiagnostic } from './model-settings-store.mjs';
+import { modelSettingsFailureDiagnostic } from './model-settings-diagnostics.mjs';
 import { modelRecoveryProgress, projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 
 const responses = new WeakMap();

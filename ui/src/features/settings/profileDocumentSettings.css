@@ -1,0 +1,57 @@
+/* Global profile document composition */
+.profile-document-overflow textarea,
+.profile-documents-content textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.profile-global-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.profile-global-controls legend {
+  margin-bottom: 7px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.profile-global-controls label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  cursor: pointer;
+}
+.profile-global-controls input {
+  margin-top: 1px;
+}
+.profile-global-controls strong,
+.profile-global-controls small {
+  display: block;
+}
+.profile-global-controls strong {
+  font-size: 12px;
+}
+.profile-global-controls small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.profile-global-controls:disabled label {
+  cursor: default;
+}

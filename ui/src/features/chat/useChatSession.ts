@@ -1,80 +1,51 @@
+import { useConversationAuthority } from './useConversationAuthority';
+import { useConversationSelection } from './useConversationSelection';
+import { useConversationRevalidation } from './useConversationRevalidation';
 import { useChatRecovery } from './useChatRecovery';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { clientBudgets } from '../../app/clientBudgets';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useChatComposer } from './useChatComposer';
 import {
-  api,
   textFromChatValue,
-  type ChatSession,
   type SessionSummary,
   type SessionTurn,
   type ToolActivity,
 } from '../../app/api';
-import {
-  conversationCacheGeneration,
-  conversationCacheInvalidated,
-  conversationCacheKey,
-  readConversationCache,
-  writeConversationCache,
-  type ConversationCache,
-} from './chatConversationCache';
-import { cachedTurnsForSession, reconcileSessionTurns } from './chatTurnReconciliation';
+import { conversationCacheGeneration, conversationCacheKey } from './chatConversationCache';
 import { finalizeThoughtProgress } from './chatThoughtProgress';
 import { chatTerminalMetadata } from './chatTerminal';
-import { createChatSessionRepository, readSessionListCache } from './chatSessionRepository';
+import { readSessionListCache } from './chatSessionRepository';
 
 export { conversationCacheKey } from './chatConversationCache';
 
 /** Owns conversation freshness, navigation, and runtime reconciliation. */
 export function useChatSession(selectedAgentId: string) {
-  const sessionRepository = useMemo(() => createChatSessionRepository(), []);
-  const [olderState, setOlderState] = useState<{ key: string; hasMore: boolean; loading: boolean }>(
-    { key: '', hasMore: false, loading: false },
-  );
-  const olderRequest = useRef<object | null>(null);
-  const olderBySession = useRef(new Map<string, boolean>());
-  // A read may finish after navigation. Only its caller, after validating its
-  // scope, may change the pagination state of the displayed conversation.
-  const loadSession = useCallback(
-    (agentId: string, id: string) => sessionRepository.loadSession(agentId, id),
-    [sessionRepository],
-  );
-  const navigationReads = useRef(new Map<string, Promise<ChatSession>>());
-  const loadNavigationSession = useCallback(
-    (agentId: string, id: string) => {
-      const key = JSON.stringify([conversationCacheGeneration, agentId, id]);
-      const existing = navigationReads.current.get(key);
-      if (existing) return existing;
-      const pending = loadSession(agentId, id);
-      navigationReads.current.set(key, pending);
-      void pending
-        .finally(() => {
-          if (navigationReads.current.get(key) === pending) navigationReads.current.delete(key);
-        })
-        .catch(() => undefined);
-      return pending;
-    },
-    [loadSession],
-  );
-  const showOlderState = useCallback((agentId: string, id: string, session: ChatSession) => {
-    olderBySession.current.set(conversationCacheKey(agentId, id), Boolean(session.hasMore));
-    if (selectedChatRef.current.agentId !== agentId || selectedChatRef.current.sessionId !== id)
-      return;
-    setOlderState({
-      key: conversationCacheKey(agentId, id),
-      hasMore: Boolean(session.hasMore),
-      loading: olderRequest.current !== null,
-    });
-  }, []);
+  const [sessionId, setSessionId] = useState('');
+  const authority = useConversationAuthority(() => setTurns([]), selectedAgentId, sessionId);
+  const {
+    commitSnapshot,
+    appendLocalTurn,
+    resetSnapshot,
+    sessionRepository,
+    loadSession,
+    navigationReads,
+    loadNavigationSession,
+    pendingTurnsRef,
+    conversationCacheRef,
+    reconcileSnapshot,
+    liveSnapshots,
+    staleSnapshots,
+    rememberLiveSnapshot,
+    olderState,
+    showOlderState,
+    restoreOlderState,
+  } = authority;
   const [isNewSession, setIsNewSession] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [sessionId, setSessionId] = useState('');
   const [turns, setTurns] = useState<SessionTurn[]>([]);
   const attachmentKey = JSON.stringify([selectedAgentId, sessionId]);
   const attachmentScopeRef = useRef({ key: attachmentKey });
   if (attachmentScopeRef.current.key !== attachmentKey) {
     attachmentScopeRef.current = { key: attachmentKey };
-    olderRequest.current = null;
   }
   const attachmentScope = attachmentScopeRef.current;
   const isAttachmentScopeCurrent = useCallback(
@@ -95,55 +66,6 @@ export function useChatSession(selectedAgentId: string) {
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const childSessionsRef = useRef(new Set<string>());
   const [, setToolActivityVersion] = useState(0);
-  const pendingTurnsRef = useRef(new Map<string, SessionTurn[]>());
-  const conversationCacheRef = useRef<ConversationCache>({});
-  // Local turns bridge persistence lag only until the server acknowledges each
-  // run/role. Completing a stream is not a transcript acknowledgement.
-  const reconcileSnapshot = useCallback(
-    (cacheKey: string, session: ChatSession, cachedTurns: SessionTurn[]) => {
-      const pending = cachedTurnsForSession(session, pendingTurnsRef.current.get(cacheKey) ?? []);
-      const next = reconcileSessionTurns(session, cachedTurns, pending);
-      const acknowledged = new Set(
-        (session.turns ?? []).map((turn) => `${turn.runId}:${turn.role}`),
-      );
-      const remaining = pending.filter((turn) => !acknowledged.has(`${turn.runId}:${turn.role}`));
-      if (remaining.length) pendingTurnsRef.current.set(cacheKey, remaining);
-      else pendingTurnsRef.current.delete(cacheKey);
-      return next;
-    },
-    [],
-  );
-  // Disk snapshots are restoration/reconciliation input only. Only snapshots
-  // confirmed during this mounted workspace can paint an instant return.
-  const liveSnapshots = useRef(new Map<string, string>());
-  const staleSnapshots = useRef(new Set<string>());
-  const rememberLiveSnapshot = useCallback((key: string, version: string) => {
-    liveSnapshots.current.delete(key);
-    liveSnapshots.current.set(key, version);
-    staleSnapshots.current.delete(key);
-    while (liveSnapshots.current.size > clientBudgets.conversationCacheEntries) {
-      const oldest = liveSnapshots.current.keys().next().value!;
-      liveSnapshots.current.delete(oldest);
-      staleSnapshots.current.delete(oldest);
-    }
-  }, []);
-  const cacheInitialized = useRef(false);
-  if (!cacheInitialized.current) {
-    conversationCacheRef.current = readConversationCache();
-    cacheInitialized.current = true;
-  }
-  useEffect(() => {
-    const invalidate = () => {
-      conversationCacheRef.current = {};
-      pendingTurnsRef.current.clear();
-      liveSnapshots.current.clear();
-      staleSnapshots.current.clear();
-      olderBySession.current.clear();
-      setTurns([]);
-    };
-    window.addEventListener(conversationCacheInvalidated, invalidate);
-    return () => window.removeEventListener(conversationCacheInvalidated, invalidate);
-  }, []);
   // Track the displayed session separately from each agent’s return anchor.
   // A child selection must not replace the root used when returning to its agent.
   const sessionIdByAgentRef = useRef<Record<string, string>>({});
@@ -224,8 +146,7 @@ export function useChatSession(selectedAgentId: string) {
         return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
       });
       rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
-      conversationCacheRef.current[cacheKey] = nextTurns;
-      writeConversationCache(conversationCacheRef.current, cacheKey);
+      commitSnapshot(cacheKey, nextTurns);
       if (current()) showOlderState(selectedAgentId, sessionId, session);
       if (
         current() &&
@@ -360,12 +281,7 @@ export function useChatSession(selectedAgentId: string) {
       cachedTurns !== undefined;
     setTurns(live ? cachedTurns : []);
     setIsLoadingConversation(!live);
-    if (live)
-      setOlderState({
-        key: cacheKey,
-        hasMore: olderBySession.current.get(cacheKey) ?? false,
-        loading: false,
-      });
+    if (live) restoreOlderState(cacheKey);
     // Background/session hydration must not erase a reported failure.
     loadNavigationSession(selectedAgentId, sessionId)
       .then((session) => {
@@ -381,8 +297,7 @@ export function useChatSession(selectedAgentId: string) {
           conversationCacheRef.current[cacheKey] ?? [],
         );
         rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
-        conversationCacheRef.current[cacheKey] = nextTurns;
-        writeConversationCache(conversationCacheRef.current, cacheKey);
+        commitSnapshot(cacheKey, nextTurns);
         showOlderState(selectedAgentId, sessionId, session);
         setTurns(nextTurns);
       })
@@ -432,8 +347,7 @@ export function useChatSession(selectedAgentId: string) {
           : normalizedTurn;
       });
       rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
-      conversationCacheRef.current[cacheKey] = nextTurns;
-      writeConversationCache(conversationCacheRef.current, cacheKey);
+      commitSnapshot(cacheKey, nextTurns);
       showOlderState(agentId, targetSessionId, session);
       const current = selectedChatRef.current;
       if (current.agentId === agentId && current.sessionId === targetSessionId) setTurns(nextTurns);
@@ -441,179 +355,32 @@ export function useChatSession(selectedAgentId: string) {
     [selectedAgentId, sessionId, sessionRepository],
   );
 
-  // Keep visited transcripts warm even while another agent is selected. The
-  // incremental session listing is a coarse invalidation signal, never a
-  // transcript revision. Re-read changed conversations through the same owner
-  // used by navigation/recovery, with generation and local-write guards.
-  useEffect(() => {
-    let stopped = false;
-    let timer: number | undefined;
-    // Use server timestamps, not the browser clock. Scope the lightweight
-    // invalidation reads to visited agents rather than enumerate every agent.
-    const poll = async () => {
-      const generation = conversationCacheGeneration;
-      try {
-        if (!liveSnapshots.current.size) return;
-        const agents = [
-          ...new Set(
-            Object.keys(conversationCacheRef.current)
-              .filter((key) => liveSnapshots.current.has(key))
-              .map((key) => key.slice(0, key.indexOf(':'))),
-          ),
-        ];
-        await Promise.all(
-          agents.map(async (agentId) => {
-            try {
-              if (stopped || generation !== conversationCacheGeneration) return;
-              const versions = [...liveSnapshots.current.entries()]
-                .filter(([key, version]) => key.startsWith(`${agentId}:`) && version)
-                .map(([, version]) => version)
-                .sort();
-              const oldest = Date.parse(versions[0] ?? '');
-              const since = Number.isFinite(oldest)
-                ? new Date(oldest - 1).toISOString()
-                : '1970-01-01T00:00:00.000Z';
-              const { sessions: changed } = await api<{ sessions: SessionSummary[] }>(
-                `/api/sessions?agentId=${encodeURIComponent(agentId)}&updatedSince=${encodeURIComponent(since)}`,
-              );
-              if (stopped || generation !== conversationCacheGeneration) return;
-              for (const summary of changed) {
-                const key = conversationCacheKey(agentId, summary.id);
-                const version = liveSnapshots.current.get(key);
-                if (version === undefined || (summary.updatedAt && summary.updatedAt === version))
-                  continue;
-                const cached = conversationCacheRef.current[key];
-                // Mark known-stale memory before awaiting the fresh page. Selecting
-                // it in this interval must not display the obsolete snapshot.
-                staleSnapshots.current.add(key);
-                try {
-                  const session = await loadNavigationSession(agentId, summary.id);
-                  if (stopped || generation !== conversationCacheGeneration) return;
-                  if (conversationCacheRef.current[key] !== cached) continue;
-                  const next = reconcileSnapshot(key, session, cached ?? []);
-                  conversationCacheRef.current[key] = next;
-                  rememberLiveSnapshot(key, session.metadata?.updatedAt ?? summary.updatedAt ?? '');
-                  writeConversationCache(conversationCacheRef.current, key);
-                  showOlderState(agentId, summary.id, session);
-                  const current = selectedChatRef.current;
-                  if (current.agentId === agentId && current.sessionId === summary.id) {
-                    setTurns(next);
-                    setIsLoadingConversation(false);
-                  }
-                } catch {
-                  // Keep invalidated entries retryable without presenting them as fresh.
-                  throw new Error('Background transcript refresh failed');
-                }
-              }
-            } catch {
-              // A failed agent read must not stall other visited conversations.
-            }
-          }),
-        );
-      } catch {
-        // Navigation owns visible errors. Versions remain unchanged for retry.
-      } finally {
-        if (!stopped) timer = window.setTimeout(poll, 2000);
-      }
-    };
-    timer = window.setTimeout(poll, 2000);
-    return () => {
-      stopped = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [loadNavigationSession, reconcileSnapshot, showOlderState, rememberLiveSnapshot]);
+  useConversationRevalidation({
+    authority,
+    showOlderState,
+    selectedChatRef,
+    setTurns,
+    setIsLoadingConversation,
+  });
 
-  const loadOlder = useCallback(async () => {
-    if (olderRequest.current || !selectedAgentId || !sessionId) return;
-    const scope = attachmentScopeRef.current;
-    const cacheKey = conversationCacheKey(selectedAgentId, sessionId);
-    const generation = conversationCacheGeneration;
-    const request = {};
-    olderRequest.current = request;
-    setOlderState((current) => ({ ...current, loading: true }));
-    try {
-      const session = await sessionRepository.loadOlder(selectedAgentId, sessionId);
-      if (
-        attachmentScopeRef.current !== scope ||
-        olderRequest.current !== request ||
-        generation !== conversationCacheGeneration
-      )
-        return;
-      const next = reconcileSnapshot(
-        cacheKey,
-        session,
-        conversationCacheRef.current[cacheKey] ?? [],
-      );
-      conversationCacheRef.current[cacheKey] = next;
-      writeConversationCache(conversationCacheRef.current, cacheKey);
-      setTurns(next);
-      showOlderState(selectedAgentId, sessionId, session);
-    } catch (error) {
-      if (attachmentScopeRef.current === scope)
-        setChatError(`Could not load older messages: ${(error as Error).message}`);
-    } finally {
-      if (attachmentScopeRef.current === scope && olderRequest.current === request) {
-        olderRequest.current = null;
-        setOlderState((current) => ({ ...current, loading: false }));
-      }
-    }
-  }, [selectedAgentId, sessionId, sessionRepository]);
+  const loadOlder = useCallback(
+    () => authority.loadOlder(selectedAgentId, sessionId, setTurns, setChatError),
+    [selectedAgentId, sessionId, authority.loadOlder],
+  );
 
-  const selectSession = useCallback(
-    (targetSessionId: string, targetAgentId = selectedAgentId) => {
-      clearActivity();
-      if (
-        !targetAgentId ||
-        !targetSessionId ||
-        (targetAgentId === selectedAgentId && targetSessionId === sessionId)
-      )
-        return;
-      // Remember explicit choices before React state changes so concurrent list
-      // refreshes cannot restore the previous session.
-      sessionIdByAgentRef.current[targetAgentId] = targetSessionId;
-      parentSessionIdByAgentRef.current[targetAgentId] = targetSessionId;
-      setSessionId(targetSessionId);
-      setTurns([]);
-      setIsLoadingConversation(true);
-      setIsNewSession(false);
-    },
-    [selectedAgentId, sessionId, clearActivity],
-  );
-  const prepareAgentSelection = useCallback(
-    (agentId: string) => {
-      clearActivity();
-      // Return to this agent’s remembered parent/root anchor, not the child.
-      const targetSessionId = parentSessionIdByAgentRef.current[agentId] ?? '';
-      // Clicking the already displayed parent is not navigation. Clearing it
-      // would leave an unchanged effect dependency waiting for a new request.
-      if (agentId === selectedAgentId && targetSessionId === sessionId) return;
-      if (targetSessionId) sessionIdByAgentRef.current[agentId] = targetSessionId;
-      else delete sessionIdByAgentRef.current[agentId];
-      setSessionId(targetSessionId);
-      setTurns([]);
-      setIsLoadingConversation(true);
-      setIsNewSession(false);
-    },
-    [clearActivity, selectedAgentId, sessionId],
-  );
-  const selectChildSession = useCallback(
-    (agentId: string, childSessionId: string, rootSessionId?: string | null) => {
-      if (agentId === selectedAgentId && childSessionId === sessionId) return;
-      clearActivity();
-      childSessionsRef.current.add(conversationCacheKey(agentId, childSessionId));
-      if (rootSessionId) parentSessionIdByAgentRef.current[agentId] = rootSessionId;
-      sessionIdByAgentRef.current[agentId] = childSessionId;
-      setSessionId(childSessionId);
-      setTurns([]);
-      setIsLoadingConversation(true);
-      setIsNewSession(false);
-    },
-    [clearActivity, selectedAgentId, sessionId],
-  );
-  const parentSessionIdForAgent = useCallback(
-    (agentId: string) => parentSessionIdByAgentRef.current[agentId] || 'default',
-    [],
-  );
+  const { selectSession, prepareAgentSelection, selectChildSession, parentSessionIdForAgent } =
+    useConversationSelection({
+      selectedAgentId,
+      sessionId,
+      clearActivity,
+      childSessionsRef,
+      sessionIdByAgentRef,
+      parentSessionIdByAgentRef,
+      setSessionId,
+      setTurns,
+      setIsLoadingConversation,
+      setIsNewSession,
+    });
   const resetSession = useCallback(async () => {
     if (!selectedAgentId) return false;
     const resetSessionId = sessionId || 'default';
@@ -626,10 +393,7 @@ export function useChatSession(selectedAgentId: string) {
     setSessionId(resetSessionId);
     sessionIdByAgentRef.current[selectedAgentId] = resetSessionId;
     const cacheKey = conversationCacheKey(selectedAgentId, resetSessionId);
-    pendingTurnsRef.current.delete(cacheKey);
-    liveSnapshots.current.delete(cacheKey);
-    conversationCacheRef.current[cacheKey] = [];
-    writeConversationCache(conversationCacheRef.current, cacheKey);
+    resetSnapshot(cacheKey);
     setTurns([]);
     setIsNewSession(true);
     setChatError('');
@@ -641,16 +405,7 @@ export function useChatSession(selectedAgentId: string) {
   }, [isNewSession]);
   const appendTurn = useCallback((agentId: string, targetSessionId: string, turn: SessionTurn) => {
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
-    if (turn.runId && (turn.role === 'user' || turn.role === 'assistant'))
-      pendingTurnsRef.current.set(cacheKey, [
-        ...(pendingTurnsRef.current.get(cacheKey) ?? []).filter(
-          (pending) => pending.runId !== turn.runId || pending.role !== turn.role,
-        ),
-        turn,
-      ]);
-    const nextTurns = [...(conversationCacheRef.current[cacheKey] ?? []), turn];
-    conversationCacheRef.current[cacheKey] = nextTurns;
-    writeConversationCache(conversationCacheRef.current, cacheKey);
+    const nextTurns = appendLocalTurn(cacheKey, turn);
     if (
       selectedChatRef.current.agentId === agentId &&
       selectedChatRef.current.sessionId === targetSessionId
@@ -688,8 +443,7 @@ export function useChatSession(selectedAgentId: string) {
     // are invalid; removing the user turn here can make the request blink away.
     const nextTurns = cachedTurns.filter((turn) => turn.runId !== runId || turn.role === 'user');
     if (nextTurns.length !== cachedTurns.length) {
-      conversationCacheRef.current[cacheKey] = nextTurns;
-      writeConversationCache(conversationCacheRef.current, cacheKey);
+      commitSnapshot(cacheKey, nextTurns);
       if (
         selectedChatRef.current.agentId === agentId &&
         selectedChatRef.current.sessionId === targetSessionId

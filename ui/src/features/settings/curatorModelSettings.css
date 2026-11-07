@@ -1,0 +1,22 @@
+.curator-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr);
+  align-items: end;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .curator-model-row {
+    grid-template-columns: 1fr;
+  }
+}
+.curator-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.55fr);
+  align-items: end;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .curator-model-row {
+    grid-template-columns: 1fr;
+  }
+}

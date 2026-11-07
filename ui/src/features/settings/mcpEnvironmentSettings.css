@@ -1,0 +1,37 @@
+.mcp-environment {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.mcp-environment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mcp-environment-heading strong {
+  font-size: 12px;
+}
+.mcp-environment-heading .secondary {
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.mcp-environment-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.5fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.mcp-environment-row input {
+  min-width: 0;
+}
+@media (max-width: 620px) {
+  .mcp-environment-row {
+    grid-template-columns: 1fr auto;
+  }
+  .mcp-environment-row input:first-child {
+    grid-column: 1/-1;
+  }
+}
+
+/* MCP diagnostics are backend-redacted operator feedback, never tool payloads. */

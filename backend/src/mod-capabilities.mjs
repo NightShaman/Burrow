@@ -5,7 +5,7 @@ import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModel
 import { createModelAdapter } from './model-adapter.mjs';
 import { normalizeExternalTurnAttachments } from './mod-external-turn-attachments.mjs';
 import { normalizeModAgent } from './agent-registry.mjs';
-import { assertIdentity } from './model-settings-store.mjs';
+import { assertIdentity } from './model-settings-normalization.mjs';
 
 function invalid() { throw new Error('mod_capability_input_invalid'); }
 function bounded(value, max) { if (typeof value !== 'string' || !value || value.length > max) invalid(); return value; }

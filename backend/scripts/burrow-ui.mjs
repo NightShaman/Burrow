@@ -1,11 +1,16 @@
 #!/usr/bin/env node
+import { createImportExportApplication } from './ui/import-export-application.mjs';
+import { createModelConnectionService } from './ui/model-connection-service.mjs';
+import { createMcpConnectionService } from './ui/mcp-connection-service.mjs';
+import { createChatSessionService, publicChatProgress } from './ui/chat-session-service.mjs';
+import { createModLifecycleService } from './ui/mod-lifecycle-service.mjs';
 import { createPostgresOpenAiResetStore } from '../src/postgres-openai-reset-store.mjs';
 import { startOpenAiResetScheduler } from '../src/openai-reset-scheduler.mjs';
 import { activeSessionDetail } from './ui/active-session-detail.mjs';
 import { assertModAgentAvailable } from '../src/mod-agent-runtime.mjs';
 import { createAgentReferenceImageRoutes, createModReferenceImageContentRoute, createOperatorReferenceImageRoutes } from './ui/agent-reference-image-routes.mjs';
 import { createBoardTaskExecutor } from '../src/task-execution.mjs';
-import { chatResultMetadata } from '../src/chat-result-metadata.mjs';
+
 import { compactChatTurn } from '../src/compact-chat-turn.mjs';
 import { createArchiveReadProcess } from './ui/archive-read-process.mjs';
 import { createArchiveAgentContext } from './ui/archive-agent-context.mjs';
@@ -15,7 +20,7 @@ import { createCompletionEventSettings } from '../src/completion-event-settings.
 import { createCompletionEventRunner } from '../src/completion-event-runner.mjs';
 import { createCompletionEventRoutes } from './ui/completion-event-routes.mjs';
 import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs';
-import { readDreamPromotion, saveDreamPromotion } from '../src/dream-promotion-settings.mjs';
+
 import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
 import { createModTextGenerator } from '../src/mod-capabilities.mjs';
@@ -26,10 +31,9 @@ import { createProviderUsageService } from '../src/provider-usage-service.mjs';
 import { createBackgroundLifecycle, createCoordinatedShutdown } from '../src/background-lifecycle.mjs';
 import { SkillGitSync } from '../src/skill-git-sync.mjs';
 import { createSkillSourceRoutes } from './ui/skill-source-routes.mjs';
-import { performance } from 'node:perf_hooks';
-import { createChatStreamDelta } from '../src/chat-stream-delta.mjs';
-import { applyModelRecoveryProgress, modelRecoveryProgress } from '../src/model-recovery-projection.mjs';
-import { beginSessionAdmissionSupersession, finishSessionAdmissionSupersession, serializeSessionAdmission } from '../src/session-admission.mjs';
+
+import { applyModelRecoveryProgress } from '../src/model-recovery-projection.mjs';
+
 import { createBrainRoutes } from './ui/brain-routes.mjs';
 import { createArchiveService } from './ui/archive-service.mjs';
 import { completeSetupOperation } from '../src/setup-operation.mjs';
@@ -47,7 +51,7 @@ import { acquirePostgresRuntimeOwnership } from '../src/postgres-runtime-ownersh
 import { readJsonBody } from '../src/request-resource-budgets.mjs';
 import { operatorTimezone, saveOperatorTimezone } from '../src/timezone.mjs';
 import { ensureDefaultGlobalWorkspace } from '../src/runtime-workspace-defaults.mjs';
-import { publishModTools } from '../src/mod-agent-tools.mjs';
+
 import { diagnosticMods, modJobs, pendingModOperations } from '../src/mod-diagnostics.mjs';
 import { forgeDiagnosticJobs, forgeDiagnosticJob, postgresDiagnostic } from '../src/forge-diagnostic-summary.mjs';
 import { brainDiagnosticSummary, brainDiagnosticMemories, brainDiagnosticEmbeddingJobs } from '../src/brain-diagnostic-summary.mjs';
@@ -59,24 +63,22 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectSessionContext, inspectSessionContextStatus } from '../src/context-engine.mjs';
-import { runSessionCompression } from '../src/session-compression.mjs';
-import { conversationAuthority } from '../src/conversation-authority.mjs';
-import { buildSessionEntry } from '../src/session-entry.mjs';
+
 import { serializeSessionExecution } from '../src/app-runtime.mjs';
-import { createTraceLogger } from '../src/trace-logger.mjs';
+
 import { activeConversationLimits } from '../src/context-preparation.mjs';
-import { beginRuntimeSessionExecutionSupersession, chatTurnInputFromBody, createChatTurnRunId, finishRuntimeSessionExecutionSupersession, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, chatTurnProgressResponse, chatTurnErrorResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
+import { createChatTurnRunId, runChatTurnFromBody, runChatTurnFromWorkbenchContinuation, chatTurnResponse, loadRuntimeConfig } from '../src/chat-turn-controller.mjs';
 import { resolveModelConfig, resolveRuntimeTracePath, resolveRuntimeTraceRoot } from '../src/config.mjs';
 import { API_TOKEN_SCOPES } from '../src/api-token-store.mjs';
 import { loadEffectiveSkillCatalog, skillManifest } from '../src/skill-catalog.mjs';
 import { collectTraceObservability } from '../src/trace-observability.mjs';
 import { listSubagentRecords, subagentVisibilitySummary } from '../src/subagent-store.mjs';
-import { readMinionSettings, saveMinionSettings } from '../src/minion-depth.mjs';
+import { readMinionSettings } from '../src/minion-depth.mjs';
 import { projectSubagentTree, sessionMinionAncestry } from '../src/subagent-projection.mjs';
 import { buildContinuityHandoff } from '../src/continuity-handoff-store.mjs';
 import { createRecoveryContinuationScheduler } from '../src/recovery-continuation-runner.mjs';
 import { recordActiveRunInterruptions } from '../src/interrupted-run-recovery.mjs';
-import { postgresContinuity } from '../src/postgres-continuity.mjs';
+
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
@@ -93,13 +95,11 @@ import { createExecutionProviderRegistry } from '../src/process-execution-router
 import { buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
-import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, isProviderPool, assertConnection, assertProviderPoolMembers, providerPoolModels, normalizeModels, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
-import { claudeCredentialAuthPayload, detectClaudeCliCredential } from '../src/claude-cli-credentials.mjs';
-import { cancelClaudeCodeLogin, getClaudeCodeLogin, importClaudeCodeLoginCredential, startClaudeCodeLogin, submitClaudeCodeLoginCode } from '../src/claude-code-login.mjs';
-import { cancelOpenAiOAuthLogin, getOpenAiOAuthLogin, startOpenAiOAuthLogin, submitOpenAiOAuthCode } from '../src/openai-oauth-login.mjs';
-import { curatorRoot, curatorRuntimeStatus, readCuratorSelection, saveCuratorSelection } from '../src/curator-runtime.mjs';
+import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
+
+import { curatorRoot, curatorRuntimeStatus, saveCuratorSelection } from '../src/curator-runtime.mjs';
 import { agentRuntimeContext, ensureAgentRoots } from '../src/agent-registry.mjs';
-import { AGENT_PROFILE_KINDS } from '../src/agent-profile-store.mjs';
+
 import { consolidateDreamMemoryAsync } from '../src/dream-memory-consolidator.mjs';
 import { createDreamCycleScheduler, runDreamCycle } from '../src/dream-cycle-runner.mjs';
 import { createTiddleScheduler, listTiddleCards, tiddleHistory, tiddleStatus } from '../src/tiddle-continuity.mjs';
@@ -109,19 +109,19 @@ import { TASK_PRIORITIES, TASK_STATUSES } from '../src/task-board-store.mjs';
 import { createScheduledJobScheduler } from '../src/scheduled-job-scheduler.mjs';
 import { createModExternalTurnDispatcher } from '../src/mod-external-turns.mjs';
 import { backgroundSchedulersEnabled } from '../src/background-scheduler-policy.mjs';
-import { diagnoseMcpConnection as diagnoseMcpConnectionRuntime, discoverMcpTools, configureMcpProviderStateStore, hydrateMcpProviderStates, reconcilePersistentMcpConnection } from '../src/mcporter-adapter.mjs';
+import { configureMcpProviderStateStore, hydrateMcpProviderStates } from '../src/mcporter-adapter.mjs';
 import { createRuntimeMetricsCollector } from '../src/runtime-metrics.mjs';
 import { createRuntimeServerLogger, safeOperationalError } from '../src/runtime-server-log.mjs';
 import { operationalEvent } from '../src/operational-log.mjs';
 import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, observeModelRecovery, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
-import { BASIC_SESSION_COOKIE, basicCredentials, parseCookieHeader, planUiAuthSettings, safeUiAuthSettings, setBasicSessionCookie, verifyBasicSessionCookie, verifyScryptPassword, createUiAuthService } from '../src/ui-auth-service.mjs';
+import { BASIC_SESSION_COOKIE, basicCredentials, parseCookieHeader, setBasicSessionCookie, verifyBasicSessionCookie, verifyScryptPassword, createUiAuthService } from '../src/ui-auth-service.mjs';
 import { logAuthFailure, startAuthLoginTelemetry, observeAuthEnvironmentOverride } from '../src/ui-auth-diagnostics.mjs';
 import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { contextReport } from '../src/context-report.mjs';
-import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
+
 import { createAgentRunCompletionDispatch } from '../src/agent-run-completion-dispatch.mjs';
-import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
-import { toolActivityPresentation } from '../src/tool-activity-labels.mjs';
+import { activeChatRunKey, activeChatRunSummary } from '../src/active-chat-runs.mjs';
+
 import { executionBoundaryStatus, readExecutionBoundaries, saveExecutionBoundaries } from '../src/execution-boundaries.mjs';
 import { clearOidcCookies, completeOidcCallback, oidcCookieClearHeader, oidcLoginUrl, oidcSessionFromRequest, sendOidcSessionCookie, setOidcStateCookie } from '../src/ui-oidc-auth.mjs';
 import { buildExport, decodeExport, exportCatalog, normalizeImportRequest } from '../src/export-service.mjs';
@@ -141,8 +141,8 @@ import { createObservabilityRoutes } from './ui/observability-routes.mjs';
 import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs';
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
-import { cleanupMods, createModRoute, discoverMods, loadMods } from '../src/mod-runtime.mjs';
-import { activeManagedSkillDeclarations, createManagedSkillSynchronizer, inspectManagedSkills, reconcileManagedSkills } from '../src/managed-skills.mjs';
+import { cleanupMods, createModRoute, discoverMods } from '../src/mod-runtime.mjs';
+import { inspectManagedSkills } from '../src/managed-skills.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
 import { listSecretReferences, resolveSecretReference } from '../src/secret-references.mjs';
@@ -199,30 +199,9 @@ const RUN_CANCELLATION_GRACE_MS = Number.isFinite(configuredRunCancellationGrace
 const authorityConfig = httpAuthorityConfig({ host, port });
 browserOriginConfig(); // Validate optional environment override at startup.
 let completionDispatch = null;
-const activeChatRuns = new class extends Map {
-  delete(key) {
-    const removed = super.delete(key);
-    if (removed) queueMicrotask(() => completionDispatch?.activityChanged());
-    return removed;
-  }
-}();
 const executionProviders = createExecutionProviderRegistry();
-const sessionContinuityHeads = new Map();
-// The continuity head rejects stale writes, but browser requests sharing a
-// session must not make each other stale in the first place. Serialize the
-// complete HTTP turn per agent/session; nested A2A runs are serialized by the
-// runtime queue in app-runtime.
-const sessionChatQueues = new Map();
-function sessionChatQueueKey(agentId, sessionId) { return `${String(agentId)}:${String(sessionId || 'default')}`; }
-async function serializeSessionChat({ agentId, sessionId, operation, signal, onCancellationDeadline = null }) {
-  const key = sessionChatQueueKey(agentId, sessionId);
-  const cancellationGraceMs = typeof RUN_CANCELLATION_GRACE_MS === 'number' ? RUN_CANCELLATION_GRACE_MS : 10_000;
-  return serializeSessionAdmission(sessionChatQueues, key, operation, signal, { cancellationGraceMs, onCancellationDeadline });
-}
-const claudeCodeLoginConnectionIds = new Map();
 const groupChannelRuns = new Map();
 let scheduledJobScheduler = null;
-let loadedMods = [];
 let dreamCycleScheduler = null;
 let tiddleScheduler = null;
 let retentionScheduler = null;
@@ -259,11 +238,44 @@ await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication
 await runtimeConfig();
 await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
 const generationDispatcher = createModGenerationDispatcher({ logger: serverLogger, store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
+const {
+  modelConnections, startClaudeCodeLoginApi, claudeCodeLoginStatus,
+  submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi,
+  startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi,
+  cancelOpenAiOAuthLoginApi, claudeCliCredentialStatus, importClaudeCliCredential,
+  agentModelSelection, saveAgentModelSelection, agentMinionModelSelection,
+  saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings,
+  chatIdentities, saveChatIdentity, discoverModelConnection, saveModelConnection,
+  resolveModelConnectionChatBody,
+} = createModelConnectionService({ modelsStore, metadataStore, resolveAgentRuntime,
+  logger: serverLogger, runtimeRoot: process.env.BURROW_RUNTIME_ROOT || path.dirname(projectRoot), projectRoot });
+const {
+  mcpConnections, saveMcpConnection, removeMcpConnection, discoverMcpConnection,
+  diagnoseMcpConnection, agentMcpTools, saveAgentMcpTools,
+} = createMcpConnectionService({ mcpStore, resolveAgentRuntime, logger: serverLogger });
+const chatSession = createChatSessionService({
+  runtime: { projectRoot, postgresApplication, requestLifecycle, resolveAgentRuntime,
+    resolveModelConnectionChatBody, runChatTurnFromBody, serializeSessionExecution,
+    telemetry: otelRuntime, logger: serverLogger, getCompletionDispatch: () => completionDispatch,
+    cancellationGraceMs: RUN_CANCELLATION_GRACE_MS },
+  http: { readJsonBody, validateBoundaryBody, sendJson, correlateHttpRun, recordHttpFailure,
+    observeHttpResult, observeHttpRunEvent },
+  commands: { runtimeConfig, activeConversationLimits, inspectSessionContextStatus,
+    latestProviderRequest, contextReport, commandText, contextMeterLines },
+  sessions: { sessionWriteHandoff, archiveSummaryForReset },
+  observability: { agentsStore, resolveAgentContext, listSubagentSummaries, readMinionSettings, metadataStore },
+  runPolicy: { onActiveRunRemoved: () => completionDispatch?.activityChanged() },
+});
+const { activeChatRuns, sessionContinuityHeads, serializeSessionChat, sessionContinuityHeadKey,
+  registerRuntimeActiveRun, retireCancelledRun, handleChat, cancelChatRun, supersedeSessionRuns,
+  beginSessionAdmissionsReset, finishSessionAdmissionsReset, steerChatRun, listChatSteering,
+  currentActiveChatRunSummaries } = chatSession;
 const chatInputRunner = createChatInputRunner({ store: postgresApplication.stores.chatInputs, stores: postgresApplication.stores,
   resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime,
   requestRecovery: () => recoveryContinuationScheduler?.wake() || Promise.resolve(),
   admitMain: (job, operation, signal) => serializeSessionChat({ ...job, operation, signal }),
 });
+chatSession.configureChatInputRunner(chatInputRunner);
 const chatInputs = createChatInputService({ stores: postgresApplication.stores, activeRuns: activeChatRuns, runner: chatInputRunner, resolveAgentRuntime });
 const completionEventRunner = createCompletionEventRunner({ store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 const externalTurnDispatcher = createModExternalTurnDispatcher({ logger: serverLogger, store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
@@ -279,7 +291,7 @@ let nodeGoblinOtelConfigurationUnavailable = false;
 async function applyOtelConfigurationToNodeGoblins() {
   const configuration = otelRuntime.remoteConfiguration();
   const expected = configuration.enabled === true && Boolean(executionProviders.get('node-goblin'))
-    && loadedMods.some(mod => mod.id === 'node-goblin' && mod.status === 'loaded');
+    && modLifecycle.getMods().some(mod => mod.id === 'node-goblin' && mod.status === 'loaded');
   // Disabling/removing a provider is not a failure or a recovery. Still send the
   // configuration below, including disabled configurations, as before.
   if (!expected) nodeGoblinOtelConfigurationUnavailable = false;
@@ -337,7 +349,7 @@ function scheduler() {
       executeTurn: runChatTurnFromBody, createRunId: createChatTurnRunId, executeTask: executeBoardTask,
       closeStore: async () => {},
       resolveAgentRuntime, rootDir: projectRoot, stores: postgresApplication.stores, telemetry: otelRuntime,
-      activeOwnerModIds: () => loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
+      activeOwnerModIds: () => modLifecycle.getMods().filter((mod) => mod.status === 'loaded').map((mod) => mod.id),
     });
   }
   return scheduledJobScheduler;
@@ -399,33 +411,6 @@ async function executeBoardTask(taskId, options = {}) {
   })(taskId, options);
 }
 
-
-function registerRuntimeActiveRun(options) {
-  const lifecycle = registerActiveAgentRun(activeChatRuns, { ...options, logger: typeof serverLogger === 'undefined' ? null : serverLogger });
-  lifecycle.cancellationGraceMs = RUN_CANCELLATION_GRACE_MS;
-  lifecycle.onCancellationDeadline = options.lane === 'side_question' ? null : () => retireCancelledRun(lifecycle.record);
-  return lifecycle;
-}
-
-async function retireCancelledRun(record, { recovery = record?.source === 'recovery' } = {}) {
-  if (!record?.agentId || !record?.sessionId || !record?.runId) return { ok: false, stale: true };
-  const authority = postgresContinuity({ store: postgresApplication.stores.conversations, agentId: record.agentId });
-  const retired = await authority.retire({
-    sessionId: record.sessionId,
-    runId: record.runId,
-    generation: Number.isSafeInteger(record.generation) ? record.generation : null,
-    reason: String(record.reason || 'cancellation_deadline_exceeded'),
-    objective: record.objective || record.latestUserMessage || null,
-    recovery,
-  });
-  const key = activeChatRunKey(record.agentId, record.runId);
-  if (retired.ok && activeChatRuns.get(key) === record) activeChatRuns.delete(key);
-  return retired;
-}
-
-function sessionContinuityHeadKey(agentId, sessionId) {
-  return `${String(agentId)}:${String(sessionId || 'default')}`;
-}
 function groupChannelRunKey(channelId, agentId, runId) {
   return `${String(channelId)}:${String(agentId)}:${String(runId)}`;
 }
@@ -443,7 +428,6 @@ function agentRuntimeArgs(agentRuntime, dataRoot) {
   // into mutable request arguments.
   return agentRuntime ? {} : { data_root: dataRoot };
 }
-
 
 let codexClientVersionRefreshInterval = null;
 const versionRefreshLifecycle = createBackgroundLifecycle({ name: 'codex_client_version_refresh', logger: serverLogger });
@@ -497,282 +481,6 @@ export function configureUiAuthSecretStoreFactory(factory) {
 
 function modelsStore() { return postgresApplication.stores.models; }
 function mcpStore() { return postgresApplication.stores.mcp; }
-async function mcpConnections() { return { ok: true, connections: await mcpStore().list() }; }
-async function saveMcpConnection(body = {}) { try {
-  const store = mcpStore();
-  const prepared = typeof store.prepareSave === 'function'
-    ? store.prepareSave(body)
-    : { existing: body.id ? await store.get(body.id) : null, next: body };
-  const { existing, next } = await prepared;
-  const previousApiKey = existing ? await store.apiKey(existing.id) : null;
-  const nextApiKey = body.apiKey === undefined || !String(body.apiKey || '').trim() ? previousApiKey : String(body.apiKey).trim();
-  const previousHeaders = existing ? await store.secretHeaders(existing.id) : {};
-  const previousEnvironmentVariables = existing ? await store.secretEnvironment(existing.id) : {};
-  const nextEnvironmentVariables = Array.isArray(body.environmentVariables) ? Object.fromEntries(body.environmentVariables.map((entry) => [String(entry?.name || '').trim(), entry?.value === undefined || !String(entry.value).trim() ? previousEnvironmentVariables[String(entry?.name || '').trim()] : String(entry.value).trim()]).filter(([name, value]) => name && value)) : previousEnvironmentVariables;
-  // Persist configuration and scoped secrets before touching a running daemon.
-  // A stale/broken keep-alive process must not turn a valid settings update into
-  // a failed save (and lose the operator's replacement secret).
-  const connection = await store.save(body);
-  try {
-    await reconcilePersistentMcpConnection(existing, connection, { previousApiKey, nextApiKey, previousEnvironmentVariables, nextEnvironmentVariables, previousHeaders, nextHeaders: await store.secretHeaders(connection.id) });
-  } catch (error) {
-    void serverLogger.event('mcp_connection_reconcile_failed', { connectionId: connection.id, error }, { level: 'warn', component: 'mcp' });
-  }
-  return { ok: true, connection };
-} catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; } }
-async function removeMcpConnection(id) {
-  try {
-    const store = mcpStore();
-    const connection = await store.get(id);
-    if (!connection) return false;
-    await reconcilePersistentMcpConnection(connection, null, { previousApiKey: await store.apiKey(connection.id), previousHeaders: await store.secretHeaders(connection.id), previousEnvironmentVariables: await store.secretEnvironment(connection.id) });
-    return await store.remove(id);
-  } catch (error) { throw error; }
-}
-const mcpCatalogDiagnostics = createCatalogRefreshDiagnostics(serverLogger, 'mcp');
-async function discoverMcpConnection(body = {}) {
-  try {
-    const connection = await mcpStore().get(body.connectionId);
-    if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
-    const tools = await discoverMcpTools(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) });
-    const refreshed = await mcpStore().refreshTools(connection.id, tools);
-    mcpCatalogDiagnostics('mcp_catalog_refresh', true, { connectionId: connection.id });
-    return { ok: true, connection: refreshed, tools };
-  } catch (error) {
-    mcpCatalogDiagnostics('mcp_catalog_refresh', false, { connectionId: body.connectionId, error });
-    return { ok: false, status: 400, error: String(error?.message || error) };
-  }
-}
-async function diagnoseMcpConnection(body = {}) {
-  const connection = await mcpStore().get(body.connectionId);
-  if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
-  const result = await diagnoseMcpConnectionRuntime(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id), toolName: typeof body.toolName === 'string' && body.toolName.trim() ? body.toolName.trim() : null, arguments: body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments) ? body.arguments : {} });
-  return { ...result, ...(result.ok ? {} : { status: 400 }) };
-}
-async function agentMcpTools(agentId) { try { await resolveAgentRuntime(agentId); return { ok: true, agentId, tools: await mcpStore().agentTools(agentId) }; } catch (error) { return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) }; } }
-async function saveAgentMcpTools(agentId, body = {}) { try { return { ok: true, agentId, tools: await mcpStore().setAgentTools(agentId, body.tools) }; } catch (error) { return { ok: false, status: String(error?.message || error) === 'agent_not_found' ? 404 : 400, error: String(error?.message || error) }; } }
-
-function mergeDiscoveredModels(discovered = [], existing = []) {
-  const prior = new Map((Array.isArray(existing) ? existing : []).map((model) => [String(model?.id || '').trim(), model]).filter(([id]) => id));
-  const merged = [];
-  for (const model of discovered) {
-    const priorModel = prior.get(model.id);
-    // Discovery refreshes provider/catalog metadata, but it must not erase
-    // explicit operator overrides. Those overrides are the authority when a
-    // provider's /models response omits output modalities (as Azure Foundry
-    // currently does for image and speech deployments).
-    const operatorOverrides = priorModel ? {
-      ...(Array.isArray(priorModel.acceptedInputOverride) ? { acceptedInputOverride: priorModel.acceptedInputOverride } : {}),
-      ...(Array.isArray(priorModel.acceptedOutputOverride) ? { acceptedOutputOverride: priorModel.acceptedOutputOverride } : {}),
-      ...(priorModel.contextWindowOverride !== undefined ? { contextWindowOverride: priorModel.contextWindowOverride } : {}),
-    } : {};
-    merged.push(normalizeModels([{ ...model, ...operatorOverrides, selected: priorModel?.selected !== false, manual: false }])[0]);
-    prior.delete(model.id);
-  }
-  for (const model of prior.values()) merged.push({ ...model, selected: model.selected !== false, manual: Boolean(model.manual) });
-  return merged;
-}
-
-async function modelConnections() {
-  return { ok: true, connections: await modelsStore().list() };
-}
-
-
-const CLAUDE_CODE_DEFAULT_CONNECTION = Object.freeze({
-  provider: 'Anthropic',
-  apiType: 'anthropic-messages',
-  baseUrl: 'https://api.anthropic.com',
-  acceptedInput: ['text', 'image'],
-});
-
-async function ensureClaudeCodeConnection(body = {}) {
-  const store = modelsStore();
-  const explicitId = String(body.connectionId || body.modelConnectionId || '').trim();
-  if (explicitId) {
-    const connection = await store.get(explicitId);
-    if (!connection) { const error = new Error('model_connection_not_found'); error.statusCode = 404; throw error; }
-    return connection;
-  }
-  const provider = String(body.provider || CLAUDE_CODE_DEFAULT_CONNECTION.provider).trim() || CLAUDE_CODE_DEFAULT_CONNECTION.provider;
-  const apiType = String(body.apiType || CLAUDE_CODE_DEFAULT_CONNECTION.apiType).trim() || CLAUDE_CODE_DEFAULT_CONNECTION.apiType;
-  const baseUrl = String(body.baseUrl || CLAUDE_CODE_DEFAULT_CONNECTION.baseUrl).trim() || CLAUDE_CODE_DEFAULT_CONNECTION.baseUrl;
-  // A login without an explicit connection ID starts a new account flow. Reusing
-  // the first connection with the same Anthropic endpoint causes its eventual
-  // Save to overwrite that account instead of preserving the new one.
-  let selectedProvider = provider;
-  for (let suffix = 0; suffix < 10; suffix += 1) {
-    try {
-      return await store.save({ provider: selectedProvider, apiType, baseUrl, acceptedInput: Array.isArray(body.acceptedInput) ? body.acceptedInput : CLAUDE_CODE_DEFAULT_CONNECTION.acceptedInput, models: Array.isArray(body.models) ? body.models : [] });
-    } catch (error) {
-      if (!/provider_label_duplicate/.test(String(error?.message || error))) throw error;
-      selectedProvider = suffix === 0 ? 'Anthropic OAuth' : `Anthropic OAuth ${suffix + 1}`;
-    }
-  }
-  throw new Error('claude_code_connection_label_unavailable');
-}
-
-async function startClaudeCodeLoginApi(body = {}) {
-  try {
-    const connection = await ensureClaudeCodeConnection(body);
-    const login = await startClaudeCodeLogin({ runtimeRoot: process.env.BURROW_RUNTIME_ROOT || path.dirname(projectRoot) });
-    if (login?.id) claudeCodeLoginConnectionIds.set(login.id, connection.id);
-    return { ok: true, connection, login };
-  } catch (error) {
-    return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
-  }
-}
-
-function claudeCodeLoginStatus(id) {
-  const login = getClaudeCodeLogin({ id });
-  return login ? { ok: true, login } : { ok: false, status: 404, error: 'claude_code_login_not_found' };
-}
-
-function submitClaudeCodeLoginApi(id, body = {}) {
-  return submitClaudeCodeLoginCode({ id, code: body.code });
-}
-
-async function cancelClaudeCodeLoginApi(id) {
-  try { return await cancelClaudeCodeLogin({ id }); }
-  finally { claudeCodeLoginConnectionIds.delete(String(id || '')); }
-}
-
-async function importClaudeCodeLoginApi(id, body = {}) {
-  try {
-    const store = modelsStore();
-    const mappedConnectionId = claudeCodeLoginConnectionIds.get(String(id || ''));
-    const connection = await ensureClaudeCodeConnection(mappedConnectionId && !body.connectionId && !body.modelConnectionId ? { ...body, connectionId: mappedConnectionId } : body);
-    const result = await importClaudeCodeLoginCredential({ id, persistAuth: async (auth) => { await store.persistAuth(connection.id, auth); return await store.get(connection.id); } });
-    if (result.ok) claudeCodeLoginConnectionIds.delete(String(id || ''));
-    return result;
-  } catch (error) {
-    return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
-  }
-}
-
-const OPENAI_OAUTH_DEFAULT_CONNECTION = Object.freeze({
-  provider: 'OpenAI',
-  apiType: 'openai-responses',
-  baseUrl: 'https://chatgpt.com/backend-api',
-  acceptedInput: ['text', 'image'],
-});
-
-async function persistOpenAiOauthForConnection(connectionId) {
-  const store = modelsStore();
-  const connection = await store.get(connectionId);
-  if (!connection) throw new Error('model_connection_not_found');
-  return async (auth) => { await store.persistAuth(connection.id, auth); return await store.get(connection.id); };
-}
-
-async function ensureOpenAiOAuthConnection(body = {}) {
-  const store = modelsStore();
-  const explicitId = String(body.connectionId || body.modelConnectionId || '').trim();
-  if (explicitId) {
-    const connection = await store.get(explicitId);
-    if (!connection) { const error = new Error('model_connection_not_found'); error.statusCode = 404; throw error; }
-    return connection;
-  }
-
-  const provider = String(body.provider || OPENAI_OAUTH_DEFAULT_CONNECTION.provider).trim() || OPENAI_OAUTH_DEFAULT_CONNECTION.provider;
-  const apiType = String(body.apiType || OPENAI_OAUTH_DEFAULT_CONNECTION.apiType).trim() || OPENAI_OAUTH_DEFAULT_CONNECTION.apiType;
-  const baseUrl = String(body.baseUrl || OPENAI_OAUTH_DEFAULT_CONNECTION.baseUrl).trim() || OPENAI_OAUTH_DEFAULT_CONNECTION.baseUrl;
-  // A login without an explicit connection ID starts a new account flow. Reusing
-  // the first matching OpenAI endpoint overwrites that account's OAuth token.
-  let selectedProvider = provider;
-  for (let suffix = 0; suffix < 10; suffix += 1) {
-    try {
-      return await store.save({
-        provider: selectedProvider,
-        apiType,
-        baseUrl,
-        acceptedInput: Array.isArray(body.acceptedInput) ? body.acceptedInput : OPENAI_OAUTH_DEFAULT_CONNECTION.acceptedInput,
-        models: Array.isArray(body.models) ? body.models : [],
-      });
-    } catch (error) {
-      if (!/provider_label_duplicate/.test(String(error?.message || error))) throw error;
-      selectedProvider = suffix === 0 ? 'OpenAI OAuth' : `OpenAI OAuth ${suffix + 1}`;
-    }
-  }
-  throw new Error('openai_oauth_connection_label_unavailable');
-}
-
-async function startOpenAiOAuthLoginApi(body = {}) {
-  try {
-    const connection = await ensureOpenAiOAuthConnection(body);
-    return { ok: true, connection, login: await startOpenAiOAuthLogin({ connectionId: connection.id, persistAuth: await persistOpenAiOauthForConnection(connection.id) }) };
-  } catch (error) {
-    return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
-  }
-}
-
-function openAiOAuthLoginStatus(id) {
-  const login = getOpenAiOAuthLogin({ id });
-  return login ? { ok: true, login } : { ok: false, status: 404, error: 'openai_oauth_login_not_found' };
-}
-
-async function submitOpenAiOAuthLoginApi(id, body = {}) {
-  const existing = getOpenAiOAuthLogin({ id });
-  const connectionId = existing?.connectionId || String(body.connectionId || body.modelConnectionId || '').trim();
-  return submitOpenAiOAuthCode({ id, input: body.code || body.redirectUrl || body.input, persistAuth: connectionId ? await persistOpenAiOauthForConnection(connectionId) : undefined });
-}
-
-async function cancelOpenAiOAuthLoginApi(id) {
-  return cancelOpenAiOAuthLogin({ id });
-}
-
-async function claudeCliCredentialStatus() {
-  return { ok: true, credential: detectClaudeCliCredential({ allowKeychainPrompt: false }) };
-}
-
-async function importClaudeCliCredential(body = {}) {
-  try {
-    const store = modelsStore();
-    const connection = await ensureClaudeCodeConnection(body);
-    const auth = claudeCredentialAuthPayload({ allowKeychainPrompt: false });
-    const saved = await store.persistAuth(connection.id, { ...auth, source: 'claude-code-import' });
-    return { ok: true, connection: await store.get(connection.id), auth: { configured: true, type: saved.type, provider: saved.provider, source: saved.source, expiresAt: saved.expiresAt } };
-  } catch (error) {
-    return { ok: false, status: 400, error: String(error?.message || error) };
-  }
-}
-
-async function agentModelSelection(agentId) {
-  const runtime = await resolveAgentRuntime(agentId);
-  return { ok: true, selection: await modelsStore().modelSelection(runtime.agentId) };
-}
-
-async function saveAgentModelSelection(agentId, body = {}) {
-  try {
-    const runtime = await resolveAgentRuntime(agentId);
-    return { ok: true, selection: await modelsStore().saveModelSelection({ agentId: runtime.agentId, connectionId: body.connectionId || body.modelConnectionId, model: body.model || body.modelId, reasoningEffort: body.reasoningEffort, thinkingMode: body.thinkingMode, temperature: body.temperature }) };
-  } catch (error) {
-    return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
-  }
-}
-
-async function agentMinionModelSelection(agentId) {
-  const runtime = await resolveAgentRuntime(agentId);
-  return { ok: true, selection: await modelsStore().modelSelection(runtime.agentId, { minion: true }) };
-}
-
-async function saveAgentMinionModelSelection(agentId, body = {}) {
-  try {
-    const runtime = await resolveAgentRuntime(agentId);
-    return { ok: true, selection: await modelsStore().saveModelSelection({ agentId: runtime.agentId, connectionId: body.connectionId || body.modelConnectionId, model: body.model || body.modelId, reasoningEffort: body.reasoningEffort, thinkingMode: body.thinkingMode, temperature: body.temperature, minion: true }) };
-  } catch (error) {
-    return { ok: false, status: error?.statusCode || 400, error: String(error?.message || error) };
-  }
-}
-
-async function agentMinionSettings(agentId) {
-  const runtime = await resolveAgentRuntime(agentId);
-  return { ok: true, ...await readMinionSettings(metadataStore(), runtime.agentId) };
-}
-
-async function saveAgentMinionSettings(agentId, body = {}) {
-  const runtime = await resolveAgentRuntime(agentId);
-  return { ok: true, ...await saveMinionSettings(metadataStore(), runtime.agentId, body) };
-}
-
 async function archiveSummarySelection(agentId) {
   return metadataStore().get(`archive_summary_model:${agentId}`);
 }
@@ -833,90 +541,6 @@ async function saveCuratorSettings(body = {}) {
 }
 
 const { readUiAuthRecord, uiAuthSettings, saveUiAuthSettings } = createUiAuthService({ metadataStore, uiAuthSecretStore, runtimeConfig });
-
-async function chatIdentities() { return { ok: true, ...await modelsStore().identities() }; }
-async function saveChatIdentity(body = {}) {
-  try { return { ok: true, ...await modelsStore().saveIdentity(body) }; }
-  catch (error) { return { ok: false, status: 400, error: String(error?.message || error) }; }
-}
-
-async function discoverModelConnection(body = {}) {
-  const store = modelsStore();
-  const existing = body.id ? await store.get(String(body.id)) : null;
-  let auth = body.auth || (existing ? await store.auth(existing.id) : null) || {};
-  const baseUrl = body.baseUrl || existing?.baseUrl;
-  const apiType = body.apiType || existing?.apiType;
-  const priorModels = body.models || existing?.models || [];
-  try {
-    if (isProviderPool({ apiType })) {
-      const connection = { ...assertConnection({ ...existing, ...body, apiType }), id: existing?.id };
-      const members = await Promise.all(connection.pool.memberConnectionIds.map(id => store.get(id)));
-      assertProviderPoolMembers(connection, members.filter(Boolean));
-      const catalogs = await Promise.all(members.map(async member => {
-        const models = await store.discoverModels({ id: member.id, useModelsDev: true, signal: AbortSignal.timeout(15_000) });
-
-        return { ...member, models };
-      }));
-      const discovered = providerPoolModels(catalogs);
-      return { ok: true, models: discovered, discovery: { status: discovered.length ? 'discovered' : 'manual_only', count: discovered.length } };
-    }
-    if (existing && auth?.type === 'oauth' && /openai/i.test(String(auth.provider || existing.provider || '')) && /chatgpt\.com\/backend-api/i.test(String(baseUrl || ''))) auth = { ...auth, ...(await store.resolveAuth(existing.id)) };
-    const apiKey = String(body.apiKey || '').trim() || (auth?.token ? String(auth.token).trim() : '') || (auth?.apiKey ? String(auth.apiKey).trim() : '') || (auth?.accessToken ? String(auth.accessToken).trim() : '') || (existing ? await store.apiKey(existing.id) : null);
-    const hasCredential = Boolean(apiKey || auth?.token || auth?.apiKey || auth?.accessToken);
-    if (!hasCredential) return { ok: false, status: 400, error: 'api_key_required' };
-    const discovered = existing && auth.type === 'oauth' && !body.auth && !body.apiKey && baseUrl === existing.baseUrl && apiType === existing.apiType
-      ? await store.discoverModels({ id: existing.id, useModelsDev: true, signal: AbortSignal.timeout(15_000) })
-      : await discoverModels({ baseUrl, provider: body.provider || existing?.provider || auth?.provider, useModelsDev: true, apiType, apiKey, auth, store, signal: AbortSignal.timeout(15_000) });
-    return { ok: true, models: mergeDiscoveredModels(discovered, priorModels), discovery: { status: discovered.length ? 'discovered' : 'manual_only', count: discovered.length } };
-  } catch (error) {
-    return { ok: true, models: mergeDiscoveredModels([], priorModels), discovery: { status: 'manual_only', count: 0, error: String(error?.message || error) } };
-  }
-}
-
-async function saveModelConnection(body = {}) {
-  try {
-    return { ok: true, connection: await modelsStore().save(body) };
-  } catch (error) {
-    return { ok: false, status: 400, error: String(error?.message || error) };
-  }
-}
-
-
-async function resolveModelConnectionChatBody(body = {}) {
-  const connectionId = String(body.modelConnectionId || body.modelProviderId || '').trim();
-  const model = String(body.model || body.modelId || '').trim();
-  if (!connectionId || !model || model === 'off') return body;
-  const store = modelsStore();
-  const connection = await store.get(connectionId);
-  if (!connection) {
-    const error = new Error('model_connection_not_found');
-    error.statusCode = 400;
-    throw error;
-  }
-  const selected = (connection.models || []).some((item) => item.id === model && item.selected !== false);
-  if (!selected) {
-    const error = new Error('model_not_enabled_for_connection');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!await store.hasAuth(connection.id)) {
-    const error = new Error('model_connection_auth_required');
-    error.statusCode = 400;
-    throw error;
-  }
-  return {
-    ...body,
-    // Only the connection record ID and exact enabled model cross the API boundary.
-    // Runtime resolution retrieves connection metadata and its encrypted secret
-    // directly from the settings database.
-    modelConnectionId: connection.id,
-    model,
-    modelConnection: undefined,
-    modelBaseUrl: undefined,
-    modelApi: undefined,
-    modelApiKey: undefined,
-  };
-}
 
 async function runtimeConfig(agentId = 'hatchet') {
   const runtime = await loadRuntimeConfig({ rootDir: projectRoot, args: { agent_id: String(agentId || 'hatchet') }, stores: postgresApplication.stores, tolerateModelResolutionError: true });
@@ -1115,7 +739,6 @@ function headerValue(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-
 function denyBasic(res, reason) {
   res.setHeader('www-authenticate', 'Basic realm="Burrow", charset="UTF-8"');
   sendJson(res, 401, { ok: false, error: 'unauthorized', auth: { required: true, mode: 'basic', reason } });
@@ -1270,404 +893,6 @@ async function applyApiCors(req, res, url) {
   res.writeHead(204); res.end(); return true;
 }
 
-
-const IMPORT_SUPPORTED_CATEGORIES = new Set(['agents', 'settings', 'task-board', 'model-connections', 'mcp-connections', 'ui-auth', 'scheduled-jobs', 'skills']);
-async function importPreview(decoded, conflictPolicy) {
-  const supported = decoded.categories.filter((id) => IMPORT_SUPPORTED_CATEGORIES.has(id));
-  const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
-  let uiAuth = null;
-  if (supported.includes('ui-auth') && decoded.payload.categories['ui-auth']?.auth) {
-    const category = decoded.payload.categories['ui-auth'];
-    const existing = await readUiAuthRecord();
-    const secret = category.oidcClientSecret;
-    const input = secret && secret !== '[redacted]' ? { ...category.auth, oidc: { ...category.auth.oidc, clientSecret: secret } } : category.auth;
-    const basicReconfigurationRequired = input.mode === 'basic' && input.basic?.password === undefined;
-    const plan = planUiAuthSettings(basicReconfigurationRequired ? { ...input, mode: existing.mode, basic: existing.basic } : input, existing);
-    if (!plan.ok) throw Object.assign(new Error(plan.error), { statusCode: plan.status });
-    const summary = record => ({ mode: record.mode, enabled: record.mode !== 'none', basicPasswordConfigured: Boolean(record.basic.passwordHash), oidcClientSecretConfigured: Boolean(record.oidc.clientSecretConfigured || record.oidc.clientSecret) });
-    uiAuth = { before: summary(existing), after: summary(plan.next), basicCredentialsPortable: false, requiresBasicReconfiguration: basicReconfigurationRequired, warning: basicReconfigurationRequired ? 'Basic credentials are not portable. Existing authentication will be preserved; configure Basic credentials deliberately after import.' : null };
-  }
-  const mcpCategory = decoded.payload.categories['mcp-connections'];
-  const legacyMcpGrants = mcpCategory && typeof mcpCategory === 'object' && !Array.isArray(mcpCategory) && Array.isArray(mcpCategory.grants) ? mcpCategory.grants : [];
-  const mcpConnections = Array.isArray(mcpCategory) ? mcpCategory : (Array.isArray(mcpCategory?.connections) ? mcpCategory.connections : []);
-  const mcpAuthorization = supported.includes('mcp-connections') ? {
-    transferred: false,
-    ignoredGrantRecords: legacyMcpGrants.length,
-    ignoredToolGrants: legacyMcpGrants.reduce((count, grant) => count + (Array.isArray(grant?.tools) ? grant.tools.length : 0), 0),
-    regrantRequired: mcpConnections.length > 0,
-    message: 'MCP tool grants are deployment-local and are not imported. Regrant access deliberately on this deployment.',
-  } : null;
-  return { ok: true, format: decoded.payload.manifest.format, encrypted: decoded.encrypted, categories: decoded.categories, supported, unsupported, conflictPolicy, requiresConfirmation: true, redacted: Boolean(decoded.payload.manifest.redacted), uiAuth, mcpAuthorization };
-}
-async function applyImport(decoded, { conflictPolicy = 'error' } = {}) {
-  const categories = Object.fromEntries(decoded.categories.map(id => [id, decoded.payload.categories[id]]));
-  const importedMcpCategory = categories['mcp-connections'];
-  const legacyMcpGrants = importedMcpCategory && typeof importedMcpCategory === 'object' && !Array.isArray(importedMcpCategory) && Array.isArray(importedMcpCategory.grants) ? importedMcpCategory.grants : [];
-  const importedMcpConnections = Array.isArray(importedMcpCategory) ? importedMcpCategory : (Array.isArray(importedMcpCategory?.connections) ? importedMcpCategory.connections : []);
-  const mcpAuthorization = Object.hasOwn(categories, 'mcp-connections') ? {
-    transferred: false,
-    ignoredGrantRecords: legacyMcpGrants.length,
-    ignoredToolGrants: legacyMcpGrants.reduce((count, grant) => count + (Array.isArray(grant?.tools) ? grant.tools.length : 0), 0),
-    regrantRequired: importedMcpConnections.length > 0,
-    message: 'MCP tool grants are deployment-local and are not imported. Regrant access deliberately on this deployment.',
-  } : null;
-  const unsupported = decoded.categories.filter((id) => !IMPORT_SUPPORTED_CATEGORIES.has(id));
-  if (unsupported.length) return { ok: false, status: 400, error: 'import_category_unsupported', details: { categories: unsupported } };
-  if (Object.hasOwn(categories, 'agents') && (!categories.agents || typeof categories.agents !== 'object' || Array.isArray(categories.agents) || categories.agents.schema !== 'burrow.agents-and-profiles/v2' || !Array.isArray(categories.agents.records) || !categories.agents.profiles || typeof categories.agents.profiles !== 'object' || Array.isArray(categories.agents.profiles))) {
-    return { ok: false, status: 400, error: 'import_agents_format_invalid', details: { expected: 'burrow.agents-and-profiles/v2' } };
-  }
-  if (Object.hasOwn(categories, 'scheduled-jobs') && (categories['scheduled-jobs']?.schema !== 'burrow.scheduled-jobs/v1' || !Array.isArray(categories['scheduled-jobs'].jobs) || categories['scheduled-jobs'].jobs.some(job => !job || !/^[A-Za-z0-9._-]{1,96}$/.test(job.id || '') || job.ownerModId))) return { ok: false, status: 400, error: 'import_scheduled_jobs_format_invalid' };
-  if (Object.hasOwn(categories, 'skills') && (categories.skills?.schema !== 'burrow.skills/v1' || !Array.isArray(categories.skills.records) || !Array.isArray(categories.skills.assignments) || categories.skills.records.some(skill => !skill || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(skill.id || '') || skill.storage && skill.storage !== 'postgres' || skill.contentOwner && skill.contentOwner !== 'operator'))) return { ok: false, status: 400, error: 'import_skills_format_invalid' };
-  if (categories.skills?.assignments.some(assignment => !assignment || typeof assignment.agentId !== 'string' || !Array.isArray(assignment.assignedSkillIds) || assignment.assignedSkillIds.some(id => !categories.skills.records.some(skill => skill.id === id)))) return { ok: false, status: 400, error: 'import_skill_assignments_invalid' };
-  for (const records of [categories['scheduled-jobs']?.jobs, categories.skills?.records]) {
-    if (records && new Set(records.map(record => record.id)).size !== records.length) return { ok: false, status: 400, error: 'import_duplicate_id' };
-  }
-  const conflicts = [];
-  for (const skill of (categories.skills?.records || [])) if (await postgresApplication.stores.skills.get(skill.id)) conflicts.push({ category: 'skills', id: skill.id });
-  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
-    const existing = await postgresApplication.stores.scheduledJobs.getJob(job.id);
-    // Generic config imports must never overwrite mod-owned definitions.
-    if (existing?.ownerModId) return { ok: false, status: 409, error: 'import_scheduled_job_mod_owned', details: { id: job.id } };
-    if (existing) conflicts.push({ category: 'scheduled-jobs', id: job.id });
-  }
-  if (categories['task-board']?.projects && Array.isArray(categories['task-board'].projects)) for (const project of categories['task-board'].projects) if (await withTaskBoard((store) => store.getProject(project.id))) conflicts.push({ category: 'task-board.projects', id: project.id });
-  if (Array.isArray(categories['model-connections'])) {
-    const store = modelsStore();
-    for (const connection of categories['model-connections']) {
-      if (!connection?.id) continue;
-      const existingById = await store.get(connection.id);
-      const existingByProvider = (await store.list()).find((item) => String(item.provider || '').toLowerCase() === String(connection.provider || '').toLowerCase() && item.id !== connection.id);
-      if (existingById) conflicts.push({ category: 'model-connections', id: connection.id, reason: 'id' });
-      if (existingByProvider) conflicts.push({ category: 'model-connections', id: connection.id, existingId: existingByProvider.id, reason: 'provider' });
-    }
-  }
-  for (const agent of (categories.agents?.records || [])) if (await agentsStore().get(agent.id)) conflicts.push({ category: 'agents', id: agent.id });
-  const mcpConnections = importedMcpConnections;
-  for (const connection of mcpConnections) if (await mcpStore().get(connection.id)) conflicts.push({ category: 'mcp-connections', id: connection.id });
-  for (const task of (categories['task-board']?.tasks || [])) if (await withTaskBoard(store => store.getTask(task.id))) conflicts.push({ category: 'task-board.tasks', id: task.id });
-  if (conflicts.length && conflictPolicy === 'error') return { ok: false, status: 409, error: 'import_conflicts', details: { conflicts }, mcpAuthorization };
-  const imported = [];
-  const deleted = [];
-  const completed = [];
-  let currentItem = null;
-  const failure = (result) => ({ ...result, ok: false, status: result.status || result.statusCode || 400, imported: [...imported], deleted: [...deleted], completed: [...completed], partial: completed.length > 0 || deleted.length > 0, failed: { item: currentItem, error: String(result.error || 'import_failed') }, skipped: conflicts.filter(c => conflictPolicy === 'skip'), unsupported: [], mcpAuthorization });
-  const write = async (item, operation) => {
-    currentItem = item;
-    const result = await operation();
-    if (result?.ok === false || result === false) throw Object.assign(new Error(result?.error || 'import_write_failed'), { importResult: result || {} });
-    completed.push(item);
-    return result;
-  };
-  try {
-  let importRuntime = null;
-  const materializeAgentRuntime = async (agent) => {
-    if (!agent?.id) return;
-    importRuntime ||= await runtimeConfig();
-    const context = await ensureAgentRoots({ runtimeState: importRuntime.runtimeState, agent });
-    await postgresApplication.stores.conversations.updateMetadata({ agentId: agent.id, sessionId: 'default', update: (metadata) => metadata });
-
-  };
-  if (categories.settings && typeof categories.settings === 'object') {
-    if (categories.settings.timezone !== undefined) {
-      await write('settings:timezone', () => saveOperatorTimezone(postgresApplication.stores.metadata, { timezone: categories.settings.timezone }));
-      imported.push('settings:timezone');
-    }
-    if (categories.settings.retentionPolicy !== undefined) {
-      await write('settings:retention-policy', () => postgresApplication.stores.retentionSettings.savePolicy(categories.settings.retentionPolicy));
-      imported.push('settings:retention-policy');
-    }
-    if (categories.settings.brainMemory !== undefined) {
-      await write('settings:brain-memory', () => saveDreamPromotion(metadataStore(), categories.settings.brainMemory));
-      imported.push('settings:brain-memory');
-    }
-    if (categories.settings.workingMemoryRetention !== undefined) {
-      await write('settings:working-memory-retention', () => postgresApplication.stores.workingMemoryRetention.save(categories.settings.workingMemoryRetention));
-      imported.push('settings:working-memory-retention');
-    }
-    // Legacy browserOrigin exports are ignored; only deployment environment controls it.
-    if (categories.settings.executionBoundaries) {
-      const result = await write('settings:execution-boundaries', () => saveExecutionBoundaries(categories.settings.executionBoundaries, { metadataStore: postgresApplication.stores.metadata, }));
-      if (!result.ok) return failure(result);
-      imported.push('settings:execution-boundaries');
-    }
-    if (categories.settings.curatorSelection) {
-      try {
-        await write('settings:curator-selection', () => saveCuratorSelection(categories.settings.curatorSelection, { stores: postgresApplication.stores, root: curatorRoot() }));
-        imported.push('settings:curator-selection');
-      } catch (error) { return failure({ status: 400, error: String(error?.message || error) }); }
-    }
-  }
-  // Model connections must exist before agent dream settings are restored.
-  if (Array.isArray(categories['model-connections'])) {
-    const store = modelsStore();
-    for (const connection of categories['model-connections']) {
-      if (connection.auth?.apiKey === '[redacted]' || connection.auth?.token === '[redacted]') continue;
-      const connectionConflicts = conflicts.filter((conflict) => conflict.category === 'model-connections' && conflict.id === connection.id);
-      if (conflictPolicy === 'skip' && connectionConflicts.length) continue;
-      for (const conflict of connectionConflicts) {
-        if (conflict.reason === 'provider' && conflict.existingId && conflict.existingId !== connection.id) { await write(`model-connections:delete:${conflict.existingId}`, () => store.remove(conflict.existingId)); deleted.push(`model-connections:${conflict.existingId}`); }
-      }
-      await write(`model-connections:${connection.id}`, () => store.save(connection));
-      imported.push(`model-connections:${connection.id}`);
-    }
-  }
-  if (categories.agents && typeof categories.agents === 'object' && !Array.isArray(categories.agents)) {
-    const agentRecords = Array.isArray(categories.agents.records) ? categories.agents.records : [];
-    const profiles = categories.agents.profiles && typeof categories.agents.profiles === 'object' ? categories.agents.profiles : {};
-    for (const agent of agentRecords) {
-      if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'agents' && c.id === agent.id)) continue;
-      // Portable restoration checks ownership and writes the complete registry
-      // identity under a row lock. The normal create/update APIs ignore modAgent
-      // and cannot distinguish an old regular payload from a mod-owned ID.
-      const importedAgent = await write(`agents:${agent.id}:record`, () => agentsStore().restorePortable(agent, { conflictPolicy }));
-      const modOwned = Boolean(importedAgent.modAgent);
-      if (!modOwned) await write(`agents:${agent.id}:runtime`, () => materializeAgentRuntime(importedAgent));
-      if (agent.avatar !== undefined || agent.identityName !== undefined) await write(`agents:${agent.id}:identity`, () => modelsStore().saveIdentity({ kind: 'agent', id: agent.id, name: agent.identityName ?? agent.name, avatar: agent.avatar ?? '' }));
-      const profileDocuments = Array.isArray(profiles[agent.id]) ? profiles[agent.id] : [];
-      // Mod profiles are provided by the owner, not imported core profiles.
-      // Existing legacy data stays untouched.
-      if (!modOwned && profileDocuments.length) {
-        const profileStore = profilesStore();
-        try { await write(`agents:${agent.id}:profiles`, () => profileStore.replace(agent.id, profileDocuments.filter((item) => AGENT_PROFILE_KINDS.includes(String(item?.kind || '').toUpperCase())).map((item) => ({ ...item, kind: String(item.kind).toUpperCase() })))); } finally { await profileStore.close(); }
-      }
-      if (!modOwned && agent.dreamSettings && typeof agent.dreamSettings === 'object') {
-        const dreamStore = dreamSettingsStore();
-        try {
-          try {
-            await write(`agents:${agent.id}:dream`, () => dreamStore.save(agent.id, agent.dreamSettings));
-          } catch (error) {
-            // Dream model selection is optional. An export may refer to a provider
-            // model that was not included, was redacted, or is unavailable here.
-            // Preserve the rest of the dream configuration rather than aborting
-            // the entire import; the model can be selected later in Settings.
-            if (!['dream_settings_model_selection_invalid', 'dream_settings_model_selection_incomplete'].includes(error?.message)) throw error;
-            await write(`agents:${agent.id}:dream`, () => dreamStore.save(agent.id, { ...agent.dreamSettings, modelConnectionId: null, model: null }));
-          }
-        } finally { await dreamStore.close(); }
-      }
-      for (const [field, minion] of [['modelSelection', false], ['minionModelSelection', true]]) {
-        if ((modOwned && minion) || !Object.hasOwn(agent, field)) continue; // Older v2 bundles remain valid.
-        const selection = agent[field];
-        if (selection) await write(`agents:${agent.id}:${field}`, () => modelsStore().saveModelSelection({ ...selection, agentId: agent.id, minion }));
-        else await write(`agents:${agent.id}:${field}`, () => modelsStore().clearModelSelection(agent.id, { minion }));
-      }
-      if (!modOwned && Object.hasOwn(agent, 'archiveSummaryModelSelection')) await write(`agents:${agent.id}:archive-summary-model`, () => saveArchiveSummaryModelSelection(agent.id, agent.archiveSummaryModelSelection || {}));
-      imported.push(`agents:${agent.id}`);
-    }
-    if (categories.agents.operator?.name && typeof categories.agents.operator === 'object') {
-      const operator = categories.agents.operator;
-      await write('agents:operator', () => modelsStore().saveIdentity({ kind: 'operator', id: 'default', name: operator.name ?? '', avatar: operator.avatar ?? '' }));
-      imported.push('agents:operator');
-    }
-  }
-  if (categories.settings?.brainEmbeddings !== undefined) {
-    await write('settings:brain-embeddings', () => postgresApplication.stores.brainEmbeddings.configure(categories.settings.brainEmbeddings));
-    imported.push('settings:brain-embeddings');
-  }
-  for (const skill of (categories.skills?.records || [])) {
-    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'skills' && c.id === skill.id)) continue;
-    const store = postgresApplication.stores.skills;
-    await write(`skills:${skill.id}`, async () => await store.get(skill.id) ? store.update(skill.id, skill) : store.create(skill));
-    imported.push(`skills:${skill.id}`);
-  }
-  for (const assignment of (categories.skills?.assignments || [])) {
-    if (conflictPolicy === 'skip' && (conflicts.some(c => c.category === 'agents' && c.id === assignment.agentId) || conflicts.some(c => c.category === 'skills' && assignment.assignedSkillIds.includes(c.id)))) continue;
-    const skillStore = postgresApplication.stores.skills;
-    const incomingIds = new Set(categories.skills.records.map(skill => skill.id));
-    const retainedIds = (await skillStore.assignments(assignment.agentId)).assignedSkillIds.filter(id => !incomingIds.has(id));
-    await write(`skills:assignments:${assignment.agentId}`, () => skillStore.replaceAssignments(assignment.agentId, [...retainedIds, ...assignment.assignedSkillIds]));
-    imported.push(`skills:assignments:${assignment.agentId}`);
-  }
-  if (categories['task-board']) for (const project of (categories['task-board'].projects || [])) { if (conflictPolicy === 'skip' && conflicts.some((c) => c.category === 'task-board.projects' && c.id === project.id)) continue; const existing = await withTaskBoard((store) => store.getProject(project.id)); if (!existing) await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.createProject(project))); else if (conflictPolicy === 'replace') await write(`task-board.projects:${project.id}`, () => withTaskBoard((store) => store.updateProject(project.id, project))); else continue; imported.push(`task-board.projects:${project.id}`); }
-  if (categories['task-board']) for (const task of (categories['task-board'].tasks || [])) { const exists = await withTaskBoard((store) => store.getTask(task.id)); if (exists && conflictPolicy !== 'replace') continue; if (!exists) await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.createTask(task))); else await write(`task-board.tasks:${task.id}`, () => withTaskBoard((store) => store.updateTask(task.id, task))); imported.push(`task-board.tasks:${task.id}`); }
-  for (const job of (categories['scheduled-jobs']?.jobs || [])) {
-    if (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'scheduled-jobs' && c.id === job.id)) continue;
-    const store = postgresApplication.stores.scheduledJobs;
-    const existing = await store.getJob(job.id);
-    await write(`scheduled-jobs:${job.id}`, async () => {
-      if (!await agentsStore().get(job.agentId)) throw new Error('scheduled_job_agent_not_found');
-      return existing ? store.updateJob(job.id, job) : store.createJob(job);
-    });
-    imported.push(`scheduled-jobs:${job.id}`);
-  }
-  if (categories['mcp-connections'] && typeof categories['mcp-connections'] === 'object' && !Array.isArray(categories['mcp-connections'])) {
-    const connections = Array.isArray(categories['mcp-connections'].connections) ? categories['mcp-connections'].connections : [];
-    for (const connection of connections) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
-  } else if (Array.isArray(categories['mcp-connections'])) for (const connection of categories['mcp-connections']) { if (connection.apiKey === '[redacted]' || (conflictPolicy === 'skip' && conflicts.some(c => c.category === 'mcp-connections' && c.id === connection.id))) continue; const { environmentVariables, ...portableConnection } = connection; await write(`mcp-connections:${connection.id}`, () => mcpStore().save(portableConnection)); imported.push(`mcp-connections:${connection.id}`); }
-  if (categories['ui-auth'] && typeof categories['ui-auth'] === 'object') {
-    const importedAuth = categories['ui-auth'].auth;
-    const auth = importedAuth?.mode === 'basic' && importedAuth.basic?.password === undefined ? null : importedAuth;
-    const secret = categories['ui-auth'].oidcClientSecret;
-    if (auth && typeof auth === 'object' && secret !== '[redacted]' && secret) {
-      const result = await write('ui-auth:oidc-secret', () => saveUiAuthSettings({ ...auth, oidc: { ...(auth.oidc || {}), clientSecret: secret } }));
-      if (!result.ok) return failure(result);
-      imported.push('ui-auth:oidc-secret');
-    } else if (auth && typeof auth === 'object') {
-      const result = await write('ui-auth:settings', () => saveUiAuthSettings(auth));
-      if (!result.ok) return failure(result);
-      imported.push('ui-auth:settings');
-    }
-  }
-  return { ok: true, imported, deleted, completed, partial: false, skipped: conflicts.filter((c) => conflictPolicy === 'skip'), unsupported: [], mcpAuthorization };
-  } catch (error) {
-    return failure({ ...(error?.importResult || {}), error: String(error?.importResult?.error || error?.message || error), status: error?.importResult?.status || error?.statusCode || 400 });
-  }
-}
-
-async function exportSnapshot(categories = []) {
-  const data = {};
-  if (categories.includes('api-contract')) {
-    data['api-contract'] = {
-      openapi: JSON.parse(await fs.readFile(path.join(sourceRoot, 'docs', 'openapi.json'), 'utf8')),
-      streamContract: await fs.readFile(path.join(sourceRoot, 'docs', 'chat-stream-contract.md'), 'utf8'),
-      policy: await fs.readFile(path.join(sourceRoot, 'docs', 'api-contract-policy.md'), 'utf8'),
-    };
-  }
-  if (categories.includes('agents')) {
-    const identities = await modelsStore().identities();
-    const identitiesById = new Map(identities.agents.map((identity) => [identity.id, identity]));
-    const agentRecords = await agentsStore().list({ includeDisabled: true });
-    const profileStore = profilesStore();
-    const dreamStore = dreamSettingsStore();
-    let profiles;
-    let dreamSettings;
-    const modelSelections = Object.fromEntries(await Promise.all(agentRecords.map(async agent => [agent.id, { modelSelection: await modelsStore().modelSelection(agent.id), minionModelSelection: await modelsStore().modelSelection(agent.id, { minion: true }), archiveSummaryModelSelection: await archiveSummarySelection(agent.id) }])));
-    try {
-      profiles = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, await profileStore.list(agent.id)])));
-      // Dream get() persists default settings, which a mod-owned identity must
-      // never acquire just by being included in a portable export.
-      dreamSettings = Object.fromEntries(await Promise.all(agentRecords.map(async (agent) => [agent.id, agent.modAgent ? null : await dreamStore.get(agent.id)])));
-    } finally { await profileStore.close(); await dreamStore.close(); }
-    data.agents = {
-      schema: 'burrow.agents-and-profiles/v2',
-      operator: identities.operator,
-      records: agentRecords.map((agent) => {
-        const identity = identitiesById.get(agent.id);
-        return { ...agent, ...modelSelections[agent.id], ...(identity ? { identityName: identity.name, avatar: identity.avatar || '' } : {}), dreamSettings: dreamSettings[agent.id] };
-      }),
-      profiles,
-    };
-  }
-  if (categories.includes('settings')) {
-    data.settings = {
-      schema: 'burrow.portable-settings/v1',
-      timezone: await operatorTimezone(postgresApplication.stores.metadata),
-      retentionPolicy: await postgresApplication.stores.retentionSettings.readPolicy(),
-      workingMemoryRetention: await postgresApplication.stores.workingMemoryRetention.read(),
-      brainMemory: await readDreamPromotion(metadataStore()),
-      brainEmbeddings: await postgresApplication.stores.brainEmbeddings.settings().then(s => ({ enabled: s.enabled, conversationEnabled: s.conversation_enabled === true, connectionId: s.connection_id, model: s.model })),
-      executionBoundaries: await readExecutionBoundaries({ metadataStore: postgresApplication.stores.metadata, }),
-      curatorSelection: await readCuratorSelection({ stores: postgresApplication.stores, root: curatorRoot() }),
-      ownership: [{ id: 'core-persistence', authority: 'postgres', storage: 'PostgreSQL' }],
-    };
-  }
-  if (categories.includes('skills')) {
-    const skills = await postgresApplication.stores.skills.list();
-    const sourceIds = new Set((await postgresApplication.stores.skillSources.list()).map(s => s.skillId));
-    const portable = skills.filter(s => s.storage === 'postgres' && s.contentOwner === 'operator' && !sourceIds.has(s.id));
-    const portableIds = new Set(portable.map(s => s.id));
-    data.skills = { schema: 'burrow.skills/v1', records: portable.map(({ id, name, description, content, lifecycle, global }) => ({ id, name, description, content, lifecycle, global })),
-      assignments: await Promise.all((await agentsStore().list({ includeDisabled: true })).map(async agent => ({ agentId: agent.id, assignedSkillIds: (await postgresApplication.stores.skills.assignments(agent.id)).assignedSkillIds.filter(id => portableIds.has(id)) }))),
-      externalDependencies: skills.filter(s => !portableIds.has(s.id)).map(({ id, storage, contentOwner, installedPath, lifecycle, global }) => ({ id, storage, contentOwner, installedPath, lifecycle, global, requiresReinstallation: true })),
-      externalAssignments: await Promise.all((await agentsStore().list({ includeDisabled: true })).map(async agent => ({ agentId: agent.id, assignedSkillIds: (await postgresApplication.stores.skills.assignments(agent.id)).assignedSkillIds.filter(id => !portableIds.has(id)) }))) };
-  }
-  if (categories.includes('scheduled-jobs')) {
-    data['scheduled-jobs'] = { schema: 'burrow.scheduled-jobs/v1', jobs: (await postgresApplication.stores.scheduledJobs.listJobs({ ownerModId: null })).map(({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled, contextMode, jobKind, taskId, extraInstructions, scheduleKind, runAt }) => ({ id, agentId, name, prompt, cron, sessionId, modelConnectionId, model, enabled, contextMode, jobKind, taskId, extraInstructions, scheduleKind, runAt })) };
-  }
-  if (categories.includes('model-connections')) {
-    const store = modelsStore();
-    data['model-connections'] = await Promise.all((await store.list()).map(async (connection) => ({ ...connection, auth: await store.auth(connection.id) })));
-  }
-  if (categories.includes('mcp-connections')) {
-    const store = mcpStore();
-    data['mcp-connections'] = {
-      schema: 'burrow.mcp-connections/v3',
-      connections: await Promise.all((await store.list()).filter(connection => connection.transport !== 'mod' && !connection.id.startsWith('mod.')).map(async (connection) => ({ ...connection, apiKey: await store.apiKey(connection.id), headers: await store.secretHeaders(connection.id), environmentVariables: (connection.environmentVariables || []).map(({ name }) => ({ name, configured: true })) }))),
-    };
-  }
-  if (categories.includes('ui-auth')) {
-    data['ui-auth'] = { auth: safeUiAuthSettings(await readUiAuthRecord()), oidcClientSecret: await uiAuthSecretStore().get('oidcClientSecret') };
-  }
-  if (categories.includes('sessions')) data.sessions = { note: 'Session content export is intentionally bounded to metadata in v1.', agents: (await agentsStore().list({ includeDisabled: true })).map((agent) => ({ id: agent.id, name: agent.name })) };
-  if (categories.includes('task-board')) data['task-board'] = { projects: await withTaskBoard((store) => store.listProjects()), tasks: await withTaskBoard((store) => store.listTasks()) };
-  if (categories.includes('traces')) data.traces = await runtimeMetrics();
-  return data;
-}
-
-
-function acceptsNdjson(req) {
-  return String(req.headers.accept || '').toLowerCase().split(',').some((value) => value.trim().split(';')[0] === 'application/x-ndjson');
-}
-
-function beginNdjson(res) {
-  res.writeHead(200, {
-    'content-type': 'application/x-ndjson; charset=utf-8',
-    'cache-control': 'no-cache, no-transform',
-    'x-accel-buffering': 'no',
-  });
-}
-
-function writeNdjson(res, event, options) {
-  observeHttpRunEvent(res, event, options);
-  if (res.writableEnded || res.destroyed) return;
-  res.write(`${JSON.stringify(event)}\n`);
-}
-
-// This is deliberately a narrow public projection of persisted trace records.
-// Prompts, headers, tool arguments/results, and model/provider internals stay
-// in trace evidence; the progress stream exposes only operational state.
-function publicChatProgress(record = {}) {
-  if (record.type === 'model-recovery') return modelRecoveryProgress(record);
-  const payload = record.payload || {};
-  if (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(record.type)) {
-    return { type: record.type.replace('context-compaction-', 'context.compaction.'), data: {
-      reason: payload.reason || null, compressed: payload.compressed === true,
-      ...(payload.error ? { error: String(payload.error).slice(0, 1000) } : {}),
-    } };
-  }
-  if (record.type === 'router' && payload.stage === 'ask-chat-turn') {
-    return { type: 'route.decided', data: { routeKind: payload.route?.kind || null, sessionKind: payload.runtimeTurn?.envelope?.route?.kind || null } };
-  }
-  if (record.type === 'provider-dispatched') {
-    return { type: 'model.dispatched', data: { requestId: payload.requestId, modelCall: payload.modelCall || null, provider: payload.provider, api: payload.api, model: payload.model, invokedAt: payload.invokedAt, monotonicMs: payload.monotonicMs, clockDomain: payload.clockDomain, boundary: 'local-fetch-invocation', providerAcceptance: 'unknown' } };
-  }
-  if (record.type === 'model' && payload.stage === 'model-request') {
-    return { type: 'model.started', data: { provider: payload.provider || null, api: payload.api || null, model: payload.model || null, toolCount: Number(payload.toolCount || 0) } };
-  }
-  if (record.type === 'model' && payload.stage === 'model-response') {
-    return { type: 'model.completed', data: { status: payload.status ?? null, ok: payload.ok === true, finishReason: payload.finishReason || null, responseChars: Number(payload.responseChars || 0) } };
-  }
-  if (record.type === 'tool') {
-    const presentation = toolActivityPresentation(payload) || {};
-    return {
-      type: payload.phase === 'start' ? 'tool.started' : 'tool.completed',
-      data: {
-        tool: payload.tool || null,
-        rawTool: payload.tool || null,
-        provider: payload.provider || null,
-        mcpToolName: payload.mcpToolName || null,
-        skillId: payload.skillId || null,
-        skillName: payload.skillName || null,
-        activityId: payload.activityId || null,
-        ok: payload.ok ?? null,
-        status: payload.status || null,
-        childSessionId: payload.childSessionId || null,
-        ...presentation,
-        command: payload.command || null,
-        cwd: payload.cwd || null,
-        filePath: payload.filePath || payload.path || null,
-        dirPath: payload.dirPath || null,
-        query: payload.query || payload.pattern || null,
-        reason: payload.reason || null,
-        error: payload.error || null,
-      },
-    };
-  }
-  if (record.type === 'verifier') return { type: 'verification.completed', data: { ok: payload.ok ?? null, required: payload.required ?? null, status: payload.status || null } };
-  if (record.type === 'chat-tool-loop-warning' || record.type === 'chat-tool-loop-blocked') return { type: 'runtime.notice', data: { notice: record.type } };
-  return null;
-}
-
 const MIME_TYPES = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
@@ -1708,7 +933,6 @@ async function serveV18Asset(url, res) {
     return false;
   }
 }
-
 
 function requireObjectBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('request_body_object_required'), { statusCode: 400 });
@@ -1856,7 +1080,6 @@ async function runtimeStatus(agentId = null) {
     return { ok: false, root: projectRoot, runtime: 'burrow', version: releaseVersion, error: String(error?.message || error) };
   }
 }
-
 
 function selectedWorkspaceRoot(runtime, scope = 'workspaces', agentRuntime = null) {
   const workspaceContainer = path.resolve(runtime.runtimeState.workspaceRoot || runtime.runtimeState.sourceCopyRoot || runtime.runtimeState.sourceRoot || projectRoot);
@@ -2343,313 +1566,6 @@ function contextMeterLines(context = {}, compaction = {}, memory = {}) {
   ];
 }
 
-async function handleChatCommand({ parsed, sessionId, agentRuntime, runId = null, onProgress = null, signal = null } = {}) {
-  if (parsed?.error) return { status: 400, response: chatCommandResponse({ command: null, sessionId, text: `Invalid command.\n\n${chatCommandHelpText()}`, receipt: { error: parsed.error }, ok: false }) };
-  if (!parsed?.definition) return { status: 400, response: chatCommandResponse({ command: parsed?.command || null, sessionId, text: `Unknown command: /${parsed?.command || ''}\n\n${chatCommandHelpText()}`, receipt: { error: 'command_unknown' }, ok: false }) };
-  if (parsed.args && !(parsed.command === 'context' && parsed.args === 'full')) return { status: 400, response: chatCommandResponse({ command: parsed.command, sessionId, text: `${parsed.definition.usage} does not accept arguments.`, receipt: { error: 'command_arguments_not_supported' }, ok: false }) };
-  if (parsed.command === 'help') return { status: 200, response: chatCommandResponse({ command: 'help', sessionId, text: chatCommandHelpText(), receipt: { available: ['help', 'context', 'compact', 'status', 'new', 'stop'] } }) };
-  if (parsed.command === 'new') {
-    const resetBarrier = await beginSessionAdmissionsReset({ agentId: agentRuntime.agentId, sessionId });
-    try {
-      const supersededRuns = await supersedeSessionRuns({ agentId: agentRuntime.agentId, sessionId, reason: 'superseded by /new' });
-      const active = supersededRuns[0] || null;
-      await sessionWriteHandoff({ agentId: agentRuntime.agentId, sessionId, title: `Boundary checkpoint before new conversation: ${sessionId}`, runId: `session-reset-${Date.now()}`, message: `Preserve the useful state from session ${sessionId} before starting a new conversation.` });
-      const reset = await postgresApplication.stores.conversations.reset({ agentId: agentRuntime.agentId, sessionId });
-      void archiveSummaryForReset({ agentId: agentRuntime.agentId, rootDir: agentRuntime.agentWorkspaceRoot, sessionId, archiveId: reset.archiveId, archivedPath: reset.archivedPath }).catch(() => {});
-      return { status: 200, response: chatCommandResponse({ command: 'new', sessionId, text: 'Started a fresh conversation. Prior history was archived; it was not deleted.', receipt: { conversationId: reset.conversationId, archivedPath: reset.archivedPath || null, resetAt: reset.resetAt || reset.metadata?.resetAt || null, ...(reset.archiveId ? { archiveId: reset.archiveId } : {}), ...(active ? { cancelledRunId: active.runId } : {}) } }) };
-    } finally { finishSessionAdmissionsReset(resetBarrier); }
-  }
-  if (parsed.command === 'stop') {
-    // Signal first. Compaction/feedback may own the very row lock (or last
-    // pool connection) needed by the durable queue hold below.
-    chatInputRunner.cancelSession({ agentId:agentRuntime.agentId, sessionId, mainOnly:true });
-    const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && run.lane !== 'side_question');
-    const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
-    if (active && !active.controller.signal.aborted) {
-      const cancelled = await cancelChatRun(active.runId, { reason: 'stopped by /stop' }, agentRuntime);
-      return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Stopped active run ${active.runId}.`, receipt: cancelled }) };
-    }
-    await postgresApplication.stores.chatInputs.holdSession({ agentId:agentRuntime.agentId, sessionId });
-    if (!active) return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: 'No active run in this session.', receipt: { status: 'idle' } }) };
-    return { status: 200, response: chatCommandResponse({ command: 'stop', sessionId, text: `Run ${active.runId} is already cancelling.`, receipt: { status: 'cancelling', runId: active.runId, agentId: active.agentId, sessionId: active.sessionId, reason: active.reason || null } }) };
-  }
-  if (parsed.command === 'compact') {
-    runId ||= createChatTurnRunId({ sessionId, prefix: 'compact' });
-    const lifecycle = { reason: 'manual', compressed: false };
-    signal?.throwIfAborted();
-    await onProgress?.({ type: 'context.compaction.started', data: lifecycle });
-    signal?.throwIfAborted();
-    const authority = conversationAuthority({ store: postgresApplication.stores.conversations, agentId: agentRuntime.agentId });
-    const metadata = await authority.metadata(sessionId, { signal });
-    signal?.throwIfAborted();
-    const expectedGeneration = Number(metadata?.generation || 0);
-    let logger;
-    let receipt;
-    let text;
-    let ok = true;
-    try {
-      const runtime = await runtimeConfig(agentRuntime.agentId);
-      const traceRoot = resolveRuntimeTracePath({ ...runtime.runtimeState, agentId: agentRuntime.agentId, sessionId });
-      logger = createTraceLogger({ rootDir: traceRoot, runId, sessionId });
-      const result = await runSessionCompression({ rootDir: agentRuntime.agentWorkspaceRoot, sessionId, config: runtime.contextConfig, force: true, stores: postgresApplication.stores, agentId: agentRuntime.agentId, logger, expectedGeneration, signal });
-      signal?.throwIfAborted();
-      receipt = { reason: result.reason, compressed: Boolean(result.compressed) };
-      text = result.compressed ? 'Conversation context compacted. Original history remains archived.' : `No compaction performed: ${result.reason}.`;
-    } catch (error) {
-      signal?.throwIfAborted();
-      receipt = { ...lifecycle, error: error?.message || String(error) };
-      text = `Compaction failed: ${receipt.error}`;
-      ok = false;
-    } finally {
-      await logger?.terminal?.();
-    }
-    // Append to the successor transcript after compaction, not the generation
-    // it may archive. Command feedback is visible history, never model input.
-    // Keep persistence outside the compression catch: a storage failure must
-    // not publish a terminal receipt claiming feedback was saved.
-    signal?.throwIfAborted();
-    // Both feedback turns share a single locked generation check and commit.
-    // Reading metadata after rotation would accidentally adopt a concurrent /new.
-    await postgresApplication.stores.conversations.appendBatchIfGeneration({
-      agentId: agentRuntime.agentId, sessionId,
-      expectedGeneration: expectedGeneration + (receipt.compressed ? 1 : 0), signal,
-      entries: [['user', '/compact'], ['assistant', text]].map(([role, content]) => ({
-        entry: buildSessionEntry({ sessionId, runId, role, content, type: 'message', visibility: 'chat', entersPrompt: false,
-          metadata: { command: 'compact', commandReceipt: receipt, ok } }),
-        idempotencyKey: `command:compact:${runId}:${role}`,
-      })),
-    });
-    signal?.throwIfAborted();
-    const response = chatCommandResponse({ command: 'compact', sessionId, text, receipt, ok });
-    response.result.runId = runId;
-    await onProgress?.({ type: ok ? 'context.compaction.completed' : 'context.compaction.failed', data: receipt });
-    return { status: ok ? 200 : 500, response };
-  }
-  const runtime = await runtimeConfig(agentRuntime.agentId);
-  const limits = activeConversationLimits({ modelConfig: runtime.modelConfig, contextConfig: runtime.contextConfig });
-  const matchingRuns = [...activeChatRuns.values()].filter((run) => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && run.lane !== 'side_question');
-  const active = matchingRuns.find((run) => !run.controller.signal.aborted) || matchingRuns.at(-1) || null;
-  const status = await inspectSessionContextStatus({ stores: postgresApplication.stores, agentId: agentRuntime.agentId, rootDir: projectRoot, dataRoot: agentRuntime.agentWorkspaceRoot, sessionId, limits, contextConfig: runtime.contextConfig, contextWindow: runtime.modelConfig?.contextWindow, contextTokens: runtime.modelConfig?.contextTokens, liveContext: active?.contextUsage || null });
-  const context = status.context || {};
-  if (parsed.command === 'context') {
-    const traceSessionRoot = resolveRuntimeTracePath({ cacheRoot: runtime.runtimeState.cacheRoot, workspaceRoot: runtime.runtimeState.workspaceRoot, agentId: agentRuntime.agentId, sessionId });
-    const request = await latestProviderRequest({ traceSessionRoot, sessionId, runId: context.runId || null, requestId: context.requestId || null });
-    if (!request) return { status: 404, response: chatCommandResponse({ command: 'context', sessionId, text: 'No captured provider request is available for this session meter. Send a message first; older requests may predate request capture. Current settings have not been substituted for missing captured context.', receipt: { error: 'provider_request_unavailable', runId: context.runId || null, requestId: context.requestId || null }, ok: false }) };
-    const full = parsed.args === 'full';
-    const presentation = contextReport({ request, agentRuntime, sessionId, status, full });
-    const response = chatCommandResponse({ command: 'context', sessionId, text: presentation.text, receipt: { mode: full ? 'full' : 'overview', runId: request.runId, sentAt: request.ts, requestId: request.payload?.requestId || null, messageCount: request.payload?.messageCount ?? null, promptChars: request.payload?.promptChars ?? null, estimatedTokens: context.requestId === request.payload?.requestId ? context.estimatedTokens ?? null : null, capacityTokens: context.capacityTokens ?? null } });
-    response.result.contextReport = presentation.report;
-    return { status: 200, response };
-  }
-  return { status: 200, response: chatCommandResponse({ command: 'status', sessionId, text: commandText('Status', [['Agent', agentRuntime.agentId], ['Session', sessionId], ['Model', runtime.modelConfig?.model || 'unconfigured'], ['Model configured', Boolean(runtime.modelConfig?.model)], ['Run', active ? `${active.runId} (${active.phase})` : 'idle'], ...contextMeterLines(context, status.compaction, { source: status.recall?.used ? 'session recall' : 'none' })]), receipt: { agentId: agentRuntime.agentId, model: runtime.modelConfig?.model || null, modelConfigured: Boolean(runtime.modelConfig?.model), activeRun: active ? activeChatRunSummary(active) : null, context, compaction: { active: Boolean(status.compaction?.active), next: status.compaction?.next || null }, memory: { source: status.recall?.used ? 'session recall' : 'none' } } }) };
-}
-
-async function handleChat(req, res) {
-  const latencyTiming = { ingressMs: performance.now(), ingressAt: new Date().toISOString() };
-  const body = validateBoundaryBody('chat', await readJsonBody(req));
-  let agentRuntime;
-  try {
-    agentRuntime = await resolveAgentRuntime(body.agentId);
-  } catch (error) {
-    return sendJson(res, error?.statusCode || 500, { ok: false, error: String(error?.message || error) });
-  }
-  const sessionId = String(body.sessionId || 'default');
-  // Cancellation, reset, and read-only status must reach the active turn, not
-  // wait for that turn to finish. Mutating ordinary chat remains serialized
-  // within the current session generation.
-  if (['stop', 'new', 'status'].includes(parseChatCommand(body.message)?.command)) {
-    return handleSerializedChat({ req, res, body, agentRuntime, sessionId });
-  }
-  const busy = [...activeChatRuns.values()].some(run => run.agentId === agentRuntime.agentId && run.sessionId === sessionId && run.lane !== 'side_question');
-  const pending = await postgresApplication.stores.chatInputs.list({ agentId: agentRuntime.agentId, sessionId });
-  if (busy || pending.inputs.some(input => input.intent === 'queue_next' && ['queued','held','running'].includes(input.status))) {
-    return sendJson(res, 409, { ok:false, error:'chat_session_busy_use_explicit_intent' });
-  }
-  const admission = new AbortController();
-  const disconnected = () => admission.abort(new Error('chat_admission_disconnected'));
-  res.once('close', disconnected);
-  req.once('aborted', disconnected);
-  if (req.aborted || res.destroyed) disconnected();
-  latencyTiming.httpQueuedMs = performance.now();
-  try {
-    return await serializeSessionChat({ agentId: agentRuntime.agentId, sessionId, signal: admission.signal, operation: async () => {
-      const waiting = await postgresApplication.stores.chatInputs.list({ agentId: agentRuntime.agentId, sessionId });
-      if (waiting.inputs.some(input => input.intent === 'queue_next' && ['queued','held','running'].includes(input.status))) return sendJson(res,409,{ok:false,error:'chat_session_busy_use_explicit_intent'});
-      latencyTiming.httpAdmittedMs = performance.now();
-      // After admission preserve the existing detached-run policy.
-      res.removeListener('close', disconnected);
-      req.removeListener('aborted', disconnected);
-      return handleSerializedChat({ req, res, body, agentRuntime, sessionId, latencyTiming });
-    } });
-  } catch (error) {
-    if (!admission.signal.aborted) throw error;
-  } finally {
-    res.removeListener('close', disconnected);
-    req.removeListener('aborted', disconnected);
-    void chatInputRunner.wake().catch(() => {});
-  }
-}
-
-async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, latencyTiming = null }) {
-  if (typeof requestLifecycle !== 'undefined') requestLifecycle.signal.throwIfAborted();
-  const streaming = acceptsNdjson(req);
-  const command = parseChatCommand(body.message);
-  if (command) {
-    const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'command' });
-    correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
-    // Manual compaction is real session work, not an invisible command.
-    // Register before waiting for the shared runtime lane so Stop can cancel
-    // even a compact blocked behind another producer.
-    const manualCompact = command.command === 'compact' && command.definition && !command.args && !command.error;
-    const owner = manualCompact ? registerActiveAgentRun(activeChatRuns, {
-      agentId: agentRuntime.agentId, sessionId, runId, message: '/compact', source: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat',
-    }) : null;
-    if (owner) { owner.record.phase = 'compacting'; owner.record.detached = false; }
-    const detached = () => { if (owner && !res.writableEnded) owner.record.detached = true; };
-    if (owner) req.on('close', detached);
-    try {
-      if (streaming) beginNdjson(res);
-      const onProgress = streaming ? (event) => writeNdjson(res, { ...event, runId, sessionId, ts: new Date().toISOString() }) : null;
-      const operation = () => handleChatCommand({ parsed: command, sessionId, agentRuntime, runId, onProgress, signal: owner?.signal });
-      const result = owner
-        ? await serializeSessionExecution({ rootDir: projectRoot, sessionId, agentRuntime, args: { abort_signal: owner.signal } }, operation)
-        : await operation();
-      owner?.signal.throwIfAborted();
-      if (streaming) {
-        writeNdjson(res, { type: result.response.ok ? 'run.completed' : 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...result.response, result: { ...result.response.result, runId } } } }, { status: result.status });
-        return res.end();
-      }
-      return sendJson(res, result.status, result.response);
-    } catch (error) {
-      if (owner?.signal.aborted) {
-        const response = { ...chatResultMetadata({ ok: false, decision: 'cancelled' }), ok: false, error: String(owner.record.reason || error?.message || 'agent_stopped'), runId };
-        if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
-        return sendJson(res, 499, response);
-      }
-      const expected = chatTurnErrorResponse(error);
-      if (!expected) recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_command_failed' });
-      throw error;
-    } finally {
-      if (owner) { req.removeListener('close', detached); owner.finish(); }
-    }
-  }
-  const runId = body.runId ? String(body.runId) : createChatTurnRunId({ sessionId, prefix: 'ui' });
-  correlateHttpRun(res, { runId, sessionId, agentId: agentRuntime.agentId });
-  if (activeChatRuns.has(activeChatRunKey(agentRuntime.agentId, runId))) throw Object.assign(new Error('chat_run_id_already_used'), { statusCode: 409 });
-  const controller = new AbortController();
-  completionDispatch?.trackHttp(agentRuntime.agentId, runId, res, { sessionId, source: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat', startedAt: new Date().toISOString() });
-  const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: String(body.message || '').trim().slice(0, 16_000), objective: String(body.message || '').trim().slice(0, 16_000), progress: [], contextUsage: null, cancelled: false, reason: null, detached: false, steeringReady: false };
-  const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
-  sessionContinuityHeads.set(headKey, record);
-  activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
-  if (streaming) {
-    beginNdjson(res);
-    writeNdjson(res, { type: 'run.started', runId, sessionId, ts: record.startedAt, data: { command: 'chat' } });
-  }
-  req.on('close', () => {
-    if (!res.writableEnded && !controller.signal.aborted) record.detached = true;
-  });
-  const emitTextDelta = streaming ? createChatStreamDelta({ record, type: 'assistant.delta', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null;
-  const emitThoughtDelta = streaming ? createChatStreamDelta({ record, type: 'assistant.thought', runId, sessionId, write: (event) => writeNdjson(res, event) }) : null;
-  try {
-    const chatBody = await resolveModelConnectionChatBody(body);
-    const result = await runChatTurnFromBody({
-      body: { ...chatBody, runId, abortSignal: controller.signal },
-      rootDir: projectRoot,
-      agentRuntime,
-      stores: postgresApplication.stores,
-      resolveAgentRuntime,
-      latencyTiming,
-      telemetry: otelRuntime,
-      runSource: coreApiCaller(req) ? 'backdoor-api' : 'operator-chat',
-      cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,
-      onCancellationDeadline: () => retireCancelledRun(record),
-      registerNestedAgentRun: ({ agentRuntime: nestedRuntime, sessionId: nestedSessionId, runId: nestedRunId, message, source, ...a2a }) => registerRuntimeActiveRun({ agentId: nestedRuntime.agentId, sessionId: nestedSessionId, runId: nestedRunId, message, source, a2a: source === 'a2a' ? a2a : null }),
-      onTraceRecord: (traceRecord) => {
-        // Capture runtime-owned span correlation while the run is still active.
-        correlateHttpRun(res, { traceContext: otelRuntime.traceContextForRun?.(runId) });
-        const progress = publicChatProgress(traceRecord);
-        if (progress) {
-          const event = { ...progress, runId, sessionId, ts: traceRecord.ts || new Date().toISOString() };
-          record.progress = [...record.progress, event].slice(-50);
-          if (progress.type === 'model.recovery') observeModelRecovery(serverLogger, traceRecord, record);
-          if (!applyModelRecoveryProgress(record, progress)) {
-            if (controller.signal.aborted || record.phase === 'cancelling') record.phase = 'cancelling';
-            else {
-              if (progress.type === 'context.compaction.started') record.phase = 'compacting';
-              if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
-            }
-          }
-          if (streaming) writeNdjson(res, event);
-        }
-      },
-      onModelTextDelta: streaming ? (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitTextDelta(delta); } : null,
-      onModelThoughtDelta: streaming ? (delta) => { if (controller.signal.aborted || record.phase === 'cancelling') { record.phase = 'cancelling'; return; } emitThoughtDelta(delta); } : null,
-      onSteeringReady: () => { record.steeringReady = !controller.signal.aborted && record.phase !== 'cancelling'; },
-      onModelContextUsage: async (usage) => {
-        if (!usage || typeof usage !== 'object') return;
-        // Each update is scoped to one physical request; never carry a previous
-        // response or run maximum into the next request estimate.
-        record.contextUsage = { ...usage, runId };
-        try {
-          await postgresApplication.stores.conversations.append({
-            agentId: agentRuntime.agentId,
-            sessionId,
-            entry: {
-            sessionId,
-            type: 'event',
-            role: null,
-            content: 'Latest provider request context measurement updated.',
-            runId,
-            metadata: { contextMeter: record.contextUsage },
-            visibility: 'debug',
-            entersPrompt: false,
-            },
-          });
-        } catch {
-          // Meter persistence is observational; it must never interrupt a run.
-        }
-      },
-    });
-    if (sessionContinuityHeads.get(headKey) !== record) {
-      const response = { ...chatResultMetadata({ ok: false, decision: 'superseded' }), ok: false, decision: 'superseded', runId, sessionId, blockers: ['superseded_by_newer_session_run'] };
-      if (streaming) { writeNdjson(res, { type: 'run.superseded', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
-      return sendJson(res, 409, response);
-    }
-    correlateHttpRun(res, { cancelled: controller.signal.aborted });
-    // An abort-ignoring attempt can still settle with a result. Stop owns the
-    // public terminal; do not turn that late settlement into a completed run.
-    if (controller.signal.aborted) {
-      const response = chatTurnProgressResponse({ ...result, decision: 'cancelled', answerText: null }, { ok: false });
-      if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
-      return sendJson(res, 499, response);
-    }
-    // Observe the internal result before the stream's intentionally narrow
-    // response drops model status/codes. This never serializes model payloads.
-    observeHttpResult(res, 200, { ok: result.ok, result }, { event: 'run_failed' });
-    const response = chatTurnResponse(result, { ok: result.ok });
-    const streamResponse = chatTurnProgressResponse(result, { ok: result.ok });
-    if (streaming) { writeNdjson(res, { type: `run.${streamResponse.result.terminalStatus}`, runId, sessionId, ts: new Date().toISOString(), data: { response: streamResponse } }); return res.end(); }
-    return sendJson(res, 200, response);
-  } catch (error) {
-    if (controller.signal.aborted) {
-      const response = { ...chatResultMetadata({ ok: false, decision: 'cancelled' }), ok: false, error: String(record.reason || error?.message || 'agent_stopped'), runId };
-      if (streaming) { writeNdjson(res, { type: 'run.cancelled', runId, sessionId, ts: new Date().toISOString(), data: { response } }); return res.end(); }
-      return sendJson(res, 499, response);
-    }
-    const errorResponse = chatTurnErrorResponse(error);
-    if (errorResponse) {
-      if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...errorResponse.body, ...chatResultMetadata({ ok: false, decision: 'failed' }) } } }, { status: errorResponse.status }); return res.end(); }
-      return sendJson(res, errorResponse.status, { ...errorResponse.body, ...chatResultMetadata({ ok: false, decision: 'failed' }) });
-    }
-    recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_run_failed' });
-    if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...chatResultMetadata({ ok: false, decision: 'failed' }), ok: false, error: String(error?.message || error), runId } } }); return res.end(); }
-    throw error;
-  } finally {
-    if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));
-  }
-}
-
 const startGroupChannelMessage = createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgentRuntime, conversationStore: postgresApplication.stores.conversations, stores: postgresApplication.stores, retentionDays: async () => (await postgresApplication.stores.albdruck.readRetention()).attachmentDays, projectRoot, groupChannelRuns, groupChannelRunKey, runChatTurnFromBody, telemetry: otelRuntime, lifecycle: requestLifecycle });
 
 async function cancelGroupChannelRun(channelId, runId, body = {}) {
@@ -2661,131 +1577,11 @@ async function cancelGroupChannelRun(channelId, runId, body = {}) {
   return { ok: true, channelId, runId, agentId: record.agentId, status: 'cancelled', reason: record.reason };
 }
 
-async function cancelChatRun(runId, body = {}, agentRuntime = null) {
-  const requestedAgentId = agentRuntime?.agentId || body.agentId;
-  const matches = [...activeChatRuns.values()].filter(run => run.runId===runId);
-  const record = requestedAgentId ? activeChatRuns.get(activeChatRunKey(requestedAgentId,runId)) : matches.length===1 ? matches[0] : null;
-  const cancelled = cancelActiveChatRun(activeChatRuns, runId, { body, agentId: agentRuntime?.agentId || null });
-  if (record && record.lane !== 'side_question') {
-    chatInputRunner.cancelSession({ ...record, mainOnly: true });
-    await postgresApplication.stores.chatInputs.holdSession(record);
-  }
-  return cancelled;
-}
-
-async function supersedeSessionRuns({ agentId, sessionId, reason = 'superseded by session reset' } = {}) {
-  const matches = [...activeChatRuns.values()].filter((run) => run.agentId === agentId && run.sessionId === sessionId);
-  const superseded = [];
-  for (const run of matches) {
-    sessionContinuityHeads.delete(sessionContinuityHeadKey(agentId, sessionId));
-    const result = cancelActiveChatRun(activeChatRuns, run.runId, { body: { reason }, agentId });
-    if (result.ok && result.cancelledRuns.length) superseded.push(...result.cancelledRuns);
-    else if (run.controller.signal.aborted) superseded.push({ runId: run.runId, agentId: run.agentId, sessionId: run.sessionId });
-    // Reset supersedes this display/dispatch identity. Durable reset fences its
-    // old writes; an abort-ignoring provider must not block the fresh generation.
-    activeChatRuns.delete(activeChatRunKey(run.agentId,run.runId));
-  }
-  return superseded.filter((run, index, all) => all.findIndex((candidate) => candidate.agentId === run.agentId && candidate.runId === run.runId) === index);
-}
-
-async function beginSessionAdmissionsReset({ agentId, sessionId } = {}) {
-  const agentRuntime = await resolveAgentRuntime(agentId);
-  const http = beginSessionAdmissionSupersession(sessionChatQueues, sessionChatQueueKey(agentId, sessionId));
-  try {
-    const runtime = beginRuntimeSessionExecutionSupersession({ rootDir: projectRoot, sessionId, agentRuntime });
-    try {
-      // The reset barriers already exclude successors. Signal current owners
-      // before waiting for durable queue/reset rows they may themselves hold.
-      for (const record of activeChatRuns.values()) {
-        if (record.agentId === agentId && record.sessionId === sessionId) {
-          cancelActiveChatRun(activeChatRuns, record.runId, { body: { reason: 'superseded by session reset' }, agentId });
-        }
-      }
-      chatInputRunner.cancelSession({ agentId, sessionId });
-      await postgresApplication.stores.chatInputs.cancelGeneration({ agentId, sessionId });
-      return { http, runtime };
-    } catch(error) { finishRuntimeSessionExecutionSupersession(runtime); throw error; }
-  } catch (error) {
-    finishSessionAdmissionSupersession(http);
-    throw error;
-  }
-}
-
-function finishSessionAdmissionsReset(tokens = {}) {
-  finishRuntimeSessionExecutionSupersession(tokens.runtime);
-  finishSessionAdmissionSupersession(tokens.http);
-}
-
-async function steerChatRun(runId, body, agentRuntime) {
-  if (!agentRuntime) throw Object.assign(new Error('agent_id_required'),{statusCode:400});
-  const input = chatTurnInputFromBody({ body });
-  const identity = { agentId: agentRuntime.agentId, sessionId: input.sessionId, runId };
-  const record = activeChatRuns.get(activeChatRunKey(identity.agentId, runId));
-  if (record && (record.sessionId !== input.sessionId || record.lane === 'side_question')) throw Object.assign(new Error('chat_run_not_found'),{statusCode:404});
-  // Stop closes acceptance even while the provider is unwinding.
-  if (!record || record.controller.signal.aborted) await postgresApplication.stores.steering.boundary(identity, { finish: true });
-  if (body.promotedFrom) {
-    const side = await postgresApplication.stores.chatInputs.get({ ...identity, id: body.promotedFrom });
-    if (!side || side.intent !== 'side_question' || side.status !== 'succeeded') throw Object.assign(new Error('chat_input_promotion_source_invalid'),{statusCode:400});
-  }
-  const steering = await postgresApplication.stores.steering.submit({ ...identity, idempotencyKey: body.idempotencyKey, message: input.message, attachments: input.args.attachments || [], generation: body.generation, promotedFrom: body.promotedFrom });
-  return { ok: true, runId, sessionId: identity.sessionId, steering };
-}
-
-async function listChatSteering(runId, body, agentRuntime) {
-  if (!agentRuntime) throw Object.assign(new Error('agent_id_required'),{statusCode:400});
-  const identity = { agentId: agentRuntime.agentId, sessionId: String(body.sessionId || 'default'), runId };
-  if (!activeChatRuns.has(activeChatRunKey(identity.agentId, runId))) {
-    try { await postgresApplication.stores.steering.boundary(identity, { finish: true }); }
-    catch (error) { if (error.statusCode !== 404) throw error; }
-  }
-  return { ok: true, ...identity, steering: await postgresApplication.stores.steering.list(identity) };
-}
-
-async function currentActiveChatRunSummaries({ agentId = null, sessionId = null } = {}) {
-  const allRuns = activeChatRunSummaries(activeChatRuns, { agentId });
-  const runs = [];
-  const childRecords = [];
-  // Observability reads stored identity/data, not permission to execute a turn.
-  const runtimes = agentId ? [await resolveAgentContext(agentId)] : await Promise.all((await agentsStore().list({ includeDisabled: true })).map((agent) => resolveAgentContext(agent.id)));
-  for (const agentRuntime of runtimes) {
-    const [records, settings, metadata] = await Promise.all([
-      listSubagentSummaries(agentRuntime),
-      readMinionSettings(metadataStore(), agentRuntime.agentId),
-      sessionId ? postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId }) : null,
-    ]);
-    const requested = sessionId ? sessionMinionAncestry({ sessionId, metadata, maxDepth: settings.maxDepth }) : null;
-    const agentRuns = allRuns.filter(run => run.agentId === agentRuntime.agentId);
-    const activeSessions = await Promise.all(agentRuns.map(async run => ({
-      ...run,
-      metadata: run.sessionId === sessionId ? metadata : await postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId: run.sessionId }),
-    })));
-    const tree = projectSubagentTree(records, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested?.depth > 0 ? requested.rootSessionId : null, activeSessions });
-    const expectedRoot = requested?.depth > 0 ? requested.rootSessionId : tree.find(item => item.sessionId === sessionId)?.rootSessionId || sessionId;
-    const liveSessions = new Set(agentRuns.map(run => run.sessionId));
-    const activeTree = projectSubagentTree(tree, { agentId: agentRuntime.agentId, sessionId, rootSessionId: requested?.depth > 0 ? requested.rootSessionId : null, visible: item => !item.final || liveSessions.has(item.sessionId) });
-    childRecords.push(...activeTree.map(item => ({ ...item, source: 'subagent' })));
-    for (const run of agentRuns) {
-      const subagent = tree.find(item => item.sessionId === run.sessionId && (!item.trace?.runId || item.trace.runId === run.runId));
-      const runMetadata = subagent ? null : activeSessions.find(item => item.runId === run.runId)?.metadata;
-      const ancestry = sessionMinionAncestry({ sessionId: run.sessionId, runId: run.runId, metadata: runMetadata, maxDepth: settings.maxDepth, subagent });
-      if (sessionId && run.sessionId !== sessionId && ancestry.rootSessionId && expectedRoot && ancestry.rootSessionId !== expectedRoot) continue;
-      if (sessionId && run.sessionId !== sessionId && !subagent && ancestry.rootSessionId !== sessionId && ancestry.parentSessionId !== sessionId) continue;
-      // A requested child must not pick up siblings sharing its root marker.
-      if (sessionId && requested?.depth > 0 && run.sessionId !== sessionId && !subagent && ancestry.parentSessionId !== sessionId) continue;
-      const observed = { ...run, ...ancestry };
-      if (run.lane === 'side_question') observed.steering = [];
-      else {
-        try { observed.steering = await postgresApplication.stores.steering.list(run); }
-        catch (error) { if (error.statusCode !== 404) throw error; observed.steering = []; }
-      }
-      runs.push(observed);
-    }
-  }
-  runs.sort((a, b) => a.agentId.localeCompare(b.agentId) || a.depth - b.depth);
-  return { runs, subagents: childRecords, pendingForgeDeliveries: await postgresApplication.stores.forge.pendingChatDeliveryCount({ agentId, sessionId }) };
-}
-
+const { importPreview, applyImport, exportSnapshot } = createImportExportApplication({
+  stores: postgresApplication.stores, metadataStore, uiAuthSecretStore,
+  runtime: { sourceRoot, config: runtimeConfig, ensureAgentRoots, metrics: runtimeMetrics, curatorRoot,
+    archiveSummary: { read: archiveSummarySelection, save: saveArchiveSummaryModelSelection } },
+});
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
 const completionEventReceiverSettings = createCompletionEventSettings({ store: postgresApplication.stores.completionEventSettings });
 const completionEventRoute = createCompletionEventRoutes({ store: postgresApplication.stores.completionEvents, readJsonBody, sendJson, resolveAgentRuntime, wake: () => completionEventRunner.wake(), getWebhookSecret: () => completionEventReceiverSettings.secret(), receiverSettings: completionEventReceiverSettings });
@@ -2864,10 +1660,10 @@ const runtimeDiagnostics = Object.freeze({
     if (operation === 'brain-embedding-jobs') return brainDiagnosticEmbeddingJobs(postgresApplication.pool, { agentId: targetAgentId(input.agentId), limit: input.limit, cursor: input.cursor });
     if (operation === 'forge-jobs') { requireGlobal(); return forgeDiagnosticJobs(postgresApplication.pool, { limit: input.limit, cursor: input.cursor }); }
     if (operation === 'forge-job') { requireGlobal(); return forgeDiagnosticJob(postgresApplication.pool, input.jobId); }
-    if (operation === 'mods') return { ok: true, mods: diagnosticMods(loadedMods) };
-    if (operation === 'mod-jobs') { requireGlobal(); return { ok: true, ...await modJobs(loadedMods, input.modId, { limit: input.limit, cursor: input.cursor }) }; }
-    if (operation === 'mod-job') { requireGlobal(); return { ok: true, ...await modJobs(loadedMods, input.modId, { jobId: input.jobId }) }; }
-    if (operation === 'mod-pending') { requireGlobal(); return { ok: true, ...pendingModOperations(loadedMods, input.modId) }; }
+    if (operation === 'mods') return { ok: true, mods: diagnosticMods(modLifecycle.getMods()) };
+    if (operation === 'mod-jobs') { requireGlobal(); return { ok: true, ...await modJobs(modLifecycle.getMods(), input.modId, { limit: input.limit, cursor: input.cursor }) }; }
+    if (operation === 'mod-job') { requireGlobal(); return { ok: true, ...await modJobs(modLifecycle.getMods(), input.modId, { jobId: input.jobId }) }; }
+    if (operation === 'mod-pending') { requireGlobal(); return { ok: true, ...pendingModOperations(modLifecycle.getMods(), input.modId) }; }
     if (operation === 'agents') return { ok: true, agents: await agentsStore().list({ includeDisabled: input.includeDisabled !== false }) };
     if (operation === 'agent-status') { const runtime = await agentRuntime(input.agentId); return { ok: true, ...(await agentStatusForSession(sessionId(), runtime)) }; }
     if (operation === 'sessions') {
@@ -2917,82 +1713,19 @@ const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagem
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
 } };
-const coreManagedSkills = [{ id: 'burrow-runtime', repository: 'https://github.com/GoblinKing-Burrow/Burrow-Skills.git', path: 'burrow-runtime/SKILL.md' }];
-async function reconcileRuntimeManagedSkills(mods = loadedMods) {
-  const workspaceRoot = (await runtimeConfig()).runtimeState.workspaceRoot;
-  return reconcileManagedSkills({ root: path.join(workspaceRoot, 'global', 'managed-skills'), declarations: activeManagedSkillDeclarations(mods, coreManagedSkills) });
-}
-const managedSkillSynchronizer = createManagedSkillSynchronizer({
-  logger: serverLogger,
-  reconcile: () => reconcileRuntimeManagedSkills(),
-  intervalMs: Math.max(60_000, Number(process.env.BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS || 6 * 60 * 60 * 1000)),
+const modLifecycle = createModLifecycleService({
+  modLoadOptions, logger: serverLogger,
+  getManagedSkillRoot: async () => path.join((await runtimeConfig()).runtimeState.workspaceRoot, 'global', 'managed-skills'),
+  managedSkillSyncIntervalMs: Math.max(60_000, Number(process.env.BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS || 6 * 60 * 60 * 1000)),
 });
-let modsStarting = true;
-const modRoute = createModRoute({ getMods: () => loadedMods, readJsonBody, sendJson });
-async function transitionMod({ modId, enabled, installed, action, reactivate = false }) {
-  // Startup journals reconcile files and metadata before any hosts are started.
-  if (modsStarting) return;
-  const old = loadedMods.find((entry) => entry.id === modId) || null;
-  // Repeated enable is a no-op only for a genuinely active loaded host.
-  // Failed/disconnected hosts must still pass through activation on retry.
-  if (!reactivate && ['enable', 'enable-recovery'].includes(action) && installed && enabled && old?.status === 'loaded' && old.host && !old.host.child?.killed && old.host.child?.connected) return;
-  if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
-  if (action === 'update-preflight') return;
-  // A failed uninstall can restore files and lifecycle records after the old
-  // host/catalog entry was removed. Re-discover a disabled mod as well as
-  // reactivating an enabled one so memory, filesystem, and PostgreSQL converge.
-  if (action === 'uninstall-recovery' && installed && !enabled && !old) {
-    const [restored] = await loadMods({ ...modLoadOptions, onlyModIds: [modId] });
-    if (!restored) throw Object.assign(new Error('mod_recovery_failed'), { statusCode: 500 });
-    loadedMods = [...loadedMods, restored];
-    return;
-  }
-  if (!installed || !enabled) {
-    if (old) await cleanupMods([old], { logger: serverLogger });
-    loadedMods = installed
-      ? loadedMods.map((entry) => entry.id === modId ? { ...entry, host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' } : entry)
-      : loadedMods.filter((entry) => entry.id !== modId);
-    await managedSkillSynchronizer.tick();
-    return;
-  }
-  if (reactivate && old) {
-    // Newly approved interfaces require a fresh host. Stop the old listener
-    // before activation; overlapping Node Goblin listeners cannot share a port.
-    await cleanupMods([old], { logger: serverLogger });
-    Object.assign(old, { host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' });
-  }
-  const [next] = await loadMods({ ...modLoadOptions, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
-  if (!next || next.status !== 'loaded') {
-    if (next) await cleanupMods([next], { logger: serverLogger });
-    throw Object.assign(new Error(next?.error || 'mod_activation_failed'), { statusCode: 409 });
-  }
-  // Activation awaits child IPC; acquire an idle admission barrier before
-  // the fallible asynchronous catalog write. Keep the original host tracked
-  // until publication succeeds, so distribution compensation cannot orphan it.
-  let resumeAdmissions;
-  try {
-    if (old?.host?.activeOperationCount?.() > 0) throw Object.assign(new Error('mod_busy'), { statusCode: 409 });
-    resumeAdmissions = old?.host?.pauseAdmissions?.();
-    if (action === 'update') await publishModTools(next, modLoadOptions.modCatalogWriter);
-    next.commitProviderReplacement?.();
-    loadedMods = old ? loadedMods.map((entry) => entry.id === modId ? next : entry) : [...loadedMods, next];
-  } catch (error) {
-    await cleanupMods([next], { logger: serverLogger });
-    resumeAdmissions?.();
-    throw error;
-  }
-  if (old) await cleanupMods([old], { logger: serverLogger });
-  // Skill delivery is auxiliary: its synchronizer owns failure diagnostics and
-  // periodic retries. A missing upstream skill must not undo a valid mod update.
-  await managedSkillSynchronizer.tick();
-  await modLoadOptions.onExecutionProviderActivated?.(modId);
-}
+const managedSkillSynchronizer = modLifecycle.managedSkillSynchronizer;
+const modRoute = createModRoute({ getMods: modLifecycle.getMods, readJsonBody, sendJson });
 const modDistribution = createModDistribution({
   logger: serverLogger,
   runtimeRoot: modsRuntimeRoot,
   repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
-  onLifecycleChange: transitionMod,
-  resolveSecretReference: reference => resolveSecretReference(loadedMods, reference),
+  onLifecycleChange: modLifecycle.transition,
+  resolveSecretReference: reference => resolveSecretReference(modLifecycle.getMods(), reference),
 });
 // Complete durable uninstall reconciliation before accepting requests. The
 // callback above is self-contained and does not call back into the distribution,
@@ -3003,23 +1736,23 @@ await migrateLegacyExecutionProviderApproval({
   mods: await discoverMods({ runtimeRoot: modsRuntimeRoot, logger: serverLogger }),
   agents: await agentsStore().list({ includeDisabled: true }),
 });
-loadedMods = await loadMods(modLoadOptions);
+await modLifecycle.initialize();
 completionDispatch = createAgentRunCompletionDispatch({ feed: postgresApplication.stores.agentRuns,
-  activeRuns: activeChatRuns, getHosts: () => loadedMods.filter(mod => mod.status === 'loaded').map(mod => mod.host) });
+  activeRuns: activeChatRuns, getHosts: () => modLifecycle.getMods().filter(mod => mod.status === 'loaded').map(mod => mod.host) });
 await managedSkillSynchronizer.tick();
 await applyOtelConfigurationToNodeGoblins();
-modsStarting = false;
+modLifecycle.markReady();
 coreModManagement = createModManagement({ logger: serverLogger, modAuthority, distribution: modDistribution, repositoryFactory: postgresApplication.modDistributionRepositoryFactory });
 await coreModManagement.ready;
-const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => loadedMods, readJsonBody, sendJson });
+const modAuthorityRoute = createModAuthorityRoute({ authority: modAuthority, getMods: () => modLifecycle.getMods(), readJsonBody, sendJson });
 const modManagementDistribution = {
   ...modDistribution,
-  listSecretReferences: scheme => listSecretReferences(loadedMods, { scheme }),
+  listSecretReferences: scheme => listSecretReferences(modLifecycle.getMods(), { scheme }),
   async list() {
     const result = await modDistribution.list();
     const workspaceRoot = (await runtimeConfig()).runtimeState.workspaceRoot;
     const managedRoot = path.join(workspaceRoot, 'global', 'managed-skills');
-    const loadedById = new Map(loadedMods.map(mod => [mod.id, mod]));
+    const loadedById = new Map(modLifecycle.getMods().map(mod => [mod.id, mod]));
     return {
       ...result,
       mods: await Promise.all(result.mods.map(async mod => {
@@ -3099,9 +1832,9 @@ async function handleRequest(req, res) {
       try { return sendJson(res, 200, await forgeDiagnosticJob(postgresApplication.pool, url.pathname.slice('/api/diagnostics/forge/jobs/'.length))); }
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_diagnostics_unavailable' }); }
     }
-    if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(loadedMods) });
+    if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(modLifecycle.getMods()) });
     if (req.method === 'GET' && /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(url.pathname)) {
-      try { return sendJson(res, 200, { ok: true, ...pendingModOperations(loadedMods, url.pathname.split('/')[4]) }); }
+      try { return sendJson(res, 200, { ok: true, ...pendingModOperations(modLifecycle.getMods(), url.pathname.split('/')[4]) }); }
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/mods/')) {
@@ -3109,7 +1842,7 @@ async function handleRequest(req, res) {
       if (!match) return sendJson(res, 404, { ok: false, error: 'not_found' });
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
       const cursor = url.searchParams.has('cursor') ? url.searchParams.get('cursor') : undefined;
-      try { return sendJson(res, 200, { ok: true, ...await modJobs(loadedMods, match[1], { jobId: match[2], limit, cursor }) }); }
+      try { return sendJson(res, 200, { ok: true, ...await modJobs(modLifecycle.getMods(), match[1], { jobId: match[2], limit, cursor }) }); }
       catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
@@ -3254,7 +1987,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     }
   },
   drainAdmission: () => httpClosePromise,
-  closers: () => [() => archiveReadProcess.close(), () => cleanupMods(loadedMods, { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
+  closers: () => [() => archiveReadProcess.close(), () => cleanupMods(modLifecycle.getMods(), { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
   onTimeout: () => server.closeAllConnections?.(),
 });
 let shutdownPromise = null;
@@ -3305,8 +2038,8 @@ server.listen(port, host, () => {
     version: releaseVersion, authMode: bundledSkillRuntime.ui.authMode, authSource: bundledSkillRuntime.ui.authSource,
     environmentOverride: Object.keys(process.env).some(key => key.startsWith('BURROW_UI_AUTH_') && Boolean(process.env[key])),
     database: 'ready', schedulers: backgroundSchedulersEnabled() ? 'enabled' : 'disabled',
-    mods: { total: loadedMods.length, loaded: loadedMods.filter(mod => mod.status === 'loaded').length,
-      disabled: loadedMods.filter(mod => mod.status === 'disabled').length, failed: loadedMods.filter(mod => mod.status === 'failed').length },
+    mods: { total: modLifecycle.getMods().length, loaded: modLifecycle.getMods().filter(mod => mod.status === 'loaded').length,
+      disabled: modLifecycle.getMods().filter(mod => mod.status === 'disabled').length, failed: modLifecycle.getMods().filter(mod => mod.status === 'failed').length },
   });
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
   const forgeDelivery = await postgresApplication.stores.forge.reconcileChatDeliveries();
@@ -3317,7 +2050,7 @@ server.listen(port, host, () => {
     void managedSkillSynchronizer.start().catch(() => {}); // Synchronizer owns failure/recovery diagnostics.
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{ error }, { level: 'warn', component: 'skills' }));
     const store = postgresApplication.stores.scheduledJobs;
-    try { await postgresApplication.stores.tasks.reconcileInterruptedExecutions(); await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: loadedMods.filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
+    try { await postgresApplication.stores.tasks.reconcileInterruptedExecutions(); await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: modLifecycle.getMods().filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
     if (shuttingDown) return;
     await completionEventRunner.start();
     await chatInputRunner.start();

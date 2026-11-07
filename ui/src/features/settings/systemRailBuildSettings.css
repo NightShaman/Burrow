@@ -1,0 +1,23 @@
+.system-rail-summary > .system-rail-build {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 9px;
+  min-width: 0;
+}
+.system-rail-build strong {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: none;
+}
+.system-rail-build > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--muted);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+  font-weight: 400;
+}

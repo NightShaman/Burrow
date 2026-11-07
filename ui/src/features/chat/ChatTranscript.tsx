@@ -2,7 +2,8 @@ import { contextReport } from './contextReport';
 import type { ChatInput } from './chatInputs';
 import { chatTerminalMetadata } from './chatTerminal';
 import type { ChatLiveStage } from './chatLiveStage';
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo } from 'react';
+import { useTranscriptScroll } from './useTranscriptScroll';
 import {
   textFromChatValue,
   type ProgressEntry,
@@ -156,45 +157,19 @@ export const ChatTranscript = memo(function ChatTranscript({
     !a2aActivities.length &&
     !visibleRuntimeChildActivities.length &&
     (isNewSession || !messages.length);
-  const messagesRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const updateScrollIntent = () => {
-    const container = messagesRef.current;
-    if (!container) return;
-    stickToBottomRef.current =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 48;
-    setShowJumpToLatest(!stickToBottomRef.current);
-  };
-  const syncScroll = () => {
-    const container = messagesRef.current;
-    if (!container) return;
-    if (!isLoading && stickToBottomRef.current) container.scrollTop = container.scrollHeight;
-    setShowJumpToLatest(
-      container.scrollHeight - container.scrollTop - container.clientHeight >= 48,
-    );
-  };
-  useLayoutEffect(syncScroll, [
-    isLoading,
-    isNewSession,
-    messages.length,
-    isSending,
-    liveProgress,
-    liveAnswer,
-    activeActivity,
-    chatInputs,
-    error,
-  ]);
-  // Images, expanded tool details and viewport changes can alter the bottom
-  // without adding a turn. Follow only when the reader has not scrolled away.
-  useEffect(() => {
-    const container = messagesRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(syncScroll);
-    observer.observe(container);
-    for (const child of container.children) observer.observe(child);
-    return () => observer.disconnect();
-  });
+  const { messagesRef, showJumpToLatest, updateScrollIntent, loadOlder, jumpToLatest } =
+    useTranscriptScroll({
+      isLoading,
+      isNewSession,
+      messageCount: messages.length,
+      isSending,
+      liveProgress,
+      liveAnswer,
+      activeActivity,
+      chatInputs,
+      error,
+      onLoadOlder,
+    });
   return (
     <div className="chat-transcript">
       <div
@@ -210,21 +185,7 @@ export const ChatTranscript = memo(function ChatTranscript({
         ) : (
           <>
             {hasOlder && onLoadOlder && (
-              <button
-                className="secondary"
-                disabled={isLoadingOlder}
-                onClick={async () => {
-                  const container = messagesRef.current;
-                  const height = container?.scrollHeight ?? 0;
-                  const top = container?.scrollTop ?? 0;
-                  stickToBottomRef.current = false;
-                  await onLoadOlder();
-                  requestAnimationFrame(() => {
-                    if (container && container === messagesRef.current && !stickToBottomRef.current)
-                      container.scrollTop = top + container.scrollHeight - height;
-                  });
-                }}
-              >
+              <button className="secondary" disabled={isLoadingOlder} onClick={loadOlder}>
                 {isLoadingOlder ? 'Loading older messages…' : 'Load older messages'}
               </button>
             )}
@@ -409,13 +370,7 @@ export const ChatTranscript = memo(function ChatTranscript({
           className="chat-jump-latest"
           aria-label="Jump to latest message"
           title="Jump to latest message"
-          onClick={() => {
-            const container = messagesRef.current;
-            if (!container) return;
-            stickToBottomRef.current = true;
-            container.scrollTop = container.scrollHeight;
-            setShowJumpToLatest(false);
-          }}
+          onClick={jumpToLatest}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 4v16m-6-6 6 6 6-6" />

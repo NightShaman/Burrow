@@ -1,4 +1,4 @@
-import { isProviderPool } from './model-settings-store.mjs';
+import { isProviderPool } from './provider-pool-settings.mjs';
 import { createOpenAiResetCreditsService, stableResetAccount } from './openai-reset-credits-service.mjs';
 
 // Invalidation epoch reaches native pool service instances without sharing cache ownership.

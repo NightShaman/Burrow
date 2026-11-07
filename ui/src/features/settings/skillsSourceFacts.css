@@ -1,0 +1,139 @@
+/* Skills content within the shared Settings columns. */
+/* Skills uses the same column surfaces, cards and navigation states as Settings. */
+.skill-source-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+.skill-source-facts dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.skill-source-facts dd {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.skill-source-facts code {
+  font-size: 11px;
+  white-space: normal;
+}
+
+.settings-blank-slate.has-top-navigation {
+  grid-template-columns: minmax(0, 0.434fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+.settings-blank-slate.has-top-navigation.has-utility-panel {
+  grid-template-columns: minmax(0, 0.434fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(240px, 0.4fr);
+}
+.has-top-navigation > .settings-prototype-agent-selector {
+  grid-column: 1 / -1;
+}
+.has-top-navigation.has-utility-panel > .settings-prototype-agent-selector {
+  grid-column: 1 / 4;
+}
+.has-top-navigation.has-utility-panel > .settings-utility-panel {
+  grid-column: 4;
+}
+@media (max-width: 1200px) {
+  .settings-blank-slate.has-top-navigation {
+    grid-template-columns: 180px minmax(300px, 1fr) minmax(260px, 1fr);
+  }
+  .settings-blank-slate.has-top-navigation.has-utility-panel {
+    grid-template-columns: 180px minmax(300px, 0.8fr) minmax(260px, 0.8fr) minmax(240px, 0.4fr);
+  }
+}
+
+.skill-source-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.skill-instructions {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.65 var(--mono, monospace);
+  margin: 0;
+  max-width: 100%;
+}
+
+.skill-repository-preview {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  min-width: 0;
+}
+.skill-repository-preview h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.skill-source-fields textarea {
+  resize: vertical;
+  font-family: monospace;
+  line-height: 1.5;
+  min-width: 0;
+  max-width: 100%;
+}
+.skill-artifacts {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.skill-artifacts li {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.skill-artifacts code {
+  overflow-wrap: anywhere;
+}
+.skill-disclosure {
+  min-width: 0;
+  margin: 10px 0;
+}
+.skill-disclosure > summary {
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 0;
+}
+.skill-disclosure > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.skill-disclosure[open] > summary {
+  margin-bottom: 12px;
+}
+
+/* Pair short Skills fields by available form width, not viewport width. */
+.skill-source-fields {
+  container-type: inline-size;
+  container-name: skills-form;
+}
+.field-pair.skill-field-pair {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  min-width: 0;
+}
+.field-pair.skill-ref-path {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+.skill-field-pair .field {
+  min-width: 0;
+}
+.skill-compact-field {
+  width: 100%;
+  max-width: 220px;
+}
+@container skills-form (max-width:460px) {
+  .field-pair.skill-field-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

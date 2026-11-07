@@ -1,0 +1,61 @@
+.export-options {
+  display: grid;
+  gap: 8px;
+}
+.export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  cursor: pointer;
+}
+.export-option span {
+  display: grid;
+  gap: 2px;
+}
+.export-option small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.export-option input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.export-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.import-file-name {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.import-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-raised));
+}
+.import-preview .field {
+  margin: 0;
+}
+.import-warning {
+  margin: 0;
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.import-preview > .primary {
+  justify-self: end;
+}

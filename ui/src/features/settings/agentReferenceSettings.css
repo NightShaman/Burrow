@@ -1,0 +1,40 @@
+/* Reference photos retain their full composition; avatars remain cropped. */
+.agent-reference-preview img {
+  object-fit: contain;
+}
+
+/* Reference photos have two actions; leave the avatar's two-column row unchanged. */
+.reference-photo-file-control {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+.reference-photo-paste textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 68px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  resize: vertical;
+}
+.reference-photo-paste > button {
+  justify-self: start;
+}
+
+.agent-sidebar-order-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.agent-sidebar-order-list > div:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

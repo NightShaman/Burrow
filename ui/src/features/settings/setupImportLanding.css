@@ -1,0 +1,103 @@
+.wizard-import-landing {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 30px 24px 34px;
+  text-align: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 60%
+    ),
+    var(--surface-sunken);
+}
+.wizard-import-landing img {
+  width: 72px;
+  filter: drop-shadow(0 0 22px var(--accent-glow-strong));
+}
+.wizard-import-landing h3 {
+  margin: 0;
+  font-size: 22px;
+}
+.wizard-import-landing p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.wizard-import-landing .primary {
+  min-width: 180px;
+}
+.wizard-import-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 5px 0 -4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.wizard-import-divider::before,
+.wizard-import-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: '';
+}
+
+.wizard-import-landing {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 30px 24px 34px;
+  text-align: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 60%
+    ),
+    var(--surface-sunken);
+}
+.wizard-import-landing img {
+  width: 72px;
+  filter: drop-shadow(0 0 22px var(--accent-glow-strong));
+}
+.wizard-import-landing h3 {
+  margin: 0;
+  font-size: 22px;
+}
+.wizard-import-landing p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.wizard-import-landing .primary {
+  min-width: 180px;
+}
+.wizard-import-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 5px 0 -4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.wizard-import-divider::before,
+.wizard-import-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: '';
+}

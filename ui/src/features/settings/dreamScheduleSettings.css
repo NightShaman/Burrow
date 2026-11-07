@@ -1,0 +1,57 @@
+.dream-recent-activity {
+  margin-top: 16px;
+}
+.dream-recent-activity summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+}
+.dream-recent-activity .dream-cycle-activity {
+  margin-top: 10px;
+  padding-top: 0;
+  border: 0;
+}
+
+.dream-toggle-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+.dream-toggle-group .agent-enabled,
+.dream-memory-controls .agent-enabled {
+  margin-top: 0;
+}
+.dream-toggle-group .settings-description {
+  margin: 6px 0 0 42px;
+}
+.dream-memory-controls {
+  gap: 10px;
+}
+.dream-memory-heading {
+  margin-top: 4px;
+}
+.dream-settings-fields .settings-description {
+  margin-bottom: 0;
+}
+.dream-schedule-fields {
+  grid-template-columns: 1fr;
+}
+.dream-schedule-fields .skill-compact-field {
+  max-width: 220px;
+}
+.dream-actions {
+  justify-content: flex-start;
+}
+.dream-recent-activity {
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.dream-scheduled-controls {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.dream-scheduled-controls .skill-compact-field {
+  max-width: 220px;
+}
