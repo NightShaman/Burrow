@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ModArchiveHost } from './ModArchiveHost';
 
 const { mountArchive, apiLocal } = vi.hoisted(() => ({ mountArchive: vi.fn(), apiLocal: vi.fn() }));
 vi.mock('../../app/api', () => ({ apiLocal }));
 vi.mock('./ModPanelHost', () => ({ mountArchive }));
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Imports and async mounts may still be settling when their host is removed.
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   vi.resetAllMocks();
   vi.useRealTimers();
 });
@@ -224,13 +228,19 @@ it('retains filters through cleanup-only opt-in remounts without a registration 
     return vi.fn();
   });
   const view = render(<ModArchiveHost panel={panel} date="" headerRoot={headerRoot} />);
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   await waitFor(() => expect(within(headerRoot).getByRole('searchbox')).toBeTruthy());
   fireEvent.change(within(headerRoot).getByRole('searchbox'), { target: { value: 'preserved' } });
   await waitFor(() =>
     expect((within(headerRoot).getByRole('searchbox') as HTMLInputElement).value).toBe('preserved'),
   );
   const count = mountArchive.mock.calls.length;
-  await new Promise((r) => setTimeout(r, 30));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await new Promise((r) => setTimeout(r, 30));
+  });
   expect(mountArchive.mock.calls.length).toBe(count);
   expect(count).toBeLessThan(5);
   view.unmount();
@@ -247,7 +257,11 @@ it('cannot resurrect header controls after async mount rejection', async () => {
     throw new Error('Rejected mount');
   });
   const view = render(<ModArchiveHost panel={panel} date="" headerRoot={headerRoot} />);
-  await screen.findByRole('alert');
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  expect((await screen.findByRole('alert')).textContent).toBe('Rejected mount');
+  expect(context).toBeTruthy();
   context.configureHeader({ categories: [{ id: 'late', label: 'Late' }], participants: [] });
   await new Promise((r) => setTimeout(r, 0));
   expect(headerRoot.textContent).toBe('');
