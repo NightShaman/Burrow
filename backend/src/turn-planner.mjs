@@ -531,7 +531,6 @@ export function planTurn({
   // explicit transport action; otherwise the model interprets the message.
   const advisoryOnly = false;
   const readOnly = false;
-  const instruction = null;
   const explicitAction = normalizeAction(explicitControls.action ?? action);
   const plannedAction = explicitAction || null;
   const executionBase = actionExecution(plannedAction);
@@ -541,7 +540,6 @@ export function planTurn({
   const skills = skillPlan({ skillIndex, selectedIds: [] });
   const provenance = [];
   if (explicitAction) provenance.push({ source: 'explicit-action', action: explicitAction });
-  if (!explicitAction && instruction) provenance.push({ source: instruction.source, action: instruction.action, target: instruction.target, confidence: instruction.confidence });
   provenance.push(...memory.provenance.map((item) => ({ ...item, area: 'memory' })));
   provenance.push(...workspace.provenance.map((item) => ({ ...item, area: 'workspace' })));
   provenance.push(...extraEyes.provenance.map((item) => ({ ...item, area: 'extra-eyes' })));
@@ -549,11 +547,11 @@ export function planTurn({
   if (extraEyes.requested && !plannedAction) executionBase.mayInspect = true;
   const observabilitySource = explicitAction
     ? 'explicit-action'
-    : instruction?.source || extraEyes.provenance[0]?.source || 'default-chat';
+    : extraEyes.provenance[0]?.source || 'default-chat';
   const observabilityConfidence = explicitAction
     ? 'explicit-control'
-    : instruction?.confidence || (extraEyes.requested ? 'explicit-control' : 'default');
-  const facts = intentFacts({ action: plannedAction, instruction, explicitAction, advisoryOnly, readOnly, message });
+    : (extraEyes.requested ? 'explicit-control' : 'default');
+  const facts = intentFacts({ action: plannedAction, explicitAction, advisoryOnly, readOnly, message });
   const observability = {
     mode: executionBase.mode,
     action: plannedAction,
@@ -577,7 +575,7 @@ export function planTurn({
       ...(explicitControls || {}),
       action: explicitAction,
     },
-    instruction,
+    instruction: null,
     support: {
       memory,
       skills,

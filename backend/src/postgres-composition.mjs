@@ -27,19 +27,19 @@ import { PostgresDreamSettingsStore } from './postgres-dream-settings-store.mjs'
 import { PostgresDreamDiaryStore } from './postgres-dream-diary-store.mjs';
 import { PostgresDreamCycleReceiptStore } from './postgres-dream-cycle-receipt-store.mjs';
 import { PostgresContinuityHandoffStore } from './postgres-continuity-handoff-store.mjs';
-import PostgresForgeStore, { POSTGRES_FORGE_SCHEMA_SQL } from './postgres-forge-store.mjs';
+import PostgresForgeStore from './postgres-forge-store.mjs';
 import { PostgresWorkingMemoryStore } from './postgres-working-memory-store.mjs';
 import { PostgresApiTokenStore } from './postgres-api-token-store.mjs';
 import { PostgresSkillSettingsStore } from './postgres-skill-settings-store.mjs';
-import PostgresSetupStateStore, { POSTGRES_SETUP_STATE_SCHEMA_SQL } from './postgres-setup-state-store.mjs';
+import PostgresSetupStateStore from './postgres-setup-state-store.mjs';
 import PostgresSettingsMetadataStore from './postgres-settings-metadata-store.mjs';
 import { PostgresSessionStore } from './postgres-session-store.mjs';
 import PostgresUiAuthSecretStore from './postgres-ui-auth-secret-store.mjs';
 import PostgresOtelSettingsStore from './postgres-otel-settings-store.mjs';
-import PostgresRetentionSettingsStore, { POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL } from './postgres-retention-settings-store.mjs';
+import PostgresRetentionSettingsStore from './postgres-retention-settings-store.mjs';
 import { PostgresModGenerationStore } from './postgres-mod-generation-store.mjs';
 import { PostgresModExternalTurnStore } from './postgres-mod-external-turn-store.mjs';
-import PostgresWorkingMemoryRetentionSettingsStore, { POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL } from './postgres-working-memory-retention-settings-store.mjs';
+import PostgresWorkingMemoryRetentionSettingsStore from './postgres-working-memory-retention-settings-store.mjs';
 
 import { migratePostgres } from './postgres-migrations.mjs';
 import './postgres-application-schema.mjs';

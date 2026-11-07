@@ -2,7 +2,6 @@ import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 
 const AAD_PREFIX = 'burrow-mcp-secret-v1';
 const text = (value) => String(value ?? '').trim();
-const id = (value, field = 'id') => { const result = text(value); if (!/^[A-Za-z0-9._-]{1,96}$/.test(result)) throw new Error(`${field}_invalid`); return result; };
 export function settingsKeyFromEnvironment(env = process.env) {
   const encoded = text(env.BURROW_SETTINGS_KEY);
   if (!encoded) throw new Error('settings_encryption_key_missing');

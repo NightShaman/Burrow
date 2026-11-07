@@ -49,7 +49,6 @@ function modelHttpError(code, status) {
   return Object.assign(new Error(`${code}:${status}`), { code, upstreamStatus: status });
 }
 
-function now() { return new Date().toISOString(); }
 function normalize(value) { return String(value ?? '').trim(); }
 function asBoolean(value) { return value === true || value === 1; }
 function parseJson(value, fallback) { try { return JSON.parse(value); } catch { return fallback; } }

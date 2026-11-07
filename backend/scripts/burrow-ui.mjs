@@ -81,20 +81,17 @@ import { postgresContinuity } from '../src/postgres-continuity.mjs';
 import { generateArchiveSummary } from '../src/archive-summary.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from '../src/working-memory-continuity.mjs';
 import { workingContextFromSession } from '../src/working-context.mjs';
-import { appendGroupChannelTurn, createGroupChannel, listGroupChannels, readGroupChannel, readGroupChannelTurns } from '../src/group-channel-store.mjs';
-import { resolveGroupMentionTargets } from '../src/group-channel-routing.mjs';
+import { createGroupChannel, listGroupChannels, readGroupChannelTurns } from '../src/group-channel-store.mjs';
 import { runRetentionCleanup } from '../src/retention.mjs';
 import { normalizeRetentionPolicy, readRetentionPolicy, readRetentionPolicyState, retentionPolicyFailureState, retentionPolicySuccessState, saveRetentionPolicy, writeRetentionPolicyState } from '../src/retention-settings.mjs';
 import { createRetentionScheduler } from '../src/retention-scheduler.mjs';
 import { createInstallStagingCleanupScheduler } from '../src/install-staging-cleanup.mjs';
 import { authorityExplanationFromTraceSummary, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, summarizeTrace, validTraceRunId } from '../src/trace-summary.mjs';
-import { routeRequest } from '../src/request-router.mjs';
 import { planTurn } from '../src/turn-planner.mjs';
 import { workbenchWorkflow } from '../src/workbench-workflow.mjs';
 import { runWorkbenchStep } from '../src/workbench-runner.mjs';
-import { resolveExecutionTarget } from '../src/execution-context.mjs';
 import { createExecutionProviderRegistry } from '../src/process-execution-router.mjs';
-import { buildChatSupportStatus, buildWorkbenchStatus } from '../src/workbench-status.mjs';
+import { buildWorkbenchStatus } from '../src/workbench-status.mjs';
 import { allowedNextSteps, appendWorkItemStep, archiveWorkItem, createWorkItem, listWorkItems, readWorkItem, workItemEligibility } from '../src/work-item-store.mjs';
 import { searchBurrowSessionEvidence, searchSessionEvidence } from '../src/session-search.mjs';
 import { CODEX_CLIENT_VERSION_CACHE_TTL_MS, isProviderPool, assertConnection, assertProviderPoolMembers, providerPoolModels, normalizeModels, discoverModels, refreshCodexClientVersionCache } from '../src/model-settings-store.mjs';
@@ -123,7 +120,7 @@ import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
 import { contextReport } from '../src/context-report.mjs';
 import { chatCommandHelpText, chatCommandResponse, parseChatCommand } from '../src/chat-commands.mjs';
 import { activeChatRunKey, activeChatRunSummaries, activeChatRunSummary, cancelActiveChatRun, registerActiveAgentRun } from '../src/active-chat-runs.mjs';
-import { toolActivityPresentation, toolActivityStatus } from '../src/tool-activity-labels.mjs';
+import { toolActivityPresentation } from '../src/tool-activity-labels.mjs';
 import { executionBoundaryStatus, readExecutionBoundaries, saveExecutionBoundaries } from '../src/execution-boundaries.mjs';
 import { clearOidcCookies, completeOidcCallback, oidcCookieClearHeader, oidcLoginUrl, oidcSessionFromRequest, sendOidcSessionCookie, setOidcStateCookie } from '../src/ui-oidc-auth.mjs';
 import { buildExport, decodeExport, exportCatalog, normalizeImportRequest } from '../src/export-service.mjs';
@@ -1938,19 +1935,6 @@ async function listDirs(dir) {
   }
 }
 
-async function sessionPreview(id) {
-  try {
-    const { agentId } = await resolveAgentRuntime();
-    const meta = await postgresApplication.stores.conversations.getMetadata({ agentId, sessionId: id });
-    const turns = await postgresApplication.stores.conversations.projection({ agentId, sessionId: id, visibility: 'chat', limit: 20 });
-    const last = turns.at(-1) || null;
-    return { id, turnCount: meta?.turnCount ?? turns.length, createdAt: meta?.createdAt || null, updatedAt: meta?.updatedAt || last?.ts || null, lastRole: meta?.lastRole || last?.role || null, lastContent: last?.content || '', summary: meta?.summary || '' };
-  } catch (error) {
-    if (error?.code === 'ENOENT') return { id, turnCount: 0, updatedAt: null, lastRole: null, lastContent: '' };
-    throw error;
-  }
-}
-
 function boundedInteger(value, { fallback = 100, min = 1, max = 500 } = {}) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -1966,13 +1950,6 @@ async function listSessions({ rootDir, rootDirs = null, agentId = null, includeA
   return rows.filter((item) => !isInternalContextSession(item)).filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit ?? undefined).map((item) => ({ ...item, id: item.sessionId }));
 }
 
-function activityItemFromTraceCard(card = {}) {
-  const payload = card.payload || card;
-  const presentation = toolActivityPresentation(payload);
-  if (!presentation) return null;
-  return { ...presentation, status: toolActivityStatus({ card, payload }) };
-}
-
 function runtimeTraceRoot(runtime, sessionId = 'default', agentId = runtime.runtimeState.agentId) {
   return resolveRuntimeTracePath({
     cacheRoot: runtime.runtimeState.cacheRoot,
@@ -1981,29 +1958,6 @@ function runtimeTraceRoot(runtime, sessionId = 'default', agentId = runtime.runt
     sessionId,
   });
 }
-
-async function sessionActivities({ sessionId, turns } = {}) {
-  const runtime = await runtimeConfig();
-  const receiptRuns = [...new Set((turns || []).filter((turn) => turn.type === 'receipt' && turn.runId).map((turn) => turn.runId))];
-  const activities = [];
-  for (const runId of receiptRuns.slice(-20)) {
-    const trace = await summarizeTrace({ conversationStore: postgresApplication.stores.conversations, agentId: runtime.runtimeState.agentId, rootDir: runtimeTraceRoot(runtime, sessionId), runId, includeToolOutput: false, includeRelatedWorkTrace: false });
-    const items = (trace.cards || []).filter((card) => card.stream === 'tool').map(activityItemFromTraceCard).filter(Boolean);
-    const uniqueItems = items.filter((item, index, all) => all.findIndex((candidate) => candidate.label === item.label && candidate.status === item.status && candidate.detail === item.detail) === index);
-    if (!uniqueItems.length) continue;
-    const failures = uniqueItems.some((item) => item.status === 'error');
-    const complete = uniqueItems.every((item) => item.status === 'ok' || item.status === 'error');
-    activities.push({
-      runId,
-      status: failures ? 'warn' : complete ? 'ok' : 'running',
-      title: failures ? 'Finished with an issue' : complete ? 'Done' : 'Working…',
-      summary: complete ? `Used ${uniqueItems.length} tool${uniqueItems.length === 1 ? '' : 's'}.` : uniqueItems.at(-1)?.label || 'Working…',
-      items: uniqueItems,
-    });
-  }
-  return activities;
-}
-
 
 async function sessionDetail(id, { rootDir, agentId = null, limit, before } = {}) {
   agentId ||= (await resolveAgentRuntime()).agentId;
@@ -2305,7 +2259,6 @@ async function workbenchPlan(body = {}, agentRuntime = null) {
   const workspaceRoot = body.workspaceRoot ? String(body.workspaceRoot) : null;
   const action = body.action ? String(body.action) : null;
   const turnPlan = planTurn({ message, action, workspaceContext: { workspaceRoot } });
-  const route = await routeRequest({ rootDir: projectRoot, message, workspaceContext: { workspaceRoot }, turnPlan });
   const session = turnPlan.intentFacts?.authoritative
     ? {
         kind: turnPlan.intentFacts.kind,
@@ -2339,7 +2292,6 @@ async function workbenchRun(body = {}, agentRuntime = null) {
   const target = body.target && typeof body.target === 'object' ? body.target : null;
   const action = body.action ? String(body.action) : null;
   const turnPlan = planTurn({ message, action, workspaceContext: { workspaceRoot } });
-  const route = await routeRequest({ rootDir: projectRoot, message, workspaceContext: { workspaceRoot }, turnPlan });
   const session = turnPlan.intentFacts?.authoritative
     ? {
         kind: turnPlan.intentFacts.kind,
@@ -2389,7 +2341,6 @@ async function createWorkbenchItem(body = {}, agentRuntime = null) {
   const workspaceRoot = body.workspaceRoot ? String(body.workspaceRoot) : null;
   const action = body.action ? String(body.action) : null;
   const turnPlan = planTurn({ message, action, workspaceContext: { workspaceRoot } });
-  const route = await routeRequest({ rootDir: projectRoot, message, workspaceContext: { workspaceRoot }, turnPlan });
   const session = turnPlan.intentFacts?.authoritative
     ? { kind: turnPlan.intentFacts.kind, reason: 'explicit-action' }
     : { kind: 'chat', reason: 'model-owned' };

@@ -5,9 +5,7 @@ import { runBurrow } from './runner.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { runExec } from './harness/exec.mjs';
 import { workbenchWorkflow } from './workbench-workflow.mjs';
-import { routeRequest } from './request-router.mjs';
-import { resolveRuntimeTracePath, resolveSkillsConfig } from './config.mjs';
-import { planTurn } from './turn-planner.mjs';
+import { resolveRuntimeTracePath } from './config.mjs';
 import { resolveExecutionTarget } from './execution-context.mjs';
 
 const STEPS = new Set(['inspect', 'propose', 'verify', 'factory']);
@@ -112,14 +110,6 @@ export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', 
     return { ok: execResult.ok, step, decision: execResult.ok ? 'verified' : 'verification_failed', runId: logger.runId, traceDir: logger.traceDir, review, verification: { command: verifyCommand, ok: execResult.ok, exitCode: execResult.exitCode, verificationCheck: true, result: execResult }, mayMutateInline: false, mayCommitInline: false };
   }
 
-  const route = await routeRequest({
-    rootDir,
-    message,
-    skillConfig: runtime.skillsConfig || resolveSkillsConfig({}),
-    workspaceContext: { workspaceRoot },
-  });
-  const factoryMessage = `${message}\nfactory`;
-  const turnPlan = planTurn({ message: factoryMessage, action: 'write', workspaceContext: { workspaceRoot } });
   const session = { kind: 'factory', reason: 'explicit_workbench_step', workspaceRoot };
   const actionRoute = { kind: 'factory', route: 'workbench.factory', reason: 'factory_preview' };
   return {

@@ -72,10 +72,6 @@ function ownershipMetrics(value) {
   return inspectRuntimeObject(value, { nodeBudget: 5_000, estimatedCharBudget: 2_000_000, stringSampleChars: 8_000 });
 }
 
-function allSkippedChatTools(chatToolLoop = {}) {
-  return chatToolLoop.skipped || (chatToolLoop.iterations || []).flatMap((iteration) => iteration.proposalExecution?.skipped || []);
-}
-
 async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, iteration = 0, traceLogger = null, executionPolicy = null, modelConfig = null, executionContext = null, abortSignal = null } = {}) {
   const toolCalls = normalizeNativeToolCalls(model?.choice?.toolCalls || []);
   const proposal = proposalFromNativeToolCalls(toolCalls, model?.choice?.text ?? '', executionContext);
@@ -599,12 +595,7 @@ export async function runPlainModelTurn({
       rawToolResults = null;
       executed = null;
       if (useNativeContinuation && Array.isArray(model?.nativeTranscript)) {
-        nativeTranscript = normalizeProviderMessages([
-          ...model.nativeTranscript.filter((entry) => {
-            const content = String(entry?.content || '');
-            return true;
-          }),
-        ]);
+        nativeTranscript = normalizeProviderMessages(model.nativeTranscript);
       }
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
         iteration,
@@ -684,7 +675,6 @@ export async function runPlainModelTurn({
     delete model.output_artifacts;
   }
   const outputArtifacts = [];
-  const skipped = allSkippedChatTools(chatToolLoop);
   const answerText = model?.ok === false ? (partialAnswerText || (proposal?.answerText ?? null)) : proposal?.answerText ?? null;
   const runtime = createRuntimeTurnResult({
     finalText: answerText || '',

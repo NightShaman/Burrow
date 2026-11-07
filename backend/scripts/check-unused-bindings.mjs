@@ -66,7 +66,7 @@ export function unusedNamedImports(source) {
 }
 
 const files = [
-  'src/agent-registry.mjs', 'src/app-runtime.mjs', 'src/dream-cycle-runner.mjs',
+  'scripts/burrow-ui.mjs', 'src/agent-registry.mjs', 'src/app-runtime.mjs', 'src/dream-cycle-runner.mjs',
   'src/context-engine.mjs', 'src/completion-addendum.mjs', 'src/doctor.mjs',
   'src/model-adapter.mjs', 'src/mod-runtime.mjs', 'src/mcp-settings-store.mjs',
   'src/model-settings-store.mjs', 'src/model-adapters/openai.mjs',
@@ -78,11 +78,9 @@ const files = [
 ];
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const failures = [];
-  // Legacy schema constants outside the audit's inventory are not part of this scoped cleanup.
-  const legacySchemaBindings = new Set(['POSTGRES_FORGE_SCHEMA_SQL', 'POSTGRES_SETUP_STATE_SCHEMA_SQL', 'POSTGRES_RETENTION_SETTINGS_SCHEMA_SQL', 'POSTGRES_WORKING_MEMORY_RETENTION_SCHEMA_SQL']);
   for (const file of files) {
     for (const name of unusedNamedImports(readFileSync(path.join(root, file), 'utf8'))) {
-      if (!legacySchemaBindings.has(name)) failures.push(`${file}: ${name}`);
+      failures.push(`${file}: ${name}`);
     }
   }
   if (failures.length) { console.error(`Unused imports in reviewed modules:\n${failures.join('\n')}`); process.exitCode = 1; }
