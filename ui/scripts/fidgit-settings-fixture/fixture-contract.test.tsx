@@ -149,9 +149,15 @@ it('loads every built-in subsection against isolated realistic fixture data', as
         expect(
           document.querySelectorAll('.memory-connection-list .memory-connection'),
         ).toHaveLength(4);
+        const source = within(document.body).getByRole('button', { name: 'Edit Fixture Mod' });
+        expect(source.textContent).not.toContain('https://');
         await act(async () => {
-          fireEvent.click(document.querySelector('[aria-label="Edit Fixture Mod"]')!);
+          fireEvent.click(source);
         });
+        expect(source.getAttribute('aria-pressed')).toBe('true');
+        expect(
+          (within(document.body).getByLabelText('Git repository URL') as HTMLInputElement).value,
+        ).toBe('https://example.invalid/synthetic-team/mod-source-1.git');
         await waitFor(() =>
           expect(document.querySelector('[aria-label="Browse stored credentials"]')).toBeTruthy(),
         );

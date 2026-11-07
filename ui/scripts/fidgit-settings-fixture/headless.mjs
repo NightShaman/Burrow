@@ -1305,7 +1305,7 @@ try {
     const selectors = {
       'Installed skills': '.memory-connection-select',
       'Installed mods': '[aria-label="Manage Fixture Mod"]',
-      'Mod sources': '[aria-label="Edit https://example.invalid/synthetic-team/mod-source-1.git"]',
+      'Mod sources': '[aria-label="Edit Fixture Mod"]',
       OpenTelemetry: '.telemetry-inventory-item',
       'Load Balancing': '.provider-card-select',
       'MCP servers': '[aria-label="Edit GitHub MCP"]',
@@ -1335,6 +1335,18 @@ try {
     if (selector) {
       await wait(`!!document.querySelector(${JSON.stringify(selector)})`);
       await clickSelector(selector);
+    }
+    if (section === 'Mod sources') {
+      // Source cards use discovered mod names; the URL belongs to the selected editor.
+      await wait(
+        `document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-pressed')==='true'&&document.querySelector('input[placeholder="https://git.example.com/team/mod.git"]')?.value==='https://example.invalid/synthetic-team/mod-source-1.git'`,
+      );
+      results.push({
+        modSourceSelection: {
+          name: 'Fixture Mod',
+          url: 'https://example.invalid/synthetic-team/mod-source-1.git',
+        },
+      });
     }
     await pause();
     const errors = await evaluate(
