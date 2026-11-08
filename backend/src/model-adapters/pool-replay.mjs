@@ -42,8 +42,15 @@ export function portablePoolReplay(args, family) {
   const clean = complete.map(message => {
     if (!['system', 'developer', 'user', 'assistant', 'tool'].includes(message.role) ||
         Object.keys(message).some(key => !['role', 'content', 'tool_calls', 'tool_call_id'].includes(key))) fail('nonportable_history');
-    const content = message.content;
+    // Anthropic thinking/signatures are bound to the account that produced
+    // them. The proof above compares the ORIGINAL transcript first; only the
+    // outbound copy may omit those opaque blocks. Visible text, tool calls and
+    // tool receipts retain their order and exact contents.
+    const content = family === 'anthropic' && Array.isArray(message.content)
+      ? message.content.filter(part => !['thinking', 'redacted_thinking'].includes(part?.type))
+      : message.content;
     if (Array.isArray(content) && content.some(part => ['thinking', 'redacted_thinking'].includes(part?.type))) fail('nonportable_history');
+    if (Array.isArray(message.content) && message.content.length && !content.length) fail('nonportable_history');
     if (typeof content !== 'string' && (!Array.isArray(content) || content.some(part =>
       (part?.type !== 'text' && !(family === 'anthropic' && part?.type === 'tool_use' && typeof part.id === 'string' && typeof part.name === 'string' && part.input && typeof part.input === 'object' && !Array.isArray(part.input))) || (part?.type === 'text' && typeof part.text !== 'string') || Object.keys(part).some(key => !(['type', 'text', ...(family === 'anthropic' && part?.type === 'tool_use' ? ['id', 'name', 'input'] : [])].includes(key)))))) fail('nonportable_history');
     if (typeof content === 'string' && /data:[^\s]+;base64,/i.test(content)) fail('nonportable_history');

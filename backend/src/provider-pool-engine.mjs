@@ -93,9 +93,9 @@ export class ProviderPoolEngine {
       const affinity = (await client.query('SELECT * FROM provider_pool_affinity WHERE pool_id=$1 AND thread_key=$2 FOR UPDATE', [connection.id, threadKey])).rows[0];
       const health = (await client.query('SELECT * FROM provider_pool_health WHERE pool_id=$1', [connection.id])).rows;
       for (const candidate of diagnostics) {
-        if (exclude.includes(candidate.id)) { candidate.eligible = false; candidate.reason = 'attempt_failed'; }
+        if (exclude.includes(candidate.id)) { candidate.eligible = false; candidate.reason = 'attempt_failed'; candidate.hardBlocked = true; }
         const state = health.find((row) => row.member_id === candidate.id);
-        if (state && time(state.cooldown_until) > now) { candidate.eligible = false; candidate.reason = state.last_reason || 'cooldown'; candidate.blockedUntil = Math.max(candidate.blockedUntil || 0, time(state.cooldown_until)); }
+        if (state && time(state.cooldown_until) > now) { candidate.eligible = false; candidate.reason = state.last_reason || 'cooldown'; candidate.hardBlocked = true; candidate.blockedUntil = Math.max(candidate.blockedUntil || 0, time(state.cooldown_until)); }
       }
       // Account-bound evidence constrains the destination, not eligibility.
       // Never force an exhausted/cooling account just because it owns a turn.
@@ -104,6 +104,13 @@ export class ProviderPoolEngine {
           diagnostics, rejection: { memberId: requiredMemberId, reason: 'member_removed', hard: true },
         });
       }
+      // The five-hour headroom floor reserves NEW work and portable handoffs;
+      // it is not an exhaustion wall for a turn that cannot safely replay.
+      // Cooldowns, exclusions, missing usage and actual exhaustion still block.
+      const headroomContinuation = (id) => diagnostics.find(candidate =>
+        candidate.id === id && candidate.pressure && !candidate.exhausted &&
+        !candidate.hardBlocked && candidate.reason === 'quota_pressure');
+      const pinnedHeadroom = requiredMemberId && headroomContinuation(requiredMemberId);
       const available = diagnostics.filter((candidate) => candidate.eligible);
       const eligible = (id) => available.find((candidate) => candidate.id === id);
       let selected;
@@ -113,7 +120,7 @@ export class ProviderPoolEngine {
       let substituteUntil = null;
       if (requiredMemberId) {
         // Native IDs and signed blocks may only return to the account that made them.
-        selected = eligible(requiredMemberId);
+        selected = eligible(requiredMemberId) || pinnedHeadroom;
         if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics, retryNotBefore: diagnostics.find(row => row.id === requiredMemberId)?.blockedUntil || null, rejection: { memberId: requiredMemberId, reason: diagnostics.find(row => row.id === requiredMemberId)?.reason || 'member_unavailable', hard: true } });
       } else if (preferredMemberId && eligible(preferredMemberId)) {
         selected = eligible(preferredMemberId);
@@ -130,6 +137,12 @@ export class ProviderPoolEngine {
           let cursor = this.random() * total;
           selected = available.find((candidate) => (cursor -= candidate.weight) < 0) || available.at(-1);
         }
+      }
+      // Only an existing portable continuation may use its pressured owner as
+      // last resort. New requests and a failed/excluded owner never acquire it.
+      if (!selected && preferredMemberId && owner === preferredMemberId && ids.includes(owner)) {
+        selected = headroomContinuation(owner);
+        if (selected) rebalanceReason = 'owner_continued_past_headroom';
       }
       if (!selected) throw Object.assign(new Error('provider_pool_no_eligible_members'), { diagnostics, retryNotBefore: poolRetryNotBefore(diagnostics, now) });
       // A temporarily unavailable owner retains ownership indefinitely. Removal is permanent.
