@@ -65,6 +65,9 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
     carry = carry.replace(/\r\n/g, '\n');
     let index;
     while ((index = carry.indexOf('\n\n')) >= 0 || (final && carry)) {
+      // Switch only between events: the terminal event still owns its parts,
+      // callbacks and errors, but later events can only contribute metadata.
+      metadataOnly ||= terminal();
       const event = index >= 0 ? carry.slice(0,index) : carry;
       carry = index >= 0 ? carry.slice(index+2) : '';
       const payload = event.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
@@ -73,6 +76,8 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
       try { data = JSON.parse(payload); }
       catch (error) { if (metadataOnly) continue; throw error; }
       saw = true;
+      if (providerResponseModel(data.modelVersion)) responseModel = providerResponseModel(data.modelVersion);
+      if (providerResponseIdentifier(data.responseId)) responseId = providerResponseIdentifier(data.responseId);
       if (metadataOnly) {
         usageMetadata = data.usageMetadata || usageMetadata;
         continue;
@@ -82,8 +87,6 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
         finishes.set(index, candidate.finishReason || finishes.get(index) || null);
       }
       if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), data.error);
-      if (providerResponseModel(data.modelVersion)) responseModel = providerResponseModel(data.modelVersion);
-      if (providerResponseIdentifier(data.responseId)) responseId = providerResponseIdentifier(data.responseId);
       const c = data.candidates?.[0];
       for (const part of c?.content?.parts || []) {
         parts.push(part);
