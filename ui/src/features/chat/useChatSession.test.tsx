@@ -1720,3 +1720,140 @@ it.each(['session', 'agent', 'return'] as const)(
     expect(result.current.hasOlder).toBe(false);
   },
 );
+
+it.each(['success', 'error', 'cursor-error'] as const)(
+  'keeps successful reset authoritative over pending older %s and permits fresh history',
+  async (outcome) => {
+    const { readConversationCache } = await import('./chatConversationCache');
+    let finish!: () => void;
+    const old = new Promise<unknown>((resolve, reject) => {
+      finish = () =>
+        outcome === 'success'
+          ? resolve({
+              session: {
+                id: sessionId,
+                turns: [{ id: 'obsolete', role: 'user', content: 'obsolete' }],
+                hasMore: false,
+              },
+            })
+          : reject(
+              new Error(outcome === 'cursor-error' ? 'archive_cursor_invalid' : 'old offline'),
+            );
+    });
+    let reset = false;
+    let fresh = false;
+    apiMock.mockImplementation(async (path, init) => {
+      if (init?.method === 'POST') {
+        reset = true;
+        return {};
+      }
+      if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+      if (String(path).includes('before=')) {
+        if (!fresh) return old;
+        return {
+          session: {
+            id: sessionId,
+            turns: [{ id: 'fresh-old', role: 'user', content: 'fresh old' }],
+            hasMore: false,
+            metadata: { resetGeneration: 1 },
+          },
+        };
+      }
+      if (path === conversationPath)
+        return {
+          session: {
+            id: sessionId,
+            turns: reset
+              ? fresh
+                ? [{ id: 'fresh', role: 'user', content: 'fresh' }]
+                : []
+              : [{ id: 'before', role: 'user', content: 'before' }],
+            hasMore: !reset || fresh,
+            nextCursor: 'cursor',
+            metadata: { resetGeneration: reset ? 1 : 0 },
+          },
+        };
+      return { runs: [] };
+    });
+    const { result } = renderHook(() => useChatSession(agentId));
+    await waitFor(() => expect(result.current.hasOlder).toBe(true));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.loadOlder();
+    });
+    await act(async () => {
+      expect(await result.current.resetSession()).toBe(true);
+    });
+    expect(result.current.isLoadingOlder).toBe(false);
+    expect(result.current.hasOlder).toBe(false);
+    await act(async () => {
+      finish();
+      await pending;
+    });
+    expect(result.current.turns).toEqual([]);
+    expect(result.current.chatError).toBe('');
+    expect(readConversationCache()[conversationCacheKey(agentId, sessionId)]).toEqual([]);
+    fresh = true;
+    await act(async () => {
+      await result.current.refreshConversation();
+    });
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.turns.map((t) => t.content)).toEqual(['fresh old', 'fresh']);
+  },
+);
+
+it('recovers paging after a rejected reset while an older read is pending', async () => {
+  const old = deferred<unknown>();
+  let olderCalls = 0;
+  apiMock.mockImplementation(async (path, init) => {
+    if (init?.method === 'POST') throw Object.assign(new Error('denied'), { status: 403 });
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }] };
+    if (String(path).includes('before=')) {
+      if (++olderCalls === 1) return old.promise;
+      return {
+        session: {
+          id: sessionId,
+          turns: [{ id: 'older', role: 'user', content: 'older retained' }],
+          hasMore: false,
+        },
+      };
+    }
+    if (path === conversationPath)
+      return {
+        session: {
+          id: sessionId,
+          turns: [{ id: 'current', role: 'user', content: 'current retained' }],
+          hasMore: true,
+          nextCursor: 'cursor',
+        },
+      };
+    return { runs: [] };
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.hasOlder).toBe(true));
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.loadOlder();
+  });
+  await act(async () => {
+    await expect(result.current.resetSession()).rejects.toThrow('denied');
+  });
+  await act(async () => {
+    old.resolve({
+      session: { id: sessionId, turns: [{ id: 'obsolete', role: 'user', content: 'obsolete' }] },
+    });
+    await pending;
+  });
+  expect(result.current.isLoadingOlder).toBe(false);
+  expect(result.current.hasOlder).toBe(true);
+  expect(result.current.turns.map((t) => t.content)).toEqual(['current retained']);
+  await act(async () => {
+    await result.current.loadOlder();
+  });
+  expect(result.current.turns.map((t) => t.content)).toEqual([
+    'older retained',
+    'current retained',
+  ]);
+});

@@ -368,21 +368,22 @@ describe('active scrollback', () => {
       resetStarted.resolve();
       return resetResponse.promise;
     });
-    request.mockResolvedValueOnce(page(['new'], null, 1));
+    request.mockResolvedValue(page(['new'], null, 1));
     const old = repo.loadSession('agent', 'default');
     const reset = repo.resetSession('agent', 'default');
     const fresh = repo.loadSession('agent', 'default');
     await Promise.resolve();
     expect(request).toHaveBeenCalledTimes(2);
     oldResponse.resolve(page(['old'], 'old-cursor'));
-    await old;
+    // Obsolete reads now wait for reset authority before returning a fresh page.
     await resetStarted.promise;
     expect(request).toHaveBeenCalledTimes(2);
     resetResponse.resolve();
     await reset;
     expect((await fresh).turns?.map((t) => t.id)).toEqual(['new']);
+    await old;
     expect((await repo.loadOlder('agent', 'default')).nextCursor).toBeNull();
-    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(4);
   });
 
   it('does not block another session and allows refresh after failure', async () => {

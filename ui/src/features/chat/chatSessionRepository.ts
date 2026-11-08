@@ -133,13 +133,16 @@ export function createChatSessionRepository(): ChatSessionRepository {
       const epoch = epochs.get(cacheKey) ?? 0;
       const revision = (revisions.get(cacheKey) ?? 0) + 1;
       revisions.set(cacheKey, revision);
-      const page = await read(agentId, sessionId);
+      let page: ChatSession;
+      try {
+        page = await read(agentId, sessionId);
+      } catch (error) {
+        if (epoch !== (epochs.get(cacheKey) ?? 0)) return this.loadSession(agentId, sessionId);
+        throw error;
+      }
       syncCacheGeneration();
-      if (
-        cacheGenerationAtStart !== cacheGeneration ||
-        epoch !== (epochs.get(cacheKey) ?? 0) ||
-        revision !== revisions.get(cacheKey)
-      )
+      if (epoch !== (epochs.get(cacheKey) ?? 0)) return this.loadSession(agentId, sessionId);
+      if (cacheGenerationAtStart !== cacheGeneration || revision !== revisions.get(cacheKey))
         return loaded.get(cacheKey) ?? page;
       const previous = loaded.get(key(agentId, sessionId));
       if (
@@ -190,6 +193,7 @@ export function createChatSessionRepository(): ChatSessionRepository {
           page = await read(agentId, sessionId, page.nextCursor);
         }
         syncCacheGeneration();
+        if (epoch !== (epochs.get(cacheKey) ?? 0)) return this.loadSession(agentId, sessionId);
         const current = loaded.get(cacheKey) ?? previous;
         if (
           cacheGenerationAtStart !== cacheGeneration ||
@@ -215,6 +219,8 @@ export function createChatSessionRepository(): ChatSessionRepository {
         loaded.set(cacheKey, session);
         return session;
       } catch (error) {
+        // A reset owns the boundary even when the obsolete request failed.
+        if (epoch !== (epochs.get(cacheKey) ?? 0)) return this.loadSession(agentId, sessionId);
         if (!(error instanceof Error) || !error.message.includes('archive_cursor_invalid'))
           throw error;
         if (olderRequests.get(cacheKey) !== request) return loaded.get(cacheKey) ?? previous;

@@ -136,6 +136,13 @@ export function useConversationAuthority(onInvalidate: () => void, agentId = '',
   );
   const resetSnapshot = useCallback(
     (key: string) => {
+      // A successful same-session reset invalidates paging ownership, not just
+      // the snapshot. Old completions (including errors) cannot repaint it.
+      if (selection.current.key === key) {
+        olderRequest.current = null;
+        setOlderState({ key, hasMore: false, loading: false });
+      }
+      olderBySession.current.delete(key);
       pendingTurnsRef.current.delete(key);
       liveSnapshots.current.delete(key);
       commitSnapshot(key, []);
@@ -169,7 +176,11 @@ export function useConversationAuthority(onInvalidate: () => void, agentId = '',
         display(next);
         showOlderState(agentId, id, session);
       } catch (error) {
-        if (selection.current === scope)
+        if (
+          selection.current === scope &&
+          olderRequest.current === request &&
+          generation === conversationCacheGeneration
+        )
           reportError(`Could not load older messages: ${(error as Error).message}`);
       } finally {
         if (selection.current === scope && olderRequest.current === request) {
