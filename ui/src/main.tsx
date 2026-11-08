@@ -6,6 +6,7 @@ import { ConfirmProvider } from './app/ConfirmDialog';
 import { LoginPage } from './features/auth/LoginPage';
 import { ReauthGate } from './features/auth/ReauthGate';
 import { discoverAuthMode } from './app/auth';
+import { UiPreferencesGate } from './app/UiPreferencesGate';
 import './app.css';
 
 function Root() {
@@ -36,7 +37,9 @@ function Root() {
   if (authState === 'login') return <LoginPage onAuthenticated={() => setAuthState('open')} />;
   return (
     <ReauthGate>
-      <App />
+      <UiPreferencesGate>
+        <App />
+      </UiPreferencesGate>
     </ReauthGate>
   );
 }

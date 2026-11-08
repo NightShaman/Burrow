@@ -150,3 +150,13 @@ it.each(['paper', 'high-contrast'])('falls back when the removed %s theme was sa
   const theme = renderHook(() => usePersistedTheme());
   expect(theme.result.current[0]).toBe('smatchet');
 });
+
+it('retains operator panel choices when adopting a new defaults version', () => {
+  localStorage.setItem('hc.rightPanelDefaultsVersion', '2');
+  localStorage.setItem('hc.leftTopPanel', 'workspace');
+  localStorage.setItem('hc.rightTopPanel', 'agents');
+  const { result } = renderHook(() => usePersistedLayout());
+  expect(result.current.leftTopPanel).toBe('workspace');
+  expect(result.current.rightTopPanel).toBe('agents');
+  expect(localStorage.getItem('hc.rightPanelDefaultsVersion')).toBe('3');
+});

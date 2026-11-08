@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { ownerPanelModId, panelIds } from './panelRegistry';
 import {
   readStorage,
-  removeStorage,
   writeStorage,
   readStoredValue,
   writeStoredValue,
@@ -16,15 +15,9 @@ export const clampRailSplit = (value: number) =>
 const persistedStateVersion = 1;
 const rightPanelDefaultsVersionKey = 'hc.rightPanelDefaultsVersion';
 const rightPanelDefaultsVersion = '3';
-let rightPanelDefaultsMigrated = false;
-
 function migrateRightPanelDefaults() {
-  if (rightPanelDefaultsMigrated) return;
-  rightPanelDefaultsMigrated = true;
   if (readStorage(rightPanelDefaultsVersionKey) === rightPanelDefaultsVersion) return;
-  ['hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftTopPanel', 'hc.leftBottomPanel'].forEach(
-    (key) => removeStorage(key),
-  );
+  // New defaults must never erase an operator's existing panel selections.
   writeStorage(rightPanelDefaultsVersionKey, rightPanelDefaultsVersion);
 }
 
