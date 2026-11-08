@@ -132,9 +132,60 @@ function anthropicCacheableSystem(system = '') {
   return blocks;
 }
 
+// Anthropic rejects composition keywords on the input_schema root. This is a
+// descriptive wire projection, NOT a replacement for the source/IPC validator.
+// Keep nested constraints visible; exact cross-field branch validation remains
+// with the original runtime schema, not this descriptive wire projection.
+function anthropicObjectProjection(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return { properties: {}, required: [] };
+  const properties = { ...(schema.properties || {}) };
+  const required = new Set(schema.required || []);
+  for (const key of ['allOf', 'oneOf', 'anyOf']) {
+    const branches = schema[key];
+    if (!Array.isArray(branches) || !branches.length) continue;
+    const projected = branches.map(anthropicObjectProjection);
+    const branchRequired = key === 'allOf'
+      ? new Set(projected.flatMap(branch => branch.required))
+      : new Set(projected[0].required.filter(name => projected.every(branch => branch.required.includes(name))));
+    for (const name of branchRequired) required.add(name);
+    const names = new Set(projected.flatMap(branch => Object.keys(branch.properties)));
+    for (const name of names) {
+      const definitions = projected.map(branch => branch.properties[name] || {});
+      // Composition is supported below the root. Keep each argument's complete
+      // schema (especially the native mod bridge's arguments) visible to Claude.
+      const alternatives = [...new Map(definitions.map(value => [JSON.stringify(value), value])).values()];
+      const combined = alternatives.length === 1 ? alternatives[0] : { [key === 'allOf' ? 'allOf' : 'anyOf']: alternatives };
+      if (!Object.hasOwn(properties, name)) properties[name] = combined;
+      else if (JSON.stringify(properties[name]) !== JSON.stringify(combined)) {
+        properties[name] = { allOf: [properties[name], combined] };
+      }
+    }
+  }
+  return { properties, required: [...required] };
+}
+
+function anthropicWireInputSchema(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  if (!['oneOf', 'anyOf', 'allOf'].some(key => Object.hasOwn(schema, key))) return schema;
+  const { oneOf, anyOf, allOf, ...plain } = schema;
+  const { properties, required } = anthropicObjectProjection(schema);
+  return { ...plain, type: 'object', properties, ...(required.length ? { required } : {}) };
+}
+
+function anthropicOperationGuidance(schema) {
+  const branches = schema?.oneOf || schema?.anyOf;
+  if (!Array.isArray(branches)) return '';
+  const operations = branches.map(branch => {
+    const operation = branch?.properties?.operation?.const;
+    return typeof operation === 'string' ? `${operation}: ${[...(branch.required || [])].filter(key => key !== 'operation').join(', ') || 'no other required fields'}` : null;
+  });
+  return operations.every(Boolean) ? ` Operations (required fields by operation): ${operations.join('; ')}. Follow the original operation-specific constraints.` : '';
+}
+
 function anthropicTool(tool = {}) {
   const fn = tool.function || tool;
-  return { name: fn.name || tool.name, description: fn.description || tool.description || '', input_schema: fn.parameters || tool.input_schema || tool.inputSchema || { type: 'object', properties: {} } };
+  const schema = fn.parameters || tool.input_schema || tool.inputSchema || { type: 'object', properties: {} };
+  return { name: fn.name || tool.name, description: (fn.description || tool.description || '') + anthropicOperationGuidance(schema), input_schema: anthropicWireInputSchema(schema) };
 }
 
 function anthropicCacheableTools(tools = []) {
