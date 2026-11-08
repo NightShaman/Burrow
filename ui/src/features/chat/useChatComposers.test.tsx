@@ -207,3 +207,86 @@ it('never resets a session whose create succeeds after navigation', async () => 
   expect(apiMock).toHaveBeenCalledTimes(1);
   expect(options.selectSession).not.toHaveBeenCalled();
 });
+
+describe('group deletion', () => {
+  const room = { id: 'design', name: 'Design', participantAgentIds: [] };
+  beforeEach(() => {
+    vi.resetAllMocks();
+    apiMock.mockResolvedValue({ ok: true, channels: [room] });
+  });
+  it('cancels without a request and preserves rooms on server failure', async () => {
+    const { result, options } = renderComposers();
+    act(() => result.current.group.open());
+    await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
+    act(() => result.current.group.requestDelete(room));
+    act(() => result.current.group.cancelDelete());
+    await act(() => result.current.group.deleteGroup());
+    expect(apiMock).toHaveBeenCalledTimes(1);
+    act(() => result.current.group.requestDelete(room));
+    apiMock.mockRejectedValueOnce(new Error('offline'));
+    await act(() => result.current.group.deleteGroup());
+    expect(result.current.group.deleteError).toContain('offline');
+    expect(result.current.group.rooms).toHaveLength(1);
+    expect(options.setTabs).not.toHaveBeenCalled();
+  });
+  it.each(['group:design', 'chat', 'group:other'])(
+    'removes only matching tabs with active %s and filters stale lists',
+    async (active) => {
+      const tabs = [
+        { id: 'group:design', kind: 'group', channelId: 'design', label: 'Design' },
+        { id: 'group:other', kind: 'group', channelId: 'other', label: 'Other' },
+      ] as Parameters<typeof useChatComposers>[0]['tabs'];
+      const { result, options } = renderComposers({ tabs });
+      act(() => result.current.group.open());
+      await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
+      act(() => result.current.group.requestDelete(room));
+      apiMock.mockResolvedValueOnce({ ok: true, id: room.id });
+      await act(() => result.current.group.deleteGroup());
+      expect(apiMock).toHaveBeenLastCalledWith('/api/group-channels/design', { method: 'DELETE' });
+      const updateTabs = vi.mocked(options.setTabs).mock.calls.at(-1)![0] as (
+        value: typeof tabs,
+      ) => typeof tabs;
+      expect(updateTabs(tabs)).toEqual([tabs[1]]);
+      const updateActive = vi.mocked(options.setActiveTabId).mock.calls.at(-1)![0] as (
+        value: string,
+      ) => string;
+      expect(updateActive(active)).toBe(active === 'group:design' ? 'chat' : active);
+      expect(result.current.group.rooms).toEqual([]);
+      act(() => result.current.group.close());
+      act(() => result.current.group.open());
+      await waitFor(() => expect(result.current.group.roomsLoading).toBe(false));
+      expect(result.current.group.rooms).toEqual([]);
+    },
+  );
+});
+
+it('uses current tab ownership after a pending deletion and blocks reopening', async () => {
+  vi.resetAllMocks();
+  const room = { id: 'design', name: 'Design', participantAgentIds: [] };
+  apiMock.mockResolvedValue({ ok: true, channels: [room] });
+  const { result, options, rerender } = renderComposers();
+  act(() => result.current.group.open());
+  await waitFor(() => expect(result.current.group.rooms).toHaveLength(1));
+  act(() => result.current.group.requestDelete(room));
+  let resolve!: (value: unknown) => void;
+  apiMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.group.deleteGroup();
+  });
+  act(() => result.current.group.openExisting(room));
+  expect(options.setActiveTabId).not.toHaveBeenCalled();
+  options.tabs = [{ id: 'restored', kind: 'group', channelId: 'design', label: 'Design' }];
+  rerender();
+  await act(async () => {
+    resolve({ ok: true, id: 'design' });
+    await pending;
+  });
+  const update = vi.mocked(options.setActiveTabId).mock.calls.at(-1)![0] as (id: string) => string;
+  expect(update('restored')).toBe('chat');
+  expect(update('elsewhere')).toBe('elsewhere');
+});

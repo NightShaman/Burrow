@@ -23,6 +23,12 @@ type GroupComposer = {
   toggleAgent: (agentId: string) => void;
   create: () => Promise<void>;
   rooms: Array<{ id: string; name: string; participantAgentIds: string[] }>;
+  deleteTarget?: { id: string; name: string } | null;
+  isDeleting?: boolean;
+  deleteError?: string;
+  requestDelete?: (room: { id: string; name: string }) => void;
+  cancelDelete?: () => void;
+  deleteGroup?: () => Promise<void>;
   roomsLoading: boolean;
   roomsError: string;
   openExisting: (room: { id: string; name: string }) => void;
@@ -75,10 +81,58 @@ export function ChatComposerDialogs({
                 <ul>
                   {group.rooms.map((room) => (
                     <li key={room.id}>
-                      <button type="button" onClick={() => group.openExisting(room)}>
-                        <strong>{room.name}</strong>
-                        <small>{room.participantAgentIds.length} members</small>
-                      </button>
+                      <div className="group-room-actions">
+                        <button
+                          type="button"
+                          disabled={group.isDeleting}
+                          onClick={() => group.openExisting(room)}
+                        >
+                          <strong>{room.name}</strong>
+                          <small>{room.participantAgentIds.length} members</small>
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          aria-label={`Delete ${room.name}`}
+                          disabled={group.isDeleting}
+                          onClick={() => group.requestDelete?.(room)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                      {group.deleteTarget?.id === room.id && (
+                        <div
+                          className="group-room-confirm"
+                          role="group"
+                          aria-label={`Confirm deletion of ${room.name}`}
+                        >
+                          <p>
+                            Delete “{room.name}” and its transcript? Active group activity will
+                            stop. Individual chats are kept.
+                          </p>
+                          {group.deleteError && (
+                            <p role="alert" className="session-dialog-error">
+                              {group.deleteError}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={group.isDeleting}
+                            onClick={group.cancelDelete}
+                          >
+                            Keep group
+                          </button>
+                          <button
+                            type="button"
+                            className="danger"
+                            disabled={group.isDeleting}
+                            onClick={() => void group.deleteGroup?.()}
+                          >
+                            {group.isDeleting ? 'Deleting…' : 'Delete group'}
+                          </button>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

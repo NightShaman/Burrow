@@ -468,3 +468,38 @@
 .native-model-toolbar select[aria-invalid='true'] {
   border-color: var(--warn);
 }
+
+.group-room-actions {
+  display: flex;
+  align-items: stretch;
+}
+.group-room-actions > button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.group-room-actions > button.secondary {
+  width: auto;
+  flex: none;
+  align-items: center;
+  color: var(--muted);
+}
+.group-room-confirm {
+  padding: 10px;
+  background: var(--panel-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.group-room-confirm p {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.group-room-picker .group-room-confirm > button {
+  width: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.group-room-picker button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}

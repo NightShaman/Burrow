@@ -35,6 +35,8 @@ export function useChatComposers({
   setTabs,
   setActiveTabId,
 }: ChatComposerOptions) {
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   const scopeKey = JSON.stringify([selectedAgentId, sessionId]);
   const scopeRef = useRef({ key: scopeKey });
   if (scopeRef.current.key !== scopeKey) scopeRef.current = { key: scopeKey };
@@ -64,6 +66,11 @@ export function useChatComposers({
   const [rooms, setRooms] = useState<
     Array<{ id: string; name: string; participantAgentIds: string[] }>
   >([]);
+  const deletedRooms = useRef(new Set<string>());
+  const deletingRef = useRef(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState('');
   useEffect(() => {
@@ -80,7 +87,10 @@ export function useChatComposers({
           response.channels.flatMap((value: unknown) => {
             if (!value || typeof value !== 'object') return [];
             const room = value as Record<string, unknown>;
-            return typeof room.id === 'string' && room.id && typeof room.name === 'string'
+            return typeof room.id === 'string' &&
+              room.id &&
+              !deletedRooms.current.has(room.id) &&
+              typeof room.name === 'string'
               ? [
                   {
                     id: room.id,
@@ -108,7 +118,12 @@ export function useChatComposers({
   }, [isGroupOpen]);
   const openExistingGroup = useCallback(
     (room: { id: string; name: string }) => {
-      if (!rooms.some((item) => item.id === room.id)) return;
+      if (
+        deletingRef.current ||
+        deletedRooms.current.has(room.id) ||
+        !rooms.some((item) => item.id === room.id)
+      )
+        return;
       const existing = tabs.find((tab) => tab.kind === 'group' && tab.channelId === room.id);
       const tabId = existing?.id ?? `group:${room.id}`;
       if (!existing)
@@ -122,6 +137,46 @@ export function useChatComposers({
     },
     [rooms, setActiveTabId, setTabs, tabs],
   );
+
+  const requestDelete = (room: { id: string; name: string }) => {
+    if (deletingRef.current) return;
+    setDeleteError('');
+    setDeleteTarget(room);
+  };
+  const cancelDelete = () => {
+    if (deletingRef.current) return;
+    setDeleteTarget(null);
+    setDeleteError('');
+  };
+  const deleteGroup = async () => {
+    if (!deleteTarget || deletingRef.current) return;
+    const target = deleteTarget;
+    deletingRef.current = true;
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      const response = await api<{ ok: boolean; id: string }>(
+        `/api/group-channels/${encodeURIComponent(target.id)}`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok || response.id !== target.id) throw new Error('Invalid deletion response.');
+      deletedRooms.current.add(target.id);
+      setRooms((current) => current.filter((room) => room.id !== target.id));
+      setTabs((current) =>
+        current.filter((tab) => tab.kind !== 'group' || tab.channelId !== target.id),
+      );
+      const removedIds = tabsRef.current
+        .filter((tab) => tab.kind === 'group' && tab.channelId === target.id)
+        .map((tab) => tab.id);
+      setActiveTabId((current) => (removedIds.includes(current) ? 'chat' : current));
+      setDeleteTarget(null);
+    } catch (error) {
+      setDeleteError(`Could not delete group chat: ${(error as Error).message}`);
+    } finally {
+      deletingRef.current = false;
+      setIsDeleting(false);
+    }
+  };
 
   const openSession = useCallback(() => {
     setSessionError('');
@@ -207,7 +262,11 @@ export function useChatComposers({
     setIsGroupOpen(true);
   }, []);
   const closeGroup = useCallback(() => {
-    if (!isCreatingGroup) setIsGroupOpen(false);
+    if (!isCreatingGroup && !deletingRef.current) {
+      setIsGroupOpen(false);
+      setDeleteTarget(null);
+      setDeleteError('');
+    }
   }, [isCreatingGroup]);
   const toggleGroupAgent = useCallback((agentId: string) => {
     setGroupAgentIds((current) =>
@@ -277,6 +336,12 @@ export function useChatComposers({
       agentIds: groupAgentIds,
       error: groupError,
       rooms,
+      deleteTarget,
+      isDeleting,
+      deleteError,
+      requestDelete,
+      cancelDelete,
+      deleteGroup,
       roomsLoading,
       roomsError,
       openExisting: openExistingGroup,
