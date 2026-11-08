@@ -41,7 +41,7 @@ export function createBoardTaskExecutor({
       if (options.scheduled && task.status !== 'todo') return { ok: false, skipped: true, error: 'scheduled_job_task_not_todo', task };
       if (options.scheduled && task.assignedAgentId !== options.agentId) return { ok: false, skipped: true, error: 'scheduled_job_task_agent_mismatch', task };
       if (!task.assignedAgentId) return { ok: false, error: 'task_assigned_agent_required', task };
-      if (['done', 'cancelled'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
+      if (['done', 'cancelled', 'parked'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
       if (options.validate) await options.validate();
       options.abortSignal?.throwIfAborted();
       const agentRuntime = await resolveAgentRuntime(task.assignedAgentId);

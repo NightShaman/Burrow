@@ -280,4 +280,8 @@ INSERT INTO openai_reset_credit_attempts(account_key,credit_id,request_id,claime
 CREATE INDEX openai_reset_credit_claims_unknown_idx ON openai_reset_credit_claims(account_key) WHERE outcome='unknown';
 ` },
   { version: 99, name: 'agent-run-completion-feed', sql: POSTGRES_AGENT_RUN_FEED_SQL },
+  { version: 100, name: 'parked-board-task-status', sql: `
+ALTER TABLE task_board_tasks DROP CONSTRAINT task_board_tasks_status_check;
+ALTER TABLE task_board_tasks ADD CONSTRAINT task_board_tasks_status_check CHECK (status IN ('backlog','todo','in_progress','review','done','cancelled','parked'));
+` },
 ]);

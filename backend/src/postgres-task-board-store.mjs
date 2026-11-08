@@ -461,7 +461,7 @@ export class PostgresTaskBoardStore {
       if (execution.requiredStatus && current.status !== execution.requiredStatus) throw new Error('scheduled_job_task_not_todo');
       // The row lock is the claim authority, not the dispatcher's earlier read.
       // A running receipt owns this task even while its turn is queued.
-      if (["done", "cancelled"].includes(current.status))
+      if (["done", "cancelled", "parked"].includes(current.status))
         throw new Error("task_not_executable");
       if (!current.assignedAgentId)
         throw new Error("task_assigned_agent_required");

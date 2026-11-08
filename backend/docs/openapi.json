@@ -10566,7 +10566,8 @@
               "in_progress",
               "review",
               "done",
-              "cancelled"
+              "cancelled",
+              "parked"
             ]
           },
           "priority": {
