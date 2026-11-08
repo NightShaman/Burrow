@@ -23,7 +23,7 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   the next UTC day.
 - Public skill `SKILL.md` frontmatter versions are stamped with that same plain
   release date during staging, before validation and publication. Development
-  `.N` authoring versions remain in NightShaman only. The four official skills
+  `.N` authoring versions remain in NightShaman only. All official public skills
   must match their `PUBLIC_RELEASE.json`; only the version field is rewritten.
 - Node Goblin owns its version, source snapshot, bootstrap installer, tarball, and checksum. A Node Goblin change triggers the coordinated release, including Burrow, without transferring asset ownership.
   Its checksum-validated release asset is built once from the frozen staged

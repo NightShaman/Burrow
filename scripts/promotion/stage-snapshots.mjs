@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations', 'menagerie-companion-visits'];
+
 export const TARGETS = {
   burrow: {
     paths: ['.github/workflows/docs.yml', '.dockerignore', '.gitignore', 'Dockerfile', 'LICENSE', 'README.md', 'SOURCE_VERSIONS', 'backend', 'burrow-logo.png', 'compose.yml', 'docker-entrypoint.sh', 'docs', 'install.sh', 'mkdocs.yml', 'requirements-docs-test.txt', 'requirements-docs.txt', 'scripts/assembly/packaged-smoke.mjs', 'scripts/docs', 'scripts/install', 'ui'],
@@ -17,7 +19,7 @@ export const TARGETS = {
     excludes: []
   },
   burrowSkills: {
-    paths: ['LICENSE', 'README.md', 'burrow-backdoor', 'burrow-runtime', 'docs', 'goblin-secret-store', 'node-goblin-operations'],
+    paths: ['LICENSE', 'README.md', 'docs', ...PUBLIC_SKILL_IDS],
     excludes: []
   },
   burrowBackdoor: {
@@ -38,7 +40,6 @@ export const TARGETS = {
   }
 };
 
-export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations'];
 
 const DATE = /^\d{4}\.\d{2}\.\d{2}$/;
 const SHA = /^[0-9a-f]{40}$/;

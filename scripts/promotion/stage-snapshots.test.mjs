@@ -13,7 +13,8 @@ test('accepts the complete frozen source set', () => {
 });
 
 test('public skills snapshot includes every supported skill directory', () => {
-  for (const directory of ['burrow-backdoor', 'burrow-runtime', 'goblin-secret-store', 'node-goblin-operations']) {
+  for (const directory of ['burrow-backdoor', 'burrow-runtime', 'goblin-secret-store', 'node-goblin-operations', 'menagerie-companion-visits']) {
+    assert.ok(PUBLIC_SKILL_IDS.includes(directory), `missing public skill version stamping: ${directory}`);
     assert.ok(TARGETS.burrowSkills.paths.includes(directory), `missing public skill directory: ${directory}`);
   }
 });
@@ -126,7 +127,7 @@ test('Burrow Switchboard snapshot includes the standalone mod without developmen
 });
 
 
-test('public snapshot stamps all four skill frontmatter versions without changing instructions', t => {
+test('public snapshot stamps all supported skill frontmatter versions without changing instructions', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'public-skill-versions-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const originals = new Map();
