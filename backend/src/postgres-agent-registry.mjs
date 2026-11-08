@@ -293,7 +293,25 @@ export class PostgresAgentRegistryStore {
         [a.id, a.name, a.enabled !== false, json(['chat']), json(normalizeAgentContextConfig({})), json(metadata), at]);
       if (!r.rows[0]) throw Error('agent_id_exists');
       await this.saveOwnedModel(c, a.id, modelConnectionId, model, at);
+      await c.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at)
+        VALUES($1,'default','{}'::jsonb,$2,$2) ON CONFLICT(agent_id,session_id) DO NOTHING`, [a.id, at]);
       return row(r.rows[0]);
+    });
+  }
+  // Repair only identities with no conversation scopes at all. A missing
+  // default alongside other sessions (including an archived default) is an
+  // intentional history state, not a reason to resurrect a deleted session.
+  async ensureInitialSession(id) {
+    return withPostgresTransaction(this.pool, async c => {
+      const agentId = text(id);
+      const locked = await c.query('SELECT 1 FROM agents WHERE id=$1 FOR UPDATE', [agentId]);
+      if (!locked.rows[0]) return false;
+      const at = now();
+      const result = await c.query(`INSERT INTO conversation_sessions(agent_id,session_id,metadata,created_at,updated_at)
+        SELECT $1,'default','{}'::jsonb,$2,$2
+        WHERE NOT EXISTS (SELECT 1 FROM conversation_sessions WHERE agent_id=$1)
+        ON CONFLICT(agent_id,session_id) DO NOTHING RETURNING session_id`, [agentId, at]);
+      return result.rowCount > 0;
     });
   }
   async updateOwned(id, input, { ownerModId, modelConnectionId, model } = {}) {

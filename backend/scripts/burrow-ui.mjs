@@ -985,7 +985,13 @@ async function listSessions({ rootDir, rootDirs = null, agentId = null, includeA
   const resolvedLimit = limit == null ? null : Number(limit);
   if (resolvedLimit !== null && (!Number.isSafeInteger(resolvedLimit) || resolvedLimit < 1)) throw new RangeError('session_list_limit_invalid');
   agentId ||= (await resolveAgentRuntime()).agentId;
-  const rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
+  let rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
+  if (!rows.length) {
+    await agentsStore().ensureInitialSession(agentId);
+    // A concurrent request may have repaired the scope first; reread even
+    // when this request did not insert it.
+    rows = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived });
+  }
   const since = updatedSince && !Number.isNaN(Date.parse(updatedSince)) ? String(updatedSince) : null;
   return rows.filter((item) => !isInternalContextSession(item)).filter((item) => !query || JSON.stringify(item).toLowerCase().includes(String(query).toLowerCase())).filter((item) => !since || String(item.updatedAt || "") > since).slice(0, resolvedLimit ?? undefined).map((item) => ({ ...item, id: item.sessionId }));
 }
