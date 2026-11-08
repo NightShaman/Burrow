@@ -2,7 +2,7 @@
 
 
 !!! note "Implementation and historical evidence"
-    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+    Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 Use runtime receipts, persisted history, logs, and provider-request evidence to answer different questions. A green process or successful HTTP response is not proof that the requested work completed.
 
@@ -132,7 +132,7 @@ For production acceptance, use the correct supervisor scope, authenticated API e
 
 ## Targeted source review
 
-The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
+The full page was reconciled statically on **8 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)

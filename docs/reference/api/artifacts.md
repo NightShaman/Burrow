@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 These endpoints read and modify runtime-owned files or produce transferable data. These routes pass through the configured interactive-auth gate; diagnostics tokens do not grant them. With authentication mode `none`, that gate does not require credentials.
@@ -36,7 +36,7 @@ Poll job detail for a terminal result and inspect `errorDetails` when present. A
 Attach with exactly `agentId`, `sessionId` and `artifactId` to an existing destination session after job success. Delivery has an idempotency path; verify destination records and bytes separately from generation. The previously missing path import in attachment cleanup is present in this build.
 ## Forge deletion and retained Archive
 
-`DELETE /api/forge/jobs/{id}` takes no body and returns `{ok: true}`. Only succeeded, failed or interrupted jobs can be deleted. Queued/running jobs return409 `forge_job_active`; missing/deleted jobs return404. A committed Archive receipt is required before removal. This is not a cancellation endpoint.
+`DELETE /api/forge/jobs/{id}` takes no body and returns `{ok: true}`. Only succeeded, failed or interrupted jobs can be deleted. Queued/running jobs return 409 `forge_job_active`; missing/deleted jobs return 404. A committed Archive receipt is required before removal. This is not a cancellation endpoint.
 
 `GET /api/archive/forge` returns `{records: [...]}`, newest first, across the operator's Forge history. It includes prompt, provider/model IDs, status, timestamps, bounded call summaries and outcome; deleted jobs retain `deletedAt`. It is a **metadata-only** archive, not media storage, but prompts can still be sensitive. Both routes require operator access; diagnostics-only API tokens cannot use them.
 
@@ -80,7 +80,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/ui/export-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/export-routes.mjs)
@@ -107,3 +107,7 @@ Checked **6 November 2026**: `forge_create_job` requires a trusted originating a
 The stored delivery receipt binds agent, session and reset generation before paid dispatch. Cancelling the waiting chat does not cancel the provider job; a later success still targets that recorded conversation, while reset fencing prevents stale delivery into a new generation. Generation failure returns `ok:false` and the safe failed job without a paid retry. `forge_wait_interrupted` describes interruption of the waiter, not cancellation of the durable job.
 
 Public chat-requested jobs expose `delivery.status` (`pending`, `delivered` or `failed`) and optional `forge_delivery_failed`, not private destination/reset metadata. Delivery failure leaves successful generation/artifacts intact. Reopening the runtime reconciles succeeded undelivered jobs, and explicit same-key retries can reconcile delivery without another paid dispatch. Same-sender artifact/destination retries are idempotent; operator and assistant sends have separate identities. An uncertain attachment commit is checked against the durable conversation before copied bytes are removed.
+
+## Viewing a copied Forge image reference
+
+The native `attachment_view` tool accepts a copied `[forge:<jobId>:<artifactId>]` reference (or its unbracketed form), with both IDs in UUID form. Core resolves it through the operator-owned Forge store and reads the existing artifact, rather than treating it as a path or URL. Supported display types are PNG, JPEG, GIF and WebP, at most 20 MiB. Invalid references, unavailable/deleted artifacts, unsupported media and oversized files return distinct failures. This is an image inspection path, not a new HTTP upload endpoint, generation request or proof of chat delivery.

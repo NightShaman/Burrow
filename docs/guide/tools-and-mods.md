@@ -1,6 +1,6 @@
 # Tools, mods, and execution
 
-Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **8 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Start here when an agent needs access to files, a service, or another execution machine.
 

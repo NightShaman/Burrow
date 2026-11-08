@@ -47,7 +47,7 @@ npm run test:files -- tests/agent-context-config.test.mjs
 npm test
 ```
 
-`npm run check` also syntax-checks source/tests/bin/scripts and runs the suite. Inspect the exact scripts before selecting the aggregate check for your change. The public assembly includes the OpenAPI JSON artifact but not backend tests or the full upstream documentation, so these commands do not have the same meaning in its bundled `backend/` directory.
+`npm run check` also checks unused bindings, syntax-checks source/tests/bin/scripts, and runs the suite. Inspect the exact scripts before selecting the aggregate check for your change. The public assembly includes the OpenAPI JSON artifact but not backend tests or the full upstream documentation, so these commands do not have the same meaning in its bundled `backend/` directory.
 
 The test runner creates private temporary runtime roots, clears selected runtime/key environment values, provides a test-only key, and enforces a whole-suite timeout (120 seconds normally, or 900 seconds with `BURROW_TEST_DISPOSABLE_POSTGRES=1`; configurable through `BURROW_TEST_TIMEOUT_MS`). Do not point tests at a deployed database or live workspace.
 

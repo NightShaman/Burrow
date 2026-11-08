@@ -32,4 +32,4 @@ Follow [OIDC before remote access](../guide/first-agent.md#configure-oidc-before
 
 ## Targeted source review
 
-The consolidated guide retains the **1 November 2026** static reconciliation and historical source receipts. See [source coverage](../project/source-map.md) for pins and limits; this reorganization is not a live application, provider, database, or security test.
+The consolidated guide retains the **8 November 2026** static reconciliation and historical source receipts. See [source coverage](../project/source-map.md) for pins and limits; this reorganization is not a live application, provider, database, or security test.

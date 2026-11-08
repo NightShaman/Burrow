@@ -3,7 +3,7 @@
 
 !!! note "Implementation and historical evidence"
 
-    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+    Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 Use one replaceable application and one clearly owned durable-state root. Keep the database, encryption key, and filesystem artifacts recoverable together.

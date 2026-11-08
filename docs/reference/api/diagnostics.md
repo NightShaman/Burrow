@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 Health, operational projections and conversation/trace evidence expose different levels of information. A read-only route is not necessarily content-free, and an HTTP success is not proof that a full model/tool workflow succeeded.
@@ -57,9 +57,9 @@ Known token counts are summed over all attempts, including failures. Unknown usa
 
 ## OpenAI rate-limit reset credits
 
-`GET /api/openai/oauth/reset-credits?connectionId=...` reads provider-reported credit availability. `POST /api/openai/oauth/reset-credits/consume` takes `connectionId`, `creditId` and a stable `requestId`; it is an explicit operator action that can consume a provider credit, not a diagnostic health check or automatic LB action. These routes require normal interactive authentication, not a diagnostics Bearer token.
+`GET /api/openai/oauth/reset-credits?connectionId=...` reads provider-reported credit availability. `POST /api/openai/oauth/reset-credits/consume` takes `connectionId`, `creditId` and a stable `requestId`; it is an explicit operator action that can consume a provider credit, not a diagnostic health check. A separate default-off direct-connection preference can authorize automatic use of expiring credits; see [reset settings](settings.md#automatic-expiring-reset-preference). These routes require normal interactive authentication, not a diagnostics Bearer token.
 
-The service refreshes eligibility before dispatch and guards concurrent redemption for the same account. It does not retry the non-idempotent provider POST. Reusing a request ID with a different credit returns 409; repeat identity can replay the recorded result only within this process lifetime. An `ambiguous` result means the outcome is unknown: do not submit a fresh ID merely to retry. Check provider credit/usage state first; this is not a restart-durable redemption ledger. A successful redemption can carry failed `usageRefresh` or `creditsRefresh`; refresh failure does not mean redemption failed. Provider availability/entitlement is not guaranteed by route existence.
+The service refreshes eligibility before dispatch and guards concurrent redemption for the same stable account. A manual call does not automatically retry its provider POST. Same-process request-ID replay retains the result and rejects a changed credit. In the composed runtime, PostgreSQL also records a pre-dispatch claim and settled outcome for both manual and automatic redemption. An unknown outcome fences the account across restart; stale availability, disappearance or expiry alone cannot clear it. Only exact provider history showing that credit redeemed settles the unknown claim, and that reconciliation does not dispatch another credit in the same call. Do not submit a fresh ID merely to retry an ambiguous result or edit the ledger. A successful redemption can carry failed `usageRefresh` or `creditsRefresh`; refresh failure does not mean redemption failed. `outcomeRecorded:false` and `ledgerError` mean the durable fence remains uncertain. Provider availability/entitlement is not guaranteed by route existence.
 
 ## Auth flow endpoints
 
@@ -110,7 +110,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
 - [backend/src/brain-diagnostic-summary.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/brain-diagnostic-summary.mjs)

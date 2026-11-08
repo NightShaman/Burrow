@@ -1,6 +1,6 @@
 # Skills and memory
 
-Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **8 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 Use **skills** for reusable instructions, **profile documents** for agent-specific guidance, and **Brains** for explicit saved memories.
 

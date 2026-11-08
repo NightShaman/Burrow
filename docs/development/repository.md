@@ -8,10 +8,10 @@ Burrow is assembled from separate source repositories; public promotion publishe
 
 | Artifact | Revision |
 |---|---|
-| Development assembly | `400ec8f2d0b24478ca2185bf8c38aee2ede4c445` |
-| Build | `2026.11.03.8` |
-| Backend source | `32dde3266a231777ddfec6dba141d6b9972a21fd` |
-| UI source | `4a17a8c73c588a7582835ca6ff50dcabe409c33c` |
+| Development assembly | `79c4346acf461ddbb16fe94d85d1a387df3ddc80` |
+| Build | `2026.11.08.7` |
+| Backend source | `f7ab762d49b9e65ea3e071ba762dfcea16e0e01a` |
+| UI source | `e51eaf1e1ebb65c9eee60690643746619a4a549b` |
 
 These pins describe the documentation's evidence baseline, not a claim about every running installation. Read your installed `SOURCE_VERSIONS` and health version when investigating a deployment.
 
@@ -70,4 +70,6 @@ See [source map](../project/source-map.md), [architecture](../architecture/overv
 
 ## Source review
 
-Reviewed on 1 November 2026 against development assembly `fe851c4e546c9bf9f53f861e24f918474432c296` (build2026.11.01.7), Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and UI `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.
+Historical review on 1 November 2026 used development assembly `fe851c4e546c9bf9f53f861e24f918474432c296` (build2026.11.01.7), Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and UI `e6d3fe7b17da1c68d380f1e28482fd9c5819cdef`. This is static source review, not a claim that tests, installation or provider calls were run. Public snapshots can lag development; these pins are provenance, not an installed-version compatibility promise.
+
+Current ownership and payload structure were checked again on **8 November 2026** against the reviewed snapshot above. No application tests or runtime operations were executed.

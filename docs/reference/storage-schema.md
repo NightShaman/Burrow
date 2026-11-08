@@ -2,9 +2,9 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-This reference reviews application storage ownership and records the current migration ledger through **89**, checked against Core on **2 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference reviews application storage ownership and records the current migration ledger through **100**, checked against Core on **8 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -188,7 +188,7 @@ Original references are semantic locators resolved through the conversation stor
 | `scheduled_jobs` | `id`; agent FK cascades | Owner mod, prompt, cron, legacy nullable timezone, operator-derived effective timezone, session/model and next/last run |
 | `scheduled_job_runs` | `id`; job FK cascades; unique `(job_id, scheduled_for)` | Run status, dispatch/completion, trace/result/error fields |
 
-Task statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`; priorities are `critical`, `high`, `normal`, `low`. Scheduled-run statuses are `running`, `completed`, `failed`, `cancelled`, `missed`, `skipped`. Model override fields on scheduled jobs are validated by the store rather than declared as model-connection foreign keys.
+Task statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`, `parked`; priorities are `critical`, `high`, `normal`, `low`. Scheduled-run statuses are `running`, `completed`, `failed`, `cancelled`, `missed`, `skipped`. Model override fields on scheduled jobs are validated by the store rather than declared as model-connection foreign keys.
 ## Forge and filesystem artifacts
 
 | Table | Key | Stored data |
@@ -255,7 +255,7 @@ See [Persistence architecture](../architecture/persistence.md#filesystem-state) 
 
 ## Targeted source review
 
-The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
+The current page was statically reconciled on **2026-11-08** against Backend `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/postgres-skill-sources.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-skill-sources.mjs)
@@ -357,3 +357,7 @@ Backfill prepares transaction-local projections before row locks, then uses a sh
 | 99 | `agent-run-completion-feed` | Durable bounded agent-run completion metadata for mod catch-up, without transcript content. |
 
 These additive application migrations were inspected against Core `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1`; this documentation run executed no database migration or application test. Existing published migration bodies remain unchanged. Use supported lifecycle operations, not direct edits to claims, completion cursors or the migration ledger.
+
+## 8 November migration addition
+
+Migration **100**, `parked-board-task-status`, adds `parked` to the task-board status constraint. Parked is a retained, non-executable task state, not deletion or the derived Done archive projection. Move it to an eligible state before executing or selecting it as a new scheduled task target. No migration or application test was executed during this source review.

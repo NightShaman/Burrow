@@ -2,7 +2,7 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
@@ -133,7 +133,7 @@ Read [Deployment](../operations/deployment.md), [Configuration](../reference/con
 
 ## Targeted source review
 
-The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
+The current page was statically reconciled on **2026-11-08** against Backend `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/mod-host.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-host.mjs)
 - [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)

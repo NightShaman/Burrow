@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 The API serves BURROW's UI and external clients. It is an operator-level control surface: it can create agents, change credentials and grants, execute model/tool work, import data and delete retained content. Read [authentication](../security/authentication.md) and [trust boundaries](../security/trust-boundaries.md) before exposing it.
@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-11-01** has **194 paths, 257 operations and 206 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `43e53af292b31437a96c123dfe5ef117f75597cab8f05cf62b28c2eded310968`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-11-08** has **198 paths, 264 operations and 212 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `78f0680cf67917dc156975718ec6eb9a00206bfab560a42c398263a182b32ec9`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -46,10 +46,10 @@ The current development contract reviewed on **2026-11-01** has **194 paths, 257
 Specific drift:
 
 - Mod catalog responses also carry lifecycle status, failure information, version and Archive UI contributions
-- Forge accepts mode-based selection; its source artifact still requires an explicit connection/model pair and omits the `mode` property
+- Forge request selection now includes `mode` and canonical-photo selectors; earlier explicit-pair-only schema guidance is obsolete
 - Music availability is catalog-dependent; it is not unconditionally false as the old schema states
 - Forge jobs can include bounded `errorDetails`; the old job schema omits them
-- Archive calendar uses the requested timezone, despite its old UTC-only summary
+- Archive calendar now documents local-day retained-occurrence behavior; the earlier UTC-only summary is obsolete
 - Native OAuth pool settings and metrics now have schema coverage, but the model-connection description still says union while current runtime catalogs use the intersection of non-manual member models
 - The operator mod-access route is source-implemented but absent from this schema
 
@@ -96,7 +96,7 @@ For Basic authentication, add `--user "$BURROW_USERNAME"` and let curl prompt fo
 
 ## Targeted source review
 
-The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)

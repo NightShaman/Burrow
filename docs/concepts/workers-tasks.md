@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW has several forms of work. Choose by the outcome you need, rather than treating every task record as a running agent.
@@ -35,7 +35,7 @@ Example agent tool arguments:
 }
 ```
 
-Supported statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, and `cancelled`; priorities are `critical`, `high`, `normal`, and `low`. Deleting a task is a permanent board mutation. Use a cancelled status when you want to retain its history.
+Supported statuses are `backlog`, `todo`, `in_progress`, `review`, `done`, `cancelled`, and `parked`; priorities are `critical`, `high`, `normal`, and `low`. Parked is retained, non-executable work, not a completed/archive state. The UI hides its column until you choose **Parked**. Deleting a task is a permanent board mutation. Use a cancelled status when you want to retain its history.
 
 The UI also offers an explicit **Execute** action. Its dispatch uses the assigned agent's `default` conversation and records execution against the task; project paths supply context rather than filesystem grants. Assignment, execution state, and board status remain distinct. The current handler awaits task/project reads and execution updates, and supplies composed stores to the chat runtime. Its acknowledgement is not a terminal receipt: inspect the recorded outcome before considering the task complete.
 
@@ -125,7 +125,7 @@ Read the [CLI wiring caveats](../reference/cli.md#legacy-store-wiring-gap) befor
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/postgres-scheduled-job-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-scheduled-job-store.mjs)
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)

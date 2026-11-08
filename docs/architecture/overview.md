@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW separates the operator surface, runtime orchestration, authoritative state, execution placement, and provider transport. This keeps the conversational interface small while preserving inspectable evidence for work performed behind it.

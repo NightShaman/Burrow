@@ -2,7 +2,7 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 BURROW authenticates access to its operator UI and HTTP API through one configured mode: `none`, `trusted-proxy`, `basic`, or `oidc`. Diagnostics bearer tokens are a separate, restricted access path. Authentication identifies an operator-facing request; it does not create per-agent operating-system isolation.
@@ -155,7 +155,7 @@ A diagnostics bearer token cannot manage tokens. With auth mode `none`, manageme
 
 | Family | Allowed pathnames |
 |---|---|
-| Runtime | `/api/health`, `/api/status`, `/api/metrics` |
+| Runtime | `/api/health`, `/api/status`, `/api/metrics`, `/api/metrics/provider-pools` |
 | Inventory and database | `/api/diagnostics/inventory`, `/api/diagnostics/postgres` |
 | Brain diagnostics | `/api/diagnostics/brains`, `/api/diagnostics/brains/memories`, `/api/diagnostics/brains/embedding-jobs` |
 | Forge diagnostics | `/api/diagnostics/forge/jobs`, `/api/diagnostics/forge/jobs/{id}` where the final segment matches `[0-9a-f-]{36}` case-insensitively |
@@ -189,7 +189,7 @@ Review [Trust boundaries](trust-boundaries.md), [Permissions](permissions.md), a
 
 ## Targeted source review
 
-The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
+The current page was statically reconciled on **2026-11-08** against Backend `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/scripts/burrow-ui.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/burrow-ui.mjs)
 - [backend/src/browser-origin-policy.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/browser-origin-policy.mjs)

@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
 
@@ -143,7 +143,7 @@ Use [Interface groups](interface.md#attachments-and-groups) for room controls an
 
 ## Watching and stopping work
 
-Active peer runs expose bounded progress. Stopping an A2A parent cancels its active nested reply tree. Local minion process cancellation sends `SIGTERM` to the process group, then forces `SIGKILL` after a configurable grace (default one second); cleanup also handles remaining descendants and removes the temporary payload. This cancellation grace is not a wall-clock task timeout. Session-scoped status projects the requested session and its descendants, not an arbitrary capped child list. The agent rail additionally requests agent-wide Minion discovery through overview, covering visible children from all originating sessions for the selected agent without adding unrelated normal conversations. Recent completed children normally remain visible for one hour; an ended ancestor can remain to connect a visible descendant. Immediate parent, root and depth are separate fields. A child-scoped query excludes siblings; overview context hydration is separately bounded to the requested session plus 12 descendants. Durable receipts remain separate from visibility.
+Active peer runs expose bounded progress. Stopping an A2A parent cancels its active nested reply tree. Local minion process cancellation sends `SIGTERM` to the process group, then forces `SIGKILL` after a configurable, depth-aware cleanup grace (six seconds for a depth-1 worker, four seconds for depth 2, and a one-second fallback when no positive depth is recorded). This gives nested workers time to drain descendants and remove their temporary payloads; cleanup also handles remaining process-group descendants. This cancellation grace is not a wall-clock task timeout. Session-scoped status projects the requested session and its descendants, not an arbitrary capped child list. The agent rail additionally requests agent-wide Minion discovery through overview, covering visible children from all originating sessions for the selected agent without adding unrelated normal conversations. Recent completed children normally remain visible for one hour; an ended ancestor can remain to connect a visible descendant. Immediate parent, root and depth are separate fields. A child-scoped query excludes siblings; overview context hydration is separately bounded to the requested session plus 12 descendants. Durable receipts remain separate from visibility.
 
 See [Interface](interface.md), [Observability](../operations/observability.md), and [Execution flow](../architecture/execution-flow.md).
 
@@ -151,7 +151,7 @@ See [Interface](interface.md), [Observability](../operations/observability.md), 
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
 - [backend/src/subagent-spawn-execution.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/subagent-spawn-execution.mjs)

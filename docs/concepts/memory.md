@@ -2,12 +2,12 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW separates original conversation evidence, editable agent profiles, operational working memory and explicit saved memories. These have different scopes, lifetimes and routes into model context. Understanding those boundaries helps explain both recall and retention.
 
-The detailed contracts below describe the public 2026.10.19 baseline unless a newer behavior is explicitly marked. [Release status](../project/release-status.md) identifies the differences.
+These contracts follow the inspected current implementation. Explicitly dated public 2026.10.19 sections describe the historical baseline; [release status](../project/release-status.md) identifies those differences.
 
 ## Memory layers
 

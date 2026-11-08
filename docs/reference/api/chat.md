@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 `POST /api/chat` submits one user-visible turn. Select an existing agent; its configured model and tools determine what the turn can do. A request can incur provider charges and execute granted tools.
@@ -135,7 +135,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Source review
 
-Reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`; static source inspection only, with no live API or provider calls.
+Reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`; static source inspection only, with no live API or provider calls.
 
 ## 27 October delta review
 

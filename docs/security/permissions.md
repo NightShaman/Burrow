@@ -2,7 +2,7 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 BURROW separates HTTP access, agent tool grants, concrete action checks, and operating-system access. These controls answer different questions. A successful UI login does not make a tool result safe, and an agent workspace is not a filesystem sandbox.
 
@@ -71,6 +71,10 @@ Core system-mod capabilities also require operator-owned authority. `core_mod_au
 
 Mod handlers receive untrusted arguments separately from trusted caller context and must implement their own argument and record-access checks. Installation is a code-trust decision; see [Extensions](../development/extensions.md) and [Trust boundaries](trust-boundaries.md#installed-mods-are-trusted-code).
 
+## Mod-owned agent tool boundary
+
+Mod-owned native agents have a separate closed tool allowlist, enforced again at concrete execution. Their declared enabled capability groups can admit A2A, Forge (including `attachment_view`), Brains, skills and MCP tools; `mod_agent_tool` is reserved for a valid mod-owned identity. Engineering/filesystem/process tools, task and schedule management, historical/continuity tools and Minion spawning are not implicitly admitted. Unknown tool names are denied even if an earlier advertisement or fabricated review says otherwise. This restricts the agent tool contract, not the OS privileges of trusted installed mod code.
+
 ## Protected values
 
 Protected values reduce accidental credential exposure in model-visible tool results. They do not authorize a tool call or contain arbitrary shell code.
@@ -93,7 +97,7 @@ Once a process receives a credential, that process can use it. Protected handles
 
 ## Targeted source review
 
-The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
+The current page was statically reconciled on **2026-11-08** against Backend `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/action-safety.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-safety.mjs)
 - [backend/src/execution-boundaries.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/execution-boundaries.mjs)

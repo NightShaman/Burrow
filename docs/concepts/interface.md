@@ -2,11 +2,11 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 For task-oriented instructions, start with [Everyday use](../guide/everyday-use.md). This page is the detailed screen, control, and browser-state reference.
 
-The BURROW interface brings conversations, agent configuration, project tasks, retained evidence, and media generation into one operator console. This guide was statically reconciled with current implementation on **1 November 2026**; its older screenshots are not a complete inventory of current controls. Start by checking the agent and session: these determine which conversation and records you are viewing.
+The BURROW interface brings conversations, agent configuration, project tasks, retained evidence, and media generation into one operator console. This guide was statically reconciled with current implementation on **8 November 2026**; its older screenshots are not a complete inventory of current controls. Start by checking the agent and session: these determine which conversation and records you are viewing.
 
 The runtime owns durable state. The browser presents API responses and live activity, and keeps some local preferences and conversation caches. A visible answer, an accepted job, and a verified result are different states; inspect the relevant run or evidence before treating work as complete.
 
@@ -220,7 +220,7 @@ Under **Mods**, source checks discover available versions; they do not automatic
 
 ### Tasks
 
-Create a project before creating a task. Projects hold description, notes, and named paths; those path references do not grant filesystem access. The visible board columns are **Backlog**, **To Do**, **In Progress**, **Review**, and **Done**. New UI tasks default to To Do with Normal priority. Edit a task to change its status or assignment; the current board does not implement drag-and-drop status transitions.
+Create a project before creating a task. Projects hold description, notes, and named paths; those path references do not grant filesystem access. The default board columns are **Backlog**, **To Do**, **In Progress**, **Review**, and **Done**. The **Parked** toolbar button reveals or hides a separate column for retained, non-executable work. New UI tasks default to To Do with Normal priority. Edit a task to change its status or assignment; the current board does not implement drag-and-drop status transitions.
 
 
 ### Board
@@ -243,7 +243,7 @@ Create a project before creating a task. Projects hold description, notes, and n
 To run a task:
 
 1. Create or open a task, select its project and **Assignee**, then save it.
-2. Reopen its details if necessary and choose **Execute**. Unsaved changes must be saved first; unassigned, Done, and cancelled tasks cannot execute.
+2. Reopen its details if necessary and choose **Execute**. Unsaved changes must be saved first; unassigned, Done, cancelled, and parked tasks cannot execute.
 3. Follow the dispatched run in the assigned agent's chat. The board refreshes tasks every 60 seconds; use **Refresh history** or reopen task details for newer persisted history.
 4. Inspect the assigned agent's **default** conversation and **Archive → Proof** for the final answer, blockers, and verification evidence.
 
@@ -297,6 +297,8 @@ Forge provides **Image**, **Video**, **Speech**, **Music**, and **Recents** view
 
 Choose an available model, enter the prompt or speech script, and start generation. Music has separate musical-direction and optional lyrics inputs; lyrics are guidance rather than a guarantee of verbatim output. `POST /api/forge/jobs` accepts the job, and the UI polls queued or running jobs. Inspect the resulting artifact or failure details. **Attach to conversation** uses the current agent and session, so verify that destination first.
 
+Supported PNG, JPEG, GIF and WebP artifacts up to 20 MiB also offer **Copy reference**. Paste the resulting `[forge:job-id:artifact-id]` into a chat so the agent can inspect that retained original with `attachment_view`, without attaching a new chat copy. It is a reference within the same operator-owned Burrow, not a public URL or a backup. Deleted or unavailable originals cannot be reopened. See [Forge references](../guide/everyday-use.md#reuse-a-forge-image-in-another-chat).
+
 ### Failed job
 
 
@@ -344,7 +346,7 @@ For endpoint schemas and error behavior, use the [API reference](../reference/ap
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [ui/src/features/settings/OpenTelemetrySettings.tsx](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/src/features/settings/OpenTelemetrySettings.tsx)
 - [ui/src/features/settings/SkillSourceSettings.tsx](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/ui/src/features/settings/SkillSourceSettings.tsx)

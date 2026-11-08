@@ -3,7 +3,7 @@
 
 !!! note "Implementation and historical evidence"
 
-    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+    Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 Upgrade the deployment through its own distribution path: the native launcher for user installs, image replacement for containers. Preserve durable state and the settings encryption key.
@@ -16,7 +16,7 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
 
-Current inspected development source includes PostgreSQL migrations through **89**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+Current inspected development source includes PostgreSQL migrations through **100**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
 
 If startup appears to wait on PostgreSQL, use [long-migration checks](troubleshooting.md#upgrade-waits-on-a-database-migration) to distinguish elapsed time, CPU activity and lock waits before taking action.
 
@@ -78,7 +78,7 @@ Pin the intended image tag, then follow [container upgrade](containers.md#upgrad
 
 ## Targeted source review
 
-The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
+The full page was reconciled statically on **8 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [install.sh](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/install.sh)
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)

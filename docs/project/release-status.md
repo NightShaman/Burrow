@@ -107,3 +107,13 @@ The full-page review remains dated **1 November**. This is static source and tes
 Inspected assembly **2026.11.07.5**, commit `c057b5e4369c9c2758c8a8ead784d59ff2e1a5db`, records Core `f0b17efdadc57c856eb3c5cf5272a3fff2268ad1` and UI `9e53442cdb1c8bbb882195d9f3de10419938a6b2`. This pass reconciles enforced A2A default-session preferences, interrupted child admission, active continuation recaps, opt-in expiring OAuth resets and durable outcomes, mod completion/activity metadata, scheduler recovery, UI ownership/refresh warnings and application migrations 97–99. Managed-skill failure no longer undoes a completed mod disable/uninstall.
 
 Unchanged sections inherit the **1 November** full review. Source and test definitions were inspected statically; no application tests, provider calls, database migrations, runtime changes or release promotions were performed. Public mirrors and installed versions may lag these source pins. Menagerie now has a separately maintained public-release guide; older dated placeholder statements describe their original review date only.
+
+## Sunday full reconciliation: 8 November 2026
+
+The full Core guide set was compared with assembly **2026.11.08.4** (`1f77c9d0277585bfe1963ce3ab3d2cdf35f16b9a`), Core `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and UI `d337e5a61667335cfaaff5b23b36c052ac6e71bb`. Review covered setup, configuration, routing, API contracts, operations, troubleshooting and cross-guide consistency. Corrections include Parked tasks and dispatch eligibility, enforced default A2A routing, reusable Forge image references, depth-aware Minion cleanup, current schema/API inventory and recovery/export boundaries.
+
+This is static implementation reconciliation and documentation validation, not executed application/provider testing, a live installation or restore, a release promotion, or proof that an installed/public build already has the behavior. Earlier dated review sections and public-source links remain historical. Approved illustrations, layout and card order are preserved.
+
+### Publication-time source check
+
+Before publication, the additional changes in assembly **2026.11.08.7** (`79c4346acf461ddbb16fe94d85d1a387df3ddc80`), Core `f7ab762d49b9e65ea3e071ba762dfcea16e0e01a` and UI `e51eaf1e1ebb65c9eee60690643746619a4a549b` were inspected. They tighten malformed native-tool argument rejection, provider streaming completion/cancellation and stale Chat paging after reset. The full review above remains the base; this final static delta preserves concurrent runtime changes and adds no application/provider test claim.

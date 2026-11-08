@@ -2,10 +2,10 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
-These observations were statically reconciled against the 1 November implementation baseline, while explicitly labeled older release examples remain historical. They are not an independently tested running installation. Recheck installed behavior when upgrading.
+These observations were statically reconciled against the 8 November implementation baseline, while explicitly labeled older release examples remain historical. They are not an independently tested running installation. Recheck installed behavior when upgrading.
 
 ## Configuration and command compatibility
 
@@ -82,7 +82,7 @@ The local process runner supports abort-driven process-group termination with a 
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](source-map.md); static inspection is not a live deployment test.
 
 - [backend/package.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/package.json)
 - [backend/docs/openapi.json](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/docs/openapi.json)

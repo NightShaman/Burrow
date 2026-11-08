@@ -2,7 +2,7 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 Burrow has two command layers: the installed shell launcher and the backend Node CLI. Use the installed launcher for a normal deployment; it loads the private environment and supplies the application root.

@@ -1,6 +1,6 @@
 # Models and connections
 
-Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **8 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 An agent needs a saved model connection and a selected model to answer. A connection tells Burrow which API to call and how to authenticate; the model selector chooses what that agent uses. A provider account, quota, and any model charges are separate from installing Burrow.
 

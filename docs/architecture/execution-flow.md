@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 This page follows a selected native tool call through validation, dispatch, provider continuation, and terminal reporting. For setup and tool arguments, see [Tools](../concepts/tools.md).
@@ -69,7 +69,7 @@ An empty answer after tool use becomes `incomplete`. The transcript must not sil
 
 Normal chat collects tool outcomes and structured completion evidence. It does not automatically execute every legacy work-loop verification/commit gate.
 
-The retained work-loop verification helper looks for a successful model call, a mutation artifact, a passing check, no failed checks, and overlap with a changed target. Its recognized mutation/check types are limited. For example, `files_edit` support differs between newer evidence helpers and legacy verification. A successful write is therefore not interchangeable with “verified,” and a successful check should identify what it checked.  
+The retained work-loop verification helper looks for a successful model call, a mutation artifact, a passing check, no failed checks, and overlap with a changed target. Its recognized mutation/check types are limited. Current verification recognizes successful `files_write`, `files_edit`, and `files_patch` results as mutations; shell-based checks still need supported command/evidence classification. A successful write is therefore not interchangeable with “verified,” and a successful check should identify what it checked.
 
 ## Failure and cancellation semantics
 

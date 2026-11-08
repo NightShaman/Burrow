@@ -2,7 +2,7 @@
 
 
 !!! note "Current source review"
-    This page was reconciled against current development source on **2026-11-01**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
+    This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
 
 This reference separates supported service settings from installer, test and compatibility names. The inventory was statically checked against the current source; internal/test names are classified separately below. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
@@ -73,6 +73,7 @@ See [Authentication caveats](../security/authentication.md)
 | `BURROW_ARCHIVE_ROOT` | `<runtimeRoot>/archive` |
 | `BURROW_SETTINGS_KEY` | Required external key material: Base64 encoding of exactly 32 bytes |
 | `BURROW_SETTINGS_KEY_FILE` | Container-entrypoint override; defaults to `<runtimeRoot>/config/settings.key` |
+| `BURROW_RUN_CANCELLATION_GRACE_MS` | `5000`; minimum 1000 ms cancellation grace before drain/fencing decisions, not a rollback guarantee |
 | `BURROW_SHUTDOWN_DRAIN_MS` | `10000`; minimum 1000 ms HTTP connection drain window |
 | `BURROW_DISABLE_BACKGROUND_SCHEDULERS` | Disabled only when set to `1`, `true`, `yes` or `on`, case-insensitive |
 | `BURROW_BOOTSTRAP_SAMPLE_IDENTITIES` | Sample-identity bootstrap is opt-in; use `1` for explicit fixtures, not as ordinary setup |
@@ -105,6 +106,7 @@ The supported startup wrapper requires an explicit lifecycle. Although the low-l
 | `BURROW_POSTGRES_PG_CTL` | `pg_ctl` executable |
 | `BURROW_POSTGRES_BIN` | `postgres` executable |
 | `BURROW_POSTGRES_LIFECYCLE_TIMEOUT_MS` | `30000` |
+| `BURROW_POSTGRES_CLEANUP_BUDGET_MS` | `60000`; startup-wrapper cleanup budget |
 
 Managed startup removes connection URLs/passwords and supplies its Unix socket, port 5432, database `postgres` and current OS username. Consequently, the general pool defaults above do not describe the managed database's effective identity. Managed PostgreSQL does not listen on TCP. External mode validates the expected major and installed `vector` extension without owning database process start/stop.
 
@@ -121,10 +123,18 @@ Managed startup removes connection URLs/passwords and supplies its Unix socket, 
 | `BURROW_CONTEXT_SUMMARY_MODEL` | Unset |
 | `BURROW_CONTEXT_MAX_SWEEP_ITERATIONS` | `4` |
 | `BURROW_CONTEXT_SWEEP_DEADLINE_MS` | `120000` |
+| `BURROW_BRAIN_EMBEDDING_TIMEOUT_MS` | `30000`; integer 1–300000 ms provider embedding request timeout |
 | `BURROW_ALBDRUCK_PROMPT_MAX_CHARS` | `4000` |
 | `BURROW_ALBDRUCK_MAX_PAGE_SIZE` | `200` |
 
 Compression controls normalize invalid values to supported defaults. The retained `BURROW_ALBDRUCK_*` configuration names are compatibility values, not switches that restore the retired Albdruck UI/API. Positive safe integers are required. Explicit history lookup also accepts `BURROW_HISTORY_QUERY_BUDGET_MS` (15000) and `BURROW_HISTORY_LOCK_TIMEOUT_MS` (1000). These are work bounds, not retention settings.
+## Task history and attachments
+
+| Variable | Default / purpose |
+|---|---|
+| `BURROW_TASK_ATTACHMENT_MAX_BYTES` | `26214400` (25 MiB); positive safe integer, separate from chat attachment budgets |
+| `BURROW_TASK_HISTORY_PAGE_MAX` | `500`; positive safe-integer history page ceiling |
+
 ## MCP, provider login and mods
 
 | Variable | Default / purpose |
@@ -145,6 +155,7 @@ Current development starts export disabled unless enabled in saved settings or o
 
 | Variable | Default / purpose |
 |---|---|
+| `BURROW_OTEL_SHUTDOWN_TIMEOUT_MS` | `5000`; bounded exporter shutdown wait |
 | `BURROW_OTEL_ENABLED` | Optional `true`/`false` override for saved enablement |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Generic HTTP(S) collector endpoint; no URL credentials, query or fragment |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | Trace-specific endpoint |
@@ -172,6 +183,8 @@ These names occur in the repository but are not a second supported application-c
 | `BURROW_TRACE_ISOLATION` | Isolated trace layout for tests/debugging; test context also detected automatically |
 | `OPENCLAW_OAUTH_CALLBACK_HOST` | Historical fallback for OpenAI loopback callback host |
 | `BURROW_HOME` | Generated native launcher installation path |
+| `BURROW_POSTGRES_CONTROLDATA` | Backup preflight executable override; otherwise sibling of the configured absolute `postgres` executable or `pg_controldata` on PATH |
+| `BURROW_SMOKE_TOKEN` | Installer-owned staging health identity; echoed only for a matching smoke header, not an API credential |
 | `BURROW_POSTGRES_BIN_DIR` | Native installer executable-discovery helper |
 | `BURROW_UID`, `BURROW_GID` | Docker build arguments, default 4226; not live process reconfiguration |
 | `BURROW_HEALTH_URL`, `BURROW_SERVICE_UNIT` | Operational health/smoke/audit script inputs |
@@ -181,11 +194,14 @@ These names occur in the repository but are not a second supported application-c
 | `BURROW_CONFIG`, `BURROW_SETTINGS_DB` | Removed-config isolation/check references; do not create JSON/SQLite settings authority |
 | `BURROW_TEST_TIMEOUT_MS`, `BURROW_VERIFY_DEPLOYED_ISOLATION`, `BURROW_POSTGRES_LIFECYCLE_REHEARSAL` | Test/rehearsal controls |
 | `BURROW_OOM_REPRO_ITERATIONS`, `BURROW_OOM_REPRO_FILE_BYTES`, `BURROW_OOM_REPRO_CALLS_PER_ITERATION`, `BURROW_OOM_REPRO_GC_INTERVAL`, `BURROW_OOM_REPRO_MAX_HEAP_MIB` | Isolated diagnostic reproducer inputs |
+| `BURROW_TRUSTED_IMAGE_URL_CONNECTION_IDS` | Explicit comma-separated connection trust override for generated-image URL retrieval; changes network trust, not model capability or authentication. Leave unset unless the provider and its returned asset destinations are deliberately trusted. |
+| `BURROW_OTEL_PRIVATE_TLS`, `BURROW_OTEL_PRIVATE_TLS_ERRORS` | Internal run-owned TLS handoff data; not operator setup inputs or safe diagnostics |
+| `BURROW_POSTGRES_TEST_URL`, `BURROW_POSTGRES_TEST_BIN`, `BURROW_POSTGRES_MANAGED_INTEGRATION`, `BURROW_TEST_DISPOSABLE_POSTGRES`, `BURROW_TEST_CONCURRENCY`, `BURROW_ACCESS_TEST_SOCKET`, `BURROW_ACCESS_TEST_USER`, `BURROW_CODES`, `BURROW_FIXED_CODE` | Test/fixture inputs, not ordinary runtime settings |
 | `BURROW_SOURCE_TOKEN` | Assembly CI secret for pinned source access; never a runtime API token |
 
 ## Targeted source review
 
-The current page was statically reconciled on **2026-11-01** against Backend `8b5889115680bcdbf698f1b93126254e1cf4d2e6` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
+The current page was statically reconciled on **2026-11-08** against Backend `6b682eae6cd0dc6efa79e173b7d819fb219443b3` and relevant UI/assembly source. The links below remain historical public evidence, not current private-source links. No live deployment or application test was performed.
 
 - [backend/src/config.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/config.mjs)
 - [backend/src/browser-origin-policy.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/browser-origin-policy.mjs)

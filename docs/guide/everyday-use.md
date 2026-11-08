@@ -1,6 +1,6 @@
 # Everyday use
 
-Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **8 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 For a detailed screen inventory, historical illustrations, and browser-cache boundaries, see the [interface reference](../concepts/interface.md).
 
@@ -65,7 +65,7 @@ Use the paperclip, drag files into the composer, or paste an image. Review the a
 
 ### Current session-routing controls
 
-Checked **2 November 2026**: the chat toolbar includes **A2A in default**, a per-agent toggle for incoming agent-to-agent conversation routing. Enabled is the default; turning it off routes new implicit deliveries into a reusable `a2a-<canonical-sender-id>` session per peer, labeled **A2A - Peer name**. Explicit target sessions and runtime-attested replies keep their existing routes; an exchange already in flight is not redirected. This is a routing preference, not a deletion or migration of existing conversations. Refresh/select the intended session to inspect its history.
+Checked **8 November 2026**: the chat toolbar includes **A2A in default**, a per-agent toggle for incoming agent-to-agent conversation routing. Enabled is the default; turning it off routes new implicit deliveries into a reusable `a2a-<canonical-sender-id>` session per peer, labeled **A2A - Peer name**. An explicit `default` target, a trusted default return route, and mirrored final replies also honor this preference. Explicit nondefault targets and trusted nondefault return routes remain intact. Final reply routing rechecks the receiving agent’s current preference, even if it changed during the exchange. This is a routing preference, not a deletion or migration of existing conversations. Refresh/select the intended session to inspect its history.
 
 Switchboard sessions receive readable Telegram/Discord labels in the session selector while retaining their actual session IDs. A label alone does not establish that the corresponding transport is configured or healthy; use the mod's own status and mapping controls.
 
@@ -150,3 +150,9 @@ Checked **6 November 2026**:
 - Final replies remain displayed until the persisted transcript acknowledges them. A provider failure uses its redacted explanation when available, otherwise a generic message. **Copy message** includes the safe terminal status/error details even for an error-only turn; review copied text before sharing.
 - `/context` summarizes the last captured provider request; `/context full` opens readable contents and technical disclosures from the same capture. Neither is a preview of your next turn.
 - Native chat Forge generation waits and delivers succeeded media as assistant attachments automatically. Do not ask for the same paid generation again because a chat was stopped: the job may still finish and deliver to its original conversation. A reset fences that old delivery. The operator Forge screen/API keeps its asynchronous workflow.
+
+## Reuse a Forge image in another chat
+
+For a retained PNG, JPEG, GIF or WebP artifact no larger than 20 MiB, choose **Copy reference** in Forge. Paste the copied `[forge:job-id:artifact-id]` into the intended conversation and ask the agent to inspect it. `attachment_view` resolves that original within the same operator-owned Burrow, across chats, without copying the image into the destination transcript. The reference is not a public share URL, a host path, or an authorization for a new paid generation.
+
+The original must still exist. Deleting its Forge job can make the reference unavailable; previously attached chat copies remain separate. **Attach to conversation** is still the explicit copy/delivery workflow. Clipboard failure is shown as an error, so verify the reference was copied before pasting.

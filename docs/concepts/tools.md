@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 Tools are structured capabilities supplied to a model request. The model chooses a tool and arguments; the runtime normalizes the call, reviews it, dispatches it, and returns an observed result. A tool's presence does not establish that a particular invocation will succeed.
@@ -23,6 +23,7 @@ The effective schema depends on runtime context and enabled integrations. The na
 | Coordination | `spawn_subagent`, `agents_list`, `agent_send_message` | Depth-gated child tasks, native peer discovery and registered-agent messaging |
 | Work records | `tasks_*`, `scheduled_jobs_*` | Task metadata and scheduled prompts |
 | Discovery | `list_skills`, `load_skill`, `mcp_providers`, `mcp_capabilities`, `mcp_call` | Load instructions or discover/invoke integrations |
+| Attachment inspection | `attachment_view` | Reopen runtime attachment metadata or a retained same-operator Forge image reference; not an arbitrary path |
 | Generation | `forge_*` | Native creation waits for generation and delivers artifacts; HTTP jobs remain asynchronous |
 
 Schemas, required fields, and feature filters are defined centrally. The supplied schema is authoritative for a particular turn; do not assume every row is available to every agent or minion.
@@ -119,7 +120,7 @@ Treat traces as potentially sensitive. Bounded output and selective redaction ar
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)
 
@@ -132,3 +133,7 @@ Native directory and minion-depth changes were checked statically against Backen
 Checked **7 November 2026**: paginated file reads report byte offsets from the original file. UTF-8 pages may extend by up to three bytes to complete a code point; reuse `nextOffsetBytes` rather than recomputing it from text length. A zero-byte limit on remaining content is rejected.
 
 Structured patch additions use exclusive creation and will not overwrite an existing target. Update hunks require a unique matching context; an optional scope must resolve uniquely, and unsupported or ambiguous scope syntax is rejected rather than guessed. Inspect partial-operation receipts after failure before retrying: these safeguards do not make a multi-file patch an atomic transaction.
+
+## Malformed provider tool calls
+
+Current adapters require incoming native-tool arguments to be a JSON object. Missing, null, array, scalar or invalid JSON arguments are marked `model_tool_call_arguments_invalid`, rather than becoming an empty optional-argument call against the default workspace. The native action converter independently rejects malformed arguments before dispatch. This is argument validation, not broader filesystem isolation.

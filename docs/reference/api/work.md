@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 BURROW exposes several work surfaces with different state models. The task board, scheduled jobs, group channels and retained Workbench compatibility API are not interchangeable task queues.
@@ -11,7 +11,7 @@ BURROW exposes several work surfaces with different state models. The task board
 
 Create a project with `{name}`. Create a task with at least `projectId` and `title`; optional state, priority, description and assigned-agent fields are validated by the store. Read available statuses/priorities rather than inventing identifiers. List filters are `projectId`, `status`, `priority` and `assignedAgentId`.
 
-`POST /api/task-board/tasks/{id}/execute` launches work through the assigned agent after awaiting the task/project lookups and execution record. Verify the returned outcome and then inspect the terminal execution receipt. Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI shows five columns and creates tasks in To Do; the API/store default is Backlog.
+`POST /api/task-board/tasks/{id}/execute` launches work through the assigned agent after awaiting the task/project lookups and execution record. Verify the returned outcome and then inspect the terminal execution receipt. Its response is not final task completion, and execution does not automatically move the task through board columns. The current UI creates tasks in To Do; the API/store default is Backlog. The status catalog includes `parked` alongside `backlog`, `todo`, `in_progress`, `review`, `done` and `cancelled`. Parked tasks remain stored but cannot execute; change to an eligible status before dispatch. Scheduled task targets still require To Do.
 
 Task responses also expose derived `archived` and `archivedAt`. A task in `done` becomes archived after 48 hours from its terminal timestamp (with updated/created fallback for old records). This is a reversible completion projection, not a new status, deletion or expiry of history. Changing out of Done clears that projection; unchanged Done edits preserve the completion boundary. List responses still carry these fields so clients can separate active and archived work.
 
@@ -125,7 +125,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/scripts/ui/task-board-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/task-board-routes.mjs)
 - [backend/src/postgres-task-audit-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-task-audit-schema.mjs)

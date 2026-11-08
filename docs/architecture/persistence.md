@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 
 BURROW uses PostgreSQL for application settings, conversation history, memory and execution metadata. File attachments, generated artifacts, traces and several worker records remain on disk. A recoverable installation therefore includes both database and filesystem state, plus the key that decrypts stored credentials.
@@ -56,7 +56,7 @@ Changing lifecycle mode does not migrate data between clusters. Plan a database 
 
 ## Migrations and transactions
 
-The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **89 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, provider pools, Archive projections, scheduled board tasks/one-time jobs, and independent Anthropic thinking-mode selections. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
+The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **100 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, provider pools, Archive projections, scheduled board tasks/one-time jobs, independent Anthropic thinking-mode selections, indexed recall, durable completion/reset outcomes, and Parked board tasks. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
 Nested transaction work uses savepoints. A nested operation cannot commit the outer transaction; rollback failure causes the client to be discarded. Per-domain locks add narrower guarantees: session appends lock the session row, Tiddle writes lock the agent, and scheduled occurrences have unique database identities.
 
 !!! warning "A reader command may apply migrations"
@@ -99,7 +99,7 @@ Attachments use bounded, contained paths and regular-file/symlink checks. Genera
 ## Backup and deletion boundaries
 
 `BURROW_SETTINGS_KEY` must decode to exactly 32 bytes. It protects encrypted settings with AES-256-GCM. Preserve the key securely alongside a recovery plan for the database; ciphertext alone cannot restore usable credentials. Keep it out of documentation, logs and ordinary exports.
-Portable configuration export covers `agents`, `settings`, `model-connections`, `mcp-connections`, `ui-auth` and `task-board`. It does not constitute a database or workspace backup: conversation originals, Brains and legacy Albdruck data, Dream diary, traces and artifact bytes are outside that category list. Secret-inclusive exports use a separate password-encrypted envelope.
+Portable configuration export covers `agents`, `skills`, `scheduled-jobs`, `settings`, `model-connections`, `mcp-connections`, `ui-auth` and `task-board`. It does not constitute a database or workspace backup: conversation originals, Brains and legacy Albdruck data, Dream diary, traces and artifact bytes are outside that category list. Secret-inclusive exports use a separate password-encrypted envelope.
 
 Resetting a conversation archives its previous active entries. Archiving a session changes metadata. Neither operation erases its historical originals. Retention policies govern separate stores and do not establish complete erasure of every derivative. Read [Conversation history](../concepts/conversation-history.md#retention-and-deletion) before deleting data, and use [Backup and recovery](../operations/backup-recovery.md) for the complete recovery unit.
 
@@ -107,7 +107,7 @@ Resetting a conversation archives its previous active entries. Archiving a sessi
 
 ## Targeted source review
 
-The immutable links below record earlier public evidence. Current contracts were reconciled against the [1 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
+The immutable links below record earlier public evidence. Current contracts were reconciled against the [8 November implementation baseline](../project/source-map.md); static inspection is not a live deployment test.
 
 - [backend/src/postgres-application-schema.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/postgres-application-schema.mjs)
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)

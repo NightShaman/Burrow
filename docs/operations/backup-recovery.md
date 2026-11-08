@@ -3,7 +3,7 @@
 
 !!! note "Implementation and historical evidence"
 
-    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+    Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 A complete recovery set contains both PostgreSQL state and the associated filesystem state, including the **matching encryption key**. Selective export is useful for portability but is not disaster recovery.
@@ -107,7 +107,7 @@ Stop Burrow cleanly and use your container/volume backup tooling to capture all 
 
 ## Portable exports
 
-The UI/API export catalog supports selected agents/profiles, settings, model connections, MCP connections, UI authentication, and task-board records. Secret-bearing exports require a password. MCP environment-variable plaintext is not included.
+The UI/API export catalog supports selected agents/profiles, operator-owned text skills and assignments, Core scheduled-job definitions, settings, model connections, MCP connections, UI authentication, and task-board records. Bundled/Git/filesystem skill packages remain external dependencies; MCP tool grants are deployment-local and must be granted deliberately after import. Scheduled jobs retain enabled state and can run after import, so inspect them before connecting a restored instance. Secret-bearing exports require a password. MCP environment-variable plaintext is not included.
 
 These exports do not capture complete conversations, original archives, Brain knowledge, Dream diaries, traces, or filesystem attachments/generated artifacts. A canonical session transcript can be exported separately through `/api/sessions/{sessionId}/export`. See [HTTP API](../reference/api.md).
 

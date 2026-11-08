@@ -1,6 +1,6 @@
 # Tasks and schedules
 
-Current implementation reviewed **1 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
+Current implementation reviewed **8 November 2026**. [Source coverage](../project/source-map.md) records the exact build and verification limits. Existing commit-linked citations identify historical evidence; they are not links to the current development source.
 
 The **tasks** page records work and dispatches saved tasks. **Cron jobs** schedule prompts or saved board tasks, either recurring or once. Creating a board record does not itself start agent work.
 
@@ -22,7 +22,7 @@ A project is required before you can create a task. Named paths help describe th
 3. Choose **Project**, **Priority**, **Status**, and an optional **Assignee**.
 4. Click **Create task**.
 
-The visible board columns are **Backlog**, **To Do**, **In Progress**, **Review**, and **Done**. To move a task, open its card, change **Status**, and click **Save changes**. Use the project selector and **Search tasks** to narrow the board. There is no drag-and-drop movement implemented in this board.
+The board shows **Backlog**, **To Do**, **In Progress**, **Review**, and **Done** by default. Use **Parked** in the toolbar to show or hide the separate Parked column. Parked retains a task without executing it or treating it as completed. To move a task, open its card, change **Status**, and click **Save changes**. Use the project selector and **Search tasks** to narrow the board. There is no drag-and-drop movement implemented in this board.
 
 [Source: board columns and editing](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TasksPage.tsx#L43-L49) · [Source: task form and board](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TasksPage.tsx#L192-L207)
 
@@ -34,7 +34,7 @@ The visible board columns are **Backlog**, **To Do**, **In Progress**, **Review*
 4. Burrow opens the assigned agent's chat. Follow the response, tool activity, and reported blockers there.
 5. Review the result and update the board status when appropriate.
 
-Done or cancelled tasks cannot be executed. Dispatch runs in the assigned agent's **default** conversation, not a newly created task-specific session. Its project context applies to that run and does not replace the conversation's active project. The execution receipt records completion or failure separately from the board status; a completed run does not automatically move the card to Done.
+Done, cancelled, or parked tasks cannot be executed. Move parked work to an executable status and save before using Execute. Dispatch runs in the assigned agent's **default** conversation, not a newly created task-specific session. Its project context applies to that run and does not replace the conversation's active project. The execution receipt records completion or failure separately from the board status; a completed run does not automatically move the card to Done.
 
 [Source: Execute and unsaved-edit guard](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/tasks/TasksPage.tsx#L144-L157) · [Source: dispatch target and validation](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/scripts/burrow-ui.mjs#L271-L308) · [Source: execution receipt](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/postgres-task-board-store.mjs#L475-L505)
 
@@ -81,7 +81,7 @@ In the same **Cron jobs** editor:
 3. Choose **Schedule → Recurring** with a cron expression, or **Once** with a future **Run at** time in the displayed **Operator timezone**. The section is still called Cron jobs even for a one-time job.
 4. Review the model choice and **Enabled**, then choose **Add job** or **Save job**. **Refresh jobs** reloads the inventory and task eligibility; **Retry tasks** or **Retry timezone** addresses those separate load failures.
 
-A task job always executes in the assigned agent's **default** conversation, continuing that context. Eligibility is checked again at dispatch. A missing, reassigned, archived, or non-To-Do task is **skipped**, with a durable receipt and no task-status change. Keeping an existing now-ineligible target allows you to pause or edit its schedule; it does not make the task executable. Ordinary manual **Execute** has different eligibility: it excludes Done/cancelled rather than requiring To Do.
+A task job always executes in the assigned agent's **default** conversation, continuing that context. Eligibility is checked again at dispatch. A missing, reassigned, archived, or non-To-Do task is **skipped**, with a durable receipt and no task-status change. Keeping an existing now-ineligible target allows you to pause or edit its schedule; it does not make the task executable. Ordinary manual **Execute** has different eligibility: it excludes Done/cancelled/parked rather than requiring To Do.
 
 A **Once** job is consumed and disabled by its due occurrence **or Run now**, even when its task is skipped. It does not remain armed for the original date after manual execution. Missed downtime occurrences are recorded as missed, not replayed. Recurring schedules are fixed cron expressions; this editor has no random interval or jitter option.
 

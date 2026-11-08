@@ -28,7 +28,7 @@ Use current inspected development implementation as the documentation baseline r
 
 ## Publishing the documentation
 
-The canonical site is [docs.goblin-kingdom.com](https://docs.goblin-kingdom.com/), with project routes including `/burrow/`, `/node-goblin/`, `/burrow-backdoor/`, `/goblin-secret-store/`, `/burrow-switchboard/`, `/burrow-theater/`, `/burrow-tutor/`, and `/burrow-skills/`. The configured base path is `/`.
+The canonical site is [docs.goblin-kingdom.com](https://docs.goblin-kingdom.com/), with project routes including `/burrow/`, `/node-goblin/`, `/burrow-backdoor/`, `/goblin-secret-store/`, `/burrow-switchboard/`, `/burrow-theater/`, `/burrow-tutor/`, `/burrow-menagerie/`, and `/burrow-skills/`. The configured base path is `/`.
 
 In **GoblinKing-Burrow/Docs-Website**, `.github/workflows/deploy.yml` builds pull requests and deploys successful builds from `main` using the GitHub Pages artifact flow. Deployments use narrowly scoped `pages: write` and `id-token: write` permissions and the `github-pages` environment. No application images are built or published.
 

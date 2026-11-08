@@ -2,7 +2,7 @@
 
 
 !!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **1 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
 A conversation is scoped by agent and session. PostgreSQL stores active entries, immutable archive snapshots and session metadata. Explicit session search and Dream can resolve evidence through these persisted originals. Brains stores saved memories separately.
 
@@ -139,3 +139,7 @@ Checked **6 November 2026**: active Chat pages through retained compacted predec
 Checked **7 November 2026**: [active continuation compaction](../architecture/runtime.md#active-run-continuation-compaction) is a separate, request-local semantic recap of older assistant prose. It does not replace the durable compression/rotation behavior described above or delete retained originals. It can incur extra model calls; user tasks and steering remain explicit, while tool evidence uses protocol-safe projection rather than semantic summarization.
 
 Operator session search ranks an exact original-content phrase ahead of token-only matches before compacting and limiting results across sessions/agents. Returned snippets remain bounded and do not expose internal ranking scores. Agent `session_search` retains its separate retrieval ranking contract.
+
+## Reset and in-flight browser paging
+
+After a successful same-session reset, Chat invalidates older-page ownership as well as its snapshot. A stale transcript response or stale request error cannot repaint the reset conversation. The repository reloads current session authority when a reset changes its epoch. This browser safeguard is separate from server reset-generation fencing and does not delete retained archives.

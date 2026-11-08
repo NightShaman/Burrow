@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-01**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 The agent registry is PostgreSQL-backed. An empty registry is valid; a fallback agent label in code does not establish that a real agent exists. Start with `GET /api/setup/status` and `GET /api/agents`.
 
@@ -52,7 +52,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 
 ## Targeted source review
 
-The full page was reconciled on **2026-11-01** against Backend commit `8b5889115680bcdbf698f1b93126254e1cf4d2e6`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
+The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6cd0dc6efa79e173b7d819fb219443b3`. No live API or provider calls were performed. The links below are retained historical public references, not links to the current development source.
 
 - [backend/src/agent-profile-store.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/agent-profile-store.mjs)
 - [backend/scripts/ui/agent-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/agent-routes.mjs)
@@ -72,3 +72,5 @@ Changed contracts above were checked statically against Backend `4057b50a5d5a9b1
 Metadata contains `id`, `attachmentId`, `contentUrl`, `mimeType`, `fileName`, `sizeBytes` and `updatedAt`. The `/content?id=<revision>` child route streams the current original with private/no-store headers; missing, stale or wrong-agent revisions return 404. Ordinary settings authentication/scopes apply. The operator attachment identity is `operator-reference-image:<uuid>`; agent photos use `agent-reference-image:<uuid>`.
 
 PostgreSQL owns links in `agent_reference_images` and singleton `operator_reference_images`; files live in Core's runtime-managed artifacts. Replacement/removal cleans the previous owned file, and agent deletion cleans its photo. These are not chat-retention attachments or selective-export payloads. See [generation selectors](artifacts.md#canonical-reference-image-generation).
+
+The exact photo-byte endpoints are `GET /api/agents/{agentId}/reference-image/content` and `GET /api/operator/reference-image/content`, with the `id` revision query. Core also serves mod-owned photo bytes at `GET /api/mod-reference-images/{modId}/{key}/content?id=...` through ordinary media authentication; mod HTTP handlers themselves remain JSON-only.

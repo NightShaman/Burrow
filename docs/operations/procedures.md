@@ -3,7 +3,7 @@
 
 !!! note "Implementation and historical evidence"
 
-    Reviewed against current implementation on **1 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+    Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
 
 
 These source-reviewed recipes assume the default native user installation. For containers, use the corresponding [container commands](containers.md). Replace example agent/session IDs with real values and run as the installation owner.
@@ -67,7 +67,7 @@ Stop also holds all current and future main queue inputs; **Resume queue** relea
 
 1. Open **Tasks**, create a project if needed, and create or open a task.
 2. Fill in the description and **Assignee**, then save. **Execute** uses only the saved task and rejects unsaved edits.
-3. Choose **Execute** on a task that is neither Done nor cancelled. Expect a dispatch receipt and navigation to the assigned agent's chat.
+3. Choose **Execute** on a task that is neither Done, cancelled, nor Parked. Expect a dispatch receipt and navigation to the assigned agent's chat.
 4. Follow progress in chat and inspect the task's saved execution/history. The board refreshes its task list about every 60 seconds; use **Refresh history** or reopen the task for newer history records, and chat for live execution. The assigned agent runs the task in its **default** conversation, with project context scoped to this task run.
 5. Inspect the default conversation and **Archive → Proof** for its final answer, blockers, and verification. Update the board status to reflect the reviewed outcome.
 
@@ -141,7 +141,7 @@ Full removal also destroys the installation's durable state. Back up first, then
 
 ## Targeted source review
 
-The full page was reconciled statically on **1 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
+The full page was reconciled statically on **8 November 2026** against the current source pins in [source coverage](../project/source-map.md). Links below retain historical revision evidence. No application, database, provider or collector test was run.
 
 - [backend/src/cli-postgres.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/cli-postgres.mjs)
 - [backend/src/retention.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/retention.mjs)
