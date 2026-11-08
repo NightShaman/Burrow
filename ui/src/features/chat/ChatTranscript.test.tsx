@@ -189,6 +189,36 @@ it('copies only a fenced code block without its Markdown fence or surrounding me
   expect(copied).toEqual(['echo "goblin"\nprintf "done"']);
 });
 
+it('removes leading empty display lines without changing indentation, internal spacing or copied source', async () => {
+  const copied: string[] = [];
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: vi.fn(() => {
+      copied.push(document.querySelector<HTMLTextAreaElement>('body > textarea')?.value ?? '');
+      return true;
+    }),
+  });
+  const source = '\n \t\n  function shrimp() {\n\n    return 1;\n  }';
+  const { container } = show([
+    { type: 'message', role: 'user', content: '```js\n' + source + '\n```' },
+  ]);
+  expect(container.querySelector('pre code')?.textContent).toBe(
+    '  function shrimp() {\n\n    return 1;\n  }\n',
+  );
+  expect(container.querySelector('pre code')?.className).toBe('language-js');
+  fireEvent.click(screen.getByRole('button', { name: 'Copy code block' }));
+  await waitFor(() => expect(copied).toEqual([source]));
+});
+
+it('keeps code without leading empty lines and an empty fence intact', () => {
+  const { container } = show([
+    { type: 'message', role: 'assistant', content: '```text\n  first\n\nlast\n```\n\n```\n```' },
+  ]);
+  const blocks = container.querySelectorAll('pre code');
+  expect(blocks[0].textContent).toBe('  first\n\nlast\n');
+  expect(blocks[1].textContent).toBe('');
+});
+
 it('places each copy control after its own code in a non-scrolling footer', () => {
   const { container } = show([
     {

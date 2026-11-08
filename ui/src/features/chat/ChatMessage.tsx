@@ -13,7 +13,7 @@ import {
 } from './chatTerminal';
 import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
-import { isValidElement, useEffect, useState } from 'react';
+import { cloneElement, isValidElement, useEffect, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownTable, MarkdownImage } from '../../app/markdownTables';
@@ -84,6 +84,13 @@ function codeText(value: ReactNode): string {
 function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const text = codeText(children).replace(/\n$/, '');
+  // Leading empty lines create a false header-sized gap. Keep the original
+  // source for copying, and leave indentation and internal blank lines intact.
+  const content =
+    isValidElement<{ children?: ReactNode }>(children) &&
+    typeof children.props.children === 'string'
+      ? cloneElement(children, {}, children.props.children.replace(/^(?:[ \t]*\r?\n)+/, ''))
+      : children;
   const copy = async () => {
     const didCopy = await copyMarkdown(text);
     setCopyState(didCopy ? 'copied' : 'failed');
@@ -93,7 +100,7 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
     copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy code';
   return (
     <div className="code-block">
-      <pre {...props}>{children}</pre>
+      <pre {...props}>{content}</pre>
       <button
         type="button"
         className="copy-code"
