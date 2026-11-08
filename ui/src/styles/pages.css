@@ -92,6 +92,9 @@
   overflow: auto;
   padding-bottom: 4px;
 }
+.kanban-board-with-parked {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
 .kanban-column {
   min-height: 0;
   display: flex;

@@ -14,6 +14,7 @@ const columns = [
   { id: 'in_progress', title: 'In Progress' },
   { id: 'review', title: 'Review' },
   { id: 'done', title: 'Done' },
+  { id: 'parked', title: 'Parked' },
 ];
 
 const statusLabel = (status: string) =>
@@ -52,6 +53,7 @@ export function Tasks({
     executeTask,
   } = useTaskWorkflow(onDispatch);
   const [search, setSearch] = useState('');
+  const [showParked, setShowParked] = useState(false);
   const [showProjects, setShowProjects] = useState(false);
   const [newProjectOnOpen, setNewProjectOnOpen] = useState(false);
 
@@ -107,6 +109,15 @@ export function Tasks({
               <button
                 className="secondary"
                 type="button"
+                aria-expanded={showParked}
+                aria-controls="parked-task-column"
+                onClick={() => setShowParked((open) => !open)}
+              >
+                Parked
+              </button>
+              <button
+                className="secondary"
+                type="button"
                 onClick={() => {
                   setShowProjects(true);
                   setNewProjectOnOpen(false);
@@ -150,38 +161,47 @@ export function Tasks({
           <p className="task-loading">Loading task board…</p>
         ) : (
           projects.length > 0 && (
-            <div className="kanban-board" aria-label="Task board">
-              {columns.map((column) => {
-                const columnTasks = visibleTasks.filter((task) => task.status === column.id);
-                return (
-                  <section className="kanban-column" key={column.id}>
-                    <header>
-                      <span>{column.title}</span>
-                      <strong>{columnTasks.length}</strong>
-                    </header>
-                    <div className="kanban-cards">
-                      {columnTasks.map((task) => (
-                        <button
-                          className="task-card"
-                          type="button"
-                          key={task.id}
-                          onClick={() => setEditor({ mode: 'edit', task })}
-                        >
-                          <span className={`task-priority ${task.priority}`}>
-                            {priorityLabel(task.priority)}
-                          </span>
-                          <strong>{task.title}</strong>
-                          <small>{projectFor(task.projectId)?.name ?? 'Unknown project'}</small>
-                          <small>
-                            Owner · {agentFor(task.assignedAgentId)?.name ?? 'Unassigned'}
-                          </small>
-                        </button>
-                      ))}
-                      {columnTasks.length === 0 && <p className="kanban-empty">No tasks</p>}
-                    </div>
-                  </section>
-                );
-              })}
+            <div
+              className={`kanban-board${showParked ? ' kanban-board-with-parked' : ''}`}
+              aria-label="Task board"
+            >
+              {columns
+                .filter((column) => column.id !== 'parked' || showParked)
+                .map((column) => {
+                  const columnTasks = visibleTasks.filter((task) => task.status === column.id);
+                  return (
+                    <section
+                      className="kanban-column"
+                      key={column.id}
+                      id={column.id === 'parked' ? 'parked-task-column' : undefined}
+                    >
+                      <header>
+                        <span>{column.title}</span>
+                        {column.id !== 'parked' && <strong>{columnTasks.length}</strong>}
+                      </header>
+                      <div className="kanban-cards">
+                        {columnTasks.map((task) => (
+                          <button
+                            className="task-card"
+                            type="button"
+                            key={task.id}
+                            onClick={() => setEditor({ mode: 'edit', task })}
+                          >
+                            <span className={`task-priority ${task.priority}`}>
+                              {priorityLabel(task.priority)}
+                            </span>
+                            <strong>{task.title}</strong>
+                            <small>{projectFor(task.projectId)?.name ?? 'Unknown project'}</small>
+                            <small>
+                              Owner · {agentFor(task.assignedAgentId)?.name ?? 'Unassigned'}
+                            </small>
+                          </button>
+                        ))}
+                        {columnTasks.length === 0 && <p className="kanban-empty">No tasks</p>}
+                      </div>
+                    </section>
+                  );
+                })}
             </div>
           )
         )}
@@ -331,7 +351,7 @@ export function Tasks({
                       disabled={
                         saving ||
                         !editingTask.assignedAgentId ||
-                        ['done', 'cancelled'].includes(editingTask.status)
+                        ['done', 'cancelled', 'parked'].includes(editingTask.status)
                       }
                       type="button"
                       onClick={() => void executeTask()}
