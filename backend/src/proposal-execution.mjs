@@ -18,6 +18,7 @@ import { invokeMcpTool } from './mcporter-adapter.mjs';
 import { executeMcpTool } from './mcp-tool-executor.mjs';
 import { activeModAgentProvider, executeModAgentTool } from './mod-agent-runtime.mjs';
 import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
+import { viewForgeArtifactReference } from './forge-artifact-reference.mjs';
 import { protectToolOutput } from './protected-values.mjs';
 import { executeSkillTool } from './skill-tool-executor.mjs';
 import path from 'node:path';
@@ -195,14 +196,19 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const started = await traceLogger?.toolStart?.({ tool: 'attachment_view', attachmentId, toolCallId: action.toolCallId || null });
       let result;
       try {
-        const attachment = attachmentId?.startsWith(OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX)
+        const forgeReference = typeof attachmentId === 'string' && /^\[?forge:/i.test(attachmentId)
+          ? await viewForgeArtifactReference(attachmentId) : null;
+        const attachment = forgeReference ? forgeReference.attachment
+          : attachmentId?.startsWith(OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX)
           ? await executionContext?.stores?.referenceImages?.viewOperator(attachmentId)
           : attachmentId?.startsWith(REFERENCE_IMAGE_ATTACHMENT_PREFIX)
           ? await (executionContext?.stores?.referenceImages?.viewShared
             ? executionContext.stores.referenceImages.viewShared(attachmentId)
             : executionContext?.stores?.referenceImages?.view(agentId || executionContext?.agentId, attachmentId))
           : await readAttachmentArtifact({ agentWorkspaceRoot, artifactPath: attachmentId, attachment: { name: path.basename(attachmentId) } });
-        result = attachment
+        result = forgeReference && !forgeReference.ok
+          ? { tool: 'attachment_view', ok: false, attachmentId, error: forgeReference.error }
+          : attachment
           ? { tool: 'attachment_view', ok: true, attachmentId, attachment }
           : { tool: 'attachment_view', ok: false, attachmentId, error: 'attachment_not_found' };
       } catch (error) {

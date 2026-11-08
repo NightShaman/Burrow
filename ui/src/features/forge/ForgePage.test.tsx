@@ -690,3 +690,64 @@ it('keeps job and shows retryable error when deletion fails', async () => {
   await screen.findByText('Could not delete creation: job is busy');
   expect(screen.getByRole('button', { name: /Image succeeded: a castle to delete/ })).toBeTruthy();
 });
+
+describe('Forge internal references', () => {
+  const job = (mimeType = 'image/png', sizeBytes = 1024) => ({
+    id: 'job-reference',
+    connectionId: 'c1',
+    modelId: 'image-1',
+    kind: 'image',
+    prompt: 'existing image',
+    status: 'succeeded',
+    createdAt: '2026-09-27T00:00:00Z',
+    artifacts: [
+      { id: 'artifact-reference', kind: 'image', name: 'Existing image', mimeType, sizeBytes },
+    ],
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  it('copies the stable job/artifact token without posting or generating', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    renderForge([job('IMAGE/PNG')]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy reference' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('[forge:job-reference:artifact-reference]'),
+    );
+    expect(await screen.findByText('Reference copied.')).toBeTruthy();
+    expect(apiMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+  it('falls back on HTTP and restores focus after copying', async () => {
+    vi.stubGlobal('isSecureContext', false);
+    const copy = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: copy });
+    renderForge([job()]);
+    const button = await screen.findByRole('button', { name: 'Copy reference' });
+    button.focus();
+    fireEvent.click(button);
+    await screen.findByText('Reference copied.');
+    expect(copy).toHaveBeenCalledWith('copy');
+    expect(document.activeElement).toBe(button);
+    expect(document.querySelector('textarea[readonly]')).toBeNull();
+  });
+  it('reports clipboard failure without success feedback', async () => {
+    vi.stubGlobal('isSecureContext', false);
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false });
+    renderForge([job()]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy reference' }));
+    expect(await screen.findByRole('alert')).toHaveProperty(
+      'textContent',
+      'Could not copy reference. Try again.',
+    );
+    expect(screen.queryByText('Reference copied.')).toBeNull();
+  });
+  it.each([
+    ['image/svg+xml', 1024],
+    ['audio/wav', 1024],
+    ['image/png', 20 * 1024 * 1024 + 1],
+  ])('omits unsupported references: %s %s', async (mime, size) => {
+    renderForge([job(mime, size)]);
+    await screen.findByRole('button', { name: 'Attach to conversation' });
+    expect(screen.queryByRole('button', { name: 'Copy reference' })).toBeNull();
+  });
+});

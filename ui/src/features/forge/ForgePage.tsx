@@ -58,6 +58,32 @@ type Job = {
   artifacts: Artifact[];
 };
 
+async function copyReference(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Local HTTP and denied clipboard access use the existing browser fallback.
+  }
+  const previous = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.append(textarea);
+  textarea.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    if (previous instanceof HTMLElement) previous.focus();
+  }
+}
+
 function safeDiagnosticText(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value
@@ -785,6 +811,23 @@ export function Forge({
                       <footer>
                         <strong>{artifact.name}</strong>
                         <div>
+                          {['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
+                            artifact.mimeType?.toLowerCase(),
+                          ) &&
+                            artifact.sizeBytes <= 20 * 1024 * 1024 && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const copied = await copyReference(
+                                    `[forge:${selectedJob.id}:${artifact.id}]`,
+                                  );
+                                  setNotice(copied ? 'Reference copied.' : '');
+                                  setError(copied ? '' : 'Could not copy reference. Try again.');
+                                }}
+                              >
+                                Copy reference
+                              </button>
+                            )}
                           <button
                             type="button"
                             onClick={() => void attach(artifact)}

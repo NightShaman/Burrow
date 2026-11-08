@@ -295,7 +295,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
       type: 'function',
       function: {
         name: 'attachment_view',
-        description: 'Reopen an attachment by its runtime-owned attachment id/reference from this agent/session. Canonical reference images from forge_catalog can also be reopened using their attachmentId. PNG, JPEG, GIF, and WebP images are returned as model-visible image content; text/JSON-like attachments return bounded text; other types return metadata. The id must come from Burrow attachment metadata, not an arbitrary filesystem path.',
+        description: 'Reopen an attachment by its runtime-owned attachment id/reference from this agent/session. Canonical reference images from forge_catalog can also be reopened using their attachmentId. Pasted Forge image references [forge:JOB_ID:ARTIFACT_ID] (or forge:JOB_ID:ARTIFACT_ID) resolve across chats for the same operator without copying the image into this chat. PNG, JPEG, GIF, and WebP images are returned as model-visible image content; text/JSON-like attachments return bounded text; other types return metadata. The id must come from Burrow attachment metadata, not an arbitrary filesystem path.',
         parameters: {
           type: 'object',
           additionalProperties: false,
