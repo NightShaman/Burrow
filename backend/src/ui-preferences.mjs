@@ -5,6 +5,7 @@ export const UI_PREFERENCE_KEYS = Object.freeze([
   'hc.rightTopPanel', 'hc.rightBottomPanel', 'hc.leftRailLayout', 'hc.rightRailLayout',
   'hc.leftSinglePanel', 'hc.rightSinglePanel', 'hc.rightPanelDefaultsVersion',
   'hc.agentRailPreferences', 'hc.groupChatTabs',
+  'hc.settingsUtilityPanelOpen', 'hc.accountStatusOrder',
 ]);
 const allowed = new Set(UI_PREFERENCE_KEYS);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
