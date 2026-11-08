@@ -501,6 +501,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (call.argumentsError || !call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) {
     const action = normalizeAction({ tool: call.name, toolCallId: call.id }, index);
     action.errors.push('model_tool_call_arguments_invalid');
+    if (call.name === 'mod_agent_tool') action.errors.push('mod_tool_envelope_invalid');
     return action;
   }
   const args = call.arguments;
