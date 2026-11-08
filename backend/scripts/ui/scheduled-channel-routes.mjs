@@ -1,3 +1,4 @@
+import { deleteGroupChannel } from '../../src/group-channel-store.mjs';
 export function createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore } = {}) {
   return async function handleScheduledChannelRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/scheduled-jobs') { sendJson(res, 200, await withScheduledJobs(async (store) => ({ ok: true, jobs: await store.listJobs({ agentId: url.searchParams.get('agentId'), enabled: url.searchParams.has('enabled') ? url.searchParams.get('enabled') === 'true' : null }), activeRuns: scheduler().activeRuns() }))); return true; }
@@ -17,6 +18,16 @@ export function createScheduledChannelRoutes({ readJsonBody, sendJson, validateB
     }
     if (url.pathname.startsWith('/api/group-channels/')) {
       const parts = url.pathname.slice('/api/group-channels/'.length).split('/').map(decodeURIComponent); const channelId = parts[0]; const action = parts[1] || null; const rootDir = await runtimeDataRoot();
+      if (req.method === 'DELETE' && parts.length === 1) {
+        try {
+          const deleted = await deleteGroupChannel({ rootDir, conversationStore, channelId, groupChannelRuns });
+          sendJson(res, deleted ? 200 : 404, deleted ? { ok: true, id: channelId } : { ok: false, error: 'group_channel_not_found' });
+        } catch (error) {
+          if (error.message !== 'group_channel_id_invalid') throw error;
+          sendJson(res, 400, { ok: false, error: error.message });
+        }
+        return true;
+      }
       if (req.method === 'GET' && !action) { const detail = await readGroupChannelTurns({ rootDir, conversationStore, channelId, limit: 500, before: url.searchParams.get('before') }); if (!detail) { sendJson(res, 404, { ok: false, error: 'group_channel_not_found' }); return true; } const runs = [...groupChannelRuns.values()].filter((run) => run.channelId === channelId).map(({ controller, ...run }) => ({ ...run, cancelled: controller.signal.aborted || run.cancelled })); sendJson(res, 200, { ok: true, ...detail, runs }); return true; }
       if (req.method === 'POST' && action === 'messages') { sendJson(res, 202, await startGroupChannelMessage(channelId, validateBoundaryBody('group-message', await readJsonBody(req)))); return true; }
       if (req.method === 'POST' && action === 'runs' && parts[3] === 'cancel') { sendJson(res, 200, await cancelGroupChannelRun(channelId, parts[2], await readJsonBody(req))); return true; }

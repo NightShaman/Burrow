@@ -6,13 +6,47 @@ import { conversationAuthority } from './conversation-authority.mjs';
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const safe = (value, field) => {
   const id = String(value || '').trim();
-  if (!ID.test(id)) throw new Error(`${field}_invalid`);
+  if (!ID.test(id) || id === '.' || id === '..') throw new Error(`${field}_invalid`);
   return id;
 };
 const channelsRoot = (rootDir) => path.join(rootDir, 'group-channels');
 const channelDir = (rootDir, id) => path.join(channelsRoot(rootDir), safe(id, 'group_channel_id'));
 const metaFile = (rootDir, id) => path.join(channelDir(rootDir, id), 'channel.json');
 const now = () => new Date().toISOString();
+
+// One process owns group metadata and run admission. Hold this same gate from
+// existence check through append/admission, and through cancellation + deletion.
+const channelOperations = new Map();
+export async function withGroupChannelAdmission({ rootDir, channelId }, operation) {
+  const key = metaFile(path.resolve(rootDir), channelId);
+  const previous = channelOperations.get(key) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => operation({
+    appendTurn: (turn) => appendTurnUnlocked({ ...turn, rootDir, channelId }),
+  }));
+  channelOperations.set(key, pending);
+  try { return await pending; }
+  finally { if (channelOperations.get(key) === pending) channelOperations.delete(key); }
+}
+
+export async function deleteGroupChannel({ rootDir, conversationStore, channelId, groupChannelRuns = new Map() } = {}) {
+  // Validate before any cancellation or filesystem/database mutation.
+  const id = safe(channelId, 'group_channel_id');
+  return withGroupChannelAdmission({ rootDir, channelId: id }, async () => {
+    if (!await readGroupChannel({ rootDir, id })) return false;
+    if (typeof conversationStore?.deleteGroupChannelTranscript !== 'function') throw new Error('conversation_store_required');
+    for (const run of groupChannelRuns.values()) {
+      if (run.channelId !== id) continue;
+      run.cancelled = true;
+      run.reason = 'group_channel_deleted';
+      run.controller.abort(new Error(run.reason));
+    }
+    // Delete only the display transcript identity, never participant/individual
+    // sessions. On database failure leave metadata in place so deletion is retryable.
+    await conversationStore.deleteGroupChannelTranscript({ channelId: id });
+    await fs.rm(channelDir(rootDir, id), { recursive: true, force: true });
+    return true;
+  });
+}
 
 const metadataWrites = new Map();
 async function atomicMetadata(file, channel) {
@@ -60,7 +94,11 @@ export async function listGroupChannels({ rootDir } = {}) {
   return channels.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-export async function appendGroupChannelTurn({ rootDir, conversationStore = null, channelId, role, content, runId = null, metadata = {} } = {}) {
+export async function appendGroupChannelTurn(options = {}) {
+  return withGroupChannelAdmission(options, ({ appendTurn }) => appendTurn(options));
+}
+
+async function appendTurnUnlocked({ rootDir, conversationStore = null, channelId, role, content, runId = null, metadata = {} } = {}) {
   const channel = await readGroupChannel({ rootDir, id: channelId });
   if (!channel) throw new Error('group_channel_not_found');
   if (!conversationStore) throw new Error('conversation_store_required');

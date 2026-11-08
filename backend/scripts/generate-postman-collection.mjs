@@ -294,6 +294,7 @@ const collection = {
     folder('Group Channels', [
       req('List group channels', 'GET', '/api/group-channels'),
       req('Create group channel', 'POST', '/api/group-channels', { body: { name: 'Room', participantAgentIds: ['hatchet', 'smatchet'] } }),
+      req('Delete group channel', 'DELETE', '/api/group-channels/{{channelId}}'),
       req('Get group channel', 'GET', '/api/group-channels/{{channelId}}'),
       req('Post group message', 'POST', '/api/group-channels/{{channelId}}/messages', { body: { message: 'Hello group', attachments: [] } }),
       req('Cancel group run', 'POST', '/api/group-channels/{{channelId}}/runs/{{groupRunId}}/cancel', { body: { reason: 'operator_cancelled' } }),

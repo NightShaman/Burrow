@@ -585,7 +585,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum display transcript turns per page (1–500; default 200).",
+            "description": "Maximum display transcript turns per page (1\u2013500; default 200).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -1402,6 +1402,51 @@
             "$ref": "#/components/parameters/PathChannelId"
           }
         ]
+      },
+      "delete": {
+        "tags": [
+          "Group channels"
+        ],
+        "summary": "Delete a group channel and shared transcript; cancel active group replies",
+        "operationId": "deleteGroupChannel",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathChannelId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "id"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
       }
     },
     "/api/group-channels/{channelId}/messages": {
@@ -1550,7 +1595,7 @@
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
-        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document’s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
+        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document\u2019s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
       }
     },
     "/api/archive/sessions/{agentId}/{sessionId}": {
@@ -1576,7 +1621,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (clamped to 1–500, default 100).",
+            "description": "Page size (clamped to 1\u2013500, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3783,7 +3828,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum rows in this page (1–500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
+            "description": "Maximum rows in this page (1\u2013500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -4249,7 +4294,7 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent\u2019s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
         "operationId": "getAgentOverview",
         "requestBody": {
           "required": true,
@@ -7022,7 +7067,7 @@
         ],
         "summary": "Read an agent minion depth setting",
         "operationId": "getAgentMinionSettings",
-        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "description": "Read the per-agent maximum nesting depth (integer 0\u20132, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7030,7 +7075,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7123,7 +7168,7 @@
         },
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "The agent\u2019s durable minion depth setting; defaults to one when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -18916,7 +18961,7 @@
           "sessionId": {
             "type": "string",
             "default": "default",
-            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -18961,7 +19006,7 @@
           "extraInstructions": {
             "type": "string",
             "default": "",
-            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",
@@ -19111,7 +19156,7 @@
           },
           "sessionId": {
             "type": "string",
-            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -19153,7 +19198,7 @@
           },
           "extraInstructions": {
             "type": "string",
-            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",

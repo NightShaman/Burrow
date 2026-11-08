@@ -76,6 +76,14 @@ export class PostgresSessionStore {
   async assertAgentMessageDeliveryOwner(args) { return this.agentDeliveries.assertOwner(args); }
   async executeAgentMessageDelivery(args, work) { return this.agentDeliveries.execute(args, work); }
 
+  // Operator-owned display transcripts have no main-session/retention policy.
+  // Keep this API structurally scoped: callers cannot choose an agent identity.
+  async deleteGroupChannelTranscript({ channelId } = {}) {
+    const id = required(channelId, 'channelId');
+    const result = await this.pool.query("DELETE FROM conversation_sessions WHERE agent_id='group-channel' AND session_id=$1", [id]);
+    return { deleted: result.rowCount === 1 };
+  }
+
   async deleteSession({agentId: rawAgentId, sessionId: rawSessionId, retentionPolicy = null} = {}) {
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = required(rawSessionId, 'sessionId');
