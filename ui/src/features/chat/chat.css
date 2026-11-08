@@ -295,9 +295,13 @@
   padding-left: 22px;
 }
 .code-block {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   max-width: 100%;
   margin: 8px 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-input);
 }
 .message-bubble .code-block:first-child {
   margin-top: 0;
@@ -309,16 +313,14 @@
   max-width: 100%;
   margin: 0;
   overflow: auto;
-  padding: 34px 10px 10px;
-  border: 1px solid var(--line-soft);
+  padding: 10px;
   border-radius: 7px;
-  background: var(--surface-input);
+  background: transparent;
 }
 .copy-code {
-  position: absolute;
-  top: 5px;
-  right: 5px;
+  align-self: flex-end;
   display: inline-flex;
+  margin: 0 5px 5px;
   align-items: center;
   gap: 5px;
   min-height: 24px;

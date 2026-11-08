@@ -93,6 +93,7 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
     copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy code';
   return (
     <div className="code-block">
+      <pre {...props}>{children}</pre>
       <button
         type="button"
         className="copy-code"
@@ -106,7 +107,6 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
         </svg>
         <span aria-live="polite">{label}</span>
       </button>
-      <pre {...props}>{children}</pre>
     </div>
   );
 }

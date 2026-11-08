@@ -189,6 +189,36 @@ it('copies only a fenced code block without its Markdown fence or surrounding me
   expect(copied).toEqual(['echo "goblin"\nprintf "done"']);
 });
 
+it('places each copy control after its own code in a non-scrolling footer', () => {
+  const { container } = show([
+    {
+      type: 'message',
+      role: 'user',
+      content: '```text\nFirst block\n```\n\n```js\nconst shrimp = 1;\n```',
+    },
+  ]);
+  const blocks = container.querySelectorAll('.code-block');
+  expect(blocks).toHaveLength(2);
+  for (const block of blocks) {
+    expect(block.firstElementChild?.tagName).toBe('PRE');
+    const button = block.querySelector('button');
+    expect(block.lastElementChild).toBe(button);
+    expect(block.querySelector('pre')?.contains(button)).toBe(false);
+  }
+});
+
+it('keeps copy failure feedback on the footer control', async () => {
+  Object.defineProperty(document, 'execCommand', {
+    configurable: true,
+    value: vi.fn(() => false),
+  });
+  show([{ type: 'message', role: 'assistant', content: '```text\nA shrimp\n```' }]);
+  const button = screen.getByRole('button', { name: 'Copy code block' });
+  fireEvent.click(button);
+  await waitFor(() => expect(button.textContent).toContain('Copy failed'));
+  expect(button.previousElementSibling?.tagName).toBe('PRE');
+});
+
 it('does not add a code copy button for inline code', () => {
   show([{ type: 'message', role: 'assistant', content: 'Use `npm run build` here.' }]);
   expect(screen.queryByRole('button', { name: 'Copy code block' })).toBeNull();
