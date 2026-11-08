@@ -53,9 +53,14 @@ export function googleContents(messages) {
   return { contents, ...(system.length ? { systemInstruction: { parts: system } } : {}) };
 }
 // Native SSE is GenerateContentResponse per data event, not OpenAI deltas.
-export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta, onThoughtDelta, onToolDelta } = {}) {
+// Completion owns the answer. Allow a short, absolute metadata-only grace
+// period for usage in a following chunk, never a new response-sized wait.
+const TRAILING_METADATA_DRAIN_MS = 50;
+export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_BYTES, onTextDelta, onThoughtDelta, onToolDelta, signal } = {}) {
   const parts = []; let carry = '', bytes = 0, finishReason = null, usageMetadata = null, responseModel = null, responseId = null, saw = false;
-  const consume = async (chunk, final = false) => {
+  const finishes = new Map();
+  const terminal = () => finishes.size > 0 && [...finishes.values()].every(Boolean);
+  const consume = async (chunk, final = false, metadataOnly = false) => {
     carry += chunk;
     carry = carry.replace(/\r\n/g, '\n');
     let index;
@@ -64,7 +69,18 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
       carry = index >= 0 ? carry.slice(index+2) : '';
       const payload = event.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart()).join('\n');
       if (!payload) continue;
-      const data = JSON.parse(payload); saw = true;
+      let data;
+      try { data = JSON.parse(payload); }
+      catch (error) { if (metadataOnly) continue; throw error; }
+      saw = true;
+      if (metadataOnly) {
+        usageMetadata = data.usageMetadata || usageMetadata;
+        continue;
+      }
+      for (const [position, candidate] of (data.candidates || []).entries()) {
+        const index = candidate.index ?? position;
+        finishes.set(index, candidate.finishReason || finishes.get(index) || null);
+      }
       if (data.error) throw markProviderEnvelopeFailure(new Error('google_stream_provider_error'), data.error);
       if (providerResponseModel(data.modelVersion)) responseModel = providerResponseModel(data.modelVersion);
       if (providerResponseIdentifier(data.responseId)) responseId = providerResponseIdentifier(data.responseId);
@@ -83,22 +99,51 @@ export async function readGoogleSse(response, { maxBytes = DEFAULT_MAX_RESPONSE_
   };
   if (response.body?.getReader) {
     const reader = response.body.getReader(), decoder = new TextDecoder();
+    let ended = false, timer, onAbort;
+    const aborted = signal && new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+    const read = () => aborted ? Promise.race([readProviderChunk(reader), aborted]) : readProviderChunk(reader);
     try {
-      while (true) {
-        const { value, done } = await readProviderChunk(reader); if (done) break;
+      while (!terminal()) {
+        const { value, done } = await read();
+        if (done) { ended = true; break; }
         bytes += value.byteLength;
         if (bytes > maxBytes) throw new Error('provider_response_too_large');
         await consume(decoder.decode(value, { stream: true }));
       }
-      await consume(decoder.decode(), true);
-    } catch (error) { try { await reader.cancel?.(); } catch {} throw error; }
-    finally { reader.releaseLock(); }
+      if (ended) await consume(decoder.decode(), true);
+      else {
+        const expired = new Promise(resolve => { timer = setTimeout(() => resolve(null), TRAILING_METADATA_DRAIN_MS); });
+        while (bytes < maxBytes) {
+          // Only a subsequent transport read is best effort. Abort and local
+          // parsing/callback failures are not reclassified as transport loss.
+          let chunk;
+          try { chunk = await Promise.race([read(), expired]); }
+          catch (error) { signal?.throwIfAborted(); break; }
+          signal?.throwIfAborted();
+          if (!chunk) break;
+          if (chunk.done) { ended = true; await consume(decoder.decode(), true, true); break; }
+          bytes += chunk.value.byteLength;
+          if (bytes > maxBytes) break;
+          await consume(decoder.decode(chunk.value, { stream: true }), false, true);
+        }
+      }
+      signal?.throwIfAborted();
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (!ended) { try { Promise.resolve(reader.cancel?.()).catch(() => {}); } catch {} }
+      try { reader.releaseLock(); } catch {}
+    }
   } else {
     const text = await readProviderText(response); bytes = Buffer.byteLength(text);
     if (bytes > maxBytes) throw new Error('provider_response_too_large');
     await consume(text, true);
   }
-  if (!saw || !finishReason) throw markProviderStreamTruncated(new Error('google_stream_truncated'));
+  if (!saw || !finishReason || !terminal()) throw markProviderStreamTruncated(new Error('google_stream_truncated'));
   return { candidates: [{ content: { role: 'model', parts }, finishReason }], usageMetadata,
     ...(responseModel ? { modelVersion: responseModel } : {}), ...(responseId ? { responseId } : {}) };
 }
@@ -130,7 +175,7 @@ export function createGoogleNativeModelAdapter({ config = {}, fetchImpl = fetch,
       await providerDiagnostic(() => traceLogger?.model?.({ stage:'model-request', providerTiming:timing.projected, ...timing.ownership, requestId, provider:'google', api, model, modelCall, url, providerRequestArtifact, providerMessageManifest:buildProviderMessageManifest(source), messageCount:body.contents.length, bodyChars:JSON.stringify(body).length, ts:clock() }));
       const response = await invokeProviderFetch(fetchImpl, streaming ? url.replace(':generateContent', ':streamGenerateContent?alt=sse') : url, { method:'POST', headers, body:JSON.stringify(body), ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider:'google', api, model, modelCall, recoveryContext, clock, timing });
       let data;
-      if (response.ok && streaming) data = await readGoogleSse(response, { maxBytes: config.maxResponseBytes, onTextDelta:timing.wrap(onTextDelta,'text'), onThoughtDelta:timing.wrap(onThoughtDelta,'thought'), onToolDelta:() => { try { timing.stream('tool'); } catch {} } });
+      if (response.ok && streaming) data = await readGoogleSse(response, { signal, maxBytes: config.maxResponseBytes, onTextDelta:timing.wrap(onTextDelta,'text'), onThoughtDelta:timing.wrap(onThoughtDelta,'thought'), onToolDelta:() => { try { timing.stream('tool'); } catch {} } });
       else {
         const bounded = await readResponseTextBounded(response, config.maxResponseBytes);
         if (!bounded.ok && response.ok) throw new Error(bounded.error);

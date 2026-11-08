@@ -11,6 +11,7 @@ export function openAIEnvelopeError(data, mode) {
     if (data.status !== 'completed') return `model_response_${data.status || 'missing_status'}`;
     if (!Array.isArray(data.output) && typeof data.output_text !== 'string') return 'model_response_malformed_envelope';
     const choice = normalizeResponseChoice(data);
+    if (choice.toolCalls.some(call => call.argumentsError)) return 'model_tool_call_arguments_invalid';
     const media = (data.output || []).some(item => item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length);
     return choice.text.trim() || choice.toolCalls.length || media ? null : 'model_response_empty';
   }
@@ -19,6 +20,7 @@ export function openAIEnvelopeError(data, mode) {
   if (!['stop', 'tool_calls', 'function_call'].includes(choice.finish_reason)) return `model_response_${choice.finish_reason || 'missing_finish_reason'}`;
   if (choice.message.tool_calls != null && !Array.isArray(choice.message.tool_calls)) return 'model_response_malformed_envelope';
   const normalized = normalizeChoice(data);
+  if (normalized.toolCalls.some(call => call.argumentsError)) return 'model_tool_call_arguments_invalid';
   const media = choice.message.audio && typeof choice.message.audio === 'object'
     && (typeof choice.message.audio.data === 'string' || typeof choice.message.audio.id === 'string');
   return normalized.text.trim() || normalized.toolCalls.length || media ? null : 'model_response_empty';
@@ -82,7 +84,7 @@ function compactResponseToolOutput(output = []) {
       call_id: boundedText(item.call_id || item.id || `tool-call-${index}`, 256),
       providerItemId: boundedText(item.id || item.call_id || `tool-call-${index}`, 256),
       name: boundedText(item.name || item.function?.name, 256),
-      arguments: typeof item.arguments === 'string' ? item.arguments : jsonText(item.arguments ?? item.function?.arguments ?? {}),
+      arguments: typeof item.arguments === 'string' ? item.arguments : jsonText(item.arguments !== undefined ? item.arguments : item.function?.arguments),
     }));
 }
 

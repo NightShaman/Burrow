@@ -496,7 +496,14 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
 }
 
 export function actionFromNativeToolCall(call = {}, index = 0) {
-  const args = call.arguments && typeof call.arguments === 'object' ? call.arguments : {};
+  // Defense in depth: never turn a malformed native call into an optional-
+  // argument tool targeting the agent home. Invalid calls remain undispatchable.
+  if (call.argumentsError || !call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) {
+    const action = normalizeAction({ tool: call.name, toolCallId: call.id }, index);
+    action.errors.push('model_tool_call_arguments_invalid');
+    return action;
+  }
+  const args = call.arguments;
   const tool = call.name;
   // Preserve provider call identity for every native tool. Remote execution
   // derives its stable operation identity from this runtime metadata.

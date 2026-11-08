@@ -169,16 +169,29 @@ function parseArguments(value) {
 function normalizeToolCall(call = {}, index = 0) {
   const fn = call.function || call;
   const name = fn.name || call.name || null;
-  const rawArguments = fn.arguments ?? call.arguments ?? {};
+  const rawArguments = fn.arguments !== undefined ? fn.arguments : call.arguments;
   const rawArgumentText = typeof rawArguments === 'string'
     ? rawArguments
     : jsonText(rawArguments);
+  let parsedArguments = rawArguments;
+  let argumentsError = null;
+  if (typeof rawArguments === 'string') {
+    try { parsedArguments = JSON.parse(rawArguments); }
+    catch { argumentsError = 'model_tool_call_arguments_invalid'; }
+  }
+  if (!parsedArguments || typeof parsedArguments !== 'object' || Array.isArray(parsedArguments)) {
+    argumentsError = 'model_tool_call_arguments_invalid';
+  }
+  if (argumentsError) parsedArguments = null;
   return {
     id: boundedText(call.id || call.call_id || `tool-call-${index}`, 256),
     type: boundedText(call.type || 'function', 64),
     name: boundedText(name, 256) || null,
     ...(call.providerItemId ? { providerItemId: boundedText(call.providerItemId, 256) } : {}),
-    arguments: parseArguments(rawArguments),
+    // Incoming calls must contain a JSON object. Keep the permissive history
+    // parser separate: malformed outbound history must not throw here.
+    arguments: parsedArguments,
+    ...(argumentsError ? { argumentsError } : {}),
     rawArguments: rawArgumentText,
   };
 }
