@@ -8924,6 +8924,64 @@
           }
         }
       }
+    },
+    "/api/settings/ui-preferences": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read operator UI preferences",
+        "operationId": "getUiPreferences",
+        "description": "Home API operator-singleton raw localStorage strings; only allowlisted presentation keys. PATCH merges atomically; null deletes. seedOnly=true inserts only missing string keys; existing keys and null inputs are untouched. No credentials, drafts or caches.",
+        "responses": {
+          "200": {
+            "description": "Current saved values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Merge operator UI preferences",
+        "operationId": "patchUiPreferences",
+        "description": "Home API operator-singleton raw localStorage strings; only allowlisted presentation keys. PATCH merges atomically; null deletes. seedOnly=true inserts only missing string keys; existing keys and null inputs are untouched. No credentials, drafts or caches.",
+        "responses": {
+          "200": {
+            "description": "Current saved values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UiPreferencesPatch"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -19344,6 +19402,193 @@
           "updatedAt"
         ],
         "additionalProperties": false
+      },
+      "UiPreferences": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hc.theme": {
+                "type": "string"
+              },
+              "hc.selectedAgentId": {
+                "type": "string"
+              },
+              "hc.leftCollapsed": {
+                "type": "string"
+              },
+              "hc.rightCollapsed": {
+                "type": "string"
+              },
+              "hc.leftSplit": {
+                "type": "string"
+              },
+              "hc.rightSplit": {
+                "type": "string"
+              },
+              "hc.leftTopPanel": {
+                "type": "string"
+              },
+              "hc.leftBottomPanel": {
+                "type": "string"
+              },
+              "hc.rightTopPanel": {
+                "type": "string"
+              },
+              "hc.rightBottomPanel": {
+                "type": "string"
+              },
+              "hc.leftRailLayout": {
+                "type": "string"
+              },
+              "hc.rightRailLayout": {
+                "type": "string"
+              },
+              "hc.leftSinglePanel": {
+                "type": "string"
+              },
+              "hc.rightSinglePanel": {
+                "type": "string"
+              },
+              "hc.rightPanelDefaultsVersion": {
+                "type": "string"
+              },
+              "hc.agentRailPreferences": {
+                "type": "string"
+              },
+              "hc.groupChatTabs": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "UiPreferencesPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "hc.theme": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.selectedAgentId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftCollapsed": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightCollapsed": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftSplit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightSplit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftTopPanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftBottomPanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightTopPanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightBottomPanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftRailLayout": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightRailLayout": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.leftSinglePanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightSinglePanel": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.rightPanelDefaultsVersion": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.agentRailPreferences": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hc.groupChatTabs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "seedOnly": {
+            "type": "boolean",
+            "default": false
+          }
+        }
       }
     },
     "securitySchemes": {

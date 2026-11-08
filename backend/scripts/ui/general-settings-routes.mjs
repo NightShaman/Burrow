@@ -1,5 +1,5 @@
 import { normalizeRetentionPolicy } from '../../src/retention-settings.mjs';
-export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserTabSettings, saveBrowserTabSettings, otelSettings, saveOtelSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
+export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings, tiddleCards, tiddleHistory, uiAuthSettings, saveUiAuthSettings, browserTabSettings, saveBrowserTabSettings, uiPreferences, saveUiPreferences, otelSettings, saveOtelSettings, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok === false ? (result.status || 500) : success, result);
     return true;
@@ -24,6 +24,10 @@ export function createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdenti
     if (req.method === 'GET' && url.pathname === '/api/tiddle/history') {
       sendJson(res, 200, await tiddleHistory({ agentId: url.searchParams.get('agentId'), cardId: url.searchParams.get('cardId'), since: url.searchParams.get('since'), limit: url.searchParams.get('limit') }));
       return true;
+    }
+    if (url.pathname === '/api/settings/ui-preferences') {
+      if (req.method === 'GET') { sendJson(res, 200, await uiPreferences()); return true; }
+      if (req.method === 'PATCH') return resultResponse(res, await saveUiPreferences(await readJsonBody(req)));
     }
     if (url.pathname === '/api/settings/browser-tab') {
       if (req.method === 'GET') { sendJson(res, 200, await browserTabSettings()); return true; }

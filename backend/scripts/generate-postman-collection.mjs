@@ -113,6 +113,8 @@ const collection = {
       req('Read operator reference photo bytes', 'GET', '/api/operator/reference-image/content'),
       req('Remove operator reference photo', 'DELETE', '/api/operator/reference-image'),
       req('Update identities', 'PUT', '/api/settings/identities', { body: { operator: { name: 'Operator', avatar: '' }, agents: [] } }),
+      req('Get UI preferences', 'GET', '/api/settings/ui-preferences'),
+      req('Merge UI preferences', 'PATCH', '/api/settings/ui-preferences', { body: { values: { 'hc.theme': 'dark' }, seedOnly: false } }),
       req('Get curator settings', 'GET', '/api/settings/curator'),
       req('Update curator settings', 'PUT', '/api/settings/curator', { body: { kind: 'external', connectionId: '{{connectionId}}', model: 'gpt-5.4-mini', temperature: 0.2 } }),
       req('Get Tiddle rolling-continuity status', 'GET', '/api/settings/tiddle', { query: [['agentId', '{{agentId}}']] }),

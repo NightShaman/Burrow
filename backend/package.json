@@ -1,6 +1,6 @@
 {
   "name": "burrow",
-  "version": "2026.11.08.8",
+  "version": "2026.11.08.9",
   "private": true,
   "type": "module",
   "bin": {
