@@ -60,21 +60,23 @@ function compactAnthropicContentParts(parts = []) {
   });
 }
 
-function anthropicContentParts(content) {
+function anthropicContentParts(content, { toolResult = false } = {}) {
   if (Array.isArray(content)) {
     return compactAnthropicContentParts(content.map((part) => {
       if (typeof part === 'string') return { type: 'text', text: part };
       if (part?.type === 'text') return { type: 'text', text: String(part.text || '') };
-      if (part?.type === 'tool_use') return { type: 'tool_use', id: String(part.id || randomUUID()), name: String(part.name || ''), input: parseArguments(part.input || {}) };
-      if (part?.type === 'thinking') return { type: 'thinking', thinking: String(part.thinking || ''), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
-      if (part?.type === 'redacted_thinking') return { type: 'redacted_thinking', ...('data' in part ? { data: String(part.data ?? '') } : {}), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
+      if (!toolResult && part?.type === 'tool_use') return { type: 'tool_use', id: String(part.id || randomUUID()), name: String(part.name || ''), input: parseArguments(part.input || {}) };
+      if (!toolResult && part?.type === 'thinking') return { type: 'thinking', thinking: String(part.thinking || ''), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
+      if (!toolResult && part?.type === 'redacted_thinking') return { type: 'redacted_thinking', ...('data' in part ? { data: String(part.data ?? '') } : {}), ...('signature' in part ? { signature: String(part.signature ?? '') } : {}) };
       if (part?.type === 'image_url') {
         const url = part.image_url?.url || part.url || '';
         const m = /^data:([^;]+);base64,(.*)$/i.exec(url);
         if (m) return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+        if (/^https?:\/\//i.test(url)) return { type: 'image', source: { type: 'url', url } };
       }
       if (part?.type === 'image' && part.source) return part;
-      return { type: 'text', text: boundedText(typeof part === 'string' ? part : JSON.stringify(part || {}), MAX_MODEL_TEXT_CHARS) };
+      const fallback = JSON.stringify(part || {});
+      return { type: 'text', text: toolResult ? fallback : boundedText(fallback, MAX_MODEL_TEXT_CHARS) };
     }));
   }
   return compactAnthropicContentParts([{ type: 'text', text: String(content || '') }]);
@@ -88,16 +90,10 @@ function anthropicMessages(messages = [], prompt = '') {
     const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user';
     if (role === 'system') { system.push(String(message.content || '')); continue; }
     if (message?.role === 'tool') {
+      // Tool results use the same image conversion as user content; keep the
+      // result nested under its paired tool_use_id.
       const resultContent = Array.isArray(message.content)
-        ? message.content.map((part) => {
-          if (part?.type === 'image_url') {
-            const url = part.image_url?.url || part.url || '';
-            const m = /^data:([^;]+);base64,(.*)$/i.exec(url);
-            if (m) return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
-          }
-          if (part?.type === 'text') return { type: 'text', text: String(part.text || '') };
-          return { type: 'text', text: typeof part === 'string' ? part : JSON.stringify(part || {}) };
-        })
+        ? anthropicContentParts(message.content, { toolResult: true })
         : String(message.content || '');
       converted.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: String(message.tool_call_id || message.id || 'tool-call'), content: resultContent }] });
       continue;
@@ -256,7 +252,7 @@ function safeAnthropicAssistantBlocks(content = []) {
   return content.map((part) => {
     if (!part || typeof part !== 'object') return null;
     if (part.type === 'text') return { type: 'text', text: boundedText(part.text || '', MAX_MODEL_TEXT_CHARS) };
-    if (part.type === 'tool_use') return { type: 'tool_use', id: boundedText(part.id || '', 256), name: boundedText(part.name || '', 256), input: parseArguments(part.input || {}) };
+    if (part.type === 'tool_use') return { type: 'tool_use', id: boundedText(part.id || '', 256), name: boundedText(part.name || '', 256), input: Object.hasOwn(part, 'input') ? part.input : {} };
     // Anthropic signs the complete opaque thinking block. These fields are
     // protocol material, not display text: changing even one byte makes a
     // valid tool-use continuation unverifiable.
@@ -351,7 +347,7 @@ function anthropicAssistantMessageFromChoice(choice = {}) {
 function normalizeAnthropicChoice(data = {}) {
   const content = Array.isArray(data.content) ? data.content : [];
   const text = boundedText(content.filter((part) => part?.type === 'text').map((part) => part.text || '').join(''), MAX_MODEL_TEXT_CHARS);
-  const toolCalls = content.filter((part) => part?.type === 'tool_use').map((part, index) => normalizeToolCall({ id: part.id || `tool-call-${index}`, name: part.name, arguments: part.input || {} }, index));
+  const toolCalls = content.filter((part) => part?.type === 'tool_use').map((part, index) => normalizeToolCall({ id: part.id || `tool-call-${index}`, name: part.name, arguments: Object.hasOwn(part, 'input') ? part.input : {} }, index));
   const assistantBlocks = safeAnthropicAssistantBlocks(content);
   return { index: 0, finishReason: data.stop_reason || null, message: { role: 'assistant', content: text }, text, toolCalls, anthropic: assistantBlocks.length ? { assistantBlocks } : null };
 }
