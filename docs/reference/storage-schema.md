@@ -361,3 +361,9 @@ These additive application migrations were inspected against Core `f0b17efdadc57
 ## 8 November migration addition
 
 Migration **100**, `parked-board-task-status`, adds `parked` to the task-board status constraint. Parked is a retained, non-executable task state, not deletion or the derived Done archive projection. Move it to an eligible state before executing or selecting it as a new scheduled task target. No migration or application test was executed during this source review.
+
+## Operator preferences and initial sessions
+
+Checked **9 November 2026**: allowlisted UI preferences live in the existing `settings_meta` entry `ui_preferences`; atomic per-key writes require no new application migration. The record is operator-wide and stores raw strings, not credentials or conversation caches. See [UI preference API](api/settings.md#operator-ui-preferences).
+
+Creating a mod-owned agent now inserts its `default` conversation in the same transaction. Session listing repairs an agent with no conversation sessions at all, under an agent-row lock. It does not resurrect a missing default when any other session exists, including retained/archived history. Group deletion targets only the `group-channel` shared transcript identity and leaves participant sessions intact.

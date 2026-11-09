@@ -156,3 +156,15 @@ Checked **6 November 2026**:
 For a retained PNG, JPEG, GIF or WebP artifact no larger than 20 MiB, choose **Copy reference** in Forge. Paste the copied `[forge:job-id:artifact-id]` into the intended conversation and ask the agent to inspect it. `attachment_view` resolves that original within the same operator-owned Burrow, across chats, without copying the image into the destination transcript. The reference is not a public share URL, a host path, or an authorization for a new paid generation.
 
 The original must still exist. Deleting its Forge job can make the reference unavailable; previously attached chat copies remain separate. **Attach to conversation** is still the explicit copy/delivery workflow. Clipboard failure is shown as an error, so verify the reference was copied before pasting.
+
+## Restore your workspace on another browser
+
+Checked **9 November 2026**: Burrow saves theme, selected agent, rail layout/order, group tabs, Settings utility-panel visibility and account-card order on the home server. A new browser restores them after authentication before opening the workspace. Existing browser preferences fill only missing server keys. Credentials, drafts and conversation caches do not synchronize.
+
+If restoration fails, choose **Retry** or **Use this browser only**. Browser-only mode keeps a visible warning; subsequent failed saves retain pending edits and offer Retry. Do not clear site data to fix a synchronization warning before considering unsynced edits. This shared operator record is not a separate preference profile for each login, and another already-open browser does not receive a live push.
+
+## Delete a group chat
+
+Open **Group Chat**, choose **Delete** beside the room, then confirm **Delete group**. Choose **Keep group** to leave it untouched. Confirmed deletion stops active group replies and deletes the room and shared transcript, but keeps individual chats and participant sessions. A failed deletion keeps the room visible for retry. Scheduled jobs are not deleted automatically. If an integration routes scheduled work to the removed room, disable or change that routing; native schedule settings do not expose a group-room destination.
+
+Chat code blocks have a separate **Copy code** footer. Leading blank display lines may be hidden, but copying preserves the original code spacing.

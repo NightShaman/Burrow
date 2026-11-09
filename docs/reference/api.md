@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-11-08** has **198 paths, 264 operations and 212 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `78f0680cf67917dc156975718ec6eb9a00206bfab560a42c398263a182b32ec9`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-11-09** has **199 paths, 267 operations and 214 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `9f62472c5edd11c04780135bb7a0034d73036aaa8f0022839bea4c10ab615c19`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -44,6 +44,8 @@ The current development contract reviewed on **2026-11-08** has **198 paths, 264
 
 
 Specific drift:
+
+- The UI-preference schema/generated types omit `hc.settingsUtilityPanelOpen` and `hc.accountStatusOrder`, which the runtime accepts; use the [source-reviewed key list](api/settings.md#operator-ui-preferences)
 
 - Mod catalog responses also carry lifecycle status, failure information, version and Archive UI contributions
 - Forge request selection now includes `mode` and canonical-photo selectors; earlier explicit-pair-only schema guidance is obsolete
@@ -112,3 +114,4 @@ Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
+

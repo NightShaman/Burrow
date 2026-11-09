@@ -143,3 +143,7 @@ Operator session search ranks an exact original-content phrase ahead of token-on
 ## Reset and in-flight browser paging
 
 After a successful same-session reset, Chat invalidates older-page ownership as well as its snapshot. A stale transcript response or stale request error cannot repaint the reset conversation. The repository reloads current session authority when a reset changes its epoch. This browser safeguard is separate from server reset-generation fencing and does not delete retained archives.
+
+## Group-room deletion boundary
+
+Checked **9 November 2026**: confirmed [group deletion](../reference/api/chat.md#delete-a-group-channel) removes the operator-owned shared transcript and room metadata and cancels active room replies. It does not delete individual chats, participant sessions, or scheduled jobs. This separate display-transcript operation is not ordinary retained-session pruning. Any integration routing scheduled work into that room needs deliberate review; native schedules do not have a group-room destination field.

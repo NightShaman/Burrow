@@ -117,3 +117,9 @@ This is static implementation reconciliation and documentation validation, not e
 ### Publication-time source check
 
 Before publication, the additional changes in assembly **2026.11.08.7** (`79c4346acf461ddbb16fe94d85d1a387df3ddc80`), Core `f7ab762d49b9e65ea3e071ba762dfcea16e0e01a` and UI `e51eaf1e1ebb65c9eee60690643746619a4a549b` were inspected. They tighten malformed native-tool argument rejection, provider streaming completion/cancellation and stale Chat paging after reset. The full review above remains the base; this final static delta preserves concurrent runtime changes and adds no application/provider test claim.
+
+## 9 November ordinary delta review
+
+Compared the successful 8 November source baseline through assembly **2026.11.08.19** (`20523845840bb4763e0fe137d603a7f54d8c5a9d`), Core `a799735c9b0d7fbdeb49dcebfc7acb798356d476` and UI `a7c081019a91f91c038ec2ed65b9b1ab3a50f666`. This pass reconciles operator-wide workspace preference persistence/retry, confirmed group-room deletion and retained participant history, mod-owned initial-session repair, Anthropic schema/image conversion and provider-pool continuation headroom/replay, plus code-block copying behavior.
+
+Unchanged pages retain the **8 November** full-review evidence. Source and test definitions were inspected statically; no application tests, live model/chat calls, migrations, runtime changes or release promotion were performed. Installed/public builds may lag development implementation. Historical screenshots and private-source-link exclusions are preserved.

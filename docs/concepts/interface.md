@@ -95,7 +95,7 @@ Choose **Group Chat** to create or reopen a room. A new room needs a name and at
 The **Workspace** panel shows the selected parent agent's files, including while a Minion conversation is displayed. Open a file to create a document tab, choose **Edit**, then **Save**. The tab retains its owning agent for the save request. The editor provides text editing, not a terminal or a file creation, rename, deletion, or upload workflow.
 The file tree uses `GET /api/workspace/files?agentId=…&scope=agent`; reads and saves use `/api/workspace/file`. Automatic tree refresh runs while Workspace is visible in the left rail and keeps the last tree on a transient failure. The backend remains responsible for file access checks.
 
-Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Accounts**, or **System** for each rail. Enabled mod-owned agents can also make an owner-named agent panel available; its content follows that mod's visibility settings. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **General → Personalization → Appearance** offers Smatchet Dark, Midnight, Violet Grove, Halloween, Blue Hour, Nexus, Hatchet, Chaos, and Terminal. Violet Grove uses Midnight's dark surfaces with violet accents and green healthy/account indicators; warning and blocked-context colors retain their distinct meanings. These layout preferences are stored in the browser.
+Use **Settings → General → Rail panels** to choose **None**, **Agents**, **Workspace**, **Accounts**, or **System** for each rail. Enabled mod-owned agents can also make an owner-named agent panel available; its content follows that mod's visibility settings. A rail can show a single panel or divided panels. Defaults put Agents above Workspace on the left and no panels on the right. **General → Personalization → Appearance** offers Smatchet Dark, Midnight, Violet Grove, Halloween, Blue Hour, Nexus, Hatchet, Chaos, and Terminal. Violet Grove uses Midnight's dark surfaces with violet accents and green healthy/account indicators; warning and blocked-context colors retain their distinct meanings. These display preferences are restored from the home server after authentication and cached in the browser. See [workspace preference synchronization](#workspace-preference-synchronization).
 On viewports at or below 600 pixels wide, controls reflow into a stacked layout, rails remain available, and page tabs can scroll horizontally. Scroll the page or expand a collapsed rail to reach its controls.
 
 ### Read the context meter
@@ -335,8 +335,8 @@ The interface uses `localStorage` for more than appearance. Closing the tab or r
 | Chat transcripts | Up to 24 cached conversations; optimistic image-preview data URLs are removed before storage |
 | Session lists | Cached lists for up to 16 agents |
 | Archive Chat lists | Up to 12 scoped query entries by default |
-| Group tabs | Room-tab descriptors survive reloads; file tabs do not |
-| UI preferences | Agent selection, themes, rail layout, and ordering persist |
+| Group tabs | Room-tab descriptors synchronize with UI preferences; file tabs do not |
+| UI preferences | Allowlisted display choices persist on the home server with a browser cache and pending-edit journal |
 Archive cache keys include target identity, agent, query, date, timezone, and content kind. Cached rows can appear before refresh; check stale or unavailable warnings rather than treating a cached list as a successful current read. Default transcript cache limits also bound turns per conversation, text size per turn, and aggregate serialized content.
 
 These bounds are cache policies, not secure-erasure guarantees. Protect the browser profile, especially on shared machines, and include site data in any browser cleanup procedure. Clearing browser site data does not delete server records; server retention or purge does not promise to erase every browser copy. Basic credentials are held separately in memory and are not written to these caches.
@@ -394,3 +394,15 @@ Checked **6 November 2026**: active Chat includes compacted predecessors within 
 Checked **7 November 2026**: a successful group send followed by a failed transcript refresh is shown as **Message sent, but could not refresh group chat**, with **Retry refresh**. Refreshing does not resend the message. If attachment persistence was not confirmed, files remain attached and the warning says not to resend automatically. Requests from a previous agent/session/channel or unmounted view must not replace the current view.
 
 Dream settings keep configuration in the middle column and Dream memory in the third, preserving their save scopes. The Models workspace exposes the optional expiring-reset control only with expanded direct OpenAI OAuth connection settings. Treat the historical screenshots above as illustrations, not a promise of current positioning.
+
+## Workspace preference synchronization
+
+Checked **9 November 2026**: theme, selected agent, rail layout/order, group-tab descriptors, Settings utility-panel visibility and account-card order are synchronized through the home server's operator-wide preference record. This is one shared operator workspace, not per-user or per-selected-node settings. Credentials, chat drafts and transcript caches are excluded.
+
+The interface restores preferences before mounting the workspace. Existing browser values seed only server keys that are missing; they do not overwrite saved server choices. If restoration fails, choose **Retry** or **Use this browser only**. Browser-only mode warns that changes will not follow you to another PC. Later synchronization failures retain local pending edits and show a retry warning; clearing site data can discard those unsynced edits. A fresh browser load reads saved values; this is not a live cross-device broadcast.
+
+## Delete a group room
+
+In **Group Chat**, choose **Delete** beside the room, then **Delete group** to confirm or **Keep group** to cancel. Deletion stops active room replies and removes the room metadata and shared transcript. Individual chats and participant sessions remain. Matching open tabs disappear only after confirmed success; a failure leaves the room available for retry. Existing scheduled jobs are not removed. If an integration delivers scheduled work into this room, disable or retarget it deliberately: later deliveries fail rather than recreate the room. The native scheduler has no group-room destination field.
+
+Code-block copy controls sit below each block in a non-scrolling footer. Leading empty display lines are hidden, while copied source retains them and preserves indentation and internal blank lines.
