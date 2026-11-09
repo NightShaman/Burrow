@@ -284,6 +284,58 @@ describe('Google Developer API model metadata', () => {
       'None reported',
     );
   });
+  it('keeps scalar metadata compact and long or structured values full-width and selectable', () => {
+    const longName = 'models/' + 'long-model-identifier-'.repeat(8);
+    const { container } = render(
+      <ModelCapabilityEditor
+        model={{
+          id: 'metadata-layout',
+          supportedGenerationMethods: ['generateContent', 'countTokens'],
+          googleMetadata: {
+            name: longName,
+            version: '001',
+            description: 'Short description',
+            thinking: false,
+            temperature: 0,
+            // Preserve additional fields if a provider extends its runtime metadata.
+            ...{
+              extra: { enabled: true },
+              multiline: 'first\nsecond',
+              absent: null,
+              missing: undefined,
+            },
+          },
+        }}
+        onToggleModelInput={vi.fn()}
+        onSetModelInputAuto={vi.fn()}
+        onToggleModelOutput={vi.fn()}
+        onSetModelOutputAuto={vi.fn()}
+      />,
+    );
+    for (const [label, value] of [
+      ['Version', '001'],
+      ['Thinking', 'false'],
+      ['Temperature', '0'],
+    ]) {
+      const control = screen.getByLabelText(label) as HTMLInputElement;
+      expect(control.tagName).toBe('INPUT');
+      expect(control.value).toBe(value);
+      expect(control.readOnly).toBe(true);
+      expect(control.disabled).toBe(false);
+      expect(control.closest('.model-provider-metadata-wide')).toBeNull();
+    }
+    for (const label of ['Generation methods', 'Name', 'Description', 'Extra', 'Multiline']) {
+      const control = screen.getByLabelText(label) as HTMLTextAreaElement;
+      expect(control.tagName).toBe('TEXTAREA');
+      expect(control.readOnly).toBe(true);
+      expect(control.closest('.model-provider-metadata-wide')).toBeTruthy();
+    }
+    expect((screen.getByLabelText('Name') as HTMLTextAreaElement).value).toBe(longName);
+    expect((screen.getByLabelText('Extra') as HTMLTextAreaElement).value).toBe('{"enabled":true}');
+    expect(screen.queryByLabelText('Absent')).toBeNull();
+    expect(screen.queryByLabelText('Missing')).toBeNull();
+    expect(container.querySelector('.model-provider-metadata-grid')).toBeTruthy();
+  });
   it('offers native API type and renders discovered methods and token limits', () => {
     expect(modelConnectionApiTypes).toContainEqual({
       value: 'google-generative-language',

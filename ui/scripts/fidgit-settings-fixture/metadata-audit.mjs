@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserPipe } from './browser-pipe.mjs';
 const before = process.env.EXPECT_BEFORE === '1';
+const compact = !before;
 const evidence = process.env.METADATA_EVIDENCE_DIR ?? '/tmp/smatchet-provider-metadata/after';
 await mkdir(evidence, { recursive: true });
 const profile = await mkdtemp(join(tmpdir(), 'metadata-chromium-'));
@@ -93,31 +94,47 @@ try {
     );
     await new Promise((r) => setTimeout(r, 120));
     const state = await evaluate(
-      `(()=>{const fields=[...document.querySelectorAll('.model-capability-editor details textarea')];return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,fields:fields.map(e=>({label:e.closest('label').firstChild.textContent,value:e.value,readOnly:e.readOnly,bg:getComputedStyle(e).backgroundColor,color:getComputedStyle(e).color,border:getComputedStyle(e).borderColor,width:e.getBoundingClientRect().width,parent:e.parentElement.clientWidth})),errors:window.fixtureEvidence.errors,writes:window.fixtureEvidence.requests.filter(r=>r.method!=='GET')};})()`,
+      `(()=>{const fields=[...document.querySelectorAll('.model-capability-editor details :is(input, textarea)')];return {width:innerWidth,metadataHeight:document.querySelector('.model-capability-editor details').getBoundingClientRect().height,gridColumns:getComputedStyle(document.querySelector('.model-provider-metadata-grid')??document.body).gridTemplateColumns,overflow:document.documentElement.scrollWidth>innerWidth,fields:fields.map(e=>({label:e.closest('label').firstChild.textContent,value:e.value,readOnly:e.readOnly,bg:getComputedStyle(e).backgroundColor,color:getComputedStyle(e).color,border:getComputedStyle(e).borderColor,tag:e.tagName,height:e.getBoundingClientRect().height,top:e.getBoundingClientRect().top,left:e.getBoundingClientRect().left,width:e.getBoundingClientRect().width,parent:e.parentElement.clientWidth})),errors:window.fixtureEvidence.errors,writes:window.fixtureEvidence.requests.filter(r=>r.method!=='GET')};})()`,
     );
-    assert.equal(state.fields.length, 11);
+    assert.equal(state.fields.length, 12);
     assert.equal(state.overflow, false);
     assert.ok(state.fields.every((f) => f.readOnly && f.width <= f.parent + 1));
     assert.equal(state.fields.find((f) => f.label === 'Thinking').value, 'false');
     assert.equal(state.fields.find((f) => f.label === 'Temperature').value, '0');
     assert.equal(state.errors.length, 0);
     assert.equal(state.writes.length, 0);
+    if (compact) {
+      const version = state.fields.find((f) => f.label === 'Version');
+      const name = state.fields.find((f) => f.label === 'Name');
+      const description = state.fields.find((f) => f.label === 'Description');
+      assert.equal(version.tag, 'INPUT');
+      assert.equal(description.tag, 'TEXTAREA');
+      assert.ok(version.height < 40);
+      if (width >= 1690) {
+        assert.ok(Math.abs(name.top - version.top) < 1);
+        assert.ok(version.left > name.left);
+        assert.ok(description.width > version.width * 1.9);
+        assert.ok(state.metadataHeight < 600);
+      } else if (width === 390) {
+        assert.ok(version.top > name.top);
+      }
+    }
     if (!before)
       assert.ok(
         state.fields.every((f) => f.bg !== 'rgb(255, 255, 255)' && f.bg !== 'rgba(0, 0, 0, 0)'),
         JSON.stringify(state),
       );
-    else assert.equal(state.fields[0].bg, 'rgb(255, 255, 255)');
+    else assert.equal(state.fields.find((f) => f.tag === 'TEXTAREA').bg, 'rgb(255, 255, 255)');
     const image = await c('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: false,
     });
     await writeFile(join(evidence, `metadata-${width}.png`), Buffer.from(image.data, 'base64'));
     await evaluate(
-      `(()=>{const e=[...document.querySelectorAll('.model-capability-editor details textarea')].at(-1);e.scrollIntoView({block:'center'});e.focus();})()`,
+      `(()=>{const e=[...document.querySelectorAll('.model-capability-editor details :is(input, textarea)')].at(-1);e.scrollIntoView({block:'center'});e.focus();})()`,
     );
     const end = await evaluate(
-      `(()=>{const e=[...document.querySelectorAll('.model-capability-editor details textarea')].at(-1),r=e.getBoundingClientRect();return {focused:document.activeElement===e,visible:r.top>=0&&r.bottom<=innerHeight,outline:getComputedStyle(e).outlineStyle}})()`,
+      `(()=>{const e=[...document.querySelectorAll('.model-capability-editor details :is(input, textarea)')].at(-1),r=e.getBoundingClientRect();return {focused:document.activeElement===e,visible:r.top>=0&&r.bottom<=innerHeight,outline:getComputedStyle(e).outlineStyle}})()`,
     );
     assert.equal(end.focused, true);
     assert.equal(end.visible, true);

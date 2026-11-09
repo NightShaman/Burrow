@@ -215,34 +215,48 @@ export function ModelCapabilityEditor({
       {(model.supportedGenerationMethods !== undefined || model.googleMetadata) && (
         <details className="saved-accordion">
           <summary>Provider metadata</summary>
-          {model.supportedGenerationMethods !== undefined && (
-            <Field label="Generation methods">
-              <input
-                readOnly
-                value={
-                  model.supportedGenerationMethods.length
-                    ? model.supportedGenerationMethods.join(', ')
-                    : 'None reported'
-                }
-              />
-            </Field>
-          )}
-          {Object.entries(model.googleMetadata ?? {})
-            .filter(([, value]) => value !== undefined && value !== null)
-            .map(([key, value]) => (
-              <Field
-                key={key}
-                label={key
-                  .replace(/([A-Z])/g, ' $1')
-                  .replace(/^./, (letter) => letter.toUpperCase())}
-              >
-                <textarea
-                  readOnly
-                  rows={2}
-                  value={typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                />
-              </Field>
-            ))}
+          <div className="model-provider-metadata-grid">
+            {model.supportedGenerationMethods !== undefined && (
+              <div className="model-provider-metadata-wide">
+                <Field label="Generation methods">
+                  <textarea
+                    readOnly
+                    rows={2}
+                    value={
+                      model.supportedGenerationMethods.length
+                        ? model.supportedGenerationMethods.join(', ')
+                        : 'None reported'
+                    }
+                  />
+                </Field>
+              </div>
+            )}
+            {Object.entries(model.googleMetadata ?? {})
+              .filter(([, value]) => value !== undefined && value !== null)
+              .map(([key, value]) => {
+                const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                const multiline =
+                  key === 'description' ||
+                  typeof value === 'object' ||
+                  text.length > 80 ||
+                  text.includes('\n');
+                return (
+                  <div key={key} className={multiline ? 'model-provider-metadata-wide' : undefined}>
+                    <Field
+                      label={key
+                        .replace(/([A-Z])/g, ' $1')
+                        .replace(/^./, (letter) => letter.toUpperCase())}
+                    >
+                      {multiline ? (
+                        <textarea readOnly rows={2} value={text} />
+                      ) : (
+                        <input readOnly value={text} />
+                      )}
+                    </Field>
+                  </div>
+                );
+              })}
+          </div>
         </details>
       )}
       {capabilityProvenanceLabel(model.capabilityProvenance) && (

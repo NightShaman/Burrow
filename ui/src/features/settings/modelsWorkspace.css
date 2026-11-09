@@ -223,6 +223,22 @@
 .models-workspace .model-capability-provenance {
   grid-column: 1 / -1;
 }
+.models-workspace .model-provider-metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--settings-field-pair-gap, 12px);
+}
+.models-workspace .model-provider-metadata-grid > div {
+  min-width: 0;
+}
+.models-workspace .model-provider-metadata-wide {
+  grid-column: 1 / -1;
+}
+@container model-capabilities (max-width: 480px) {
+  .models-workspace .model-provider-metadata-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 /* Provider metadata lives outside .settings-view; keep its read-only textareas
    on the same themed surface as the adjacent Settings inputs. */
 .models-workspace .model-capability-editor > .saved-accordion textarea {
