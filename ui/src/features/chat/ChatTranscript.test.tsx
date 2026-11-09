@@ -1542,3 +1542,81 @@ it('hides jump to latest when manually returning near the bottom and never shows
   fireEvent.scroll(scroller);
   expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
 });
+
+const a2aSender: Agent = {
+  ...parent,
+  id: 'smatchet',
+  resourceId: 'runtime-smatchet',
+  name: 'Smatchet',
+  avatar: '/portraits/smatchet.png',
+};
+function showA2A(senderId: string | undefined, agents: Agent[], selected: Agent = parent) {
+  return render(
+    <ChatTranscript
+      selected={selected}
+      parent={parent}
+      agents={agents}
+      operator={{ name: 'Rob', avatar: '/portraits/operator.png' }}
+      isNewSession={false}
+      turns={[
+        {
+          type: 'message',
+          role: 'agent',
+          content: 'An A2A visit',
+          metadata: { fromAgentId: senderId, fromAgentName: 'Smatchet', toAgentId: selected.id },
+        },
+        { type: 'message', role: 'assistant', content: 'A reply' },
+        message('Operator followup'),
+      ]}
+      isLoading={false}
+      error=""
+      isSending={false}
+      activeRunId=""
+      liveProgress={[]}
+      liveAnswer=""
+    />,
+  );
+}
+it.each(['smatchet', 'runtime-smatchet'])(
+  'resolves A2A sender portrait by registry identity %s',
+  (id) => {
+    const { container } = showA2A(id, [a2aSender]);
+    const avatar = screen.getByLabelText('Smatchet → hatchet avatar');
+    expect(avatar.querySelector('img')?.getAttribute('src')).toBe(a2aSender.avatar);
+    expect(avatar.closest('article')?.classList.contains('operator')).toBe(true);
+    expect(screen.getByLabelText('Hatchet avatar').textContent).toBe('H');
+    expect(screen.getByLabelText('Rob avatar').querySelector('img')?.getAttribute('src')).toBe(
+      '/portraits/operator.png',
+    );
+    expect(container.querySelectorAll('article.message')).toHaveLength(3);
+  },
+);
+it.each([
+  { id: 'unknown', agents: [a2aSender] },
+  { id: undefined, agents: [a2aSender] },
+  { id: 'smatchet', agents: [{ ...a2aSender, avatar: '' }] },
+  { id: 'smatchet', agents: [{ ...a2aSender, avatar: '   ' }] },
+])('keeps initials when the A2A sender or portrait is unavailable: %j', ({ id, agents }) => {
+  showA2A(id, agents);
+  const avatar = screen.getByLabelText('Smatchet → hatchet avatar');
+  expect(avatar.querySelector('img')).toBeNull();
+  expect(avatar.textContent).toBe('S');
+});
+it('does not resolve an unknown sender by a matching display name', () => {
+  showA2A('other-agent', [a2aSender]);
+  expect(screen.getByLabelText('Smatchet → hatchet avatar').querySelector('img')).toBeNull();
+});
+it.each(['smatchet', 'runtime-smatchet'])(
+  'preserves the current sender portrait and message side for %s',
+  (id) => {
+    showA2A(id, [], a2aSender);
+    const avatar = screen.getByLabelText('Smatchet → smatchet avatar');
+    expect(avatar.querySelector('img')?.getAttribute('src')).toBe(a2aSender.avatar);
+    expect(avatar.closest('article')?.classList.contains('agent')).toBe(true);
+  },
+);
+it('resolves a parent A2A portrait without a registry', () => {
+  const selected = { ...a2aSender, id: 'kerning', name: 'Kerning' };
+  showA2A('hatchet', [], selected);
+  expect(screen.getByLabelText('Smatchet → kerning avatar').textContent).toBe('H');
+});

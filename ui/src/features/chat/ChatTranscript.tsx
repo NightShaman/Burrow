@@ -32,6 +32,7 @@ type ChatTranscriptProps = {
   inputActionPending?: string;
   selected: Agent | Subagent;
   parent: Agent;
+  agents?: Agent[];
   parentSessionName?: string;
   operator: OperatorProfile;
   isNewSession: boolean;
@@ -58,6 +59,7 @@ type ChatTranscriptProps = {
 export const ChatTranscript = memo(function ChatTranscript({
   selected,
   parent,
+  agents = [],
   parentSessionName,
   operator,
   isNewSession,
@@ -222,7 +224,15 @@ export const ChatTranscript = memo(function ChatTranscript({
             {messages.map((turn, index) => {
               const { name: userName, avatar: userAvatar } = userIdentity(turn.metadata);
               const isAgentMessage = turn.role === 'agent';
-              const fromCurrentAgent = turn.metadata?.fromAgentId === selected.id;
+              const senderId = turn.metadata?.fromAgentId;
+              const fromCurrentAgent = Boolean(
+                senderId && [selected.id, selected.resourceId].includes(senderId),
+              );
+              const sender = senderId
+                ? [selected, parent, ...agents].find((agent) =>
+                    [agent.id, agent.resourceId].includes(senderId),
+                  )
+                : undefined;
               const senderName =
                 turn.metadata?.fromAgentName ?? turn.metadata?.fromAgentId ?? 'Agent';
               const recipientName = turn.metadata?.toAgentId ?? selected.name;
@@ -261,7 +271,7 @@ export const ChatTranscript = memo(function ChatTranscript({
                     turn.role === 'user'
                       ? userAvatar
                       : isAgentMessage && !fromCurrentAgent
-                        ? senderName.slice(0, 1).toUpperCase()
+                        ? sender?.avatar?.trim() || senderName.slice(0, 1).toUpperCase()
                         : selected.avatar
                   }
                   time={

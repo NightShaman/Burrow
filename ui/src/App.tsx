@@ -787,6 +787,7 @@ function AppContent() {
                     ) ?? selected
                   }
                   parent={selected}
+                  agents={agents}
                   operator={operatorProfile}
                   draft={draft}
                   setDraft={setDraft}

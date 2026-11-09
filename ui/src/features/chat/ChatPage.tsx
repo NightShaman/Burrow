@@ -22,6 +22,7 @@ type OperatorProfile = { name: string; avatar: string };
 export function Chat({
   selected,
   parent,
+  agents,
   operator,
   draft,
   setDraft,
@@ -57,6 +58,7 @@ export function Chat({
 }: {
   selected: Agent | Subagent;
   parent: Agent;
+  agents?: Agent[];
   operator: OperatorProfile;
   draft: string;
   setDraft: (value: string) => void;
@@ -331,6 +333,7 @@ export function Chat({
       <ChatTranscript
         selected={selected}
         parent={parent}
+        agents={agents}
         parentSessionName={parentSessionName}
         operator={operator}
         isNewSession={isNewSession}

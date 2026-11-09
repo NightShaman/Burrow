@@ -901,3 +901,20 @@ it('shows a dismissible error without replacing theatrical terminal cards', () =
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss chat error' }));
   expect(dismiss).toHaveBeenCalledOnce();
 });
+
+it('passes the current agent registry through to saved A2A sender avatars', () => {
+  renderChat({
+    agents: [{ ...agent, id: 'hatchet', name: 'Hatchet', avatar: '/portraits/hatchet.png' }],
+    turns: [
+      {
+        type: 'message',
+        role: 'agent',
+        content: 'A visit',
+        metadata: { fromAgentId: 'hatchet', fromAgentName: 'Hatchet', toAgentId: agent.id },
+      },
+    ],
+  });
+  expect(
+    screen.getByLabelText('Hatchet → smatchet avatar').querySelector('img')?.getAttribute('src'),
+  ).toBe('/portraits/hatchet.png');
+});
