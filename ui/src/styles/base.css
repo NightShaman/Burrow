@@ -672,7 +672,7 @@ input:focus-visible {
   height: auto;
   align-self: stretch;
   margin: 4px 0;
-  background: var(--line);
+  background: var(--accent);
 }
 @media (max-width: 900px) and (min-width: 601px) {
   .settings-top-navigation {

@@ -40,6 +40,7 @@ it('gives the horizontal Settings separator a non-shrinking vertical line', () =
       height: 'auto',
       'align-self': 'stretch',
       margin: '4px 0',
+      background: 'var(--accent)',
     }),
   ]);
 });
