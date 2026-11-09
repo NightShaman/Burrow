@@ -67,6 +67,147 @@ afterEach(() => {
 });
 
 describe('Forge workspace', () => {
+  it('filters named providers and models by mode and saves explicit provider/model pairs', async () => {
+    const base = catalog.models[0];
+    const models = [
+      base,
+      { ...base, modelId: 'image-2', label: 'Image Two' },
+      { ...base, connectionId: 'c2', label: 'Other Image' },
+      { ...base, connectionId: 'c3', kind: 'audio', modelId: 'voice', label: 'Voice' },
+      { ...base, connectionId: 'c4', available: false, label: 'Disabled Image' },
+    ];
+    let selections = {};
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/catalog')) return Promise.resolve({ ...catalog, models });
+      if (path.endsWith('/selections')) {
+        if (init?.method === 'PUT') {
+          const { mode, ...pair } = JSON.parse(init.body as string);
+          selections = { ...selections, [mode]: pair };
+        }
+        return Promise.resolve({ selections });
+      }
+      return Promise.resolve({ jobs: [] });
+    });
+    const props = {
+      selectedAgentId: 'a',
+      sessionId: 's',
+      savedProviders: [
+        { id: 'c1', provider: 'Google' },
+        { id: 'c2', provider: 'OpenAI' },
+        { id: 'c3', provider: 'Speech provider' },
+        { id: 'c4', provider: 'Disabled provider' },
+      ],
+    };
+    const view = render(
+      <ConfirmProvider>
+        <Forge {...props} />
+      </ConfirmProvider>,
+    );
+    const provider = (await screen.findByRole('combobox', {
+      name: 'Forge provider',
+    })) as HTMLSelectElement;
+    const model = screen.getByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
+    await waitFor(() => expect(provider.options.length).toBe(2));
+    expect([...provider.options].map((o) => o.text)).toEqual(['Google', 'OpenAI']);
+    expect([...model.options].map((o) => o.text)).toEqual(['Image One', 'Image Two']);
+    expect(apiMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+    fireEvent.change(model, { target: { value: JSON.stringify(['c1', 'image-2']) } });
+    await waitFor(() => expect(model.value).toBe(JSON.stringify(['c1', 'image-2'])));
+    fireEvent.change(provider, { target: { value: 'c2' } });
+    await waitFor(() => expect(provider.value).toBe('c2'));
+    expect([...model.options].map((o) => o.text)).toEqual(['Other Image']);
+    const writes = apiMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(writes[1][1].body)).toEqual({
+      mode: 'image',
+      connectionId: 'c2',
+      modelId: 'image-1',
+    });
+    fireEvent.click(screen.getByRole('tab', { name: /Speech/ }));
+    expect([...provider.options].map((o) => o.text)).toEqual(['Speech provider']);
+    expect(model.value).toBe(JSON.stringify(['c3', 'voice']));
+    fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
+    expect(provider.value).toBe('c2');
+    view.unmount();
+    render(
+      <ConfirmProvider>
+        <Forge {...props} />
+      </ConfirmProvider>,
+    );
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('combobox', { name: 'Forge provider' }) as HTMLSelectElement).value,
+      ).toBe('c2'),
+    );
+  });
+
+  it('keeps both selectors on the saved pair during a provider save and rolls back on failure', async () => {
+    let rejectSave: ((error: Error) => void) | undefined;
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith('/catalog'))
+        return Promise.resolve({
+          ...catalog,
+          models: [catalog.models[0], { ...catalog.models[0], connectionId: 'c2', label: 'Other' }],
+        });
+      if (path.endsWith('/selections'))
+        return init?.method === 'PUT'
+          ? new Promise((_, reject) => {
+              rejectSave = reject;
+            })
+          : Promise.resolve({ selections: { image: { connectionId: 'c1', modelId: 'image-1' } } });
+      return Promise.resolve({ jobs: [] });
+    });
+    render(
+      <ConfirmProvider>
+        <Forge selectedAgentId="a" sessionId="s" />
+      </ConfirmProvider>,
+    );
+    const provider = (await screen.findByRole('combobox', {
+      name: 'Forge provider',
+    })) as HTMLSelectElement;
+    const model = screen.getByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
+    await waitFor(() => expect(provider.value).toBe('c1'));
+    fireEvent.change(provider, { target: { value: 'c2' } });
+    expect(provider.disabled).toBe(true);
+    expect(model.disabled).toBe(true);
+    expect(provider.value).toBe('c1');
+    rejectSave!(new Error('offline'));
+    await screen.findByText(/Could not save model selection: offline/);
+    expect(provider.value).toBe('c1');
+    expect(provider.disabled).toBe(false);
+    expect(model.value).toBe(JSON.stringify(['c1', 'image-1']));
+  });
+
+  it('disambiguates identically named connections without merging their models', async () => {
+    apiMock.mockImplementation((path: string) =>
+      Promise.resolve(
+        path.endsWith('/catalog')
+          ? {
+              ...catalog,
+              models: [catalog.models[0], { ...catalog.models[0], connectionId: 'c2' }],
+            }
+          : path.endsWith('/selections')
+            ? { selections: {} }
+            : { jobs: [] },
+      ),
+    );
+    render(
+      <ConfirmProvider>
+        <Forge
+          selectedAgentId="a"
+          sessionId="s"
+          savedProviders={[
+            { id: 'c1', provider: 'Google' },
+            { id: 'c2', provider: 'Google' },
+          ]}
+        />
+      </ConfirmProvider>,
+    );
+    await screen.findByRole('option', { name: 'Google · c1' });
+    expect(screen.getByRole('option', { name: 'Google · c2' })).toBeTruthy();
+    const model = screen.getByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement;
+    expect(model.options.length).toBe(1);
+  });
+
   it('uses origin for music and speech and keeps unresolved audio in Recents only', async () => {
     const base = {
       kind: 'audio',
@@ -228,9 +369,9 @@ describe('Forge workspace', () => {
       </ConfirmProvider>,
     );
     await waitFor(() =>
-      expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
-        JSON.stringify(['c1', 'image-1']),
-      ),
+      expect(
+        (screen.getByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement).value,
+      ).toBe(JSON.stringify(['c1', 'image-1'])),
     );
   });
 
@@ -257,11 +398,14 @@ describe('Forge workspace', () => {
     expect(
       (screen.getByRole('button', { name: 'Generate Image' }) as HTMLButtonElement).disabled,
     ).toBe(true);
-    fireEvent.change(screen.getByRole('combobox'), {
-      target: { value: JSON.stringify(['c1', 'image-1']) },
+    fireEvent.change(screen.getByRole('combobox', { name: 'Forge provider' }), {
+      target: { value: 'c1' },
     });
     await screen.findByText(/Could not save model selection: offline/);
-    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe(
+    expect(
+      (screen.getByRole('combobox', { name: 'Forge provider' }) as HTMLSelectElement).value,
+    ).toBe('gone');
+    expect((screen.getByRole('combobox', { name: 'Forge model' }) as HTMLSelectElement).value).toBe(
       JSON.stringify(['gone', 'missing']),
     );
   });

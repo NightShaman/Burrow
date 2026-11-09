@@ -4,7 +4,7 @@ import { useOwnedApi } from '../../app/useOwnedApi';
 import { ImagePreview } from '../../app/ImagePreview';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { Agent } from '../../app/types';
+import type { Agent, SavedProvider } from '../../app/types';
 import './forge.css';
 import './forge-motion.css';
 import { useForgeMotion } from './useForgeMotion';
@@ -317,8 +317,10 @@ export function ArtifactOutput({
 export function Forge({
   selectedAgentId,
   sessionId,
+  savedProviders = [],
 }: {
   agents?: Agent[];
+  savedProviders?: Pick<SavedProvider, 'id' | 'provider'>[];
   selectedAgentId: string;
   sessionId: string;
 }) {
@@ -409,6 +411,15 @@ export function Forge({
     : availableModels[0]
       ? modelKey(availableModels[0])
       : '';
+  const selectedProvider = savedSelection?.connectionId ?? availableModels[0]?.connectionId ?? '';
+  const providers = [...new Set(availableModels.map((model) => model.connectionId))].map((id) => {
+    const name = savedProviders.find((provider) => provider.id === id)?.provider ?? id;
+    const duplicateName = savedProviders.some(
+      (provider) => provider.id !== id && provider.provider === name,
+    );
+    return { id, label: duplicateName ? `${name} · ${id}` : name };
+  });
+  const providerModels = availableModels.filter((model) => model.connectionId === selectedProvider);
   const selectedAvailable = availableModels.some((model) => modelKey(model) === selectedModel);
   const savedUnavailableReason =
     savedSelection && !selectedAvailable
@@ -607,24 +618,54 @@ export function Forge({
               {availableModels.length} model{availableModels.length === 1 ? '' : 's'}
             </span>
           </div>
-          <label className="forge-field">
-            <span>Model</span>
-            <select
-              aria-label="Forge model"
-              value={selectedModel}
-              onChange={(event) => void saveSelection(event.target.value)}
-              disabled={loading || selectionSaving || !availableModels.length}
-            >
-              {savedSelection && !selectedAvailable && (
-                <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>
-              )}
-              {availableModels.map((model) => (
-                <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>
-                  {model.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="forge-model-selectors">
+            <label className="forge-field">
+              <span>Provider</span>
+              <select
+                aria-label="Forge provider"
+                value={selectedProvider}
+                onChange={(event) => {
+                  const model = availableModels.find(
+                    (item) => item.connectionId === event.target.value,
+                  );
+                  if (model) void saveSelection(modelKey(model));
+                }}
+                disabled={loading || selectionSaving || !providers.length}
+              >
+                {selectedProvider &&
+                  !providers.some((provider) => provider.id === selectedProvider) && (
+                    <option value={selectedProvider}>
+                      {savedProviders.find((provider) => provider.id === selectedProvider)
+                        ?.provider ?? selectedProvider}{' '}
+                      (unavailable)
+                    </option>
+                  )}
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="forge-field">
+              <span>Model</span>
+              <select
+                aria-label="Forge model"
+                value={selectedModel}
+                onChange={(event) => void saveSelection(event.target.value)}
+                disabled={loading || selectionSaving || !providerModels.length}
+              >
+                {savedSelection && !selectedAvailable && (
+                  <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>
+                )}
+                {providerModels.map((model) => (
+                  <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {savedUnavailableReason && (
             <p className="forge-error" role="alert">
               Saved model unavailable: {savedUnavailableReason}

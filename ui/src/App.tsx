@@ -664,6 +664,7 @@ function AppContent() {
             <Archive agents={agents} operatorName={operatorProfile.name} />
           ) : page === 'forge' ? (
             <Forge
+              savedProviders={savedProviders}
               agents={capabilityAgents(agents, 'forge')}
               selectedAgentId={
                 capabilityAgents(agents, 'forge').find((agent) => agent.id === selectedAgentId)
