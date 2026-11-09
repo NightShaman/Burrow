@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations', 'menagerie-companion-visits'];
+export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations', 'burrow-menagerie'];
 
 export const TARGETS = {
   burrow: {
