@@ -54,7 +54,6 @@
     grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr);
   }
   .page-tabs button {
-    min-width: 70px;
     padding: 0 8px;
   }
   .settings-view {
@@ -129,9 +128,6 @@
     width: 100%;
     overflow: auto;
     flex-shrink: 0;
-  }
-  .page-tabs button {
-    min-width: 60px;
   }
   .header-rail-controls {
     margin-left: auto;

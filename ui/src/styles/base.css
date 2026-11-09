@@ -431,7 +431,7 @@ input:focus-visible {
 }
 .page-tabs button {
   position: relative;
-  min-width: 88px;
+  min-width: 0;
   height: 38px;
   padding: 0 14px;
   display: flex;
@@ -657,7 +657,7 @@ input:focus-visible {
 }
 .settings-navigation-card .settings-prototype-menu-items button {
   flex-shrink: 0;
-  min-width: 88px;
+  min-width: 0;
   height: 38px;
   padding: 0 14px;
   border-radius: 7px;
@@ -667,9 +667,11 @@ input:focus-visible {
   text-transform: uppercase;
 }
 .settings-navigation-card .settings-prototype-menu-divider {
+  flex: 0 0 1px;
   width: 1px;
+  height: auto;
   align-self: stretch;
-  margin: 4px;
+  margin: 4px 0;
   background: var(--line);
 }
 @media (max-width: 900px) and (min-width: 601px) {
@@ -697,7 +699,7 @@ input:focus-visible {
     width: 100%;
   }
   .settings-navigation-card .settings-prototype-menu-items button {
-    min-width: 70px;
+    padding: 0 8px;
   }
 }
 

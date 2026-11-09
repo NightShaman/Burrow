@@ -19,7 +19,9 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:42817',
+      // Preserve the browser-facing authority so backend origin checks compare
+      // Origin with the Vite host, not the loopback proxy target.
+      '/api': { target: 'http://127.0.0.1:42817', changeOrigin: false },
     },
   },
   preview: {
