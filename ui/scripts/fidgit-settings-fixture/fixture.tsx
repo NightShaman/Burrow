@@ -217,7 +217,29 @@ let providers = [
     apiKey: '',
     apiKeyConfigured: true,
     models: ['google-0', 'google-1', 'google-2'],
-    connectionModels: models('google'),
+    connectionModels: models('google').map((model) => ({
+      ...model,
+      supportedGenerationMethods: [
+        'generateContent',
+        'countTokens',
+        'createCachedContent',
+        'batchGenerateContent',
+      ],
+      googleMetadata: {
+        name: `models/${model.id}`,
+        version: '001',
+        description:
+          'Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.',
+        inputTokenLimit: 1048576,
+        outputTokenLimit: 65536,
+        thinking: false,
+        temperature: 0,
+        maxTemperature: 2,
+        topP: 0.95,
+        topK: 64,
+        metadataSource: 'https://ai.google.dev/api/models',
+      },
+    })),
   },
   {
     id: 'anthropic',

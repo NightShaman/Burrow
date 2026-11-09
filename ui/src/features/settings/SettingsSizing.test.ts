@@ -94,3 +94,22 @@ it('opts action buttons into compact sizing without shrinking selection tiles', 
     /\.settings-content-standard \.settings-action\s*\{\s*width: auto;\s*max-width: 100%;\s*justify-self: end;/,
   );
 });
+
+it('themes read-only provider metadata textareas in the Models workspace', () => {
+  const rule = models.match(
+    /\.models-workspace \.model-capability-editor > \.saved-accordion textarea \{([^}]+)\}/,
+  )?.[1];
+  expect(rule).toBeTruthy();
+  for (const declaration of [
+    'background: var(--surface-input);',
+    'color: var(--text);',
+    'border: 1px solid var(--line);',
+    'border-radius: 6px;',
+    'font: inherit;',
+    'resize: vertical;',
+    'box-sizing: border-box;',
+    'width: 100%;',
+    'min-width: 0;',
+  ])
+    expect(rule).toContain(declaration);
+});

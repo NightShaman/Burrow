@@ -223,6 +223,21 @@
 .models-workspace .model-capability-provenance {
   grid-column: 1 / -1;
 }
+/* Provider metadata lives outside .settings-view; keep its read-only textareas
+   on the same themed surface as the adjacent Settings inputs. */
+.models-workspace .model-capability-editor > .saved-accordion textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+  resize: vertical;
+}
 .models-workspace .model-context-window {
   grid-column: 1;
   grid-row: 2;
