@@ -402,8 +402,14 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
         .map(({ agentId, sessionId, runId, startedAt, source }) => ({ agentId, sessionId, runId, startedAt,
           status: 'response_pending', source }))] };
     },
-    async listAgents() {
-      return await withStore('agents', async (store) => (await store.list()).filter(agent => !agent.modAgent || agent.modAgent.visibility.agents).map(({ id, name, enabled }) => ({ id, name, enabled })));
+    async listAgents(input = {}) {
+      const value = exactKeys(plain(input), ['includeHidden']);
+      if (value.includeHidden !== undefined && typeof value.includeHidden !== 'boolean') invalid();
+      // Panel visibility is presentation, not an identity/history access boundary.
+      // Existing consumers keep the visible directory unless they opt in.
+      return await withStore('agents', async (store) => (await store.list())
+        .filter(agent => value.includeHidden || !agent.modAgent || agent.modAgent.visibility.agents)
+        .map(({ id, name, enabled }) => ({ id, name, enabled })));
     },
     async getOperatorIdentity() {
       // Deliberately project only public display identity. Avatars and the rest of
