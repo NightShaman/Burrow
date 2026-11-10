@@ -111,9 +111,11 @@ Changing filters or leaving Archive cancels its reads, not durable chat/jobs. A 
 ## Generate media in Forge
 
 1. Open **Forge** and choose **Image**, **Speech**, or **Music**.
-2. Select an available model, enter a prompt or speech script, and click **Generate**. Generation uses your configured provider and may incur its charges.
+2. Select **Provider**, then an available **Model**, enter a prompt or speech script, and click **Generate**. The model list is filtered to that saved connection and media mode. Generation uses your configured provider and may incur its charges.
 3. Check the job's status. When it succeeds, preview or **Download** the output. **Attach to conversation** adds it to the selected chat session.
 4. Use **Recents** to revisit earlier jobs and **Refresh** if needed.
+
+Checked **10 November 2026**: changing Provider saves its first available model as an explicit connection/model pair for the current media mode. Duplicate provider names include their connection IDs, so identical labels do not merge their models. Both selectors are disabled while saving and retain the saved pair if the write fails. A saved unavailable pair remains visibly unavailable rather than silently becoming another selection.
 
 Model availability depends on your connections. This release has no video provider contract; the Video tab is not a promise of working video generation. Arbitrary source attachments and provider-specific tuning remain unsupported; explicitly selected canonical reference photos are the supported exception described below. The animated pressure gauge is decorative, not progress.
 

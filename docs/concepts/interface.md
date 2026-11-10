@@ -295,7 +295,7 @@ Brains search searches saved memories, not conversation transcripts. The old Alb
 
 Forge provides **Image**, **Video**, **Speech**, **Music**, and **Recents** views. Available generation models come from `GET /api/forge/catalog`; a visible mode may have no supported or configured model. In particular, the interface explicitly represents unavailable video and source-attachment capabilities.
 
-Choose an available model, enter the prompt or speech script, and start generation. Music has separate musical-direction and optional lyrics inputs; lyrics are guidance rather than a guarantee of verbatim output. `POST /api/forge/jobs` accepts the job, and the UI polls queued or running jobs. Inspect the resulting artifact or failure details. **Attach to conversation** uses the current agent and session, so verify that destination first.
+Choose **Provider**, then an available **Model** for that connection and media mode, enter the prompt or speech script, and start generation. Music has separate musical-direction and optional lyrics inputs; lyrics are guidance rather than a guarantee of verbatim output. `POST /api/forge/jobs` accepts the job, and the UI polls queued or running jobs. Inspect the resulting artifact or failure details. **Attach to conversation** uses the current agent and session, so verify that destination first.
 
 Supported PNG, JPEG, GIF and WebP artifacts up to 20 MiB also offer **Copy reference**. Paste the resulting `[forge:job-id:artifact-id]` into a chat so the agent can inspect that retained original with `attachment_view`, without attaching a new chat copy. It is a reference within the same operator-owned Burrow, not a public URL or a backup. Deleted or unavailable originals cannot be reopened. See [Forge references](../guide/everyday-use.md#reuse-a-forge-image-in-another-chat).
 
@@ -406,3 +406,10 @@ The interface restores preferences before mounting the workspace. Existing brows
 In **Group Chat**, choose **Delete** beside the room, then **Delete group** to confirm or **Keep group** to cancel. Deletion stops active room replies and removes the room metadata and shared transcript. Individual chats and participant sessions remain. Matching open tabs disappear only after confirmed success; a failure leaves the room available for retry. Existing scheduled jobs are not removed. If an integration delivers scheduled work into this room, disable or retarget it deliberately: later deliveries fail rather than recreate the room. The native scheduler has no group-room destination field.
 
 Code-block copy controls sit below each block in a non-scrolling footer. Leading empty display lines are hidden, while copied source retains them and preserves indentation and internal blank lines.
+
+
+## 10 November interface delta
+
+Forge now has separate Provider and Model selectors. Changing Provider saves the first available model on that connection for the current mode. Duplicate connection names are disambiguated by ID. Failed saves preserve the saved pair; unavailable saved selections remain visible and do not silently fall back. See [the operator workflow](../guide/everyday-use.md#generate-media-in-forge).
+
+Peer A2A messages use a saved sender avatar when the current registry resolves `fromAgentId` to that agent's ID or runtime resource ID. Unknown senders and empty portraits retain an initial fallback; matching a display name alone is insufficient. This display change does not alter message attribution or routing. Provider metadata in Models remains read-only, with short fields paired and longer descriptions or structured values using wider fields. Earlier screenshots remain historical illustrations.

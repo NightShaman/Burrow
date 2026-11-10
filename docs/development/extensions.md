@@ -118,3 +118,13 @@ Events contain only `cursor`, `agentId`, `sessionId`, `runId`, `source`, `origin
 Checked **9 November 2026**: creating a mod-owned agent provisions an empty `default` conversation in the same transaction as its registry/model ownership. Session listing repairs an identity only when it has no conversation sessions at all. An agent with other sessions does not receive a resurrected default, including when its default was deliberately archived or deleted. This does not change mod ownership or bypass model/permission validation.
 
 Anthropic projects composed tool schemas into provider-compatible object roots while the original runtime/IPC schema remains authoritative. Do not weaken a mod's input validation to imitate that wire projection; see [provider conversion](../concepts/models.md#anthropic-tool-schema-and-image-conversion).
+
+## Discover hidden agent identities explicitly
+
+Checked **10 November 2026**: `context.agents.list()` keeps the panel-visible directory by default. `context.agents.list({ includeHidden: true })` includes registered identities hidden from the Agents panel, such as mod-owned residents. Both modes retain disabled identities with `enabled: false` for historical attribution; callers must separately decide which enabled identities can be selected.
+
+The option must be a boolean. Unknown keys, non-object inputs and nonboolean `includeHidden` values are rejected. The result remains only `{ id, name, enabled }`: no profiles, ownership, capabilities or visibility settings are exposed. Discovery does not change panel visibility, enable an identity or grant authority to act as it. This is the generic mod directory, not native A2A discovery or a new HTTP route.
+
+## Mod-panel API query strings
+
+Checked **10 November 2026**: a main mod panel's scoped `api(path, init?)` forwards query strings under `/api/mods/<declaring-mod-id>`, matching the Archive host's query support. Build filter/cursor values with `URLSearchParams`; do not interpolate unescaped values. The path rejects `..`, backslashes, encoded dot/slash/backslash sequences and fragments. These path checks do not reject the same encoded characters inside query values, and they do not replace endpoint authorization. A Core-looking path or absolute URL passed to this helper remains under the declaring mod's prefix, not an unscoped request.

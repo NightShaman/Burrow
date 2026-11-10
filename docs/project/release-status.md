@@ -123,3 +123,10 @@ Before publication, the additional changes in assembly **2026.11.08.7** (`79c434
 Compared the successful 8 November source baseline through assembly **2026.11.08.19** (`20523845840bb4763e0fe137d603a7f54d8c5a9d`), Core `a799735c9b0d7fbdeb49dcebfc7acb798356d476` and UI `a7c081019a91f91c038ec2ed65b9b1ab3a50f666`. This pass reconciles operator-wide workspace preference persistence/retry, confirmed group-room deletion and retained participant history, mod-owned initial-session repair, Anthropic schema/image conversion and provider-pool continuation headroom/replay, plus code-block copying behavior.
 
 Unchanged pages retain the **8 November** full-review evidence. Source and test definitions were inspected statically; no application tests, live model/chat calls, migrations, runtime changes or release promotion were performed. Installed/public builds may lag development implementation. Historical screenshots and private-source-link exclusions are preserved.
+
+
+## 10 November ordinary delta review
+
+Inspected assembly **2026.11.10.3**, commit `1a59d735bd3142969830431e55183fd8a5130ae4`, records Core `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1` and UI `7656f04568008b6a94b40c1c8b35cc479db39a22`. The ordinary pass reconciles explicit hidden-identity discovery for mods, provider-filtered Forge selection, saved A2A sender avatars and scoped mod-panel query forwarding. Models metadata remains read-only; navigation spacing, theme styling and the application favicon do not change the documentation site's approved artwork or navigation.
+
+The full page review remains dated **8 November**. Source and test definitions were inspected statically; this is not an application/browser test run, provider call, runtime deployment or release promotion. Unchanged sections retain their prior evidence. Public mirrors and installed builds may lag current development source.
