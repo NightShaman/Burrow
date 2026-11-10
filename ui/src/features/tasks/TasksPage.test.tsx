@@ -365,7 +365,13 @@ it('keeps newer create-task text when a queued document upload fails after creat
       <Tasks agents={[]} />
     </ConfirmProvider>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: /New task/ }));
+  // The button exists while the initial project load still disables it.
+  await vi.waitFor(() =>
+    expect((screen.getByRole('button', { name: /New task/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: /New task/ }));
   fireEvent.change(screen.getByRole('textbox', { name: /Title/ }), {
     target: { value: 'Submitted' },
   });
