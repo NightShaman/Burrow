@@ -51,7 +51,13 @@ export function ModPanelHost({ panel }: { panel: ModPanel }) {
           root: node,
           api: <T,>(path: string, init?: RequestInit) => {
             const normalized = path.startsWith('/') ? path : `/${path}`;
-            if (normalized.includes('..') || normalized.includes('?') || normalized.includes('#'))
+            const pathname = normalized.split('?')[0];
+            if (
+              pathname.includes('..') ||
+              normalized.includes('#') ||
+              pathname.includes('\\') ||
+              /%2e|%2f|%5c/i.test(pathname)
+            )
               return Promise.reject(new Error('Invalid mod API path.'));
             return api<T>(`/api/mods/${panel.modId}${normalized}`, init);
           },
