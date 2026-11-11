@@ -284,6 +284,11 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       if (!turn) throw new Error('mod_external_turn_not_found');
       return turn;
     },
+    async readExternalTurnAttachment(input) {
+      if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
+      const value = exactKeys(plain(input), ['turnId', 'attachmentId']);
+      return externalTurnDispatcher.readAttachment(schedulerOwner(), bounded(value.turnId, 96), bounded(value.attachmentId, 1024));
+    },
     async cancelExternalTurn(input) {
       if (!externalTurnDispatcher) throw new Error('mod_external_turns_unavailable');
       const value = exactKeys(plain(input), ['turnId']);

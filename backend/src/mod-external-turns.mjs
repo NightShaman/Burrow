@@ -3,10 +3,12 @@ import { createChatTurnRunId } from './chat-turn-run-id.mjs';
 import { runChatTurnFromBody } from './chat-turn-controller.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
+import { externalTurnOutputAttachments, readExternalTurnOutputAttachment } from './mod-external-turn-output.mjs';
 import { sameExternalTurnInput } from './mod-external-turn-attachments.mjs';
 
-function boundedResult(result = {}) {
+function boundedResult(result = {}, attachments = []) {
   return {
+    attachments,
     answerText: typeof result.answerText === 'string' ? result.answerText.slice(0, 24_000) : null,
     decision: typeof result.decision === 'string' ? result.decision.slice(0, 128) : null,
     blockers: Array.isArray(result.blockers) ? result.blockers.slice(0, 20).map(value => String(value).slice(0, 512)) : [],
@@ -108,10 +110,11 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
           a2a: source === 'a2a' ? a2a : null,
         }) : null,
       });
+      const attachments = await externalTurnOutputAttachments({ conversations: stores.conversations, agentWorkspaceRoot: agentRuntime.agentWorkspaceRoot, agentId: turn.agentId, sessionId: turn.sessionId, runId });
       const outcome = classifyRuntimeOutcome(result, { cancelled: signal.aborted });
       await receipt.complete({
         status: signal.aborted ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
-        result: boundedResult(result),
+        result: boundedResult(result, attachments),
         error: signal.aborted ? cancellationError() : outcome.ok ? null : 'agent_turn_failed',
       });
     } catch {
@@ -159,6 +162,17 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
     async read(ownerModId, id) {
       const turn = await store.getOwned(ownerModId, id);
       return turn ? publicExternalTurn(turn) : null;
+    },
+    async readAttachment(ownerModId, id, attachmentId) {
+      const turn = await store.getOwned(ownerModId, id);
+      if (!turn) throw new Error('mod_external_turn_not_found');
+      // Durable receipt membership, not a caller-provided session/path, is authority.
+      const descriptor = turn.result?.attachments?.find(item => item.id === attachmentId);
+      if (!descriptor) throw new Error('mod_external_turn_attachment_not_found');
+      const runtime = await resolveAgentRuntime(turn.agentId);
+      const result = await readExternalTurnOutputAttachment({ agentWorkspaceRoot: runtime.agentWorkspaceRoot, descriptor });
+      if (!result) throw new Error('mod_external_turn_attachment_not_found');
+      return result;
     },
     stop: (reason) => lifecycle.stop(reason),
     close: (reason) => lifecycle.close(reason),

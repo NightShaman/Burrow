@@ -1,6 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { readArtifactBytesBounded } from './artifact-bytes.mjs';
 import { validateArtifactRoot } from './artifact-root-validation.mjs';
 
 export const ATTACHMENT_RETENTION_DAYS = 30;
@@ -83,24 +84,6 @@ function mimeFromAttachment(attachment = {}, filePath = '') {
   return 'application/octet-stream';
 }
 
-// Read at most the configured budget even if a file grows after resolution.
-async function boundedAttachmentBytes(filePath, limit) {
-  const budget = Number.isSafeInteger(limit) && limit >= 0 ? limit : 0;
-  const handle = await fs.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > budget) return null;
-    const bytes = Buffer.alloc(stat.size);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
-      if (!bytesRead) break;
-      offset += bytesRead;
-    }
-    return bytes.subarray(0, offset);
-  } finally { await handle.close(); }
-}
-
 export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath, attachment = {}, maxTextBytes = 256 * 1024, maxImageBytes = 20 * 1024 * 1024 } = {}) {
   const resolved = await resolveAttachmentArtifact({ agentWorkspaceRoot, artifactPath });
   if (!resolved) return null;
@@ -116,14 +99,14 @@ export async function readAttachmentArtifact({ agentWorkspaceRoot, artifactPath,
   if (type.toLowerCase().startsWith('image/')) {
     const normalizedType = type.toLowerCase();
     if (MODEL_VISIBLE_IMAGE_TYPES.has(normalizedType)) {
-      const bytes = await boundedAttachmentBytes(resolved.filePath, maxImageBytes);
+      const bytes = await readArtifactBytesBounded(resolved.filePath, maxImageBytes);
       if (!bytes) return { ...base, kind: 'binary', unsupportedReason: 'attachment_too_large' };
       return { ...base, type: normalizedType, kind: 'image', dataUrl: `data:${normalizedType};base64,${bytes.toString('base64')}` };
     }
     return { ...base, kind: 'binary', unsupportedReason: 'image_type_not_model_visible', supportedImageTypes: [...MODEL_VISIBLE_IMAGE_TYPES] };
   }
   if (/^(text\/|application\/(json|xml|javascript)|application\/x-ndjson)/i.test(type) && resolved.stat.size <= maxTextBytes) {
-    const bytes = await boundedAttachmentBytes(resolved.filePath, maxTextBytes);
+    const bytes = await readArtifactBytesBounded(resolved.filePath, maxTextBytes);
     if (bytes) return { ...base, kind: 'text', text: bytes.toString('utf8') };
   }
   return { ...base, kind: 'binary' };

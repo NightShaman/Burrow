@@ -35,13 +35,13 @@ export async function executeForgeTool(name, args, context = {}) {
  try {
   const store=requireStore();
   if(name==='forge_catalog') return store.catalog({agentId:context.agentId});
-  if(name==='forge_create_job') return {ok:true,...await store.createAndDeliver({mode:args.mode,connectionId:args.connectionId ?? undefined,modelId:args.modelId ?? undefined,prompt:args.prompt,idempotencyKey:args.idempotencyKey,useAgentReferenceImage:args.useAgentReferenceImage,useOperatorReferenceImage:args.useOperatorReferenceImage,referenceAgentIds:args.referenceAgentIds},{agentId:context.agentId,sessionId:context.sessionId,signal:context.signal})};
+  if(name==='forge_create_job') return {ok:true,...await store.createAndDeliver({mode:args.mode,connectionId:args.connectionId ?? undefined,modelId:args.modelId ?? undefined,prompt:args.prompt,idempotencyKey:args.idempotencyKey,useAgentReferenceImage:args.useAgentReferenceImage,useOperatorReferenceImage:args.useOperatorReferenceImage,referenceAgentIds:args.referenceAgentIds},{agentId:context.agentId,sessionId:context.sessionId,runId:context.runId || null,signal:context.signal})};
   if(name==='forge_list_jobs') return {ok:true,jobs:await store.list()};
   if(name==='forge_inspect_job') return {ok:true,job:store.public(await store.get(args.jobId))};
   if(name==='forge_attach_artifact') {
     const agentId=context.agentId, sessionId=context.sessionId;
     if(typeof agentId!=='string'||!agentId||typeof sessionId!=='string'||!sessionId) throw new Error('forge_context_unavailable');
-    return {ok:true,attachment:await store.attach(args.jobId,{agentId,sessionId,artifactId:args.artifactId},{role:'assistant'})};
+    return {ok:true,attachment:await store.attach(args.jobId,{agentId,sessionId,artifactId:args.artifactId},{role:'assistant',runId:context.runId || null})};
   }
   throw new Error('forge_tool_unsupported');
  } catch (error) { return forgeFailure(error); }
