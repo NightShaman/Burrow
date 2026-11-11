@@ -431,7 +431,9 @@ function messageContentChars(content) {
 
 async function readResponseBytesBounded(response, maxBytes = DEFAULT_MAX_RESPONSE_BYTES) {
   const limit = Number(maxBytes);
-  if (!Number.isSafeInteger(limit) || limit < 0) {
+  // Generated media explicitly opts out of a byte budget with Infinity.
+  // Omitted limits on other callers retain their existing response default.
+  if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit < 0)) {
     await response?.body?.cancel?.();
     return { ok: false, data: Buffer.alloc(0), bytes: 0, error: 'invalid_model_response_budget' };
   }

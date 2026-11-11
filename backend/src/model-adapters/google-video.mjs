@@ -27,7 +27,19 @@ export function googleVideoSupported(config = {}) {
 
 const abortError = () => Object.assign(new Error('google_video_cancelled'), { name: 'AbortError' });
 const timeoutError = () => Object.assign(new Error('google_video_timeout'), { name: 'TimeoutError' });
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// Buffer.from(base64) tolerates junk, so validate the wire encoding first.
+// Scan iteratively: payload-sized repeating regexes exhaust V8's regexp stack.
+function validVideoBase64(value) {
+  if (typeof value !== 'string' || !value.length || value.length % 4 !== 0) return false;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const end = value.length - padding;
+  for (let index = 0; index < end; index++) {
+    const code = value.charCodeAt(index);
+    if (!((code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+      || (code >= 48 && code <= 57) || code === 43 || code === 47)) return false;
+  }
+  return true;
+}
 
 export function createGoogleVideoAdapter({ config = {}, fetchImpl = globalThis.fetch, idFactory = randomUUID, timeoutMs = 600_000 } = {}) {
   if (typeof fetchImpl !== 'function' || !googleVideoSupported(config)) throw new Error('google_video_contract_unsupported');
@@ -119,7 +131,7 @@ export function createGoogleVideoAdapter({ config = {}, fetchImpl = globalThis.f
           let remaining = budgets.total;
           for (const video of videos) {
             if (video.mime_type !== 'video/mp4') throw new Error('google_video_mime_unsupported');
-            if (typeof video.data !== 'string' || !video.data.length || !BASE64.test(video.data)) throw new Error('google_video_payload_unsupported');
+            if (!validVideoBase64(video.data)) throw new Error('google_video_payload_unsupported');
             const decoded = decodeMedia(video.data, Math.min(remaining, budgets.asset));
             if (!decoded.length) throw new Error('google_video_payload_unsupported');
             remaining -= decoded.length;
