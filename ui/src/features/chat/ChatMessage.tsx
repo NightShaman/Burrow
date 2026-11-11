@@ -15,7 +15,7 @@ import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
 import { cloneElement, isValidElement, useEffect, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import { markdownPlugins, MarkdownTable, MarkdownImage } from '../../app/markdownTables';
 import {
   fetchApi,
@@ -118,7 +118,12 @@ function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
   );
 }
 
-const markdownComponents = { pre: CodeBlock, table: MarkdownTable, img: MarkdownImage };
+const markdownComponents: Components = {
+  pre: CodeBlock,
+  table: MarkdownTable,
+  img: MarkdownImage,
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+};
 
 function Markdown({ children }: { children: string }) {
   return (
