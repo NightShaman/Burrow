@@ -434,7 +434,10 @@ export function Forge({
   const activeModel = availableModels.find((model) => modelKey(model) === selectedModel);
   const imageCapability = mode === 'image' ? activeModel?.imageOptions : undefined;
   const imageScope = JSON.stringify([mode, selectedModel, imageCapability]);
-  const imageDraft = imageState?.scope === imageScope ? imageState.draft : defaultImageDraft();
+  const imageDraft =
+    imageState?.scope === imageScope
+      ? imageState.draft
+      : defaultImageDraft(imageCapability?.outputFormats);
   const imageError = imageCapability ? imageDraftError(imageDraft) : '';
   useEffect(() => {
     setImageState(null);

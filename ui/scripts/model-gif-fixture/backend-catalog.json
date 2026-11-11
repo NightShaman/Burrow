@@ -1,0 +1,116 @@
+{
+  "ok": true,
+  "models": [
+    {
+      "imageOptions": {
+        "outputFormats": [
+          "png",
+          "jpeg",
+          "webp"
+        ],
+        "sizes": [
+          "auto",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ]
+      },
+      "connectionId": "capability-fixture",
+      "modelId": "still-only",
+      "label": "Still only",
+      "kind": "image",
+      "available": true,
+      "unavailableReason": null,
+      "controls": [],
+      "agentReferenceImage": {
+        "available": true,
+        "reason": null
+      }
+    },
+    {
+      "imageOptions": {
+        "outputFormats": [
+          "gif"
+        ],
+        "sizes": [
+          "auto",
+          "640x640",
+          "768x512",
+          "512x768"
+        ],
+        "frameCount": {
+          "min": 2,
+          "max": 16,
+          "default": 9
+        },
+        "frameDurationMs": {
+          "min": 20,
+          "max": 2000,
+          "step": 10,
+          "default": 200
+        }
+      },
+      "connectionId": "capability-fixture",
+      "modelId": "gif-only",
+      "label": "GIF only",
+      "kind": "image",
+      "available": true,
+      "unavailableReason": null,
+      "controls": [],
+      "agentReferenceImage": {
+        "available": true,
+        "reason": null
+      }
+    },
+    {
+      "imageOptions": {
+        "outputFormats": [
+          "png",
+          "jpeg",
+          "webp",
+          "gif"
+        ],
+        "sizes": [
+          "auto",
+          "640x640",
+          "768x512",
+          "512x768"
+        ],
+        "frameCount": {
+          "min": 2,
+          "max": 16,
+          "default": 9
+        },
+        "frameDurationMs": {
+          "min": 20,
+          "max": 2000,
+          "step": 10,
+          "default": 200
+        }
+      },
+      "connectionId": "capability-fixture",
+      "modelId": "mixed-image-gif",
+      "label": "Image + GIF",
+      "kind": "image",
+      "available": true,
+      "unavailableReason": null,
+      "controls": [],
+      "agentReferenceImage": {
+        "available": true,
+        "reason": null
+      }
+    }
+  ],
+  "music": {
+    "available": false,
+    "reason": "music_model_not_configured"
+  },
+  "sourceAttachments": {
+    "available": false,
+    "reason": "source_attachments_unsupported"
+  },
+  "video": {
+    "available": false,
+    "reason": "video_provider_contract_unavailable"
+  }
+}

@@ -10,6 +10,12 @@ import {
 afterEach(cleanup);
 const gif = () => ({ ...defaultImageDraft(), outputFormat: 'gif' as const });
 describe('per-job Forge image options', () => {
+  it('defaults to a supported format while preferring the legacy PNG path', () => {
+    expect(defaultImageDraft(['gif']).outputFormat).toBe('gif');
+    expect(defaultImageDraft(['gif', 'png']).outputFormat).toBe('png');
+    expect(defaultImageDraft(['jpeg', 'webp']).outputFormat).toBe('jpeg');
+    expect(defaultImageDraft().outputFormat).toBe('png');
+  });
   it('preserves still defaults and sends only applicable fields', () => {
     expect(imageDraftOptions(defaultImageDraft())).toBeUndefined();
     expect(imageDraftOptions({ ...gif(), outputFormat: 'jpeg' })).toEqual({ outputFormat: 'jpeg' });

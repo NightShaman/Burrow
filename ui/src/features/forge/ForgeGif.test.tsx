@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { Forge } from './ForgePage';
+import backendCatalog from '../../../scripts/model-gif-fixture/backend-catalog.json';
 const apiMock = vi.hoisted(() => vi.fn());
 vi.mock('../../app/api', () => ({ api: apiMock, fetchApi: vi.fn() }));
 const capability = { outputFormats: ['png', 'jpeg', 'webp', 'gif'], sizes: ['auto', '1024x1024'] };
@@ -19,12 +20,13 @@ const models = [
 ];
 let posts: Record<string, unknown>[];
 let fail: boolean;
-function setup() {
+function setup(initialModels = models, initialSelections = {}) {
   posts = [];
   fail = false;
-  let selections = {};
+  let selections = initialSelections;
+  let catalogModels = initialModels;
   apiMock.mockImplementation((path: string, init?: RequestInit) => {
-    if (path.endsWith('/catalog')) return Promise.resolve({ models });
+    if (path.endsWith('/catalog')) return Promise.resolve({ models: catalogModels });
     if (path.endsWith('/selections')) {
       if (init?.method === 'PUT') {
         const { mode, ...pair } = JSON.parse(String(init.body));
@@ -56,6 +58,9 @@ function setup() {
       <Forge selectedAgentId="a" sessionId="s" />
     </ConfirmProvider>,
   );
+  return (nextModels: typeof models) => {
+    catalogModels = nextModels;
+  };
 }
 const choose = (value: string) =>
   fireEvent.change(screen.getByLabelText('Output format'), { target: { value } });
@@ -65,13 +70,13 @@ const submit = () => fireEvent.click(screen.getByRole('button', { name: 'Generat
 async function ready() {
   await screen.findByLabelText('Output format');
 }
-async function model(id: string) {
+async function model(id: string, connectionId = 'c') {
   fireEvent.change(screen.getByLabelText('Forge model'), {
-    target: { value: JSON.stringify(['c', id]) },
+    target: { value: JSON.stringify([connectionId, id]) },
   });
   await waitFor(() =>
     expect((screen.getByLabelText('Forge model') as HTMLSelectElement).value).toBe(
-      JSON.stringify(['c', id]),
+      JSON.stringify([connectionId, id]),
     ),
   );
 }
@@ -195,5 +200,77 @@ describe('capability-driven animated GIF jobs', () => {
     submit();
     await waitFor(() => expect(posts).toHaveLength(3));
     expect(posts[2].idempotencyKey).not.toBe(posts[0].idempotencyKey);
+  });
+});
+
+describe('real backend configured-output catalog in Forge', () => {
+  const selection = { image: { connectionId: 'capability-fixture', modelId: 'gif-only' } };
+  it('initializes GIF-only to GIF and explicitly submits GIF options, including after acceptance', async () => {
+    setup(backendCatalog.models, selection);
+    await ready();
+    expect((screen.getByLabelText('Output format') as HTMLSelectElement).value).toBe('gif');
+    expect(
+      [...screen.getByLabelText<HTMLSelectElement>('Output format').options].map((o) => o.value),
+    ).toEqual(['gif']);
+    expect(screen.getByText('Duration: 1.8 s')).toBeTruthy();
+    for (let count = 1; count <= 2; count++) {
+      prompt();
+      submit();
+      await waitFor(() => expect(posts).toHaveLength(count));
+      await waitFor(() =>
+        expect(screen.getByLabelText<HTMLTextAreaElement>('Prompt').value).toBe(''),
+      );
+      expect(posts[count - 1]).toMatchObject({
+        connectionId: 'capability-fixture',
+        modelId: 'gif-only',
+        imageOptions: { outputFormat: 'gif', frameCount: 9, frameDurationMs: 200, size: 'auto' },
+      });
+      expect(screen.getByLabelText<HTMLSelectElement>('Output format').value).toBe('gif');
+    }
+  });
+  it('switches from GIF-only to still or mixed models with untouched PNG/default omission', async () => {
+    setup(backendCatalog.models, selection);
+    await ready();
+    fireEvent.change(screen.getByLabelText('Frames'), { target: { value: '12' } });
+    for (const id of ['still-only', 'mixed-image-gif']) {
+      await model(id, 'capability-fixture');
+      expect(screen.getByLabelText<HTMLSelectElement>('Output format').value).toBe('png');
+      expect(screen.queryByLabelText('Frames')).toBeNull();
+      prompt();
+      submit();
+      await waitFor(() => expect(posts.at(-1)?.modelId).toBe(id));
+      await waitFor(() =>
+        expect(screen.getByLabelText<HTMLTextAreaElement>('Prompt').value).toBe(''),
+      );
+      expect(posts.at(-1)).not.toHaveProperty('imageOptions');
+    }
+    await model('gif-only', 'capability-fixture');
+    expect(screen.getByLabelText<HTMLInputElement>('Frames').value).toBe('9');
+  });
+  it('resets a GIF draft when refreshed catalog removes GIF or image options entirely', async () => {
+    const replaceModels = setup(backendCatalog.models, selection);
+    await ready();
+    fireEvent.change(screen.getByLabelText('Frames'), { target: { value: '12' } });
+    replaceModels(
+      backendCatalog.models.map((m) =>
+        m.modelId === 'gif-only'
+          ? { ...m, imageOptions: backendCatalog.models[0].imageOptions }
+          : m,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(screen.queryByLabelText('Frames')).toBeNull());
+    expect(screen.getByLabelText<HTMLSelectElement>('Output format').value).toBe('png');
+    prompt();
+    submit();
+    await screen.findByText('Forge job accepted.');
+    expect(posts[0]).not.toHaveProperty('imageOptions');
+    replaceModels(backendCatalog.models.map(({ imageOptions: _, ...m }) => m));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(screen.queryByLabelText('Output format')).toBeNull());
+    prompt();
+    submit();
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).not.toHaveProperty('imageOptions');
   });
 });

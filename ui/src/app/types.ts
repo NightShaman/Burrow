@@ -157,6 +157,9 @@ export type SavedProvider = {
   modelContextWindowOverrides?: Record<string, number>;
   modelDiscoveredInputs?: Record<string, ('text' | 'image')[]>;
   modelInputOverrides?: Record<string, ('text' | 'image')[]>;
-  modelDiscoveredOutputs?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]>;
-  modelOutputOverrides?: Record<string, ('text' | 'audio' | 'image' | 'video' | 'file')[]>;
+  modelDiscoveredOutputs?: Record<
+    string,
+    ('text' | 'audio' | 'image' | 'gif' | 'video' | 'file')[]
+  >;
+  modelOutputOverrides?: Record<string, ('text' | 'audio' | 'image' | 'gif' | 'video' | 'file')[]>;
 };

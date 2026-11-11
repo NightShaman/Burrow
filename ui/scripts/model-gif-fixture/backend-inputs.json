@@ -1,0 +1,47 @@
+[
+  {
+    "id": "capability-fixture",
+    "name": "Compatible image API",
+    "provider": "Operator proxy",
+    "apiType": "openai-responses",
+    "models": [
+      {
+        "id": "still-only",
+        "name": "Still only",
+        "selected": true,
+        "acceptedInput": [
+          "text",
+          "image"
+        ],
+        "acceptedOutputOverride": [
+          "image"
+        ]
+      },
+      {
+        "id": "gif-only",
+        "name": "GIF only",
+        "selected": true,
+        "acceptedInput": [
+          "text",
+          "image"
+        ],
+        "acceptedOutputOverride": [
+          "gif"
+        ]
+      },
+      {
+        "id": "mixed-image-gif",
+        "name": "Image + GIF",
+        "selected": true,
+        "acceptedInput": [
+          "text",
+          "image"
+        ],
+        "acceptedOutputOverride": [
+          "image",
+          "gif"
+        ]
+      }
+    ]
+  }
+]

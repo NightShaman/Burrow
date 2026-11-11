@@ -90,6 +90,9 @@ describe('Model connection views', () => {
         .closest('.model-output-limit')
         ?.querySelector('.model-capability-title')?.textContent,
     ).toBe('Output token limit');
+    const gif = screen.getByRole('checkbox', { name: 'Output gif' }) as HTMLInputElement;
+    expect(gif.disabled).toBe(true);
+    expect(gif.checked).toBe(false);
     expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(
       screen.getByText('Source: models.dev · match OpenAI / gpt-4o · snapshot 9/26/2026'),
@@ -154,6 +157,10 @@ describe('Model connection views', () => {
     );
     fireEvent.click(audio);
     expect(onToggleModelOutput).toHaveBeenCalledWith('text-model', 'audio');
+    const gif = screen.getByRole('checkbox', { name: 'Output gif' }) as HTMLInputElement;
+    expect(gif.disabled).toBe(false);
+    fireEvent.click(gif);
+    expect(onToggleModelOutput).toHaveBeenCalledWith('text-model', 'gif');
   });
 
   it('renders output manual changes when the editor state updates', () => {
@@ -189,6 +196,11 @@ describe('Model connection views', () => {
     expect(audio.checked).toBe(true);
     fireEvent.click(text);
     expect(text.checked).toBe(false);
+    const gif = screen.getByRole('checkbox', { name: 'Output gif' }) as HTMLInputElement;
+    fireEvent.click(gif);
+    expect(gif.checked).toBe(true);
+    fireEvent.click(gif);
+    expect(gif.checked).toBe(false);
   });
 
   it('renders saved authentication details and delegates provider actions', () => {

@@ -151,9 +151,9 @@ export type RuntimeModel = {
   contextWindowMode?: 'auto' | 'manual';
   manual?: boolean;
   acceptedInput?: ('text' | 'image')[];
-  acceptedOutput?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
-  discoveredOutput?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
-  acceptedOutputOverride?: ('text' | 'audio' | 'image' | 'video' | 'file')[];
+  acceptedOutput?: ('text' | 'audio' | 'image' | 'gif' | 'video' | 'file')[];
+  discoveredOutput?: ('text' | 'audio' | 'image' | 'gif' | 'video' | 'file')[];
+  acceptedOutputOverride?: ('text' | 'audio' | 'image' | 'gif' | 'video' | 'file')[];
   inputCapabilityOverrides?: Partial<Record<'text' | 'image', 'auto' | 'enabled' | 'disabled'>>;
   discoveredInput?: ('text' | 'image')[];
   acceptedInputOverride?: ('text' | 'image')[];

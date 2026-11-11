@@ -337,6 +337,60 @@ describe('useModelConnectionEditor', () => {
     expect(result.current.availableModels[0].acceptedInputOverride).toBeUndefined();
   });
 
+  it.each([{ outputs: ['gif'] }, { outputs: ['image', 'gif'] }] as const)(
+    'hydrates and saves configured GIF outputs %j without provider or model-name inference',
+    async ({ outputs }) => {
+      apiMock.mockResolvedValue({});
+      const { result } = renderEditor();
+      const provider: SavedProvider = {
+        ...savedProvider,
+        apiType: 'openai-compatible',
+        models: ['arbitrary-model-id'],
+        modelDiscoveredOutputs: { 'arbitrary-model-id': ['image'] },
+        modelOutputOverrides: { 'arbitrary-model-id': [...outputs] },
+      };
+      act(() => result.current.editProvider(provider));
+      expect(result.current.availableModels[0]).toEqual(
+        expect.objectContaining({
+          acceptedOutput: outputs,
+          acceptedOutputOverride: outputs,
+          discoveredOutput: ['image'],
+        }),
+      );
+      await act(() => result.current.saveProvider());
+      const payload = JSON.parse(apiMock.mock.calls[0][1]!.body as string);
+      expect(payload.models[0]).toEqual(
+        expect.objectContaining({
+          id: 'arbitrary-model-id',
+          acceptedOutput: outputs,
+          acceptedOutputOverride: outputs,
+        }),
+      );
+    },
+  );
+
+  it('toggles GIF independently, and Auto removes the override and restores discovered output', () => {
+    const { result } = renderEditor();
+    act(() =>
+      result.current.editProvider({
+        ...savedProvider,
+        models: ['vision'],
+        modelDiscoveredOutputs: { vision: ['image'] },
+      }),
+    );
+    act(() => result.current.setModelOutputAuto('vision', false));
+    act(() => result.current.toggleModelOutput('vision', 'gif'));
+    expect(result.current.availableModels[0].acceptedOutputOverride).toEqual(['image', 'gif']);
+    act(() => result.current.toggleModelOutput('vision', 'image'));
+    expect(result.current.availableModels[0].acceptedOutputOverride).toEqual(['gif']);
+    act(() => result.current.toggleModelOutput('vision', 'gif'));
+    expect(result.current.availableModels[0].acceptedOutputOverride).toEqual([]);
+    act(() => result.current.toggleModelOutput('vision', 'gif'));
+    act(() => result.current.setModelOutputAuto('vision', true));
+    expect(result.current.availableModels[0].acceptedOutputOverride).toBeUndefined();
+    expect(result.current.availableModels[0].acceptedOutput).toEqual(['image']);
+  });
+
   const fillTokens = (editor: ReturnType<typeof useModelConnectionEditor>) => {
     editor.setOauthIdToken(' id-secret ');
     editor.setOauthAccessToken(' access-secret ');

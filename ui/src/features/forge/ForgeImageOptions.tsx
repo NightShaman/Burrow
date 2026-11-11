@@ -11,8 +11,8 @@ export type ImageDraft = {
   frameDurationMs: string;
   size: string;
 };
-export const defaultImageDraft = (): ImageDraft => ({
-  outputFormat: 'png',
+export const defaultImageDraft = (formats?: readonly ImageOutputFormat[]): ImageDraft => ({
+  outputFormat: !formats || formats.includes('png') ? 'png' : (formats[0] ?? 'png'),
   frameCount: '9',
   frameDurationMs: '200',
   size: 'auto',

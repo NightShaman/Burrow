@@ -427,7 +427,10 @@ export function useModelConnectionEditor({
       }),
     );
 
-  const toggleModelOutput = (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') =>
+  const toggleModelOutput = (
+    id: string,
+    output: 'text' | 'audio' | 'image' | 'gif' | 'video' | 'file',
+  ) =>
     setAvailableModels((all) =>
       all.map((model) => {
         if (model.id !== id) return model;

@@ -138,7 +138,10 @@ export function ModelCapabilityEditor({
   model: RuntimeModel;
   onToggleModelInput: (id: string, input: 'text' | 'image') => void;
   onSetModelInputAuto: (id: string, enabled: boolean) => void;
-  onToggleModelOutput: (id: string, output: 'text' | 'audio' | 'image' | 'video' | 'file') => void;
+  onToggleModelOutput: (
+    id: string,
+    output: 'text' | 'audio' | 'image' | 'gif' | 'video' | 'file',
+  ) => void;
   onSetModelOutputAuto: (id: string, enabled: boolean) => void;
   onSetModelContextAuto?: (id: string, enabled: boolean) => void;
   onSetModelContextOverride?: (id: string, value: number | undefined) => void;
@@ -189,7 +192,7 @@ export function ModelCapabilityEditor({
         auto={outputAuto}
         onAutoChange={(enabled) => onSetModelOutputAuto(model.id, enabled)}
       >
-        {(['text', 'audio', 'image', 'video', 'file'] as const).map((value) => (
+        {(['text', 'audio', 'image', 'gif', 'video', 'file'] as const).map((value) => (
           <label key={value}>
             <input
               type="checkbox"
