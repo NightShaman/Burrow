@@ -363,3 +363,47 @@ it.each([undefined, 0, -1])(
     ).toMatchObject({ shouldRefresh: false, hadRuns: false, runtimeRun: null });
   },
 );
+
+it.each([
+  { type: 'tool.started', ok: undefined, status: 'pending', overall: 'running' },
+  { type: 'tool.completed', ok: true, status: 'ok', overall: 'ok' },
+  { type: 'tool.completed', ok: false, status: 'error', overall: 'warn' },
+])(
+  'recovers explicit mod identity for $type/$status without payloads',
+  ({ type, ok, status, overall }) => {
+    const { runtimeRun } = projectChatActivity(
+      {
+        ok: true,
+        runs: [
+          {
+            status: 'running',
+            runId: 'r',
+            agentId: 'a',
+            sessionId: 'parent',
+            progress: [
+              {
+                type,
+                data: {
+                  tool: 'mod_agent_tool',
+                  modToolName: 'notebook',
+                  activityId: 'mod-1',
+                  ok,
+                  detail: 'private-payload',
+                  output: 'private-payload',
+                  arguments: { name: 'private-payload' },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      selection,
+    );
+    expect(runtimeRun?.toolActivity).toEqual({
+      runId: 'r',
+      status: overall,
+      items: [{ id: 'mod-1', label: 'notebook', status }],
+    });
+    expect(JSON.stringify(runtimeRun)).not.toContain('private-payload');
+  },
+);

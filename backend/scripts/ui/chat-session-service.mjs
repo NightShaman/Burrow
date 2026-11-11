@@ -56,6 +56,7 @@ export function publicChatProgress(record = {}) {
         rawTool: payload.tool || null,
         provider: payload.provider || null,
         mcpToolName: payload.mcpToolName || null,
+        modToolName: typeof payload.modToolName === 'string' ? payload.modToolName.trim() || null : null,
         skillId: payload.skillId || null,
         skillName: payload.skillName || null,
         activityId: payload.activityId || null,

@@ -47,7 +47,7 @@ export function compactChatToolLoop(loop = null) {
 
 function activityLabel(result = {}) {
   const tool = String(result.tool || '').trim();
-  if (tool === 'mcp_call' || tool === 'load_skill') return toolActivityPresentation(result).label;
+  if (tool === 'mcp_call' || tool === 'mod_agent_tool' || tool === 'load_skill') return toolActivityPresentation(result).label;
   const filePath = String(result.filePath || result.path || '').trim();
   const command = String(result.command || '').trim();
   if (tool === 'files_read' && filePath) return `Reading ${filePath.split('/').pop()}`;
@@ -69,7 +69,7 @@ function activityLabel(result = {}) {
 }
 
 function activityDetail(result = {}) {
-  if (result.tool === 'mcp_call' || result.tool === 'load_skill') return toolActivityPresentation(result).detail || '';
+  if (result.tool === 'mcp_call' || result.tool === 'mod_agent_tool' || result.tool === 'load_skill') return toolActivityPresentation(result).detail || '';
   return String(result.filePath || result.path || result.dirPath || result.command || result.error || '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -79,6 +79,7 @@ function activityGroupKey(result = {}) {
   const tool = String(result.tool || '').trim();
   const target = String(result.filePath || result.path || result.dirPath || result.cwd || result.command || result.mcpToolName || '').replace(/\s+/g, ' ').trim();
   if (tool === 'mcp_call') return `${tool}|${result.provider || ''}|${result.mcpToolName || ''}`;
+  if (tool === 'mod_agent_tool') return `${tool}|${result.modToolName || ''}`;
   if (tool === 'load_skill') return `${tool}|${result.skill?.id || result.skillId || ''}`;
   return `${tool}|${target || activityDetail(result)}`;
 }

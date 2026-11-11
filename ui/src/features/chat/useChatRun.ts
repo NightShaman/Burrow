@@ -36,6 +36,7 @@ type StreamToolEvent = {
   detail?: unknown;
   provider?: unknown;
   mcpToolName?: unknown;
+  modToolName?: unknown;
   skillId?: unknown;
   skillName?: unknown;
   version?: unknown;

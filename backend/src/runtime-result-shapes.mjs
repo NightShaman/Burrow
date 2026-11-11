@@ -208,6 +208,7 @@ export function summarizeToolResults(toolResults = []) {
     provider: typeof toolResult.provider === 'string' ? compactText(toolResult.provider, 120) : undefined,
     connectionId: toolResult.tool === 'mcp_call' ? undefined : (typeof toolResult.connectionId === 'string' ? compactText(toolResult.connectionId, 120) : undefined),
     mcpToolName: typeof toolResult.mcpToolName === 'string' ? compactText(toolResult.mcpToolName, 240) : undefined,
+    modToolName: toolResult.tool === 'mod_agent_tool' && typeof toolResult.modToolName === 'string' ? compactText(toolResult.modToolName, 240) : undefined,
     nextCursor: typeof toolResult.nextCursor === 'string' ? compactText(toolResult.nextCursor, 120) : undefined,
     totalCount: Number.isFinite(Number(toolResult.totalCount)) ? Number(toolResult.totalCount) : undefined,
     providers: Array.isArray(toolResult.providers)

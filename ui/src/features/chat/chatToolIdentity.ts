@@ -1,8 +1,9 @@
-/** Only explicit identity metadata belongs in MCP/skill activity, never payloads. */
+/** Only explicit identity metadata belongs in MCP/mod/skill activity, never payloads. */
 export function chatToolIdentity(data: {
   tool?: unknown;
   provider?: unknown;
   mcpToolName?: unknown;
+  modToolName?: unknown;
   skillId?: unknown;
   skillName?: unknown;
   version?: unknown;
@@ -12,6 +13,9 @@ export function chatToolIdentity(data: {
   if (tool === 'mcp_call') {
     const identity = [text(data.provider), text(data.mcpToolName)].filter(Boolean).join(' · ');
     return { label: identity ? `MCP · ${identity}` : 'MCP call', detail: identity || undefined };
+  }
+  if (tool === 'mod_agent_tool') {
+    return { label: text(data.modToolName) || 'Mod tool' };
   }
   if (tool === 'load_skill') {
     const id = text(data.skillId);

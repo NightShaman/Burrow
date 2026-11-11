@@ -11,11 +11,14 @@ function basename(value = '') {
 export function toolActivityPresentation(input = {}) {
   const payload = input.payload || input;
   const tool = String(payload.tool || '').trim();
-  // Identity only: never derive MCP/skill presentation from arguments or bodies.
+  // Identity only: never derive MCP/mod/skill presentation from arguments or bodies.
   if (tool === 'mcp_call') {
     const provider = compactDetail(payload.provider || payload.mcpProvider);
     const name = compactDetail(payload.mcpToolName);
     return { label: name ? `MCP ${provider ? `${provider} / ` : ''}${name}` : 'MCP call' };
+  }
+  if (tool === 'mod_agent_tool') {
+    return { label: typeof payload.modToolName === 'string' ? compactDetail(payload.modToolName) || 'Mod tool' : 'Mod tool' };
   }
   if (tool === 'load_skill') {
     const id = compactDetail(payload.skillId || payload.skill?.id);

@@ -1,4 +1,5 @@
 import { applyModelRecoveryProgress, modelRecoveryProgress } from './model-recovery-projection.mjs';
+import { toolActivityPresentation } from './tool-activity-labels.mjs';
 import { observeModelRecovery } from './http-operational-log.mjs';
 
 export function activeChatRunKey(agentId, runId) {
@@ -83,7 +84,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
       const progress = recovery || (traceRecord?.type === 'model-recovery' || traceRecord?.publicProgress?.type === 'model.recovery' ? null : traceRecord?.publicProgress) || (['context-compaction-started', 'context-compaction-completed', 'context-compaction-failed'].includes(traceRecord?.type)
         ? { type: traceRecord.type.replace('context-compaction-', 'context.compaction.'), data: payload }
         : traceRecord?.type === 'tool'
-        ? { type: payload.phase === 'start' ? 'tool.started' : 'tool.completed', data: { tool: payload.tool || null, activityId: payload.activityId || null, ok: payload.ok ?? null, status: payload.status || null, label: payload.tool || 'Tool activity' } }
+        ? { type: payload.phase === 'start' ? 'tool.started' : 'tool.completed', data: { tool: payload.tool || null, ...(payload.tool === 'mod_agent_tool' ? { modToolName: typeof payload.modToolName === 'string' ? payload.modToolName.trim() || null : null } : {}), activityId: payload.activityId || null, ok: payload.ok ?? null, status: payload.status || null, label: payload.tool === 'mod_agent_tool' ? toolActivityPresentation(payload).label : payload.tool || 'Tool activity' } }
         : traceRecord?.type === 'model' && payload.stage === 'model-request' ? { type: 'model.started', data: { provider: payload.provider || null, model: payload.model || null } }
           : traceRecord?.type === 'model' && payload.stage === 'model-response' ? { type: 'model.completed', data: { ok: payload.ok === true, status: payload.status || null } } : null);
       if (progress) {

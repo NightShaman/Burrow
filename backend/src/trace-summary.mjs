@@ -212,6 +212,7 @@ function compactPayload(record) {
     executionTarget: payload.executionTarget || null,
     provider: payload.provider || null,
     mcpToolName: payload.mcpToolName || null,
+    modToolName: typeof payload.modToolName === 'string' ? payload.modToolName.trim() || null : null,
     skillId: payload.skillId || null,
     skillName: payload.skillName || null,
     cwd: payload.cwd ? redactText(payload.cwd).slice(0, 1000) : null,

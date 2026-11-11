@@ -3,6 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { Agent, Subagent } from '../../app/types';
 import type { SessionTurn } from '../../app/api';
 import { ChatTranscript } from './ChatTranscript';
+import { A2AActivityCard } from './ChatMessage';
+import { projectChatActivity } from './chatActivityProjection';
 
 afterEach(cleanup);
 const child: Subagent = {
@@ -1619,4 +1621,103 @@ it('resolves a parent A2A portrait without a registry', () => {
   const selected = { ...a2aSender, id: 'kerning', name: 'Kerning' };
   showA2A('hatchet', [], selected);
   expect(screen.getByLabelText('Smatchet → kerning avatar').textContent).toBe('H');
+});
+
+it('renders actual projected mod names live and after saving without changing the activity layout', () => {
+  const activity = projectChatActivity(
+    {
+      ok: true,
+      runs: [
+        {
+          runId: 'mod-run',
+          agentId: parent.id,
+          sessionId: 'default',
+          status: 'running',
+          progress: [
+            {
+              type: 'tool.started',
+              data: { tool: 'mod_agent_tool', modToolName: 'notebook', activityId: 'mod-1' },
+            },
+          ],
+        },
+      ],
+    },
+    { agentId: parent.id, sessionId: 'default', isChildSession: false, hadRuns: false, now: 0 },
+  ).runtimeRun!.toolActivity!;
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    isLoading: false,
+    error: '',
+    liveProgress: [],
+    liveAnswer: '',
+  };
+  const { container, rerender } = render(
+    <ChatTranscript
+      {...props}
+      turns={[]}
+      isSending
+      activeRunId="mod-run"
+      activeToolActivity={activity}
+    />,
+  );
+  expect(container.querySelector('.tool-activity summary strong')?.textContent).toBe('notebook');
+  expect(container.querySelector('.tool-activity-list strong')?.textContent).toBe('notebook');
+  rerender(
+    <ChatTranscript
+      {...props}
+      isSending={false}
+      activeRunId=""
+      turns={[
+        {
+          role: 'assistant',
+          type: 'message',
+          content: 'Done',
+          runId: 'mod-run',
+          metadata: {
+            toolActivity: {
+              ...activity,
+              status: 'ok',
+              items: (activity.items ?? []).map((item) => ({ ...item, status: 'ok' })),
+            },
+          },
+        },
+      ]}
+    />,
+  );
+  expect(container.querySelector('.tool-activity summary strong')?.textContent).toBe(
+    '1 runtime action',
+  );
+  expect(container.querySelector('.tool-activity-list strong')?.textContent).toBe('notebook');
+  expect(container.textContent).not.toContain('mod_agent_tool');
+});
+
+it('uses the same explicit mod identity in A2A activity', () => {
+  const { container } = render(
+    <A2AActivityCard
+      selectedName="Hatchet"
+      activity={{
+        id: 'a2a-mod',
+        status: 'running',
+        recipient: { agentId: 'kerning' },
+        progress: [
+          {
+            type: 'tool.completed',
+            data: {
+              tool: 'mod_agent_tool',
+              modToolName: 'notebook',
+              ok: false,
+              output: 'private-payload',
+              detail: 'private-payload',
+            },
+          },
+        ],
+      }}
+    />,
+  );
+  expect(container.querySelector('.tool-activity-list strong')?.textContent).toBe('notebook');
+  expect(container.querySelector('.tool-dot.error')).toBeTruthy();
+  expect(container.textContent).not.toContain('private-payload');
 });

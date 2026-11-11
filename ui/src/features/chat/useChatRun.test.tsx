@@ -409,21 +409,37 @@ describe('useChatRun', () => {
     );
   });
 
-  it.each([
-    {
-      tool: 'mcp_call',
-      provider: 'Bitwarden',
-      mcpToolName: 'get',
-      expectedLabel: 'MCP · Bitwarden · get',
-      expectedDetail: 'Bitwarden · get',
-    },
-    {
-      tool: 'load_skill',
-      skillId: 'frontend-review',
-      expectedLabel: 'Load skill · frontend-review',
-      expectedDetail: 'frontend-review',
-    },
-  ])('shows only safe identity for $tool in tool activity', async (identity) => {
+  it.each(
+    [
+      {
+        tool: 'mcp_call',
+        provider: 'Bitwarden',
+        mcpToolName: 'get',
+        expectedLabel: 'MCP · Bitwarden · get',
+        expectedDetail: 'Bitwarden · get',
+      },
+      {
+        tool: 'mod_agent_tool',
+        modToolName: 'notebook',
+        expectedLabel: 'notebook',
+        expectedDetail: undefined,
+      },
+      {
+        tool: 'mod_agent_tool',
+        modToolName: ' ',
+        expectedLabel: 'Mod tool',
+        expectedDetail: undefined,
+      },
+      {
+        tool: 'load_skill',
+        skillId: 'frontend-review',
+        expectedLabel: 'Load skill · frontend-review',
+        expectedDetail: 'frontend-review',
+      },
+    ].flatMap((identity) =>
+      ['tool.started', 'tool.completed'].map((type) => ({ ...identity, type })),
+    ),
+  )('shows only safe identity for $tool at $type in tool activity', async (identity) => {
     const activity = {
       items: [] as Array<{
         id: string;
@@ -435,7 +451,7 @@ describe('useChatRun', () => {
     streamChatMock.mockImplementation(async ({ onEvent, onAccepted }) => {
       onAccepted?.();
       onEvent({
-        type: 'tool.started',
+        type: identity.type,
         data: {
           ...identity,
           activityId: 'mcp-1',
@@ -478,14 +494,20 @@ describe('useChatRun', () => {
       await result.current.sendMessage();
     });
 
-    expect(session.storeToolActivity).toHaveBeenCalledWith(
+    expect(activity.items).toEqual([
       expect.objectContaining({
-        items: [
-          expect.objectContaining({
-            label: identity.expectedLabel,
-            detail: identity.expectedDetail,
-          }),
-        ],
+        label: identity.expectedLabel,
+        status: identity.type === 'tool.started' ? 'pending' : 'ok',
+      }),
+    ]);
+    expect(activity.items[0].detail).toBe(identity.expectedDetail);
+    expect(session.appendTurn).toHaveBeenLastCalledWith(
+      'nigel',
+      'session-1',
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          toolActivity: expect.objectContaining({ items: activity.items }),
+        }),
       }),
     );
     expect(session.storeToolActivity).not.toHaveBeenCalledWith(
