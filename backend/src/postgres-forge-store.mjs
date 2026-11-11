@@ -1,4 +1,5 @@
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
+import { createGoogleVideoAdapter, googleVideoSupported } from './model-adapters/google-video.mjs';
 import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
@@ -153,6 +154,7 @@ export class PostgresForgeStore {
     referenceImages,
     adapterFactory = createOpenAIGeneratedArtifactAdapter,
     googleAdapterFactory = createGoogleLyriaAdapter,
+    videoAdapterFactory = createGoogleVideoAdapter,
     ownerId = randomUUID(),
   } = {}) {
     if (!pool?.query || !pool?.connect)
@@ -172,6 +174,7 @@ export class PostgresForgeStore {
     this.referenceImages = referenceImages;
     this.adapterFactory = adapterFactory;
     this.googleAdapterFactory = googleAdapterFactory;
+    this.videoAdapterFactory = videoAdapterFactory;
     this.ownerId = ownerId;
     this.pending = new Set();
     this.backgroundFailures = new Map();
@@ -490,7 +493,7 @@ export class PostgresForgeStore {
         ['key', 'id', 'name'].some(key => typeof ref[key] !== 'string' || !ref[key].trim())))) fail('forge_request_invalid');
     if (privateReferences && (useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
     const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences);
-    if (hasReferences && body.mode && body.mode !== 'image') fail('agent_reference_image_image_only');
+    if (hasReferences && body.mode && !['image', 'video'].includes(body.mode)) fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
     if (
@@ -607,10 +610,11 @@ export class PostgresForgeStore {
         }
         if (dispatch) {
           if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
-          if (model.kind !== 'image') fail('agent_reference_image_image_only');
+          if (!['image', 'video'].includes(model.kind)) fail('agent_reference_image_image_only');
           if (!model.agentReferenceImage?.available) fail('agent_reference_image_unsupported', 409);
           if (dispatch.configurationUnavailable) fail('forge_model_unavailable', 409);
           if (!referenceImageCapability(dispatch.config).available) fail('agent_reference_image_unsupported', 409);
+          if (model.kind === 'video' && dispatch.sourceImages.length > 6) fail('google_video_reference_image_limit_exceeded');
         }
         const job = {
           id: randomUUID(),
@@ -760,17 +764,20 @@ export class PostgresForgeStore {
       config = dispatch?.config ?? await this.resolveConfig(job.connectionId, job.modelId);
       if ((job.useAgentReferenceImage || job.referenceImages?.length) && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
         throw new Error('agent_reference_image_snapshot_unavailable');
+      const video = job.kind === 'video' && googleVideoSupported(config);
       const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
       const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
       if (
         !config ||
-        (!google && !nativeGoogle &&
+        (!video && !google && !nativeGoogle &&
           (generatedArtifactKind(config) !== job.kind ||
             !/^openai-/.test(config.api)))
       )
         throw new Error("unavailable");
       config = withImageOptions(config, job.imageOptions);
-      const adapter = nativeGoogle
+      const adapter = video
+        ? this.videoAdapterFactory({ config })
+        : nativeGoogle
         ? createGoogleMediaAdapter({ config })
         : google
         ? this.googleAdapterFactory({ config })

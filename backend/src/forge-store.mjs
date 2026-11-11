@@ -2,6 +2,7 @@ import { imageOptionsCapability } from './model-adapters/image-generation-option
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { generatedArtifactKind } from './model-adapters/openai-generated-artifacts.mjs';
 import { googleLyriaSupported } from './model-adapters/google-lyria.mjs';
+import { googleVideoSupported } from './model-adapters/google-video.mjs';
 import { referenceImageCapability } from './model-adapters/reference-image-capability.mjs';
 
 export function forgeCatalog(connections) {
@@ -18,8 +19,10 @@ export function forgeCatalog(connections) {
     // OpenAI media-only classifier intentionally rejects text outputs.
     const kind = effectiveOutputs.includes('video') ? 'video' : nativeKind || generatedArtifactKind({ capabilities: { outputs: effectiveOutputs } });
     if (!kind) return [];
-    const available = kind !== 'video' && ( /^openai-/.test(c.apiType) || (kind === 'audio' && google) || nativeKind === kind );
-    const agentReferenceImage = available && kind === 'image'
+    const available = kind === 'video'
+      ? googleVideoSupported({ ...config, capabilities: { inputs, outputs: effectiveOutputs } })
+      : ( /^openai-/.test(c.apiType) || (kind === 'audio' && google) || nativeKind === kind );
+    const agentReferenceImage = available && ['image', 'video'].includes(kind)
       ? referenceImageCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } })
       : { available: false, reason: 'agent_reference_image_unsupported' };
     const imageOptions = available && kind === 'image' ? imageOptionsCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } }) : null;
@@ -27,7 +30,8 @@ export function forgeCatalog(connections) {
   }));
   const musicModels = models.filter(m => m.kind === 'audio' && m.available && googleLyriaSupported({ ...connections.find(c => c.id === m.connectionId), model: m.modelId }));
   const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };
-  return { ok: true, models, music, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: { available: false, reason: 'video_provider_contract_unavailable' } };
+  return { ok: true, models, music, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: models.some(m => m.kind === 'video' && m.available)
+    ? { available: true, reason: null } : { available: false, reason: 'video_provider_contract_unavailable' } };
 }
 
 /** Legacy entry point: callers must inject the PostgreSQL store. */

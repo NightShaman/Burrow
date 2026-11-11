@@ -15164,7 +15164,7 @@
               "null"
             ],
             "default": false,
-            "description": "True appends the saved singleton operator photo after selected agent portraits (self/explicit IDs); false/null/omission selects none. Supported image models only; missing selected photo fails before dispatch without fallback. Cannot combine with private Theater Mod references."
+            "description": "True appends the saved singleton operator photo after selected agent portraits (self/explicit IDs); false/null/omission selects none. Supported image/video models only; missing selected photo fails before dispatch without fallback. Cannot combine with private Theater Mod references."
           },
           "referenceAgentIds": {
             "anyOf": [
@@ -15179,7 +15179,7 @@
                 "type": "null"
               }
             ],
-            "description": "Ordered IDs of registered agents with saved portraits; duplicates (including self) are ignored. Native and operator API can explicitly select IDs; no image bytes or paths are accepted. Null/empty array selects no additional references. Supported image models only."
+            "description": "Ordered IDs of registered agents with saved portraits; duplicates (including self) are ignored. Native and operator API can explicitly select IDs; no image bytes or paths are accepted. Null/empty array selects no additional references. Supported image/video models only."
           },
           "imageOptions": {
             "$ref": "#/components/schemas/ForgeImageOptions"
