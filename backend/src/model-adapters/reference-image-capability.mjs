@@ -7,8 +7,9 @@ const unsupported = () => ({ available: false, reason: 'agent_reference_image_un
 
 /** An image input capability alone is not an image-generation/edit contract.
  * OpenAI-compatible media models must declare both image input and image-only
- * output; no model/deployment-name whitelist is imposed. Google's compatible
- * chat endpoint is not an images/edits endpoint. Native Google uses the existing
+ * output (image or GIF); no model/deployment-name whitelist is imposed. Google's
+ * compatible chat endpoint is not implicitly an edits contract; explicit GIF
+ * configuration opts into the compatible image contract. Native Google uses the existing
  * documented image-generation contracts, never a guessed model-name substring.
  */
 export function referenceImageCapability(config = {}) {
@@ -27,8 +28,8 @@ export function referenceImageCapability(config = {}) {
       : unsupported();
   }
   const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
-  return /^openai-/.test(config.api || config.apiType || '') && !isGoogleOpenAICompatible(config) &&
-    Array.isArray(outputs) && outputs.includes('image') && !outputs.includes('text') && acceptsImages
+  return /^openai-/.test(config.api || config.apiType || '') &&
+    Array.isArray(outputs) && (!isGoogleOpenAICompatible(config) || outputs.includes('gif')) && (outputs.includes('image') || outputs.includes('gif')) && !outputs.includes('text') && acceptsImages
     ? { available: true, reason: null }
     : unsupported();
 }

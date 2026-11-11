@@ -133,7 +133,7 @@ async function traceRequest(traceLogger, { requestId, provider, model, url, head
 export function generatedArtifactKind(config = {}) {
   const outputs = Array.isArray(config.capabilities?.outputs) ? config.capabilities.outputs.map((value) => text(value).toLowerCase()) : [];
   if (outputs.includes('text')) return null;
-  if (outputs.includes('image')) return 'image';
+  if (outputs.includes('image') || outputs.includes('gif')) return 'image';
   if (outputs.includes('audio')) return 'audio';
   return null;
 }

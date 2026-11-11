@@ -23,7 +23,7 @@ export function assertConnection(input = {}) {
 
 const MODEL_INPUT_CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'video', 'file']);
 
-const MODEL_OUTPUT_CAPABILITIES = Object.freeze(['text', 'audio', 'image', 'video', 'file']);
+const MODEL_OUTPUT_CAPABILITIES = Object.freeze(['text', 'audio', 'image', 'gif', 'video', 'file']);
 
 function normalizedInput(value) {
   return [...new Set((Array.isArray(value) ? value : []).map(normalize).filter((type) => MODEL_INPUT_CAPABILITIES.includes(type)))];

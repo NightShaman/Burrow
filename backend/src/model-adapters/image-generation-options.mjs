@@ -1,9 +1,3 @@
-import { isGoogleOpenAICompatible } from './google-wire.mjs';
-
-// Keep this allowlist explicit: an image output modality is not evidence of an
-// OpenAI Image API parameter contract. New model IDs require documentation.
-const GPT_IMAGE = /^gpt-image-(?:1(?:\.5|-mini)?|2|2\.5-(?:sunburst|flare)|2\.6-(?:sunburst|flare))(?:-\d{4}-\d{2}-\d{2})?$/;
-const GIF_MODELS = new Set(['gpt-image-2.6-sunburst', 'gpt-image-2.6-flare']);
 const STILL_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536'];
 // Convenient frame presets; unpublished aggregate GIF budgets remain provider-owned.
 const GIF_SIZES = ['auto', '640x640', '768x512', '512x768'];
@@ -13,15 +7,16 @@ export const IMAGE_MAX_EDGE = 3840;
 const invalid = () => { throw Object.assign(new Error('forge_request_invalid'), { statusCode: 400 }); };
 const unsupported = () => { throw Object.assign(new Error('generation_options_unsupported'), { statusCode: 400 }); };
 
+/** The compatible API defines the wire; saved model outputs define support.
+ * Neither operator-owned connection labels nor model/deployment IDs are gates. */
 export function imageOptionsCapability(config = {}) {
-  if (!config || !/^openai-/.test(config.api || config.apiType || '') || isGoogleOpenAICompatible(config) || !GPT_IMAGE.test(config.model || '')) return null;
-  // providerName is an operator-defined display label, not provider identity.
-  const provider = String(config.provider || '').toLowerCase();
-  if (provider && !['openai', 'azure', 'azure-openai', 'openai-compatible'].includes(provider)) return null;
+  if (!config || !/^openai-/.test(config.api || config.apiType || '')) return null;
   const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
-  if (Array.isArray(outputs) && (!outputs.includes('image') || outputs.includes('text'))) return null;
-  const gif = GIF_MODELS.has(config.model);
-  return { outputFormats: gif ? ['png', 'jpeg', 'webp', 'gif'] : ['png', 'jpeg', 'webp'],
+  if (!Array.isArray(outputs) || outputs.includes('text')) return null;
+  const image = outputs.includes('image');
+  const gif = outputs.includes('gif');
+  if (!image && !gif) return null;
+  return { outputFormats: [...(image ? ['png', 'jpeg', 'webp'] : []), ...(gif ? ['gif'] : [])],
     sizes: [...(gif ? GIF_SIZES : STILL_SIZES)],
     ...(gif ? { frameCount: { min: 2, max: 16, default: 9 }, frameDurationMs: { min: 20, max: 2000, step: 10, default: 200 } } : {}) };
 }
@@ -63,7 +58,6 @@ export function normalizeImageOptions(value, { config, mode = 'image', validateS
   }
   const size = value.size === undefined ? 'auto' : value.size;
   dimensions(size);
-  if (validateSupport && /^gpt-image-1(?:\.5|-mini)?(?:-|$)/.test(config.model) && !STILL_SIZES.includes(size)) invalid();
   return { outputFormat: value.outputFormat, size };
 }
 

@@ -602,7 +602,8 @@ export class PostgresForgeStore {
         if (!model?.available || (explicit && body.mode && !this.selectionMatches(body.mode, model, catalog))) fail("forge_model_unavailable", 409);
         if (imageOptions) {
           if (model.kind !== 'image' || !model.imageOptions?.outputFormats.includes(imageOptions.outputFormat)) fail('generation_options_unsupported');
-          normalizeImageOptions(imageOptions, { config: { api: 'openai-responses', model: model.modelId }, mode: model.kind });
+          // Shape/bounds were normalized before claiming; support comes from
+          // the same configured-output catalog exposed to UI and agents.
         }
         if (dispatch) {
           if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
