@@ -130,3 +130,9 @@ Unchanged pages retain the **8 November** full-review evidence. Source and test 
 Inspected assembly **2026.11.10.3**, commit `1a59d735bd3142969830431e55183fd8a5130ae4`, records Core `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1` and UI `7656f04568008b6a94b40c1c8b35cc479db39a22`. The ordinary pass reconciles explicit hidden-identity discovery for mods, provider-filtered Forge selection, saved A2A sender avatars and scoped mod-panel query forwarding. Models metadata remains read-only; navigation spacing, theme styling and the application favicon do not change the documentation site's approved artwork or navigation.
 
 The full page review remains dated **8 November**. Source and test definitions were inspected statically; this is not an application/browser test run, provider call, runtime deployment or release promotion. Unchanged sections retain their prior evidence. Public mirrors and installed builds may lag current development source.
+
+## Ordinary update: 11 November 2026
+
+Assembly **2026.11.11.1** (`a487b1c1f64c2e87de655e865b8951f5ac3d6bcc`) contains UI `f5da4b189745935f60112abf00462ddcba6ccf42` and unchanged Backend `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1`. Chat message links open in a new tab for operator and agent messages, including group conversations; code URLs remain non-link text. See [everyday use](../guide/everyday-use.md#follow-links-without-leaving-chat). Archive and Settings links are outside this change.
+
+The ordinary review found no new mod or skill implementation delta. This is source reconciliation, not runtime installation or acceptance testing.

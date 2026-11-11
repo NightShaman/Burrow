@@ -6,9 +6,9 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.10.3` | `1a59d735bd3142969830431e55183fd8a5130ae4` |
+| Assembled Burrow, build `2026.11.11.1` | `a487b1c1f64c2e87de655e865b8951f5ac3d6bcc` |
 | Core / Backend | `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1` |
-| UI | `7656f04568008b6a94b40c1c8b35cc479db39a22` |
+| UI | `f5da4b189745935f60112abf00462ddcba6ccf42` |
 | Skills | `550efc277addd0d872972cbfa4f8a58375a44f48` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -144,3 +144,9 @@ Unchanged pages retain the **8 November** full-review evidence. Source and test 
 Inspected assembly **2026.11.10.3**, commit `1a59d735bd3142969830431e55183fd8a5130ae4`, records Core `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1` and UI `7656f04568008b6a94b40c1c8b35cc479db39a22`. The ordinary pass reconciles explicit hidden-identity discovery for mods, provider-filtered Forge selection, saved A2A sender avatars and scoped mod-panel query forwarding. Models metadata remains read-only; navigation spacing, theme styling and the application favicon do not change the documentation site's approved artwork or navigation.
 
 The full page review remains dated **8 November**. Source and test definitions were inspected statically; this is not an application/browser test run, provider call, runtime deployment or release promotion. Unchanged sections retain their prior evidence. Public mirrors and installed builds may lag current development source.
+
+## Ordinary update: 11 November 2026
+
+The UI now opens links in operator and agent chat messages in a new tab, including group chat, without navigating away from the conversation. Named links, bare web addresses and relative links share this behavior; code remains code. Backend, mod implementations and all eight reviewed skill payloads are unchanged from the previous pass. The Skills implementation pin above remains valid; its later documentation-only commit is recorded in the maintenance receipts.
+
+Source inspection covered `ChatMessage.tsx`, its regression cases and the assembly source manifest. No application tests, external chat calls or skill scripts ran during this documentation pass.

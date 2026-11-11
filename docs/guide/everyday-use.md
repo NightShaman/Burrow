@@ -92,6 +92,10 @@ Current Core/UI implements cancellation deadlines, reset-generation fencing and 
 
 When **A2A in default** is off, a new reply-request exchange can archive/reset the visible named inbox before ingress only when no other exchange or family recovery is open. Followups reuse their namespace and do not rotate it again. Originals remain in Archive. Unfinished/uncertain exchanges can defer rotation indefinitely; this is not a TTL or immediate deletion after a reply. Default operator history and FYI-only deliveries are not rotated by this mechanism.
 
+## Follow links without leaving chat
+
+Checked **11 November 2026**: links in operator and agent chat messages open in a new browser tab, keeping the conversation open. This includes named Markdown links, bare web addresses and relative links in ordinary and group chats. URLs inside code remain code rather than clickable links. This change applies to chat message links, not every link in Archive or Settings.
+
 ## Read and edit workspace files
 
 In chat, open a file from the **Workspace** panel. It opens in a document tab. Click **Edit**, make your changes, then **Save**. Closing a modified file tab asks whether to discard unsaved edits. Saving writes to that tab's agent workspace; changing the selected agent does not retarget an already-open file tab.
