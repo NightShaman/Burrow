@@ -884,9 +884,19 @@ export class PostgresForgeStore {
     );
     if (job.status !== "succeeded") fail("forge_job_not_succeeded", 409);
     const conversations = new PostgresSessionStore({ pool: this.pool });
-    // Serialize delivery by job/destination. Retries reuse both the existing turn
-    // and its attachment file, not merely the underlying generated artifact.
-    const key = role === 'assistant' ? `forge:assistant:${job.id}:${artifact.id}` : `forge:${job.id}:${artifact.id}`;
+    // Assistant delivery belongs to the current turn, not the whole conversation.
+    // Manual/no-run attachment keeps its existing conversation-scoped identity.
+    const legacyKey = role === 'assistant' ? `forge:assistant:${job.id}:${artifact.id}` : `forge:${job.id}:${artifact.id}`;
+    const turnScoped = role === 'assistant' && typeof runId === 'string' && runId.length > 0;
+    const key = turnScoped ? `${legacyKey}:run:${runId}` : legacyKey;
+    const replay = async client => {
+      const prior = await findSessionReplay(client, body.agentId, body.sessionId, null, key);
+      if (prior || !turnScoped) return prior;
+      // Upgrades must not redeliver an already-linked legacy attachment in the
+      // same run, but an earlier run must never swallow an explicit resend.
+      const legacy = await findSessionReplay(client, body.agentId, body.sessionId, null, legacyKey);
+      return legacy?.entry.runId === runId ? legacy : null;
+    };
     let copiedPath;
     let entry;
     try {
@@ -896,7 +906,7 @@ export class PostgresForgeStore {
         if (!live.rowCount) fail('forge_job_not_found', 404);
         const session = await client.query('SELECT metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE',[body.agentId,body.sessionId]);
         if (!session.rowCount || (expectedResetGeneration !== undefined && Number(session.rows[0].metadata?.resetGeneration || 0) !== expectedResetGeneration)) fail('session_not_found', 404);
-        const prior = await findSessionReplay(client, body.agentId, body.sessionId, null, key);
+        const prior = await replay(client);
         if (prior) return prior.entry;
         const bytes = await fs.readFile(resolved.filePath);
         const [stored] = await persistChatAttachments({ retentionDays: (await new PostgresAlbdruckStore({ pool: postgresTransactionContext(client), resolveOriginal: ref => conversations.resolveOriginal(ref), searchHistory: input => conversations.history(input) }).readRetention()).attachmentDays, agentWorkspaceRoot: destination.agentWorkspaceRoot, attachments: [{ name: artifact.name, type: artifact.mimeType, content: `data:${artifact.mimeType};base64,${bytes.toString('base64')}` }] });
@@ -908,10 +918,10 @@ export class PostgresForgeStore {
         return conversations.appendLocked(client, { agentId: body.agentId, sid: body.sessionId, entry: value, idempotencyKey: key, now: value.ts });
       });
     } catch (error) {
-      let replay;
-      try { replay = await findSessionReplay(this.pool, body.agentId, body.sessionId, null, key); }
+      let committed;
+      try { committed = await replay(this.pool); }
       catch { throw error; } // Unknown commit state: don't delete potentially linked bytes.
-      if (replay) entry = replay.entry;
+      if (committed) entry = committed.entry;
       else {
         if (copiedPath) await fs.unlink(copiedPath).catch(() => {});
         throw error;
