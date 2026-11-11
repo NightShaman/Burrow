@@ -29,6 +29,7 @@ import {
   withPostgresTransaction,
 } from "./postgres-foundation.mjs";
 import { forgeCatalog } from "./forge-store.mjs";
+import { normalizeImageOptions, withImageOptions } from './model-adapters/image-generation-options.mjs';
 import { mediaBudgets } from './model-adapters/generated-media-budgets.mjs';
 import { referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
 
@@ -50,6 +51,8 @@ const stable = (value) => {
   return JSON.stringify(value);
 };
 const sameRequest = (a, b, current) => {
+  // Options must match even for legacy/default/reference-image replay paths.
+  if (stable(a?.imageOptions ?? null) !== stable(current.imageOptions ?? null)) return false;
   if (stable(a) === stable(b)) return true;
   // New multi-reference identities bind ordered digests, actor and Mod owner.
   // Saved-default retries may keep their admitted model when the configured
@@ -458,6 +461,7 @@ export class PostgresForgeStore {
       "useAgentReferenceImage",
       "useOperatorReferenceImage",
       "referenceAgentIds",
+      "imageOptions",
     ];
     if (
       Object.keys(body).some((k) => !keys.includes(k)) ||
@@ -506,12 +510,6 @@ export class PostgresForgeStore {
       (x) =>
         x.connectionId === saved.connectionId && x.modelId === saved.modelId,
     );
-    if (
-      explicit &&
-      body.mode &&
-      (!model || !this.selectionMatches(body.mode, model, catalog))
-    )
-      fail("forge_model_unavailable", 409);
     if (ownerModId !== null && (typeof ownerModId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(ownerModId))) fail('forge_request_invalid');
     let referenceConfig, referenceConfigurationUnavailable = false;
     if (hasReferences && model?.available && model.agentReferenceImage?.available) {
@@ -557,7 +555,9 @@ export class PostgresForgeStore {
       dispatch.config = referenceConfig;
       dispatch.configurationUnavailable = referenceConfigurationUnavailable;
     }
+    const imageOptions = normalizeImageOptions(body.imageOptions, { mode: body.mode ?? 'image', validateSupport: false });
     const request = {
+      ...(imageOptions ? { imageOptions } : {}),
       mode: body.mode ?? null,
       connectionId: saved.connectionId,
       modelId: saved.modelId,
@@ -599,7 +599,11 @@ export class PostgresForgeStore {
           }
           return { job: publicJob(job), replayed: true };
         }
-        if (!model?.available) fail("forge_model_unavailable", 409);
+        if (!model?.available || (explicit && body.mode && !this.selectionMatches(body.mode, model, catalog))) fail("forge_model_unavailable", 409);
+        if (imageOptions) {
+          if (model.kind !== 'image' || !model.imageOptions?.outputFormats.includes(imageOptions.outputFormat)) fail('generation_options_unsupported');
+          normalizeImageOptions(imageOptions, { config: { api: 'openai-responses', model: model.modelId }, mode: model.kind });
+        }
         if (dispatch) {
           if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
           if (model.kind !== 'image') fail('agent_reference_image_image_only');
@@ -764,6 +768,7 @@ export class PostgresForgeStore {
             !/^openai-/.test(config.api)))
       )
         throw new Error("unavailable");
+      config = withImageOptions(config, job.imageOptions);
       const adapter = nativeGoogle
         ? createGoogleMediaAdapter({ config })
         : google

@@ -8,6 +8,7 @@ import { redactHeaders } from './adapter-primitives.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
 import { readProviderError } from '../forge-diagnostics.mjs';
 import { referenceImageCapability, validatedSourceImages } from './reference-image-capability.mjs';
+import { validateImageGenerationOptions } from './image-generation-options.mjs';
 
 const AUDIO_FORMATS = Object.freeze({
   mp3: { mimeType: 'audio/mpeg', extension: 'mp3' },
@@ -78,7 +79,7 @@ function promptFrom(options = {}) {
 }
 
 const ARTIFACT_OPTION_KEYS = Object.freeze({
-  image: Object.freeze(['background', 'moderation', 'n', 'output_compression', 'output_format', 'quality', 'response_format', 'size', 'style', 'user']),
+  image: Object.freeze(['background', 'frame_count', 'frame_duration_ms', 'moderation', 'n', 'output_compression', 'output_format', 'quality', 'response_format', 'size', 'style', 'user']),
   audio: Object.freeze(['instructions', 'response_format', 'speed', 'stream_format', 'voice']),
 });
 
@@ -93,13 +94,14 @@ function supportedArtifactOptions(kind, value) {
 
 function imageMime(bytes, fallback = '') {
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'))) return 'image/gif';
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg';
   if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
   return text(fallback).split(';', 1)[0].toLowerCase() || 'application/octet-stream';
 }
 
 function imageExtension(mimeType) {
-  return ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' })[mimeType] || 'bin';
+  return ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' })[mimeType] || 'bin';
 }
 
 function validBase64(value) {
@@ -156,7 +158,13 @@ export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = 
       throw new Error('agent_reference_image_unsupported');
     const requestUrl = sourceImages ? endpoint(text(baseUrl).replace(/\/images\/(?:generations|edits)\/?$/, ''), 'images/edits') : url;
     const headers = requestHeaders(config, { multipart: Boolean(sourceImages) });
-    const artifactOptions = supportedArtifactOptions(kind, config.generatedArtifactOptions);
+    // Validate raw configured image controls before the allowlist can hide an
+    // invalid frame setting. Both JSON generations and multipart edits use the
+    // same normalized options, including GIF-incompatible control removal.
+    const generationOptions = kind === 'image'
+      ? validateImageGenerationOptions(config, config.generatedArtifactOptions ?? {})
+      : config.generatedArtifactOptions;
+    const artifactOptions = supportedArtifactOptions(kind, generationOptions);
     const body = kind === 'image'
       ? { model: wireModel, prompt, n: 1, ...artifactOptions }
       : { model: wireModel, input: prompt, voice: 'alloy', response_format: 'mp3', ...artifactOptions };

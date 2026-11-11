@@ -14909,6 +14909,139 @@
         ],
         "additionalProperties": false
       },
+      "ForgeImageSize": {
+        "type": "string",
+        "pattern": "^(auto|[1-9]\\d*x[1-9]\\d*)$",
+        "default": "auto",
+        "description": "auto or WIDTHxHEIGHT. Custom dimensions must be divisible by 16 and satisfy model-specific edge, aspect and per-image pixel limits. Provider-enforced total request limits may also reject a combination of dimensions and frames; Forge does not infer an unpublished aggregate GIF budget. Consult catalog sizes for suggested dimensions."
+      },
+      "ForgeStillImageOptions": {
+        "type": "object",
+        "properties": {
+          "outputFormat": {
+            "type": "string",
+            "enum": [
+              "png",
+              "jpeg",
+              "webp"
+            ]
+          },
+          "size": {
+            "$ref": "#/components/schemas/ForgeImageSize"
+          }
+        },
+        "required": [
+          "outputFormat"
+        ],
+        "additionalProperties": false,
+        "description": "Explicit still-image output settings for models advertising the selected format. Frame controls are not accepted for still images."
+      },
+      "ForgeGifImageOptions": {
+        "type": "object",
+        "properties": {
+          "outputFormat": {
+            "type": "string",
+            "const": "gif"
+          },
+          "frameCount": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 16,
+            "default": 9
+          },
+          "frameDurationMs": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 2000,
+            "default": 200,
+            "description": "Milliseconds per frame; normalized to the nearest 10 ms for GIF timing."
+          },
+          "size": {
+            "$ref": "#/components/schemas/ForgeImageSize"
+          }
+        },
+        "required": [
+          "outputFormat"
+        ],
+        "additionalProperties": false,
+        "description": "Animated GIF settings; only models advertising gif in catalog imageOptions support this contract. Missing frame controls and size receive the documented defaults."
+      },
+      "ForgeImageOptions": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ForgeStillImageOptions"
+          },
+          {
+            "$ref": "#/components/schemas/ForgeGifImageOptions"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Optional typed image-only settings. Null/omission preserves legacy provider defaults. Effective non-null settings are persisted in job identity; changes conflict with a reused idempotency key. Unknown keys or inappropriate frame controls fail before dispatch."
+      },
+      "ForgeImageOptionBounds": {
+        "type": "object",
+        "properties": {
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "default": {
+            "type": "integer"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "min",
+          "max",
+          "default"
+        ],
+        "additionalProperties": false
+      },
+      "ForgeImageOptionsCapability": {
+        "type": "object",
+        "properties": {
+          "outputFormats": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "png",
+                "jpeg",
+                "webp",
+                "gif"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "sizes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Suggested sizes for the model. Custom dimensions are validated separately; this is not an exhaustive enum of every supported size."
+          },
+          "frameCount": {
+            "$ref": "#/components/schemas/ForgeImageOptionBounds"
+          },
+          "frameDurationMs": {
+            "$ref": "#/components/schemas/ForgeImageOptionBounds"
+          }
+        },
+        "required": [
+          "outputFormats",
+          "sizes"
+        ],
+        "additionalProperties": false,
+        "description": "Present only for models with a recognized typed image generation contract. GIF-capable models also advertise frame count and frame duration bounds/defaults; duration step is 10 ms. Absence does not imply support for arbitrary options."
+      },
       "ForgeJob": {
         "type": "object",
         "properties": {
@@ -14965,6 +15098,9 @@
             "type": "boolean",
             "const": true,
             "description": "Only present when the operator photo was selected for this job."
+          },
+          "imageOptions": {
+            "$ref": "#/components/schemas/ForgeImageOptions"
           }
         },
         "required": [
@@ -15044,6 +15180,9 @@
               }
             ],
             "description": "Ordered IDs of registered agents with saved portraits; duplicates (including self) are ignored. Native and operator API can explicitly select IDs; no image bytes or paths are accepted. Null/empty array selects no additional references. Supported image models only."
+          },
+          "imageOptions": {
+            "$ref": "#/components/schemas/ForgeImageOptions"
           }
         },
         "required": [
@@ -15107,10 +15246,14 @@
             "maxItems": 0,
             "items": {
               "type": "object"
-            }
+            },
+            "description": "Legacy generic controls remain empty. Supported typed image settings are advertised separately in imageOptions."
           },
           "agentReferenceImage": {
             "$ref": "#/components/schemas/AgentReferenceImageCapability"
+          },
+          "imageOptions": {
+            "$ref": "#/components/schemas/ForgeImageOptionsCapability"
           }
         },
         "required": [

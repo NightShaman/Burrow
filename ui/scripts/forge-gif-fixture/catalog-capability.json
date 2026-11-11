@@ -1,0 +1,15 @@
+{
+  "outputFormats": ["png", "jpeg", "webp", "gif"],
+  "sizes": ["auto", "640x640", "768x512", "512x768"],
+  "frameCount": {
+    "min": 2,
+    "max": 16,
+    "default": 9
+  },
+  "frameDurationMs": {
+    "min": 20,
+    "max": 2000,
+    "step": 10,
+    "default": 200
+  }
+}

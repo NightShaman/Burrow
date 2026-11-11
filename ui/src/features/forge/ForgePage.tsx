@@ -8,6 +8,14 @@ import type { Agent, SavedProvider } from '../../app/types';
 import './forge.css';
 import './forge-motion.css';
 import { useForgeMotion } from './useForgeMotion';
+import {
+  defaultImageDraft,
+  ForgeImageOptions,
+  imageDraftError,
+  imageDraftOptions,
+  type ImageDraft,
+  type ImageOutputFormat,
+} from './ForgeImageOptions';
 
 type ForgeModel = {
   connectionId: string;
@@ -17,6 +25,7 @@ type ForgeModel = {
   available: boolean;
   unavailableReason?: string | null;
   controls: string[];
+  imageOptions?: { outputFormats: ImageOutputFormat[]; sizes: string[] };
 };
 type ForgeCatalog = {
   models: ForgeModel[];
@@ -347,6 +356,7 @@ export function Forge({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [imageState, setImageState] = useState<{ scope: string; draft: ImageDraft } | null>(null);
   const [selectedJobId, setSelectedJobId] = useState('');
   const loadSequence = useRef(0);
   const activeAgentRef = useRef(selectedAgentId);
@@ -421,6 +431,15 @@ export function Forge({
   });
   const providerModels = availableModels.filter((model) => model.connectionId === selectedProvider);
   const selectedAvailable = availableModels.some((model) => modelKey(model) === selectedModel);
+  const activeModel = availableModels.find((model) => modelKey(model) === selectedModel);
+  const imageCapability = mode === 'image' ? activeModel?.imageOptions : undefined;
+  const imageScope = JSON.stringify([mode, selectedModel, imageCapability]);
+  const imageDraft = imageState?.scope === imageScope ? imageState.draft : defaultImageDraft();
+  const imageError = imageCapability ? imageDraftError(imageDraft) : '';
+  useEffect(() => {
+    setImageState(null);
+  }, [imageScope]);
+
   const savedUnavailableReason =
     savedSelection && !selectedAvailable
       ? (modeModels.find((model) => modelKey(model) === selectedModel)?.unavailableReason ??
@@ -483,12 +502,32 @@ export function Forge({
   const submit = async () => {
     const model = availableModels.find((item) => modelKey(item) === selectedModel);
     const submittedPrompt = mode === 'music' ? composeMusicPrompt(prompt, lyrics) : prompt.trim();
-    if (loading || busy || selectionSavingRef.current || !model || !submittedPrompt) return;
+    if (loading || busy || selectionSavingRef.current || !model || !submittedPrompt || imageError)
+      return;
+    const imageOptions = imageCapability
+      ? imageDraftOptions(imageDraft, imageState?.scope === imageScope)
+      : undefined;
+    if (
+      imageOptions &&
+      (!imageCapability?.outputFormats.includes(imageOptions.outputFormat) ||
+        (imageOptions.size && !imageCapability.sizes.includes(imageOptions.size)))
+    ) {
+      setError(
+        'These image options are unavailable for the selected model. Choose another format or size.',
+      );
+      return;
+    }
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const requestSignature = `${model.connectionId}\u0000${model.modelId}\u0000${submittedPrompt}`;
+      const requestSignature = JSON.stringify([
+        mode,
+        model.connectionId,
+        model.modelId,
+        submittedPrompt,
+        imageOptions,
+      ]);
       const existing = idempotencyRef.current;
       const idempotencyKey = existing?.signature === requestSignature ? existing.key : newKey();
       idempotencyRef.current = { signature: requestSignature, key: idempotencyKey };
@@ -499,6 +538,7 @@ export function Forge({
           connectionId: model.connectionId,
           modelId: model.modelId,
           prompt: submittedPrompt,
+          ...(imageOptions ? { imageOptions } : {}),
           idempotencyKey,
         }),
       });
@@ -507,6 +547,7 @@ export function Forge({
       setSelectedJobId(result.job.id);
       setPrompt('');
       setLyrics('');
+      setImageState(null);
       setNotice('Forge job accepted.');
       idempotencyRef.current = null;
     } catch (e) {
@@ -677,6 +718,15 @@ export function Forge({
               {selectionError}
             </p>
           )}
+          {imageCapability && imageCapability.outputFormats.length > 0 && (
+            <ForgeImageOptions
+              draft={imageDraft}
+              formats={imageCapability.outputFormats}
+              sizes={imageCapability.sizes}
+              disabled={loading || selectionSaving || busy}
+              onChange={(draft) => setImageState({ scope: imageScope, draft })}
+            />
+          )}
           <label className="forge-field forge-prompt">
             <span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span>
             <textarea
@@ -750,7 +800,12 @@ export function Forge({
                 type="button"
                 onClick={() => void submit()}
                 disabled={
-                  loading || selectionSaving || busy || !selectedAvailable || !prompt.trim()
+                  loading ||
+                  selectionSaving ||
+                  busy ||
+                  !selectedAvailable ||
+                  !prompt.trim() ||
+                  !!imageError
                 }
               >
                 {busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}

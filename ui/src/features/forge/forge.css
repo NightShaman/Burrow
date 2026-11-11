@@ -553,3 +553,37 @@
   justify-content: flex-end;
   gap: 10px;
 }
+
+.forge-image-options {
+  display: grid;
+  gap: 10px;
+}
+.forge-gif-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 0.65fr) minmax(0, 0.85fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.forge-field input[type='number'] {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-input);
+  padding: 10px;
+  color: var(--text-strong);
+  font: inherit;
+}
+.forge-gif-duration {
+  color: var(--muted);
+  font-size: 11px;
+  justify-self: end;
+}
+@container (max-width: 400px) {
+  .forge-gif-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .forge-gif-fields > :last-child {
+    grid-column: 1 / -1;
+  }
+}

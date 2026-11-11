@@ -1,3 +1,4 @@
+import { imageOptionsCapability } from './model-adapters/image-generation-options.mjs';
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { generatedArtifactKind } from './model-adapters/openai-generated-artifacts.mjs';
 import { googleLyriaSupported } from './model-adapters/google-lyria.mjs';
@@ -21,7 +22,8 @@ export function forgeCatalog(connections) {
     const agentReferenceImage = available && kind === 'image'
       ? referenceImageCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } })
       : { available: false, reason: 'agent_reference_image_unsupported' };
-    return [{ connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [], agentReferenceImage }];
+    const imageOptions = available && kind === 'image' ? imageOptionsCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } }) : null;
+    return [{ ...(imageOptions ? { imageOptions } : {}), connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [], agentReferenceImage }];
   }));
   const musicModels = models.filter(m => m.kind === 'audio' && m.available && googleLyriaSupported({ ...connections.find(c => c.id === m.connectionId), model: m.modelId }));
   const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };
