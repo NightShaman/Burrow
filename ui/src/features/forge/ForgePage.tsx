@@ -25,10 +25,14 @@ type ForgeModel = {
   available: boolean;
   unavailableReason?: string | null;
   controls: string[];
+  agentReferenceImage?: { available: boolean; reason?: string | null };
+  referenceArtifacts?: { available: boolean; maxImages?: number; reason?: string | null };
   imageOptions?: { outputFormats: ImageOutputFormat[]; sizes: string[] };
 };
 type ForgeCatalog = {
   models: ForgeModel[];
+  agentReferenceImages?: { agentId: string; agentName?: string; id: string }[];
+  operatorReferenceImage?: { id: string } | null;
   music?: { available: boolean; reason?: string | null; models?: ForgeModel[] };
   sourceAttachments?: { available: boolean; reason?: string | null };
   video?: { available: boolean; reason?: string | null };
@@ -42,6 +46,17 @@ type Artifact = {
   previewUrl?: string | null;
   downloadUrl?: string | null;
 };
+type ArtifactReference = { jobId: string; artifactId: string };
+function eligibleVideoReference(job: Job, artifact: Artifact): boolean {
+  return (
+    job.status === 'succeeded' &&
+    job.kind === 'image' &&
+    artifact.kind === 'image' &&
+    ['image/png', 'image/jpeg', 'image/webp'].includes(artifact.mimeType?.toLowerCase()) &&
+    artifact.sizeBytes > 0 &&
+    artifact.sizeBytes <= 20 * 1024 * 1024
+  );
+}
 type ForgeErrorDetails = {
   stage: string;
   message: string;
@@ -357,6 +372,15 @@ export function Forge({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [imageState, setImageState] = useState<{ scope: string; draft: ImageDraft } | null>(null);
+  const [referenceState, setReferenceState] = useState<{
+    scope: string;
+    agentIds: string[];
+    operator: boolean;
+  } | null>(null);
+  const [artifactReferenceState, setArtifactReferenceState] = useState<{
+    scope: string;
+    references: ArtifactReference[];
+  } | null>(null);
   const [selectedJobId, setSelectedJobId] = useState('');
   const loadSequence = useRef(0);
   const activeAgentRef = useRef(selectedAgentId);
@@ -432,6 +456,78 @@ export function Forge({
   const providerModels = availableModels.filter((model) => model.connectionId === selectedProvider);
   const selectedAvailable = availableModels.some((model) => modelKey(model) === selectedModel);
   const activeModel = availableModels.find((model) => modelKey(model) === selectedModel);
+  const referenceAvailable =
+    (mode === 'image' || mode === 'video') && activeModel?.agentReferenceImage?.available;
+  const portraits = catalog?.agentReferenceImages ?? [];
+  const referenceScope = JSON.stringify([mode, selectedModel]);
+  const referenceAgentIds =
+    referenceAvailable && referenceState?.scope === referenceScope
+      ? referenceState.agentIds.filter((id) =>
+          portraits.some((portrait) => portrait.agentId === id),
+        )
+      : [];
+  const useOperatorReferenceImage = !!(
+    referenceAvailable &&
+    catalog?.operatorReferenceImage &&
+    referenceState?.scope === referenceScope &&
+    referenceState.operator
+  );
+  useEffect(() => {
+    setReferenceState(null);
+  }, [referenceScope]);
+  const videoModels = models.filter((model) => model.kind === 'video' && model.available);
+  const videoSelection = selections.video;
+  const videoModel = videoSelection
+    ? videoModels.find((model) => modelKey(model) === modelKey(videoSelection))
+    : videoModels[0];
+  const videoReferenceScope = videoModel ? modelKey(videoModel) : '';
+  const artifactReferencesAvailable = !!videoModel?.referenceArtifacts?.available;
+  const artifactReferences =
+    artifactReferencesAvailable && artifactReferenceState?.scope === videoReferenceScope
+      ? artifactReferenceState.references.filter((reference) => {
+          const job = jobs.find((item) => item.id === reference.jobId);
+          const artifact = job?.artifacts.find((item) => item.id === reference.artifactId);
+          return job && artifact && eligibleVideoReference(job, artifact);
+        })
+      : [];
+  const videoReferenceLimit = Math.min(6, videoModel?.referenceArtifacts?.maxImages ?? 6);
+  const referenceCount =
+    referenceAgentIds.length +
+    Number(useOperatorReferenceImage) +
+    (mode === 'video' ? artifactReferences.length : 0);
+  const referenceError =
+    mode === 'video' && referenceCount > videoReferenceLimit
+      ? `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`
+      : '';
+  useEffect(() => {
+    setArtifactReferenceState(null);
+  }, [videoReferenceScope]);
+  const useArtifactReference = (job: Job, artifact: Artifact) => {
+    if (!artifactReferencesAvailable || !eligibleVideoReference(job, artifact) || busy) return;
+    const exists = artifactReferences.some(
+      (ref) => ref.jobId === job.id && ref.artifactId === artifact.id,
+    );
+    if (
+      !exists &&
+      (mode === 'video' ? referenceCount : artifactReferences.length) >= videoReferenceLimit
+    ) {
+      setError(
+        `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`,
+      );
+      return;
+    }
+    setArtifactReferenceState({
+      scope: videoReferenceScope,
+      references: exists
+        ? artifactReferences
+        : [...artifactReferences, { jobId: job.id, artifactId: artifact.id }],
+    });
+    setMode('video');
+    setShowRecents(false);
+    setSelectedJobId('');
+    setError('');
+    setNotice('');
+  };
   const imageCapability = mode === 'image' ? activeModel?.imageOptions : undefined;
   const imageScope = JSON.stringify([mode, selectedModel, imageCapability]);
   const imageDraft =
@@ -505,7 +601,15 @@ export function Forge({
   const submit = async () => {
     const model = availableModels.find((item) => modelKey(item) === selectedModel);
     const submittedPrompt = mode === 'music' ? composeMusicPrompt(prompt, lyrics) : prompt.trim();
-    if (loading || busy || selectionSavingRef.current || !model || !submittedPrompt || imageError)
+    if (
+      loading ||
+      busy ||
+      selectionSavingRef.current ||
+      !model ||
+      !submittedPrompt ||
+      imageError ||
+      referenceError
+    )
       return;
     const imageOptions = imageCapability
       ? imageDraftOptions(imageDraft, imageState?.scope === imageScope)
@@ -520,6 +624,13 @@ export function Forge({
       );
       return;
     }
+    const references = {
+      ...(mode === 'video' && artifactReferences.length
+        ? { referenceArtifacts: artifactReferences }
+        : {}),
+      ...(referenceAgentIds.length ? { referenceAgentIds } : {}),
+      ...(useOperatorReferenceImage ? { useOperatorReferenceImage: true } : {}),
+    };
     setBusy(true);
     setError('');
     setNotice('');
@@ -530,6 +641,7 @@ export function Forge({
         model.modelId,
         submittedPrompt,
         imageOptions,
+        references,
       ]);
       const existing = idempotencyRef.current;
       const idempotencyKey = existing?.signature === requestSignature ? existing.key : newKey();
@@ -542,6 +654,7 @@ export function Forge({
           modelId: model.modelId,
           prompt: submittedPrompt,
           ...(imageOptions ? { imageOptions } : {}),
+          ...references,
           idempotencyKey,
         }),
       });
@@ -551,6 +664,8 @@ export function Forge({
       setPrompt('');
       setLyrics('');
       setImageState(null);
+      setReferenceState(null);
+      setArtifactReferenceState(null);
       setNotice('Forge job accepted.');
       idempotencyRef.current = null;
     } catch (e) {
@@ -730,6 +845,108 @@ export function Forge({
               onChange={(draft) => setImageState({ scope: imageScope, draft })}
             />
           )}
+          {referenceAvailable && (portraits.length > 0 || catalog?.operatorReferenceImage) && (
+            <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
+              <legend>Reference photos</legend>
+              <div className="forge-reference-options">
+                {portraits.map((portrait) => (
+                  <label key={portrait.agentId}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Use ${portrait.agentName || portrait.agentId} reference photo`}
+                      checked={referenceAgentIds.includes(portrait.agentId)}
+                      disabled={
+                        mode === 'video' &&
+                        referenceCount >= videoReferenceLimit &&
+                        !referenceAgentIds.includes(portrait.agentId)
+                      }
+                      onChange={(event) =>
+                        setReferenceState({
+                          scope: referenceScope,
+                          agentIds: event.target.checked
+                            ? [...referenceAgentIds, portrait.agentId]
+                            : referenceAgentIds.filter((id) => id !== portrait.agentId),
+                          operator: useOperatorReferenceImage,
+                        })
+                      }
+                    />
+                    <span>{portrait.agentName || portrait.agentId}</span>
+                  </label>
+                ))}
+                {catalog?.operatorReferenceImage && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label="Use operator reference photo"
+                      checked={useOperatorReferenceImage}
+                      disabled={
+                        mode === 'video' &&
+                        referenceCount >= videoReferenceLimit &&
+                        !useOperatorReferenceImage
+                      }
+                      onChange={(event) =>
+                        setReferenceState({
+                          scope: referenceScope,
+                          agentIds: referenceAgentIds,
+                          operator: event.target.checked,
+                        })
+                      }
+                    />
+                    <span>Operator</span>
+                  </label>
+                )}
+              </div>
+            </fieldset>
+          )}
+          {mode === 'video' && artifactReferencesAvailable && (
+            <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
+              <legend>Forge image references</legend>
+              {artifactReferences.length > 0 && (
+                <ul className="forge-artifact-references">
+                  {artifactReferences.map((reference) => {
+                    const artifact = jobs
+                      .find((job) => job.id === reference.jobId)
+                      ?.artifacts.find((item) => item.id === reference.artifactId);
+                    return (
+                      <li key={JSON.stringify(reference)}>
+                        <span>{artifact?.name}</span>
+                        <button
+                          type="button"
+                          className="forge-reference-action"
+                          aria-label={`Remove ${artifact?.name} reference`}
+                          onClick={() =>
+                            setArtifactReferenceState({
+                              scope: videoReferenceScope,
+                              references: artifactReferences.filter((item) => item !== reference),
+                            })
+                          }
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <button
+                type="button"
+                className="forge-reference-action"
+                disabled={referenceCount >= videoReferenceLimit}
+                onClick={() => {
+                  setShowRecents(true);
+                  setError('');
+                  setNotice('');
+                }}
+              >
+                Add Forge image
+              </button>
+            </fieldset>
+          )}
+          {referenceError && (
+            <p className="forge-error" role="alert">
+              {referenceError}
+            </p>
+          )}
           <label className="forge-field forge-prompt">
             <span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span>
             <textarea
@@ -808,7 +1025,8 @@ export function Forge({
                   busy ||
                   !selectedAvailable ||
                   !prompt.trim() ||
-                  !!imageError
+                  !!imageError ||
+                  !!referenceError
                 }
               >
                 {busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}
@@ -837,18 +1055,12 @@ export function Forge({
               <span>
                 {modeUnavailableReason ??
                   (mode === 'video'
-                    ? 'This release does not have a video provider contract.'
+                    ? 'Configure a compatible video model connection to use this mode.'
                     : mode === 'music'
                       ? 'Music generation is not configured.'
                       : 'Configure a compatible model connection to use this mode.')}
               </span>
             </div>
-          )}
-          {mode === 'video' && catalog?.sourceAttachments && (
-            <p className="forge-capability-note">
-              Source attachments: unavailable —{' '}
-              {catalog.sourceAttachments.reason ?? 'not supported by this release.'}
-            </p>
           )}
           <div className="forge-heat-seam" aria-hidden="true" />
         </section>
@@ -910,6 +1122,17 @@ export function Forge({
                       <footer>
                         <strong>{artifact.name}</strong>
                         <div>
+                          {artifactReferencesAvailable &&
+                            eligibleVideoReference(selectedJob, artifact) && (
+                              <button
+                                type="button"
+                                className="forge-reference-action"
+                                disabled={busy || selectionSaving}
+                                onClick={() => useArtifactReference(selectedJob, artifact)}
+                              >
+                                Use as video reference
+                              </button>
+                            )}
                           {['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
                             artifact.mimeType?.toLowerCase(),
                           ) &&

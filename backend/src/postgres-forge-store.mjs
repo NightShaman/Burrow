@@ -8,7 +8,7 @@ import { buildSessionEntry } from './session-entry.mjs';
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import {
   createOpenAIGeneratedArtifactAdapter,
   generatedArtifactKind,
@@ -32,7 +32,7 @@ import {
 import { forgeCatalog } from "./forge-store.mjs";
 import { normalizeImageOptions, withImageOptions } from './model-adapters/image-generation-options.mjs';
 import { mediaBudgets } from './model-adapters/generated-media-budgets.mjs';
-import { referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
+import { REFERENCE_IMAGE_MAX_BYTES, referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
 
 const fail = (error, statusCode = 400) => {
   throw Object.assign(new Error(error), { statusCode });
@@ -276,6 +276,33 @@ export class PostgresForgeStore {
     }
     return snapshots;
   }
+  async artifactReferenceSnapshot({ jobId, artifactId }) {
+    const { job, artifact, resolved } = await this.artifact(jobId, artifactId);
+    if (job.modOwnerId || job.status !== 'succeeded' || job.kind !== 'image')
+      fail('forge_reference_artifact_invalid', 409);
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(artifact.mimeType) ||
+        !resolved.stat.isFile() || resolved.stat.size < 1 || resolved.stat.size > REFERENCE_IMAGE_MAX_BYTES)
+      fail('forge_reference_artifact_invalid', 409);
+    let handle;
+    try {
+      handle = await fs.open(resolved.filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size < 1 || stat.size > REFERENCE_IMAGE_MAX_BYTES ||
+          stat.dev !== resolved.stat.dev || stat.ino !== resolved.stat.ino) fail('forge_reference_artifact_invalid', 409);
+      const buffer = Buffer.alloc(stat.size + 1);
+      let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        const part = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+        if (!part.bytesRead) break;
+        bytesRead += part.bytesRead;
+      }
+      if (bytesRead !== stat.size) fail('forge_reference_artifact_invalid', 409);
+      const bytes = buffer.subarray(0, bytesRead);
+      const sourceImages = validatedSourceImages([{ bytes, mimeType: artifact.mimeType, name: artifact.name }]);
+      return { sourceImages, referenceImage: Object.freeze({ jobId, artifactId, name: artifact.name,
+        mimeType: artifact.mimeType, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }) };
+    } finally { await handle?.close(); }
+  }
   async selections() {
     const r = await this.pool.query(
       "SELECT mode,connection_id,model_id FROM forge_selections ORDER BY mode",
@@ -464,6 +491,7 @@ export class PostgresForgeStore {
       "useAgentReferenceImage",
       "useOperatorReferenceImage",
       "referenceAgentIds",
+      "referenceArtifacts",
       "imageOptions",
     ];
     if (
@@ -487,12 +515,18 @@ export class PostgresForgeStore {
     if (body.referenceAgentIds != null && (!Array.isArray(body.referenceAgentIds) ||
       body.referenceAgentIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()))) fail('forge_request_invalid');
     const referenceAgentIds = body.referenceAgentIds ?? [];
+    if (body.referenceArtifacts != null && (!Array.isArray(body.referenceArtifacts) ||
+      body.referenceArtifacts.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
+        Object.keys(ref).length !== 2 || ['jobId', 'artifactId'].some(k => typeof ref[k] !== 'string' || !ref[k].trim() || ref[k] !== ref[k].trim())))) fail('forge_request_invalid');
+    const artifactReferences = body.referenceArtifacts ?? [];
+    if (artifactReferences.length && body.mode && body.mode !== 'video') fail('forge_reference_artifacts_video_only');
+    if (privateReferences && artifactReferences.length) fail('forge_request_invalid');
     if (privateReferences != null && (!ownerModId || !Array.isArray(privateReferences) || !privateReferences.length ||
       privateReferences.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
         Object.keys(ref).some(key => !['key', 'id', 'name'].includes(key)) ||
         ['key', 'id', 'name'].some(key => typeof ref[key] !== 'string' || !ref[key].trim())))) fail('forge_request_invalid');
     if (privateReferences && (useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
-    const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences);
+    const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences) || artifactReferences.length > 0;
     if (hasReferences && body.mode && !['image', 'video'].includes(body.mode)) fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
@@ -536,20 +570,26 @@ export class PostgresForgeStore {
     }
     // Preserve the self-only identity/prompt for existing callers. New explicit
     // lists (even one other agent), and Theater-owned refs use ordered snapshots.
-    const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences;
+    const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences && !artifactReferences.length;
     const snapshots = legacySelf ? [await this.referenceImageSnapshot(agentId)] : hasReferences
       ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, useOperatorReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
+    if (artifactReferences.length && snapshots.length + artifactReferences.length > 6) fail('google_video_reference_image_limit_exceeded');
+    for (const ref of artifactReferences) {
+      const snapshot = await this.artifactReferenceSnapshot(ref);
+      snapshots.push(snapshot);
+      if (snapshots.reduce((total, item) => total + item.sourceImages.reduce((n, image) => n + image.bytes.length, 0), 0) > snapshotMaxBytes) fail('reference_images_too_large', 413);
+    }
     const referenceImage = legacySelf ? snapshots[0].referenceImage : null;
     const multiReferences = hasReferences && !legacySelf ? snapshots.map(({ referenceImage: ref }) => privateReferences
       ? { key: ref.key, id: ref.id, name: ref.name, mimeType: ref.mimeType, sizeBytes: ref.sizeBytes, sha256: ref.sha256 }
       : ref) : null;
     const dispatch = snapshots.length ? { sourceImages: snapshots.flatMap(snapshot => snapshot.sourceImages) } : null;
-    if (dispatch && multiReferences) {
+    if (dispatch && multiReferences && multiReferences.some(ref => !ref.jobId)) {
       // Keep the selected identities aligned with the adapter's image order.
       // Only the provider prompt gets this mapping; the job's caller prompt
       // stays unchanged and no single-self exact prompt changes.
-      dispatch.prompt = `${body.prompt}\n\nUse the supplied reference images as canonical character identities: preserve each character's face, species, build and distinctive features. Do not blend identities; depict only the characters called for by the scene.\nReference images (in the order supplied):\n${multiReferences.map((ref, index) =>
-        `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ref.operatorId ? ' (operator)' : ''}.`).join('\n')}`;
+      dispatch.prompt = `${body.prompt}\n\nUse the supplied portrait reference images as canonical character identities: preserve each character's face, species, build and distinctive features. Do not blend identities; depict only the characters called for by the scene.\nReference images (in the order supplied):\n${multiReferences.map((ref, index) =>
+        ref.jobId ? `${index + 1}. Image ${index + 1} is the Forge source image ${JSON.stringify(ref.name)}; follow the scene instructions for this image.` : `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ref.operatorId ? ' (operator)' : ''}.`).join('\n')}`;
     }
     // Config resolution may borrow this same pool. Resolve before holding the
     // claim transaction (including max-one pools), but defer admission errors
@@ -608,6 +648,7 @@ export class PostgresForgeStore {
           // Shape/bounds were normalized before claiming; support comes from
           // the same configured-output catalog exposed to UI and agents.
         }
+        if (artifactReferences.length && (model.kind !== 'video' || !model.referenceArtifacts?.available)) fail('forge_reference_artifacts_unsupported', 409);
         if (dispatch) {
           if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
           if (!['image', 'video'].includes(model.kind)) fail('agent_reference_image_image_only');

@@ -1,0 +1,83 @@
+{
+  "connection": {
+    "id": "google",
+    "provider": "Google",
+    "apiType": "google-generative-language",
+    "models": [
+      {
+        "id": "models/gemini-omni-1.2-flash",
+        "name": "Gemini Omni 1.2 Flash",
+        "selected": true,
+        "acceptedOutput": ["video"],
+        "acceptedInput": ["text", "image"]
+      }
+    ]
+  },
+  "catalog": {
+    "ok": true,
+    "models": [
+      {
+        "connectionId": "google",
+        "modelId": "models/gemini-omni-1.2-flash",
+        "label": "Gemini Omni 1.2 Flash",
+        "kind": "video",
+        "available": true,
+        "unavailableReason": null,
+        "controls": [],
+        "agentReferenceImage": {
+          "available": true,
+          "reason": null
+        },
+        "referenceArtifacts": {
+          "available": true,
+          "maxImages": 6
+        }
+      }
+    ],
+    "music": {
+      "available": false,
+      "reason": "music_model_not_configured"
+    },
+    "sourceAttachments": {
+      "available": false,
+      "reason": "source_attachments_unsupported"
+    },
+    "video": {
+      "available": true,
+      "reason": null
+    }
+  },
+  "textOnlyCatalog": {
+    "ok": true,
+    "models": [
+      {
+        "connectionId": "google",
+        "modelId": "models/gemini-omni-1.2-flash",
+        "label": "Gemini Omni 1.2 Flash",
+        "kind": "video",
+        "available": true,
+        "unavailableReason": null,
+        "controls": [],
+        "agentReferenceImage": {
+          "available": false,
+          "reason": "agent_reference_image_unsupported"
+        },
+        "referenceArtifacts": {
+          "available": false
+        }
+      }
+    ],
+    "music": {
+      "available": false,
+      "reason": "music_model_not_configured"
+    },
+    "sourceAttachments": {
+      "available": false,
+      "reason": "source_attachments_unsupported"
+    },
+    "video": {
+      "available": true,
+      "reason": null
+    }
+  }
+}

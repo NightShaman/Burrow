@@ -454,7 +454,7 @@ describe('Forge workspace', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Video/ }));
     expect(screen.getByText('Video generation is unavailable')).toBeTruthy();
     expect(screen.getByText('video_disabled')).toBeTruthy();
-    expect(screen.getByText(/Source attachments: unavailable/)).toBeTruthy();
+    expect(screen.queryByText(/Source attachments: unavailable/)).toBeNull();
   });
 
   it('keeps Music honest and never offers generation', async () => {

@@ -15183,6 +15183,31 @@
           },
           "imageOptions": {
             "$ref": "#/components/schemas/ForgeImageOptions"
+          },
+          "referenceArtifacts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "description": "Ordered prior Forge PNG/JPEG/WebP image artifacts for supported video models, after saved portraits. Maximum six combined references. No source bytes or paths.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "jobId",
+                "artifactId"
+              ],
+              "properties": {
+                "jobId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "artifactId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
           }
         },
         "required": [
@@ -15254,6 +15279,21 @@
           },
           "imageOptions": {
             "$ref": "#/components/schemas/ForgeImageOptionsCapability"
+          },
+          "referenceArtifacts": {
+            "type": "object",
+            "required": [
+              "available"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "maxImages": {
+                "type": "integer",
+                "description": "Combined saved portraits and artifact reference limit."
+              }
+            }
           }
         },
         "required": [
