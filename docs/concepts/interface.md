@@ -331,7 +331,7 @@ The interface uses `localStorage` for more than appearance. Closing the tab or r
 
 | Stored browser data | Current bound or behavior |
 | --- | --- |
-| Chat drafts | Up to 50 nonempty drafts; a 24-hour age rule is applied when reading or writing the cache |
+| Chat drafts | Nonempty authored drafts remain in local browser storage until sent or explicitly discarded; no age/count eviction. Browser storage availability and quota still apply. |
 | Chat transcripts | Up to 24 cached conversations; optimistic image-preview data URLs are removed before storage |
 | Session lists | Cached lists for up to 16 agents |
 | Archive Chat lists | Up to 12 scoped query entries by default |
