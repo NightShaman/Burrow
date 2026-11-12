@@ -121,3 +121,38 @@ it('does not apply a late originating Forge transcript to a different selected d
   expect(result.current.sessionId).toBe('other');
   expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Other destination' }]);
 });
+
+it('preserves unchanged recovered transcript and rows without persisting again, but applies text, metadata and attachments', async () => {
+  turns = [
+    { id: 'history', type: 'message', role: 'assistant', content: 'History' },
+    { id: 'latest', type: 'message', role: 'assistant', content: 'Latest' },
+  ];
+  const { result } = renderHook(() => useChatSession('gerald'));
+  await flush();
+  // Navigation/recovery ownership can overlap on the initial load; settle once.
+  await tick();
+  const before = result.current.turns;
+  const writes = vi.spyOn(Storage.prototype, 'setItem');
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  expect(result.current.turns).toBe(before);
+  expect(writes.mock.calls.filter(([key]) => key.startsWith('hc.chatConversations'))).toHaveLength(
+    0,
+  );
+  turns[1] = {
+    ...turns[1],
+    content: 'Changed',
+    metadata: {
+      chatResultVersion: 2,
+      terminalStatus: 'failed',
+      attachments: [{ name: 'late.txt', type: 'text/plain' }],
+    },
+  };
+  await tick();
+  expect(result.current.turns).not.toBe(before);
+  expect(result.current.turns[0]).toBe(before[0]);
+  expect(result.current.turns[1]).toMatchObject(turns[1]);
+  turns.shift();
+  await tick();
+  expect(result.current.turns.map((turn) => turn.id)).toEqual(['latest']);
+  writes.mockRestore();
+});

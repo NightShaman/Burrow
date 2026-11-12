@@ -293,9 +293,10 @@ export function projectChatActivity(
   });
   const hasLiveSubagents = Boolean(matchingLiveSubagents.length);
   const hasPendingForgeDeliveries = (response.pendingForgeDeliveries ?? 0) > 0;
-  const hasActivity =
-    Boolean(response.runs?.length) || hasLiveSubagents || hasPendingForgeDeliveries;
-  const shouldRefresh = isChildSession || hasActivity || hadRuns;
+  const hasActivity = Boolean(liveRuns.length) || hasLiveSubagents || hasPendingForgeDeliveries;
+  // Retained terminal summaries need reconciliation, but are not live activity.
+  // The polling owner acknowledges an unchanged settled summary after success.
+  const shouldRefresh = isChildSession || hasActivity || hadRuns || Boolean(response.runs?.length);
   return {
     runtimeRun: projectedRuntimeRun,
     childActivities,

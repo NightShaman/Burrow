@@ -462,3 +462,89 @@ it('keeps polling but never reloads a perpetually idle transcript with zero pend
   expect(apiMock).toHaveBeenCalledTimes(6);
   expect(opts.onRefresh).not.toHaveBeenCalled();
 });
+
+it('keeps idle and unchanged active projection references while polling and refreshing live work at the original cadence', async () => {
+  let active: ActiveChatRunsResponse = { ok: true, runs: [] };
+  apiMock.mockImplementation(async () => structuredClone(active));
+  const opts = options();
+  const { result } = renderHook(() => useChatRecovery(opts));
+  await act(async () => {});
+  const idleChildren = result.current.runtimeChildActivities;
+  const idleA2A = result.current.a2aActivities;
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  expect(apiMock).toHaveBeenCalledTimes(4);
+  expect(result.current.runtimeChildActivities).toBe(idleChildren);
+  expect(result.current.a2aActivities).toBe(idleA2A);
+  expect(opts.onRefresh).not.toHaveBeenCalled();
+  active = response();
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  const live = result.current.runtimeRun;
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  expect(result.current.runtimeRun).toBe(live);
+  expect(opts.onRefresh).toHaveBeenCalledTimes(4);
+  active.runs[0].answerText = 'New streamed answer';
+  active.runs[0].steeringReady = true;
+  active.runs[0].progress = [{ type: 'model.dispatched', runId: 'old', sessionId: 's' }];
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(result.current.runtimeRun).not.toBe(live);
+  expect(result.current.runtimeRun).toMatchObject({
+    answerText: 'New streamed answer',
+    steeringReady: true,
+  });
+});
+
+it('retries discarded and failed retained terminal summaries, acknowledges only success, and refreshes changed outcomes', async () => {
+  let active: ActiveChatRunsResponse = {
+    ok: true,
+    runs: [{ ...run, status: 'completed', answerText: 'Final' }],
+  };
+  apiMock.mockImplementation(async () => structuredClone(active));
+  const opts = options();
+  opts.onRefresh.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('offline'));
+  const { result } = renderHook(() => useChatRecovery(opts));
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(apiMock).toHaveBeenCalledTimes(6);
+  expect(opts.onRefresh).toHaveBeenCalledTimes(3);
+  expect(result.current.runtimeRun).toBeNull();
+  active.runs[0].answerText = 'Final with persisted correction';
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(opts.onRefresh).toHaveBeenCalledTimes(4);
+  active = response('replacement');
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(result.current.runtimeRun?.runId).toBe('replacement');
+  expect(opts.onRefresh).toHaveBeenCalledTimes(6);
+  active = { ok: true, runs: [{ ...run, runId: 'replacement', status: 'failed' }] };
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  expect(opts.onRefresh).toHaveBeenCalledTimes(7);
+});
+
+it('continues child-session reconciliation and updates elapsed child activity without invalidating unrelated arrays', async () => {
+  const active: ActiveChatRunsResponse = {
+    ok: true,
+    runs: [],
+    subagents: [
+      {
+        id: 'child',
+        agentId: 'a',
+        parentSessionId: 's',
+        sessionId: 'child',
+        status: 'running',
+        activity: { startedAt: new Date(Date.now()).toISOString() },
+      },
+    ],
+  };
+  apiMock.mockImplementation(async () => structuredClone(active));
+  const opts = { ...options(), isChildSession: true };
+  const { result } = renderHook(() => useChatRecovery(opts));
+  await act(async () => {});
+  const children = result.current.runtimeChildActivities;
+  const a2a = result.current.a2aActivities;
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(result.current.runtimeChildActivities).not.toBe(children);
+  expect(result.current.runtimeChildActivities[0].summary).toContain('elapsed 2s');
+  expect(result.current.a2aActivities).toBe(a2a);
+  expect(opts.onRefresh).toHaveBeenCalledTimes(3);
+  active.subagents = [];
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
+  expect(opts.onRefresh).toHaveBeenCalledTimes(5);
+});

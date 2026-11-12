@@ -80,5 +80,10 @@ it('does not reparse an unchanged transcript on each local draft update, but upd
       ]}
     />,
   );
-  expect(markdownRender).toHaveBeenCalledTimes(3);
+  // Only the new answer is parsed; existing history stays isolated.
+  expect(markdownRender).toHaveBeenCalledTimes(2);
+  expect(markdownRender.mock.calls.map(([text]) => text)).toEqual([
+    'Existing conversation',
+    'New answer',
+  ]);
 });

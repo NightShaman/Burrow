@@ -211,3 +211,39 @@ it('separates changed payloads and server generations from ambiguous attempts', 
   });
   expect(new Set(posts.map((post) => post.idempotencyKey)).size).toBe(3);
 });
+
+it('preserves unchanged input rows across polls, exposes generation/status/error changes, and clears poll errors', async () => {
+  vi.useFakeTimers();
+  try {
+    let payload = { generation: 4, inputs: [input, { ...input, id: 'two' }] };
+    vi.mocked(api).mockImplementation(async () => structuredClone(payload));
+    const { result } = renderHook(() => useChatInputs('agent', 'default', 0));
+    await act(async () => {});
+    const previous = result.current.inputs;
+    await act(async () => vi.advanceTimersByTimeAsync(4500));
+    expect(api).toHaveBeenCalledTimes(4);
+    expect(result.current.inputs).toBe(previous);
+    payload = { ...payload, generation: 5 };
+    await act(async () => vi.advanceTimersByTimeAsync(1500));
+    expect(result.current.generation).toBe(5);
+    expect(result.current.inputs).toBe(previous);
+    payload.inputs[0] = { ...input, status: 'failed', error: 'Synthetic failure' };
+    await act(async () => vi.advanceTimersByTimeAsync(1500));
+    expect(result.current.inputs[0]).toMatchObject({
+      status: 'failed',
+      error: 'Synthetic failure',
+    });
+    expect(result.current.inputs[1]).toBe(previous[1]);
+    const changed = result.current.inputs;
+    vi.mocked(api).mockRejectedValueOnce(new Error('offline'));
+    await act(async () => vi.advanceTimersByTimeAsync(1500));
+    expect(result.current.error).toContain('offline');
+    expect(result.current.inputs).toBe(changed);
+    await act(async () => vi.advanceTimersByTimeAsync(1500));
+    expect(result.current.error).toBe('');
+    expect(result.current.inputs).toBe(changed);
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
+});

@@ -1,6 +1,7 @@
 import { useConversationAuthority } from './useConversationAuthority';
 import { useConversationSelection } from './useConversationSelection';
 import { useConversationRevalidation } from './useConversationRevalidation';
+import { shareChatRows } from './chatValueEquality';
 import { useChatRecovery } from './useChatRecovery';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useChatComposer } from './useChatComposer';
@@ -133,7 +134,7 @@ export function useChatSession(selectedAgentId: string) {
         conversationCacheRef.current[cacheKey] !== cachedTurns
       )
         return false;
-      const nextTurns = reconcileSnapshot(cacheKey, session, cachedTurns ?? []).map((turn) => {
+      const recoveredTurns = reconcileSnapshot(cacheKey, session, cachedTurns ?? []).map((turn) => {
         if (turn.role !== 'assistant' || !turn.runId || turn.metadata?.progress) return turn;
         const recovered = recoveredProgress[turn.runId];
         if (!recovered?.length) return turn;
@@ -145,8 +146,9 @@ export function useChatSession(selectedAgentId: string) {
         delete recoveredProgress[turn.runId];
         return progress ? { ...turn, metadata: { ...turn.metadata, progress } } : turn;
       });
+      const nextTurns = shareChatRows(cachedTurns ?? [], recoveredTurns);
       rememberLiveSnapshot(cacheKey, session.metadata?.updatedAt ?? '');
-      commitSnapshot(cacheKey, nextTurns);
+      if (nextTurns !== cachedTurns) commitSnapshot(cacheKey, nextTurns);
       if (current()) showOlderState(selectedAgentId, sessionId, session);
       if (
         current() &&

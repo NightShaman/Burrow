@@ -1,3 +1,4 @@
+import { chatValuesEqual } from './chatValueEquality';
 import { type ContextReport } from './contextReport';
 import {
   chatInputLabel,
@@ -13,7 +14,7 @@ import {
 } from './chatTerminal';
 import { chatLiveStageLabel, type ChatLiveStage } from './chatLiveStage';
 import { ImagePreview } from '../../app/ImagePreview';
-import { cloneElement, isValidElement, useEffect, useState } from 'react';
+import { cloneElement, isValidElement, memo, useEffect, useState } from 'react';
 import type { HTMLAttributes, ReactNode, SyntheticEvent } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { markdownPlugins, MarkdownTable, MarkdownImage } from '../../app/markdownTables';
@@ -125,13 +126,13 @@ const markdownComponents: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
 };
 
-function Markdown({ children }: { children: string }) {
+const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
     <ReactMarkdown remarkPlugins={markdownPlugins} components={markdownComponents}>
       {children}
     </ReactMarkdown>
   );
-}
+});
 
 function ContextCommandReport({ report }: { report: ContextReport }) {
   return (
@@ -562,7 +563,7 @@ function GeneratedArtifactCard({
   );
 }
 
-export function ChatMessage({
+export const ChatMessage = memo(function ChatMessage({
   side,
   name,
   avatar,
@@ -734,7 +735,7 @@ export function ChatMessage({
       </div>
     </article>
   );
-}
+}, chatValuesEqual);
 
 function agentDisplayName(value: string) {
   return value

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type ActiveChatRunsResponse, type ProgressEntry } from '../../app/api';
+import { chatValuesEqual, shareChatRows } from './chatValueEquality';
 import { isChatRunNotFoundError } from './useLiveSteering';
 import { conversationCacheGeneration } from './chatConversationCache';
 import { projectChatActivity, type RuntimeRunForSelection } from './chatActivityProjection';
@@ -69,6 +70,8 @@ export function useChatRecovery({
     const current = () => scope.current === owner && !controller.signal.aborted;
     let timer: number | undefined;
     let hadRuns = false;
+    let refreshedTerminalRuns: ActiveChatRunsResponse['runs'] | undefined;
+    let refreshedGeneration: number | undefined;
     const terminalScopeKey = JSON.stringify([agentId, sessionId]);
     const poll = async () => {
       const generation = conversationCacheGeneration;
@@ -108,7 +111,21 @@ export function useChatRecovery({
         );
         if (projection.runtimeRun)
           recoveredProgress.current[projection.runtimeRun.runId] = projection.runtimeRun.progress;
-        setActivity(projection);
+        setActivity((previous) => {
+          const runtimeRun = chatValuesEqual(previous.runtimeRun, projection.runtimeRun)
+            ? previous.runtimeRun
+            : projection.runtimeRun;
+          const childActivities = shareChatRows(
+            previous.childActivities,
+            projection.childActivities,
+          );
+          const a2aActivities = shareChatRows(previous.a2aActivities, projection.a2aActivities);
+          return runtimeRun === previous.runtimeRun &&
+            childActivities === previous.childActivities &&
+            a2aActivities === previous.a2aActivities
+            ? previous
+            : { runtimeRun, childActivities, a2aActivities };
+        });
         if (hadRuns && !projection.hadRuns) terminalRefreshNeeded.current.add(terminalScopeKey);
         hadRuns = projection.hadRuns;
         // Child workers and Forge deliveries persist outside the active-run registry;
@@ -122,7 +139,11 @@ export function useChatRecovery({
           );
         });
         if (
-          projection.shouldRefresh ||
+          (projection.shouldRefresh &&
+            (projection.hadRuns ||
+              isChildSession ||
+              refreshedGeneration !== generation ||
+              !chatValuesEqual(refreshedTerminalRuns, response.runs))) ||
           terminalRefreshNeeded.current.has(terminalScopeKey) ||
           settledRetired.length
         ) {
@@ -131,7 +152,9 @@ export function useChatRecovery({
             generation,
             recoveredProgress: recoveredProgress.current,
           });
-          if (current() && applied) {
+          if (current() && applied && conversationCacheGeneration === generation) {
+            refreshedTerminalRuns = response.runs;
+            refreshedGeneration = generation;
             terminalRefreshNeeded.current.delete(terminalScopeKey);
             settledRetired.forEach((key) => retiredRefreshNeeded.current.delete(key));
           }

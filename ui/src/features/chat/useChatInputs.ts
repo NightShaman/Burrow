@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ChatAttachment } from '../../app/api';
 import { acknowledgeChatInputRetry, chatInputRetryKey } from './chatInputRetryIdentity';
+import { shareChatRows } from './chatValueEquality';
 import type { ChatInput } from './chatInputs';
 
 type InputScope = { key: string };
@@ -49,7 +50,18 @@ export function useChatInputs(agentId: string, sessionId: string, resetGeneratio
           `/api/chat/inputs?agentId=${encodeURIComponent(agentId)}&sessionId=${encodeURIComponent(sessionId)}`,
         );
         if (live && readVersion === mutationVersion.current)
-          setState({ scope, generation: result.generation, inputs: result.inputs, error: '' });
+          setState((previous) => {
+            const inputs =
+              previous.scope === scope
+                ? shareChatRows(previous.inputs, result.inputs)
+                : result.inputs;
+            return previous.scope === scope &&
+              previous.generation === result.generation &&
+              previous.inputs === inputs &&
+              !previous.error
+              ? previous
+              : { scope, generation: result.generation, inputs, error: '' };
+          });
       } catch (error) {
         if (live)
           setState((previous) => ({
