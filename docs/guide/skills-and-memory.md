@@ -123,3 +123,7 @@ Open **Settings → Agents → [agent] → Dreams**. Enable scheduled dreaming, 
 Open **Archive → Dreams** for agent/day groups containing narratives and separate Light/Deep/REM attempt outcomes, errors and progress. The former Settings Recent activity list has moved there. A prior successful narrative and a later failed attempt can both remain visible. Current Core saves individual **Dream-generated** connections in Brains and excludes DreamMemory and Dream preloads from ordinary context. Those connections are searchable on demand, not injected into every turn. A cycle may legitimately save no new connection. See [Dream cycles](../concepts/dreams.md) for the version-specific behavior.
 
 [Source: dream settings and activity](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/AgentDreams.tsx#L87-L124)
+
+## Skill metadata parsing
+
+Checked **12 November 2026**: Optional skill frontmatter starts with a first-line `---` and, once opened, requires a closing delimiter. Core parses a YAML mapping using the JSON schema; `name`, `description` and `version`, when supplied, must be strings. Invalid, unclosed, nonmapping or incorrectly typed metadata fails explicitly rather than falling back to regex extraction. This validates metadata only; loading a skill does not authorize its instructions or tools.

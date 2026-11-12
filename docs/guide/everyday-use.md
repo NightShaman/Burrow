@@ -114,14 +114,18 @@ Changing filters or leaving Archive cancels its reads, not durable chat/jobs. A 
 
 ## Generate media in Forge
 
-1. Open **Forge** and choose **Image**, **Speech**, or **Music**.
+1. Open **Forge** and choose **Image**, **Video**, **Speech**, or **Music**, where a supported model is available.
 2. Select **Provider**, then an available **Model**, enter a prompt or speech script, and click **Generate**. The model list is filtered to that saved connection and media mode. Generation uses your configured provider and may incur its charges.
 3. Check the job's status. When it succeeds, preview or **Download** the output. **Attach to conversation** adds it to the selected chat session.
 4. Use **Recents** to revisit earlier jobs and **Refresh** if needed.
 
 Checked **10 November 2026**: changing Provider saves its first available model as an explicit connection/model pair for the current media mode. Duplicate provider names include their connection IDs, so identical labels do not merge their models. Both selectors are disabled while saving and retain the saved pair if the write fails. A saved unavailable pair remains visibly unavailable rather than silently becoming another selection.
 
-Model availability depends on your connections. This release has no video provider contract; the Video tab is not a promise of working video generation. Arbitrary source attachments and provider-specific tuning remain unsupported; explicitly selected canonical reference photos are the supported exception described below. The animated pressure gauge is decorative, not progress.
+Checked **12 November 2026**: model availability depends on your saved connections and their effective capabilities. Video generation is implemented for supported native Google Interactions models, not every model displayed by Google or every video provider. A visible Video tab or declared capability does not guarantee account access. Arbitrary uploads/URLs and generic provider tuning remain unsupported; typed image settings and the reference selections below are supported contracts. The animated pressure gauge is decorative, not progress.
+
+For an eligible model in **Image**, select GIF output and set frame count and frame duration to request animation. GIF requires the model's saved output capabilities to include GIF; a model name alone is insufficient. GIF-only models use explicit GIF settings, while mixed models keep their normal still-image default. Generated GIFs animate in the preview and download as real GIF files. See [image settings and limits](../reference/api/artifacts.md#typed-image-options-and-animated-gif).
+
+To use an existing creation in a video, open an eligible succeeded image in **Recents** and choose **Use as video reference**, or use **Add Forge image** in Video. Review the selected filenames and remove any unwanted reference before Generate. Supported saved agent/operator photos can be selected alongside these images. The limit is six images total, not six of each type. Existing sources must be PNG/JPEG/WebP, nonempty and at most 20 MiB each; GIF is not a video reference. A deleted source fails rather than being silently regenerated. Selection itself does not start a paid job; **Generate** does. See [video reference details](../reference/api/artifacts.md#existing-forge-images-as-video-references).
 
 [Source: Forge workflow and limitations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/forge/ForgePage.tsx#L240-L266) · [Source: generation contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/forge-agent-tools.mjs#L26-L30)
 
@@ -174,3 +178,4 @@ If restoration fails, choose **Retry** or **Use this browser only**. Browser-onl
 Open **Group Chat**, choose **Delete** beside the room, then confirm **Delete group**. Choose **Keep group** to leave it untouched. Confirmed deletion stops active group replies and deletes the room and shared transcript, but keeps individual chats and participant sessions. A failed deletion keeps the room visible for retry. Scheduled jobs are not deleted automatically. If an integration routes scheduled work to the removed room, disable or change that routing; native schedule settings do not expose a group-room destination.
 
 Chat code blocks have a separate **Copy code** footer. Leading blank display lines may be hidden, but copying preserves the original code spacing.
+

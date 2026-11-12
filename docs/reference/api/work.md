@@ -142,3 +142,9 @@ Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4
 ## Scheduler outcome reconciliation
 
 Checked **7 November 2026**: the scheduler stages the exact terminal result before completing a run receipt. Restart reconciliation can use that staged result, an exact task terminal, or matching committed chat continuity, runtime receipt and assistant turn. Answer wording or a different session's latest result is not completion proof, and receipt-write failures do not turn a committed successful chat into a new execution failure. Without matching evidence, work is marked missed rather than automatically rerun. An invalid or unresolvable stored schedule is disabled with a failed schedule receipt so other jobs can continue; inspect and repair its schedule deliberately.
+
+## Agent scheduler pagination
+
+Checked **12 November 2026**: The native agent tools `scheduled_jobs_list` and `scheduled_job_runs` return `nextCursor`, `hasMore`, `resultCount` and `totalCount`. Jobs default to 50 entries (maximum 100), ordered by immutable ID ascending; runs default to 50 (maximum 200), ordered by scheduled time, creation time and ID descending. Opaque cursors are bound to their agent/filter or job scope; mismatches fail as `cursor_invalid`.
+
+These are live keyset pages, not a frozen multi-page snapshot. Deleting an anchor does not invalidate continuation, but insertions before the cursor require restarting to see them; totals describe each query. This is the native agent-tool contract, not a change to the separate mod scheduler facade.

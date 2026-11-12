@@ -128,3 +128,11 @@ The option must be a boolean. Unknown keys, non-object inputs and nonboolean `in
 ## Mod-panel API query strings
 
 Checked **10 November 2026**: a main mod panel's scoped `api(path, init?)` forwards query strings under `/api/mods/<declaring-mod-id>`, matching the Archive host's query support. Build filter/cursor values with `URLSearchParams`; do not interpolate unescaped values. The path rejects `..`, backslashes, encoded dot/slash/backslash sequences and fragments. These path checks do not reject the same encoded characters inside query values, and they do not replace endpoint authorization. A Core-looking path or absolute URL passed to this helper remains under the declaring mod's prefix, not an unscoped request.
+
+## Receipt-owned output attachments
+
+Checked **12 November 2026**: Terminal `agents.turns.read` results can include `attachments`, a durable list of byte-free `{ id, name, mimeType, sizeBytes }` descriptors. Core captures only the assistant output and native provider artifacts belonging to that exact agent/session/run, not input uploads, prior turns or a session-tail guess.
+
+`context.agents.turns.readAttachment(turnId, attachmentId)` reads only an attachment listed on a receipt owned by the calling mod. It returns `{ name, mimeType, sizeBytes, encoding: "base64", content }`, with raw base64 rather than a data URL. Reads are capped at 32 MiB decoded bytes; larger descriptors can remain visible but fail with `mod_external_turn_attachment_too_large`. Missing, expired, replaced or unsafe artifact bytes fail as not found. Durable receipt metadata is not a promise of permanent byte retention.
+
+Forge delivery accepts existing database session identities, including transport/mod identities, rather than assuming a filesystem slug. Explicit artifact delivery is bound to the originating run; reusing another run’s generation identity conflicts. A terminal turn snapshot is not broadened by a late generation after cancellation. Receipt ownership does not replace the mod’s recipient authorization.

@@ -413,3 +413,13 @@ Code-block copy controls sit below each block in a non-scrolling footer. Leading
 Forge now has separate Provider and Model selectors. Changing Provider saves the first available model on that connection for the current mode. Duplicate connection names are disambiguated by ID. Failed saves preserve the saved pair; unavailable saved selections remain visible and do not silently fall back. See [the operator workflow](../guide/everyday-use.md#generate-media-in-forge).
 
 Peer A2A messages use a saved sender avatar when the current registry resolves `fromAgentId` to that agent's ID or runtime resource ID. Unknown senders and empty portraits retain an initial fallback; matching a display name alone is insufficient. This display change does not alter message attribution or routing. Provider metadata in Models remains read-only, with short fields paired and longer descriptions or structured values using wider fields. Earlier screenshots remain historical illustrations.
+
+## Chat input and activity details
+
+Checked **12 November 2026**: Non-image file attachments are validated as UTF-8 text; binary/control-character content is rejected even when named like a text file. Valid generic text is normalized to `text/plain`; supported image types and configured attachment budgets still apply. Accepted original text/data-URL payloads are distinct from bounded context previews.
+
+Mod activity displays the actual declared tool identity when available, rather than inferring it from arguments or answer text. A tool label is attribution, not proof of successful execution. Group mentions ignore escaped text and inline/fenced code; see [recipient routing](agents-minions.md#group-recipient-parsing).
+
+## Forge media choices
+
+Checked **12 November 2026**: GIF is offered only when the selected model’s saved output capabilities include `gif`, not because its name resembles a known model. GIF-only models stay in Image mode; mixed models keep a still-image default. Catalog-qualified Google video supports saved portraits and existing PNG/JPEG/WebP Forge images (up to 20 MiB each), at most six combined references. Use **Use as video reference** or **Add Forge image** where offered; unavailable controls do not imply provider support. See [typed options and references](../reference/api/artifacts.md#typed-image-options-and-animated-gif).

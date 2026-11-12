@@ -96,3 +96,7 @@ The immutable links below record earlier public evidence. Current contracts were
 
 - [backend/scripts/ui/settings-routes.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/scripts/ui/settings-routes.mjs)
 - [backend/src/action-proposal.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-proposal.mjs)
+
+## Complete enabled-provider discovery
+
+Checked **12 November 2026**: MCP discovery examines all enabled provider connections instead of silently stopping after the first 50. Availability and per-agent grants still apply; discovering a connection or tool does not authorize its invocation.

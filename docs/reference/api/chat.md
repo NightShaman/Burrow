@@ -168,3 +168,7 @@ Checked **6 November 2026**: optional `modelFailure.message` preserves an observ
 Checked **9 November 2026**: `DELETE /api/group-channels/{channelId}` returns `200 {"ok":true,"id":"<channelId>"}` on success, `404 group_channel_not_found` for an absent room, or `400 group_channel_id_invalid` for an invalid ID (including `.` and `..`). It cancels active room replies, removes metadata and deletes only the shared `group-channel` transcript identity. Individual/participant sessions remain.
 
 Admission, shared transcript appends and deletion share a per-room serialized boundary in the UI server. A send admitted after deletion cannot launch replies or recreate its history. Database failure leaves metadata in place for retry, although active replies have already been cancelled. Scheduled jobs are not removed; subsequent integration-routed deliveries to the missing room fail. The native scheduler has no group-channel destination field. This is a destructive room action, not closing a browser tab or resetting one participant's session.
+
+## Registered slash commands and complete attachments
+
+Checked **12 November 2026**: Only registered slash-command names are intercepted. Unknown slash text, malformed non-command slash text and absolute paths remain ordinary chat input; arguments to known commands are still validated. Accepted attachment text/data URLs retain the original payload instead of silently clipping it to the context-preview budget. This does not bypass request or configured upload limits.

@@ -208,3 +208,7 @@ The current page was statically reconciled on **2026-11-08** against Backend `6b
 - [backend/src/http-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/http-authority.mjs)
 - [backend/src/request-resource-budgets.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/request-resource-budgets.mjs)
 - [backend/src/otel-settings.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/otel-settings.mjs)
+
+## Environment-file parsing
+
+Checked **12 November 2026**: Environment files use a non-executing assignment parser: one assignment per line, optional indentation/`export`, supported single/double quoting and shell-style escapes/comments. Interpolation, command execution, multiline values, unsupported syntax and spaces around `=` are rejected. An unquoted `#` inside a token remains literal. Parsed effective keys govern preservation; conflicting duplicate encryption-key assignments fail rather than silently selecting a different value. This is a format contract, not an instruction to rotate or expose a key.

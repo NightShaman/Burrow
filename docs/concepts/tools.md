@@ -61,12 +61,12 @@ Example native calls:
 Listing, finding, and searching are bounded operations:
 
 - Listing defaults to depth 4 and 500 entries
-- Find defaults to depth 8, with a bounded scan
-- Search uses literal, case-sensitive text matching; default maximum 200 matches
-- Search skips oversized files and uses a cumulative scan budget
+- Find defaults to depth 8 and 500 returned entries
+- Search uses literal, case-sensitive text matching; defaults are depth 8 and 200 matches
+- Explicit `maxDepth`, `maxEntries` and `maxMatches` can raise the corresponding budgets; there is no separate hidden small-file or cumulative-byte cutoff. Search streams each file line by line, but retains traversal inventory and the current line, so it is not a constant-memory guarantee. Find uses whole-path Node glob matching.
 - Directory traversal does not descend symlink directories
 
-Inspect truncation and warning fields before interpreting an empty or partial result as exhaustive.
+Inspect `truncated`, `incomplete`, `depthTruncated`, `matchBudgetExhausted` and warnings before interpreting an empty or partial result as exhaustive. Search excerpts carry `textStartColumn`, `textEndColumn`, `lineLength` and `textTruncated`; an excerpt is not the whole line or file.
 
 ### Mutations
 
@@ -137,3 +137,15 @@ Structured patch additions use exclusive creation and will not overwrite an exis
 ## Malformed provider tool calls
 
 Current adapters require incoming native-tool arguments to be a JSON object. Missing, null, array, scalar or invalid JSON arguments are marked `model_tool_call_arguments_invalid`, rather than becoming an empty optional-argument call against the default workspace. The native action converter independently rejects malformed arguments before dispatch. This is argument validation, not broader filesystem isolation.
+
+## Patch scopes and verification receipts
+
+Checked **12 November 2026**: Structured JavaScript scopes use parsed syntax boundaries in `.js`, `.cjs` and `.mjs` files. Unsupported languages/syntax fail with `patch_scope_unsupported`; scopes must match uniquely. Unified-diff paths accept spaces and Git-quoted UTF-8 paths, with the same decoded paths used for preflight and receipts.
+
+Verification does not infer a check from words such as `test` in command text. Only explicitly marked `verificationCheck: true` shell results with boolean outcomes count as check evidence. `verificationExecutionResult` reports the whole shell command as `not_run`, `passed` or `failed`, with its exit code and `subcommandsAttested: false`. A successful compound command does not attest every embedded subcommand.
+
+Compact child receipts separate source incompleteness from delivery truncation. Inspect source flags, per-field original/delivered/omitted counts, `deliveryTruncated`, `evidenceDelivery` and retained trace/artifact locators. A complete delivery of a partial source result is still partial evidence.
+
+## Typed Forge media and explicit resend
+
+Checked **12 November 2026**: Catalog-qualified Google video and capability-declared GIF generation use typed contracts. `forge_create_job` accepts `imageOptions` and video `referenceArtifacts`; arbitrary uploads/URLs and generic provider options remain unsupported. Native `forge_attach_artifact` deduplicates same-turn retries, but an explicit later-turn call resends an existing artifact without regeneration. See [media API contracts](../reference/api/artifacts.md).

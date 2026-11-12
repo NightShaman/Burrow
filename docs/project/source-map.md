@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.11.1` | `a487b1c1f64c2e87de655e865b8951f5ac3d6bcc` |
-| Core / Backend | `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1` |
-| UI | `f5da4b189745935f60112abf00462ddcba6ccf42` |
-| Skills | `550efc277addd0d872972cbfa4f8a58375a44f48` |
+| Assembled Burrow, build `2026.11.12.2` | `6eaeba62b03b7b5a527512c9df36e92ba7d67faf` |
+| Core / Backend | `f589673df9124a459617f76230e90d021577a067` |
+| UI | `cf5098158596b64597516a70e11a4bb490d57c0e` |
+| Skills | `31470b9f184efbe88dd8ae420d5286a7fd8303c5` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -150,3 +150,9 @@ The full page review remains dated **8 November**. Source and test definitions w
 The UI now opens links in operator and agent chat messages in a new tab, including group chat, without navigating away from the conversation. Named links, bare web addresses and relative links share this behavior; code remains code. Backend, mod implementations and all eight reviewed skill payloads are unchanged from the previous pass. The Skills implementation pin above remains valid; its later documentation-only commit is recorded in the maintenance receipts.
 
 Source inspection covered `ChatMessage.tsx`, its regression cases and the assembly source manifest. No application tests, external chat calls or skill scripts ran during this documentation pass.
+
+## 12 November ordinary delta review
+
+Checked **12 November 2026**: Assembly **2026.11.12.2** and the current table pins reconcile the delta since the successful 11 November baseline. Inspected changes cover typed GIF/native Google video and references, turn-owned artifact delivery, mod tool attribution, complete accepted chat inputs, mention/command parsing, persistent authored drafts, server-anchored account freshness, filesystem/search/patch evidence, scheduler pagination, MCP discovery, Responses aggregation and bounded rule evaluation. Tutor cross-contract notes distinguish newer Core capabilities from unchanged lab routes.
+
+The full review remains **8 November**. Source and regression-test definitions were inspected statically; no application/provider tests, external chat calls, runtime changes or release promotion were performed. Unchanged historical evidence remains dated. These are implementation pins, not the later documentation-only commit IDs, which belong in maintenance receipts. Installed builds and public mirrors may lag this source.

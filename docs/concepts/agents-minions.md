@@ -177,3 +177,7 @@ Current Core can expose a mod-owned agent through native A2A only when its `a2a`
 ## 7 November peer-result safety
 
 Failed, cancelled and incomplete peer partials remain visible and attributed but do not enter the sender's later model prompt. A deliberate blocked response remains an eligible attributed answer. Cancellation is checked before queued transcript ingress and again after participant checks. These contracts and disabled-default routing were checked statically against the current Core; no live peer turn was run.
+
+## Group recipient parsing
+
+Checked **12 November 2026**: An `@` mention begins at the start of text or after whitespace. Escapes and inline/fenced Markdown code are literal. Matching is case-insensitive and prefers the longest registered name or ID, including supported Unicode name characters. A nonempty explicit `agentIds` list is authoritative; prose mentions do not silently replace it. Without explicit recipients, an unknown mention is rejected; no explicit recipients and no recognized mentions broadcasts to the existing participants.

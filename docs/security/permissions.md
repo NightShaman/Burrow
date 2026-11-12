@@ -102,3 +102,7 @@ The current page was statically reconciled on **2026-11-08** against Backend `6b
 - [backend/src/action-safety.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/action-safety.mjs)
 - [backend/src/execution-boundaries.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/execution-boundaries.mjs)
 - [backend/src/mod-authority.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-authority.mjs)
+
+## Bounded execution-boundary evaluation
+
+Checked **12 November 2026**: Execution-boundary rules are evaluated in a disposable worker. The default 1,000 ms budget includes startup and all rules/targets; a trusted shorter deadline or cancellation can stop it sooner. Timeout, cancellation or worker failure yields a hard policy block, and review waits for worker termination. This bounds evaluation, not the later action: it does not create operating-system isolation or change a configured rule’s meaning.

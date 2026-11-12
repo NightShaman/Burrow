@@ -123,3 +123,7 @@ These exports do not capture complete conversations, original archives, Brain kn
 ## Reference-photo backup scope
 
 Canonical agent, operator and Mod-character reference photos use PostgreSQL links (`agent_reference_images`, `operator_reference_images`, `mod_reference_images`) plus original files in Core's runtime `artifacts/generated` storage. Back up and restore both together, regardless of the selected local/remote execution host. Selective settings exports do not include these photo links/bytes; ordinary chat attachment retention does not manage them.
+
+## Archive path validation
+
+Checked **12 November 2026**: Archive traversal rejection checks actual `..` path components, not harmless filenames containing consecutive dots. Absolute paths, links, unsupported entry types and single-root validation remain subject to their existing protections.
