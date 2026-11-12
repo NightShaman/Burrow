@@ -1,4 +1,5 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createTraceLogger } from '../trace-logger.mjs';
@@ -7,7 +8,7 @@ import { runExec } from './exec.mjs';
 
 const DEFAULT_MAX_ENTRIES = 500;
 const DEFAULT_MAX_MATCHES = 200;
-const DEFAULT_MAX_FILE_BYTES = 512_000;
+
 
 function safeName(value) {
   return String(value || '').trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || randomUUID();
@@ -35,19 +36,7 @@ function bounded(value, fallback, ceiling) {
   return Math.max(1, Math.min(parsed, ceiling));
 }
 
-function globPatternToRegExp(pattern = '*') {
-  let source = '^';
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    if (char === '*') {
-      if (pattern[index + 1] === '*') {
-        if (pattern[index + 2] === '/') { source += '(?:.*/)?'; index += 2; } else { source += '.*'; index += 1; }
-      } else source += '[^/]*';
-    } else if (char === '?') source += '[^/]';
-    else source += /[\\^$+?.()|{}\[\]]/.test(char) ? `\\${char}` : char;
-  }
-  return new RegExp(source);
-}
+
 
 async function toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload = {} }) {
   const logger = traceLogger || createTraceLogger({ rootDir: await resolveRuntimeTraceRoot(rootDir || process.cwd()), runId });
@@ -110,7 +99,7 @@ export async function listFilesEnvelope({ dirPath, workspaceRoot, maxDepth, maxE
   try {
     const stat = await fs.stat(root);
     if (!stat.isDirectory()) throw new Error('not_a_directory');
-    const listing = await walk(root, { maxDepth: bounded(maxDepth, 4, 16), maxEntries: bounded(maxEntries, DEFAULT_MAX_ENTRIES, 2_000), includeHidden: Boolean(includeHidden) });
+    const listing = await walk(root, { maxDepth: bounded(maxDepth, 4, Infinity), maxEntries: bounded(maxEntries, DEFAULT_MAX_ENTRIES, Infinity), includeHidden: Boolean(includeHidden) });
     const contentPath = await context.logger.artifact(`${context.prefix}-listing.json`, JSON.stringify(listing.entries, null, 2));
     return finish({ logger: context.logger, tool: 'files_list', activityId: context.activityId, result: { tool: 'files_list', ok: true, dirPath: root, reason, entries: listing.entries, resultFingerprint: resultFingerprint({ entries: listing.entries, truncated: listing.truncated, incomplete: listing.incomplete, warnings: listing.warnings }), truncated: listing.truncated, entryBudgetExhausted: listing.entryBudgetExhausted, depthTruncated: listing.depthTruncated, incomplete: listing.incomplete, warnings: listing.warnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, entries: listing.entries.length, truncated: listing.truncated, warnings: listing.warnings } } });
   } catch (error) {
@@ -122,10 +111,10 @@ export async function globEnvelope({ pattern, dirPath, workspaceRoot, maxDepth, 
   const root = resolved(dirPath, workspaceRoot);
   const context = await toolContext({ tool: 'files_find', rootDir, runId, traceLogger, artifactPrefix, payload: { dirPath: root, pattern, reason } });
   try {
-    const matcher = globPatternToRegExp(String(pattern || '*'));
-    const limit = bounded(maxEntries, DEFAULT_MAX_ENTRIES, 2_000);
-    const listing = await walk(root, { maxDepth: bounded(maxDepth, 8, 24), maxEntries: bounded(maxEntries, DEFAULT_MAX_ENTRIES * 4, 4_000), includeHidden: Boolean(includeHidden) });
-    const matchedEntries = listing.entries.filter((entry) => matcher.test(entry.path));
+    const matcher = (entry) => path.matchesGlob(entry, String(pattern || '*'));
+    const limit = bounded(maxEntries, DEFAULT_MAX_ENTRIES, Infinity);
+    const listing = await walk(root, { maxDepth: bounded(maxDepth, 8, Infinity), maxEntries: Infinity, includeHidden: Boolean(includeHidden) });
+    const matchedEntries = listing.entries.filter((entry) => matcher(entry.path));
     const paths = matchedEntries.slice(0, limit).map((entry) => entry.path);
     const truncated = listing.truncated || matchedEntries.length > limit;
     const contentPath = await context.logger.artifact(`${context.prefix}-paths.json`, JSON.stringify(paths, null, 2));
@@ -153,32 +142,42 @@ export async function statPathEnvelope({ path: targetPath, workspaceRoot, traceL
 export async function searchFilesEnvelope({ query, dirPath, workspaceRoot, maxDepth, maxMatches, traceLogger, rootDir, runId, artifactPrefix, reason = null } = {}) {
   const root = resolved(dirPath, workspaceRoot);
   const context = await toolContext({ tool: 'files_search', rootDir, runId, traceLogger, artifactPrefix, payload: { dirPath: root, query, reason } });
-  const limit = bounded(maxMatches, DEFAULT_MAX_MATCHES, 1_000);
+  const limit = bounded(maxMatches, DEFAULT_MAX_MATCHES, Infinity);
   try {
     if (!query) throw new Error('query_required');
-    const listing = await walk(root, { maxDepth: bounded(maxDepth, 8, 24), maxEntries: 4_000 });
+    const listing = await walk(root, { maxDepth: bounded(maxDepth, 8, Infinity), maxEntries: Infinity });
     const matches = [];
     let scannedBytes = 0;
-    let scanTruncated = false;
     const scanWarnings = [...listing.warnings];
-    const maxScannedBytes = 8_000_000;
+    let matchBudgetExhausted = false;
     for (const entry of listing.entries) {
-      if (entry.type !== 'file' || matches.length >= limit) continue;
-      const absolute = path.join(root, entry.path);
-      let stat; try { stat = await fs.stat(absolute); } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); continue; }
-      if (stat.size > DEFAULT_MAX_FILE_BYTES || scannedBytes + stat.size > maxScannedBytes) {
-        scanTruncated = true;
-        scanWarnings.push(`skipped_file:${entry.path}:${stat.size > DEFAULT_MAX_FILE_BYTES ? 'file_too_large' : 'scan_budget_exceeded'}`);
-        continue;
-      }
-      let content; try { content = await fs.readFile(absolute, 'utf8'); } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); continue; }
-      scannedBytes += stat.size;
-      content.split(/\r?\n/).forEach((line, index) => { if (matches.length < limit && line.includes(String(query))) matches.push({ filePath: entry.path, line: index + 1, text: line.slice(0, 1_000) }); });
+      if (entry.type !== 'file') continue;
+      const stream = createReadStream(path.join(root, entry.path), { encoding: 'utf8' });
+      const lines = createInterface({ input: stream, crlfDelay: Infinity });
+      let lineNumber = 0;
+      // readline does not forward input stream errors to its async iterator.
+      const onError = error => lines.emit('error', error);
+      stream.on('error', onError);
+      try {
+        for await (const line of lines) {
+          lineNumber++;
+          const matchIndex = line.indexOf(String(query));
+          if (matchIndex < 0) continue;
+          if (matches.length === limit) { matchBudgetExhausted = true; break; }
+          const start = Math.max(0, matchIndex - 500);
+          const end = Math.min(line.length, start + Math.max(1_000, String(query).length + 500));
+          const snippetBounds = start > 0 || end < line.length
+            ? { textStartColumn: start + 1, textEndColumn: end + 1, lineLength: line.length, textTruncated: true } : {};
+          matches.push({ filePath: entry.path, line: lineNumber, text: line.slice(start, end), ...snippetBounds });
+        }
+      } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); }
+      finally { scannedBytes += stream.bytesRead; lines.close(); stream.destroy(); }
+      if (matchBudgetExhausted) break;
     }
     const contentPath = await context.logger.artifact(`${context.prefix}-matches.json`, JSON.stringify(matches, null, 2));
-    const truncated = listing.truncated || scanTruncated || matches.length >= limit;
+    const truncated = listing.truncated || matchBudgetExhausted;
     const incomplete = listing.incomplete || scanWarnings.length > 0;
-    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, incomplete, warnings: scanWarnings }), truncated, incomplete, warnings: scanWarnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: scanWarnings } } });
+    return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: true, dirPath: root, query: String(query), reason, matches, resultFingerprint: resultFingerprint({ matches, truncated, incomplete, warnings: scanWarnings }), truncated, depthTruncated: listing.depthTruncated, matchBudgetExhausted, incomplete, warnings: scanWarnings, error: null, artifacts: { contentPath }, trace: { dirPath: root, matches: matches.length, scannedBytes, truncated, warnings: scanWarnings } } });
   } catch (error) {
     return finish({ logger: context.logger, tool: 'files_search', activityId: context.activityId, result: { tool: 'files_search', ok: false, dirPath: root, query: String(query || ''), reason, matches: [], truncated: false, incomplete: true, error: String(error?.message || error), artifacts: {}, trace: { dirPath: root } } });
   }

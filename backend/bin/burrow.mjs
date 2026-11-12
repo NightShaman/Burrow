@@ -391,7 +391,7 @@ async function main() {
       : (args.message || args._.join(' '));
     if (!proposalText) throw new Error('--message or --proposal-file is required');
     const proposal = parseActionProposal(proposalText);
-    const review = reviewProposalActions({ actions: proposal.actions, workspaceRoot: args.workspace_root || null });
+    const review = await reviewProposalActions({ actions: proposal.actions, workspaceRoot: args.workspace_root || null });
     console.log(JSON.stringify({ ok: proposal.ok && review.ok, proposal, review }, null, 2));
     return;
   }

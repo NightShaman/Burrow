@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseEnvironment, parseEnvironmentLines } from '../src/environment-file.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
@@ -81,16 +82,7 @@ async function assertInstallTargetWritable(installDir) {
 }
 
 async function readEnvFile(filePath) {
-  const values = {};
-  const text = await fs.readFile(filePath, 'utf8').catch(() => '');
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const index = trimmed.indexOf('=');
-    if (index <= 0) continue;
-    values[trimmed.slice(0, index)] = trimmed.slice(index + 1);
-  }
-  return values;
+  return parseEnvironment(await fs.readFile(filePath, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; }));
 }
 
 async function sha256Stream(filePath) {
@@ -114,7 +106,7 @@ async function verifyChecksum(archivePath, checksumPath) {
 
 function assertSafeArchiveEntry(entry) {
   const name = String(entry || '').trim();
-  if (!name || name.startsWith('/') || name.includes('..') || path.isAbsolute(name)) throw new Error(`release_archive_entry_invalid:${name || 'empty'}`);
+  if (!name || name.startsWith('/') || name.split('/').includes('..') || path.isAbsolute(name)) throw new Error(`release_archive_entry_invalid:${name || 'empty'}`);
   const root = name.split('/')[0];
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(root)) throw new Error(`release_archive_root_invalid:${root}`);
   return root;
@@ -186,12 +178,12 @@ function envTemplate({ installDir, settingsKey = '', host = '0.0.0.0', port = 42
 // Refresh generated defaults without rotating keys or dropping operator DB settings.
 export function mergeRuntimeEnv(template, original = '') {
   const refreshed = new Set(['BURROW_SOURCE_ROOT', 'BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_UI_HOST', 'BURROW_UI_PORT']);
-  const preserved = original.split(/\r?\n/).filter(line => {
-    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/.exec(line);
-    if (match?.[1] === 'BURROW_SETTINGS_KEY' && /^\s*(?:export\s+)?BURROW_SETTINGS_KEY=\s*(?:""|'')?\s*$/.test(line)) return false;
-    return !match || !refreshed.has(match[1]);
-  }).join('\n');
-  if (/^\s*(?:export\s+)?BURROW_SETTINGS_KEY=.+$/m.test(original)) template = template.replace(/^BURROW_SETTINGS_KEY=.*\n/m, '');
+  const values = parseEnvironment(original);
+  const preserved = parseEnvironmentLines(original).filter(({ key }) => !key || (!refreshed.has(key) && key !== 'BURROW_SETTINGS_KEY')).map(({ line }) => line).join('\n');
+  if (values.BURROW_SETTINGS_KEY) {
+    const keyLines = parseEnvironmentLines(original).filter(({ key }) => key === 'BURROW_SETTINGS_KEY').map(({ line }) => line).join('\n');
+    template = template.replace(/^BURROW_SETTINGS_KEY=.*\n/m, keyLines + '\n');
+  }
   return template + (preserved.trim() ? '\n# Preserved operator settings.\n' + preserved + '\n' : '');
 }
 

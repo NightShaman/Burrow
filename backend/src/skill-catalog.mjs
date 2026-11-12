@@ -1,3 +1,4 @@
+import { frontmatterMetadata } from './skill-frontmatter.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -47,16 +48,7 @@ async function findSkillBodies(skillsRoot) {
   return found.sort();
 }
 
-function frontmatterMetadata(text = '') {
-  const match = String(text).match(/^---\r?\n([\s\S]{0,8192}?)\r?\n---/);
-  if (!match) return {};
-  const fields = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const entry = /^([A-Za-z][\w-]*):\s*["']?(.+?)["']?\s*$/.exec(line);
-    if (entry) fields[entry[1]] = entry[2];
-  }
-  return fields;
-}
+
 
 async function loadOwnedSkillRoot({ skillsRoot, owner, overrides = {} } = {}) {
   const root = path.resolve(skillsRoot);
@@ -67,9 +59,7 @@ async function loadOwnedSkillRoot({ skillsRoot, owner, overrides = {} } = {}) {
     const id = normalizeId(path.basename(path.dirname(absolutePath)));
     if (!id) continue;
     const stat = await fs.stat(absolutePath);
-    // Catalog metadata is deliberately bounded: enough to advertise a capability,
-    // never a substitute for loading its instructions.
-    const header = await fs.readFile(absolutePath, 'utf8').then((body) => body.slice(0, 8192));
+    const header = await fs.readFile(absolutePath, 'utf8');
     const metadata = frontmatterMetadata(header);
     const lifecycle = adminLifecycle({ id }, overrides);
     skills.push({

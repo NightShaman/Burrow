@@ -1,3 +1,4 @@
+import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import { CHAT_RESULT_VERSION, chatResultMetadata } from './chat-result-metadata.mjs';
 import { canSpawnMinion, nextMinionDepth, normalizeMinionDepth } from './minion-depth.mjs';
 import { CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, exactRepeatVerdict, fingerprint, normalizedToolOutcome, appendBoundedChatHistory } from './tool-loop-detection.mjs';
@@ -153,7 +154,7 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   toolCalls = toolCalls.map((call, index) => ({ ...call, id: call.id || `tool-call-${index}` }));
   const proposal = proposalFromNativeToolCalls(toolCalls);
-  const reviews = reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root, executionContext: parentExecutionContext });
+  const reviews = (await reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root, executionContext: parentExecutionContext, signal: signal || parentExecutionContext?.abortSignal }));
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
     stores: parentExecutionContext?.stores,
@@ -195,6 +196,14 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
     return { tool: call.name || null, toolCallId: call.id, ok: false, status,
       error: status === 'cancelled' ? 'cancelled' : (skipped?.blockers || review?.blockers || ['tool_call_not_executed']).join(', ') };
   });
+  // A remote/custom tool may not own a local result artifact. Persist the
+  // already-protected native outcome before any child delivery projection.
+  if (traceLogger?.artifact) for (const result of results) {
+    if (!result.artifacts?.resultPath && !result.traceArtifact) {
+      const locator = await traceLogger.artifact(`child-${randomUUID()}-result.json`, JSON.stringify(result));
+      result.traceArtifact = locator;
+    }
+  }
   return { results, skipped: execution.skipped };
 }
 
@@ -223,10 +232,10 @@ function continuationToolCallsForTruncatedEvidence(toolResults = [], continuatio
   const calls = [];
   const deliveredRanges = toolResults.filter(result => result?.ok && result.tool === 'files_read' && result.filePath)
     .map(result => ({ filePath: result.filePath, start: Number(result.offsetBytes || 0),
-      end: Number(result.offsetBytes || 0) + Number(result.delivery?.returnedBytes ?? result.returnedBytes ?? 0) }));
+      end: Number(result.offsetBytes || 0) + Number(result.providerDelivery?.returnedBytes ?? result.delivery?.returnedBytes ?? result.returnedBytes ?? 0) }));
   for (const result of toolResults) {
-    if (!result?.ok || !(result.delivery?.truncated ?? result.truncated) || !result.filePath) continue;
-    let offsetBytes = Math.max(0, Number(result.delivery?.nextOffsetBytes ?? (Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0))));
+    if (!result?.ok || !(result.providerDelivery?.truncated ?? result.delivery?.truncated ?? result.truncated) || !result.filePath) continue;
+    let offsetBytes = Math.max(0, Number(result.providerDelivery?.nextOffsetBytes ?? result.delivery?.nextOffsetBytes ?? (Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0))));
     if (!Number.isFinite(offsetBytes) || offsetBytes >= Number(result.bytes || 0)) continue;
     // Only contiguous delivered bytes close a gap; a disjoint later read does not.
     let previous;
@@ -270,70 +279,7 @@ function evidenceLabel(result = {}, index) {
 }
 
 function compactEvidenceItem(result = {}) {
-  const base = { tool: result.tool || 'unknown', ok: Boolean(result.ok), sideEffectsApplied: result.sideEffectsApplied };
-  if (result.tool === 'files_read') return {
-    ...base,
-    filePath: result.filePath || null,
-    offsetBytes: Number(result.offsetBytes || 0),
-    returnedBytes: Number(result.returnedBytes || 0),
-    bytes: Number(result.bytes || 0),
-    truncated: Boolean(result.truncated),
-    content: compactText(result.content, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS),
-    delivery: result.delivery || { returnedBytes: Buffer.byteLength(String(result.content || "").slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS)), truncated: Boolean(result.truncated) || String(result.content || "").length > CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS, nextOffsetBytes: Number(result.offsetBytes || 0) + Buffer.byteLength(String(result.content || "").slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS)) },
-    error: compactText(result.error, 800) || null,
-    warnings: (result.warnings || []).slice(0, 8),
-  };
-  if (result.tool === 'shell_exec') return {
-    ...base,
-    command: compactText(result.command, 800),
-    exitCode: result.exitCode ?? null,
-    stdout: compactText(result.stdout, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS),
-    stderr: compactText(result.stderr, 1_200),
-    stdoutTruncated: Boolean(result.stdoutTruncated),
-    error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'files_list') return {
-    ...base, dirPath: result.dirPath || null,
-    entries: (result.entries || []).slice(0, 200).map((entry) => ({ path: entry?.path || null, type: entry?.type || null })),
-    truncated: Boolean(result.truncated), resultFingerprint: result.resultFingerprint || null,
-    warnings: (result.warnings || []).slice(0, 8), error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'files_find') return {
-    ...base, dirPath: result.dirPath || null, pattern: result.pattern || null,
-    paths: (result.paths || []).slice(0, 200), truncated: Boolean(result.truncated), resultFingerprint: result.resultFingerprint || null,
-    warnings: (result.warnings || []).slice(0, 8), error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'files_inspect') return {
-    ...base, path: result.path || null, exists: typeof result.exists === 'boolean' ? result.exists : null,
-    type: result.type || null, size: Number.isFinite(Number(result.size)) ? Number(result.size) : null,
-    modifiedAt: result.modifiedAt || null, resultFingerprint: result.resultFingerprint || null, error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'files_search') return {
-    ...base, dirPath: result.dirPath || null, query: compactText(result.query, 1_000),
-    matches: (result.matches || []).slice(0, 200).map((match) => ({ filePath: match?.filePath || null, line: match?.line ?? null, text: compactText(match?.text, 500) })),
-    truncated: Boolean(result.truncated), resultFingerprint: result.resultFingerprint || null,
-    warnings: (result.warnings || []).slice(0, 8), error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'git_status' || result.tool === 'git_diff') return {
-    ...base, dirPath: result.dirPath || null, command: compactText(result.command, 800), exitCode: result.exitCode ?? null,
-    stdout: compactText(result.stdout, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS), stderr: compactText(result.stderr, 1_200),
-    resultFingerprint: result.resultFingerprint || null, error: compactText(result.error, 800) || null,
-  };
-  if (['files_write', 'files_edit', 'files_patch'].includes(result.tool)) return {
-    ...base, filePath: result.filePath || null, touchedFiles: (result.touchedFiles || []).slice(0, 20), changedFiles: (result.changedFiles || []).slice(0, 20),
-    beforeHash: result.beforeHash || null, afterHash: result.afterHash || null, resultFingerprint: result.resultFingerprint || null,
-    error: compactText(result.error, 800) || null,
-  };
-  if (result.tool === 'spawn_subagent') return {
-    ...base,
-    id: result.id || null,
-    status: result.status || null,
-    summary: compactText(result.summary, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS),
-    blockers: (result.blockers || []).slice(0, 8),
-    warnings: (result.warnings || []).slice(0, 8),
-    evidenceCount: Array.isArray(result.evidence) ? result.evidence.length : 0,
-  };
-  return { ...base, error: compactText(result.error, 800) || null };
+  return compactSubagentEvidence(result);
 }
 
 function boundedEvidenceLedger(toolResults = []) {
@@ -369,11 +315,11 @@ function boundedEvidenceExcerpts(results = []) {
 function compactEvidenceForHandoff(toolResults = []) {
   const retained = [];
   let used = 0;
-  for (const result of toolResults) {
+  for (const [index, result] of toolResults.entries()) {
     const compact = compactEvidenceItem(result);
     const chars = JSON.stringify(compact).length;
     if (used + chars > CHILD_EVIDENCE_EXCERPT_CHAR_BUDGET) {
-      retained.push({ tool: result?.tool || 'unknown', ok: Boolean(result?.ok), omitted: true, reason: 'subagent_handoff_evidence_budget' });
+      retained.push({ tool: result?.tool || 'unknown', ok: Boolean(result?.ok), omitted: true, omittedCount: toolResults.length - index, traceArtifact: result?.traceArtifact || result?.artifacts?.resultPath || null, reason: 'subagent_handoff_evidence_budget' });
       break;
     }
     retained.push(compact);
@@ -392,14 +338,15 @@ function retainChildResults(history, results, { limit = CHAT_TOOL_RESULT_HISTORY
     if ((result.sideEffectsApplied === true || (result.ok && ['files_write', 'files_edit', 'files_patch'].includes(result.tool)))) history.sideEffectsApplied = true;
     else if (result.ok && !['files_read', 'files_list', 'files_find', 'files_search', 'files_inspect', 'git_status', 'git_diff'].includes(result.tool) && result.sideEffectsApplied !== false && history.sideEffectsApplied !== true) history.sideEffectsApplied = null;
     const receipt = compactEvidenceItem(result);
-    if (result.tool === 'files_read') receipt.content = String(result.content || '').slice(0, CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS);
-    if (result.tool === 'files_read') receipt.delivery = result.delivery || { returnedBytes: result.returnedBytes || 0, truncated: Boolean(result.truncated) || String(result.content || '').length > CHILD_EVIDENCE_SINGLE_EXCERPT_CHARS, nextOffsetBytes: Number(result.offsetBytes || 0) + Number(result.returnedBytes || 0) };
     appendBoundedChatHistory(history, receipt, Math.max(1, Number(limit) || CHAT_TOOL_RESULT_HISTORY_LIMIT), 'omittedToolResults');
   }
 }
 
 function subagentResult({ ok, summary, outcome = null, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
+  const evidence = compactEvidenceForHandoff(toolResults);
+  const evidenceDelivery = evidenceDeliveryCounts(evidence, toolResults.consequences?.executed ?? toolResults.length);
   return {
+    evidenceTraceDir: toolResults.evidenceTraceDir || null, evidenceDelivery,
     ok: Boolean(ok),
     ...(outcome ? { outcome } : {}),
     summary: compactText(summary, 12_000) || (ok ? 'Minion completed.' : 'Minion failed.'),
@@ -407,7 +354,7 @@ function subagentResult({ ok, summary, outcome = null, blockers = [], warnings =
     warnings: warnings.slice(0, 20),
     // Full raw tool output is preserved in the child trace artifacts. The IPC
     // result and delegated record deliberately carry bounded evidence only.
-    evidence: compactEvidenceForHandoff(toolResults),
+    evidence,
     artifacts: toolResults.allArtifacts ? [...toolResults.allArtifacts] : toolResults.flatMap(result => result.artifacts || []),
     changedFiles: toolResults.consequences?.changedFiles || changedPathsFromToolResults(toolResults),
     memoryWrites: toolResults.allMemoryWrites ? [...toolResults.allMemoryWrites] : toolResults.flatMap(result => result.ok ? (result.memoryWrites || []) : []),
@@ -704,6 +651,7 @@ async function runRegisteredSpawnSubagentChild({
   let lastText = firstText;
   let activitySequence = 0;
   const toolResults = [];
+  toolResults.evidenceTraceDir = childTraceDir;
   const completedCalls = [];
   if (Array.isArray(first.nativeTranscript)) messages.splice(0, messages.length, ...first.nativeTranscript);
   let current = first;
@@ -756,7 +704,13 @@ async function runRegisteredSpawnSubagentChild({
         tools: continuationTools,
         contextThreshold: modelConfig?.contextCompression?.contextThreshold,
       }, { adapter, signal, traceLogger: modelTrace });
-      if (nativeContinuation) applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
+      if (nativeContinuation) {
+        applyFinalProviderDelivery({ toolCalls, toolResults: batch.results, messages: preparedContinuation.messages });
+        for (const result of batch.results) {
+          const retained = toolResults.find(item => item.toolCallId === result.toolCallId);
+          if (retained && result.tool === 'files_read') retained.providerDelivery = result.delivery;
+        }
+      }
       next = nativeContinuation
         ? await callModel('continueWithToolResults', {
             previousModel: current,

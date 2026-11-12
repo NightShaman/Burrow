@@ -5,7 +5,7 @@ import path from 'node:path';
 import { actionFromNativeToolCall, nativeToolSchemas, parseActionProposal } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { executeReviewedProposalActions } from './proposal-executor.mjs';
-import { evaluateVerification, normalizeVerificationEvidence } from './verification.mjs';
+import { evaluateVerification, normalizeVerificationEvidence, verificationExecutionResult } from './verification.mjs';
 import { runExec } from './harness/exec.mjs';
 import { compactToolReceipts } from './runtime-result-shapes.mjs';
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
@@ -154,7 +154,7 @@ export async function runProposalLoop({
 
   const resolvedToolResults = [...initialToolResults];
   let proposal = proposalFromNativeToolCalls(model?.choice?.toolCalls, model?.choice?.text ?? '', executionContext) || (model ? parseActionProposal(model.choice?.text ?? '') : null);
-  let proposalReview = reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext });
+  let proposalReview = (await reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext }));
   let proposalExecution = executeProposals && proposal
     ? await executeReviewedProposalActions({
         actions: proposal.actions,
@@ -194,7 +194,7 @@ export async function runProposalLoop({
     const preflightToolResults = proposalExecution.toolResults;
     const mutationFollowup = await completeMutationAfterInspection({ adapter, prompt, message, toolResults: preflightToolResults, modelConfig, contextThreshold, traceLogger });
     let mutationProposal = proposalFromNativeToolCalls(mutationFollowup?.choice?.toolCalls, mutationFollowup?.choice?.text ?? '', executionContext) || (mutationFollowup ? parseActionProposal(mutationFollowup.choice?.text ?? '') : null);
-    let mutationReview = reviewProposalActions({ actions: mutationProposal?.actions ?? [], workspaceRoot, executionContext });
+    let mutationReview = (await reviewProposalActions({ actions: mutationProposal?.actions ?? [], workspaceRoot, executionContext }));
     let mutationExecution = executeProposals && mutationProposal
       ? await executeReviewedProposalActions({
           actions: mutationProposal.actions,
@@ -243,7 +243,7 @@ export async function runProposalLoop({
           break;
         }
         const repairProposal = proposalFromNativeToolCalls(repair?.choice?.toolCalls, repair?.choice?.text ?? '', executionContext) || (repair ? parseActionProposal(repair.choice?.text ?? '') : null);
-        const repairReview = reviewProposalActions({ actions: repairProposal?.actions ?? [], workspaceRoot, executionContext });
+        const repairReview = (await reviewProposalActions({ actions: repairProposal?.actions ?? [], workspaceRoot, executionContext }));
         const repairExecution = executeProposals && repairProposal
           ? await executeReviewedProposalActions({
               actions: repairProposal.actions,
@@ -348,7 +348,7 @@ export async function runProposalLoop({
         proposal = followupProposal;
         break;
       }
-      const followupReview = reviewProposalActions({ actions: followupProposal.actions, workspaceRoot, executionContext });
+      const followupReview = (await reviewProposalActions({ actions: followupProposal.actions, workspaceRoot, executionContext }));
       const followupExecution = executeProposals
         ? await executeReviewedProposalActions({
             actions: followupProposal.actions,
@@ -430,9 +430,9 @@ export async function runVerificationGate({
 } = {}) {
   const resolvedToolResults = [...toolResults];
   if (ok && mode === 'model' && verifyCommand) {
-    const verifyReview = reviewProposalActions({ actions: [{ index: 0, tool: 'shell_exec', command: verifyCommand, errors: [] }], workspaceRoot }).reviews[0];
+    const verifyReview = (await reviewProposalActions({ actions: [{ index: 0, tool: 'shell_exec', command: verifyCommand, errors: [] }], workspaceRoot })).reviews[0];
     if (verifyReview.status !== 'allowed') {
-      resolvedToolResults.push({ tool: 'shell_exec', ok: false, command: verifyCommand, verificationCheck: true, error: `verify_command_not_allowed:${verifyReview.status}`, safetyReview: verifyReview });
+      resolvedToolResults.push({ tool: 'shell_exec', ok: false, command: verifyCommand, verificationExecution: { scope: 'shell_command', status: 'not_run', subcommandsAttested: false }, error: `verify_command_not_allowed:${verifyReview.status}`, safetyReview: verifyReview });
     } else {
       const verifyResult = await runExec({
         command: verifyCommand,
@@ -440,7 +440,7 @@ export async function runVerificationGate({
         traceLogger,
         artifactPrefix: 'verify-command',
       });
-      resolvedToolResults.push(...compactToolReceipts([{ ...verifyResult, verificationCheck: true }]));
+      resolvedToolResults.push(...compactToolReceipts([verificationExecutionResult(verifyResult)]));
     }
   }
 

@@ -281,7 +281,7 @@ describe('useChatSession', () => {
     expect(result.current.turns).toEqual([{ role: 'assistant', content: 'Fresh answer' }]);
   });
 
-  it('restores only non-empty, unexpired drafts from local storage', async () => {
+  it('restores authored drafts regardless of age and removes only empty drafts', async () => {
     localStorage.setItem(
       'hc.chatDrafts',
       JSON.stringify({
@@ -295,8 +295,12 @@ describe('useChatSession', () => {
     await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
 
     expect(result.current.draft).toBe('Saved draft');
+    expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}').value).toHaveProperty(
+      'stale.value',
+      'Old draft',
+    );
     expect(JSON.parse(localStorage.getItem('hc.chatDrafts') ?? '{}').value).not.toHaveProperty(
-      'stale',
+      'empty',
     );
   });
 

@@ -1,3 +1,4 @@
+import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { canSpawnMinion, nextMinionDepth, resolveTurnMinionDepth } from './minion-depth.mjs';
@@ -26,26 +27,7 @@ const SALVAGED_EVIDENCE_BUDGET = 36_000;
 const SALVAGED_EVIDENCE_SINGLE_TEXT = 4_000;
 
 function compactSalvagedEvidence(result = {}) {
-  const base = { tool: result.tool || 'unknown', ok: Boolean(result.ok), salvagedFromTrace: true };
-  if (result.filePath) base.filePath = result.filePath;
-  if (result.path) base.path = result.path;
-  if (result.dirPath) base.dirPath = result.dirPath;
-  if (result.command) base.command = compactText(result.command, 600);
-  if (Number.isFinite(Number(result.exitCode))) base.exitCode = result.exitCode;
-  if (result.error) base.error = compactText(result.error, 800);
-  if (result.tool === 'files_read') {
-    return { ...base, offsetBytes: Number(result.offsetBytes || 0), returnedBytes: Number(result.returnedBytes || 0), bytes: Number(result.bytes || 0), truncated: Boolean(result.truncated), content: compactText(result.content, SALVAGED_EVIDENCE_SINGLE_TEXT) };
-  }
-  if (result.tool === 'shell_exec' || result.tool === 'git_status' || result.tool === 'git_diff') {
-    return { ...base, stdout: compactText(result.stdout, SALVAGED_EVIDENCE_SINGLE_TEXT), stderr: compactText(result.stderr, 1_200) };
-  }
-  if (result.tool === 'files_list') {
-    return { ...base, entries: (result.entries || []).slice(0, 120).map((entry) => ({ path: entry?.path || null, type: entry?.type || null })), truncated: Boolean(result.truncated) };
-  }
-  if (result.tool === 'files_find') return { ...base, pattern: result.pattern || null, paths: (result.paths || []).slice(0, 160), truncated: Boolean(result.truncated) };
-  if (result.tool === 'files_search') return { ...base, query: result.query || null, matches: (result.matches || []).slice(0, 120).map((match) => ({ filePath: match?.filePath || null, line: match?.line ?? null, text: compactText(match?.text, 500) })), truncated: Boolean(result.truncated) };
-  if (result.tool === 'files_inspect') return { ...base, exists: typeof result.exists === 'boolean' ? result.exists : null, type: result.type || null, size: Number.isFinite(Number(result.size)) ? result.size : null };
-  return base;
+  return { ...compactSubagentEvidence(result, { textLimit: SALVAGED_EVIDENCE_SINGLE_TEXT, listLimit: 120, findLimit: 160 }), salvagedFromTrace: true };
 }
 
 async function salvageEvidenceFromTrace(traceDir) {
@@ -55,19 +37,31 @@ async function salvageEvidenceFromTrace(traceDir) {
   try { entries = await fs.readdir(artifactsDir, { withFileTypes: true }); } catch { return []; }
   const evidence = [];
   let used = 0;
+  let originalCount = 0;
+  let omittedCount = 0;
+  let firstOmitted = null;
   for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith('-result.json')).sort((a, b) => a.name.localeCompare(b.name))) {
     let parsed;
-    try { parsed = JSON.parse(await fs.readFile(path.join(artifactsDir, entry.name), 'utf8')); } catch { continue; }
+    const traceArtifact = path.join(artifactsDir, entry.name);
+    try { parsed = JSON.parse(await fs.readFile(traceArtifact, 'utf8')); } catch { continue; }
     if (!parsed || typeof parsed !== 'object' || !parsed.tool) continue;
-    const compact = compactSalvagedEvidence(parsed);
+    originalCount++;
+    // Continue counting after the budget is exhausted, without retaining more
+    // raw outputs. The trace remains the recoverable source of omitted items.
+    if (firstOmitted) { omittedCount++; continue; }
+    const compact = compactSalvagedEvidence({ ...parsed, traceArtifact });
     const chars = JSON.stringify(compact).length;
     if (used + chars > SALVAGED_EVIDENCE_BUDGET) {
-      evidence.push({ tool: parsed.tool || 'unknown', ok: Boolean(parsed.ok), salvagedFromTrace: true, omitted: true, reason: 'subagent_timeout_salvage_budget' });
-      break;
+      firstOmitted = { tool: parsed.tool, ok: Boolean(parsed.ok), salvagedFromTrace: true, omitted: true,
+        traceArtifact, reason: 'subagent_timeout_salvage_budget' };
+      omittedCount++;
+      continue;
     }
     evidence.push(compact);
     used += chars;
   }
+  if (firstOmitted) evidence.push({ ...firstOmitted, omittedCount });
+  evidence.evidenceDelivery = evidenceDeliveryCounts(evidence, originalCount);
   return evidence;
 }
 
@@ -120,6 +114,9 @@ function reusedSubagentResult({ record, task, target, request } = {}) {
     receiptRefs: child.receiptRefs || [],
     retention: child.retention || null,
     evidence: result.evidence || [],
+    evidenceTraceDir: result.evidenceTraceDir || record.trace?.traceDir || null,
+    evidenceDelivery: result.evidenceDelivery || null,
+    omittedToolResults: result.omittedToolResults ?? null,
     ...(result.verification ? { verification: result.verification } : {}),
     verificationTarget: result.verificationTarget || target.root,
     blockers: result.blockers || [],
@@ -316,7 +313,7 @@ export async function executeSpawnSubagentTool({
     allowedTools: ['shell_exec', 'files_list', 'files_find', 'files_inspect', 'files_search', 'git_status', 'git_diff', 'files_read', 'files_write', 'files_edit', 'files_patch', ...(canSpawnMinion(minionDepth) ? ['spawn_subagent'] : [])],
     toolSurface: 'normal-runtime-tools',
   };
-  const traceDir = traceLogger?.traceDir ? path.join(traceLogger.traceDir, 'subagents', id) : null;
+  const traceDir = traceLogger?.traceDir ? path.join(traceLogger.traceDir, 'subagents', id) : path.join(dataRoot, 'subagents', id, 'trace');
 
   // Claim admission and durable queued receipt, never the paid child run.
   const claimRoot = path.join(dataRoot, 'subagents');
@@ -397,7 +394,14 @@ export async function executeSpawnSubagentTool({
       result: { ok: false, summary: 'Minion child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
     };
   }
-  const childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+  let childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+  // Dispatch/process cancellation can lose the IPC terminal payload. Recover
+  // only persisted tool outcomes, and disclose every delivery budget omission.
+  if (!childResult.evidence?.length && (!childRun.ok || !childResult.ok || abortSignal?.aborted)) {
+    const evidence = await salvageEvidenceFromTrace(childTrace);
+    childResult = { ...childResult, evidence, evidenceDelivery: evidence.evidenceDelivery,
+      evidenceTraceDir: childTrace, warnings: [...(childResult.warnings || []), ...(evidence.length ? ['subagent_evidence_salvaged_from_trace'] : [])] };
+  }
   const status = abortSignal?.aborted || childRun.cancelled ? 'cancelled' : childRun.ok && childResult.ok ? 'succeeded' : 'failed';
   const receiptRef = childTrace ? path.join(childTrace, 'receipt.json') : null;
   if (receiptRef) {
@@ -412,6 +416,9 @@ export async function executeSpawnSubagentTool({
     blockers: childResult.blockers || [],
     warnings: [...targetWarnings, ...(childResult.warnings || [])],
     evidence: childResult.evidence || [],
+    evidenceTraceDir: childResult.evidenceTraceDir || childTrace || null,
+    evidenceDelivery: childResult.evidenceDelivery || evidenceDeliveryCounts(childResult.evidence || []),
+    omittedToolResults: childResult.omittedToolResults ?? null,
     artifacts: [...(childResult.artifacts || []), ...(receiptRef ? [{ type: 'subagent-receipt', path: receiptRef }] : [])],
     changedFiles: childResult.changedFiles || [],
     memoryWrites: childResult.memoryWrites || [],
@@ -445,6 +452,9 @@ export async function executeSpawnSubagentTool({
     receiptRefs: child.receiptRefs,
     retention: child.retention,
     evidence: result.evidence,
+    evidenceTraceDir: result.evidenceTraceDir,
+    evidenceDelivery: result.evidenceDelivery,
+    omittedToolResults: result.omittedToolResults,
     changedFiles: result.changedFiles,
     sideEffectsApplied: result.sideEffectsApplied,
     ...(result.verification ? { verification: result.verification } : {}),

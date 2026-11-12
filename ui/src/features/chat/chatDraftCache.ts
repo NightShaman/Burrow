@@ -5,8 +5,6 @@ export type DraftCache = Record<string, DraftRecord>;
 
 export const draftCacheStorageKey = 'hc.chatDrafts';
 const draftCacheVersion = 1;
-const draftRetentionMs = 24 * 60 * 60 * 1_000;
-const draftCacheLimit = 50;
 
 function isDraftRecord(value: unknown): value is DraftRecord {
   if (!value || typeof value !== 'object') return false;
@@ -28,32 +26,27 @@ function isDraftCache(value: unknown): value is DraftCache {
   );
 }
 
-function validDrafts(value: unknown, now: number): DraftCache {
+function validDrafts(value: unknown): DraftCache {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const oldestAllowed = now - draftRetentionMs;
   return Object.fromEntries(
-    Object.entries(value)
-      .filter(
-        (entry): entry is [string, DraftRecord] =>
-          Boolean(entry[0]) && isDraftRecord(entry[1]) && entry[1].updatedAt >= oldestAllowed,
-      )
-      .sort((a, b) => b[1].updatedAt - a[1].updatedAt || a[0].localeCompare(b[0]))
-      .slice(0, draftCacheLimit),
+    Object.entries(value).filter(
+      (entry): entry is [string, DraftRecord] => Boolean(entry[0]) && isDraftRecord(entry[1]),
+    ),
   );
 }
 
-export function readDraftCache(storage?: Storage | null, now = Date.now()): DraftCache {
+export function readDraftCache(storage?: Storage | null): DraftCache {
   const stored = readStoredValue({
     key: draftCacheStorageKey,
     version: draftCacheVersion,
     fallback: {},
     validate: isDraftCache,
-    decodeLegacy: (_raw, parsed) => validDrafts(parsed, now),
+    decodeLegacy: (_raw, parsed) => validDrafts(parsed),
     storage,
   });
-  return validDrafts(stored, now);
+  return validDrafts(stored);
 }
 
-export function writeDraftCache(cache: DraftCache, storage?: Storage | null, now = Date.now()) {
-  writeStoredValue(draftCacheStorageKey, draftCacheVersion, validDrafts(cache, now), storage);
+export function writeDraftCache(cache: DraftCache, storage?: Storage | null) {
+  writeStoredValue(draftCacheStorageKey, draftCacheVersion, validDrafts(cache), storage);
 }

@@ -1,5 +1,4 @@
-import { googleNativeApi, googleMediaKind } from './google-native-catalog.mjs';
-import { googleVideoSupported } from './google-video.mjs';
+import { googleNativeApi, googleMediaKind, googleVideoSupported } from './google-native-catalog.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
 
 export const REFERENCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;

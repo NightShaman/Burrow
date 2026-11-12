@@ -11,7 +11,6 @@ export async function runChatTurn(args = {}) {
   return runAskChat(args);
 }
 
-const TEXT_ATTACHMENT_CONTENT_CHARS = 200_000;
 const IMAGE_ATTACHMENT_CONTENT_CHARS = 30_000_000;
 
 function isImageAttachment(attachment = {}) {
@@ -37,7 +36,7 @@ function normalizeAttachment(attachment = {}) {
     }
     return normalized;
   }
-  return { ...normalized, content: normalized.content.slice(0, TEXT_ATTACHMENT_CONTENT_CHARS) };
+  return normalized;
 }
 
 function textFromMessagePart(value) {

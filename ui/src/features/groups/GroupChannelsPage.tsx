@@ -11,11 +11,12 @@ import type {
   SessionTurn,
   ToolActivity,
 } from '../../app/api';
+import { readAttachment } from '../../app/readAttachment';
 import { ChatComposer } from '../chat/ChatComposer';
 import { ChatMessage } from '../chat/ChatMessage';
 import { usePolling } from '../../app/usePolling';
 import { useComposerHistory } from '../chat/useComposerHistory';
-import { isWithinAttachmentBudget } from '../chat/attachmentValidation';
+import { isWithinAttachmentBudget, validatedAttachmentType } from '../chat/attachmentValidation';
 
 type GroupTurn = {
   id: string;
@@ -104,9 +105,8 @@ function avatarImage(value?: string) {
   return /^(?:data:image\/[\w+.-]+;base64,|https?:\/\/|blob:|\/)/.test(avatar) ? avatar : null;
 }
 
-export function getMentionMatch(value: string) {
-  return value.match(/(^|\s)@([\w-]*)$/);
-}
+import { getMentionMatch, groupMentionIds } from './groupMentions';
+export { getMentionMatch } from './groupMentions';
 
 export function insertMention(
   value: string,
@@ -139,6 +139,7 @@ export function GroupChannelsPage({
   const [attached, setAttached] = useState<ChatAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [attachmentError, setAttachmentError] = useState('');
   const [refreshError, setRefreshError] = useState('');
   const scope = useRef({ channelId });
   if (scope.current.channelId !== channelId) scope.current = { channelId };
@@ -180,6 +181,7 @@ export function GroupChannelsPage({
   useEffect(() => {
     setMessage('');
     setAttached([]);
+    setAttachmentError('');
     setSending(false);
     setError('');
     setRefreshError('');
@@ -297,6 +299,13 @@ export function GroupChannelsPage({
     const owner = scope.current;
     const submittedMessage = message;
     const submittedAttachments = attached;
+    const recipients = groupMentionIds(
+      content,
+      channel?.participantAgentIds.flatMap((id) => {
+        const agent = agentById.get(id);
+        return agent && isAgentEnabled(agent) ? [{ id, name: agent.name }] : [];
+      }) ?? [],
+    );
     setSending(true);
     setError('');
     try {
@@ -309,6 +318,7 @@ export function GroupChannelsPage({
         `/api/group-channels/${encodeURIComponent(channelId)}/messages`,
         jsonMutation('POST', {
           message: content,
+          ...(recipients.length ? { agentIds: recipients } : {}),
           ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
         }),
       );
@@ -344,40 +354,47 @@ export function GroupChannelsPage({
   }
   function attachImage(files: File[]) {
     const admittedSizes = attached.map((item) => item.size);
-    files.forEach((file, index) => {
-      const supported =
-        file.type.startsWith('image/') ||
-        file.type.startsWith('text/') ||
-        ['application/json', 'application/xml', 'application/rtf'].includes(file.type) ||
-        /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(
-          file.name,
+    const owner = scope.current;
+    const accepted = files.filter((file) => {
+      if (!isWithinAttachmentBudget(admittedSizes, file.size)) {
+        setAttachmentError(
+          `${file.name}: Attachment exceeds the client file, count, or batch safety budget.`,
         );
-      if (!supported || !isWithinAttachmentBudget(admittedSizes, file.size)) return;
+        return false;
+      }
       admittedSizes.push(file.size);
-      const owner = scope.current;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const content = reader.result;
-        if (mounted.current && scope.current === owner && typeof content === 'string')
-          setAttached((current) =>
-            !isWithinAttachmentBudget(
-              current.map((item) => item.size),
-              file.size,
+      return true;
+    });
+    void Promise.all(
+      accepted.map(async (file, index) => {
+        try {
+          const type = await validatedAttachmentType(file);
+          const attachment = await readAttachment(file, attachmentDisplayName(file, index + 1));
+          return { ...attachment, type };
+        } catch (reason) {
+          if (mounted.current && scope.current === owner)
+            setAttachmentError(
+              `${file.name}: ${reason instanceof Error ? reason.message : 'Could not read attachment.'}`,
+            );
+          return null;
+        }
+      }),
+    ).then((results) => {
+      if (!mounted.current || scope.current !== owner) return;
+      setAttached((current) => {
+        const next = [...current];
+        for (const attachment of results) {
+          if (!attachment) continue;
+          if (
+            isWithinAttachmentBudget(
+              next.map((item) => item.size),
+              attachment.size,
             )
-              ? current
-              : [
-                  ...current,
-                  {
-                    name: attachmentDisplayName(file, index + 1),
-                    type: file.type,
-                    size: file.size,
-                    encoding: 'data-url',
-                    content,
-                  },
-                ],
-          );
-      };
-      reader.readAsDataURL(file);
+          )
+            next.push(attachment);
+        }
+        return next;
+      });
     });
   }
 
@@ -419,6 +436,11 @@ export function GroupChannelsPage({
     <div className="group-page">
       <main className="group-transcript">
         {error && <p className="group-error">{error}</p>}
+        {attachmentError && (
+          <p className="group-error" role="alert">
+            {attachmentError}
+          </p>
+        )}
         {refreshError && (
           <div className="group-error" role="alert">
             <span>{refreshError}</span>{' '}

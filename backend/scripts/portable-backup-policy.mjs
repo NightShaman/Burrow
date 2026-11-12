@@ -3,14 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { postgresLifecycleConfig } from '../src/postgres-lifecycle-bootstrap.mjs';
 
-export function parseEnvironment(text) {
-  const env = {};
-  for (const line of text.split('\n')) {
-    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (match) env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
-  }
-  return env;
-}
+export { parseEnvironment } from '../src/environment-file.mjs';
+import { parseEnvironment } from '../src/environment-file.mjs';
 export async function coldBackupPolicy(root, runCommand) {
   const env = parseEnvironment(await fs.readFile(path.join(root, 'burrow.env'), 'utf8'));
   const config = postgresLifecycleConfig({ env, runtimeRoot: root });

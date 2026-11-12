@@ -7,7 +7,7 @@ const INSPECTION_TOOLS = new Set(['files_read', 'files_list', 'files_find', 'fil
 
 function unique(values = []) { return [...new Set(values.filter(Boolean))].slice(0, MAX_ITEMS); }
 function text(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
-function checkResult(result) { return result?.tool === 'shell_exec' && (result.verificationCheck === true || /(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:check|test|lint|build)|\b(?:check|test|lint|build)\b/i.test(String(result.command || ''))); }
+function checkResult(result) { return result?.tool === 'shell_exec' && result.verificationCheck === true; }
 function mcpLabel(result) { return result?.mcpToolName || result?.toolName || 'MCP tool'; }
 
 export function completionEvidence({ toolResults = [], consequences = null, verification = null, decision = null, validation = null } = {}) {
@@ -16,7 +16,7 @@ export function completionEvidence({ toolResults = [], consequences = null, veri
   const successful = results.filter((result) => result?.ok === true);
   const failed = results.filter((result) => result?.ok === false);
   const changedFiles = unique(changedPathsFromToolResults(results));
-  const checks = successful.filter(checkResult);
+  const checks = results.filter(checkResult);
   const mcp = results.filter((result) => result?.tool === 'mcp_call');
   const inspected = successful.filter((result) => INSPECTION_TOOLS.has(result?.tool) && !MUTATION_TOOLS.has(result?.tool));
   const repaired = results.some((result) => result?.mutationRepair || result?.verificationRepair)
@@ -24,7 +24,7 @@ export function completionEvidence({ toolResults = [], consequences = null, veri
   return {
     meaningful: Boolean(changedFiles.length || checks.length || mcp.length || failed.length || verification?.required || validation),
     changedFiles,
-    checks: checks.map((result) => ({ command: text(result.command) || 'check', ok: result.ok === true })).slice(0, MAX_ITEMS),
+    checks: checks.map((result) => ({ command: text(result.command) || 'check', ok: result.ok === true, scope: 'shell_command' })).slice(0, MAX_ITEMS),
     mcp: mcp.map((result) => ({ name: mcpLabel(result), ok: result.ok === true, provider: result.provider || null })).slice(0, MAX_ITEMS),
     inspected: inspected.length,
     failed: failed.map((result) => text(result.error || result.reason || result.tool || 'operation failed')).filter(Boolean).slice(0, MAX_ITEMS),
@@ -39,7 +39,7 @@ export function renderCompletionAddendum(evidence = null) {
   if (!evidence?.meaningful) return '';
   const lines = ['Completion evidence:'];
   if (evidence.changedFiles.length) lines.push(`- Changed: ${evidence.changedFiles.join(', ')}`);
-  if (evidence.checks.length) lines.push(`- Validation: ${evidence.checks.map((check) => `${check.command} (${check.ok ? 'passed' : 'failed'})`).join('; ')}`);
+  if (evidence.checks.length) lines.push(`- Validation: ${evidence.checks.map((check) => `${check.command} (${check.ok ? 'passed' : 'failed'})${check.scope === 'shell_command' ? ' [shell command outcome; subcommands not attested]' : ''}`).join('; ')}`);
   if (evidence.mcp.length) lines.push(`- MCP: ${evidence.mcp.map((call) => `${call.name}${call.provider ? ` via ${call.provider}` : ''} (${call.ok ? 'succeeded' : 'failed'})`).join('; ')}`);
   if (evidence.inspected && !evidence.changedFiles.length && !evidence.checks.length && !evidence.mcp.length) lines.push(`- Inspected: ${evidence.inspected} operation${evidence.inspected === 1 ? '' : 's'}`);
   if (evidence.failed.length) lines.push(`- Issue: ${evidence.failed.join('; ')}`);

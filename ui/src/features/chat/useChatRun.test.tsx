@@ -43,13 +43,34 @@ describe('useChatRun', () => {
     expect(
       trimStreamedAnswer(
         'Working notes.\n\nAuthoritative final answer.',
-        'Authoritative   final answer.',
+        'Authoritative final answer.',
       ),
-    ).toBe('Working notes.');
+    ).toBe('Working notes.\n\n');
     expect(
       trimStreamedAnswer('A streamed response that differs.', 'A rewritten final response.'),
     ).toBe('A streamed response that differs.');
     expect(trimStreamedAnswer('Short tail ok', 'ok and more')).toBe('Short tail ok');
+  });
+
+  it('preserves original code, lists, leading/trailing whitespace and whitespace-only differences', () => {
+    const original = '  ```python\nif ready:\n    act()\n```\n\n- one\n  - two\n\n';
+    const final = 'Authoritative final answer.';
+    expect(trimStreamedAnswer(original + final, final)).toBe(original);
+    expect(trimStreamedAnswer(original, final)).toBe(original);
+    expect(trimStreamedAnswer('a\n  b\n\n', 'a b')).toBe('a\n  b\n\n');
+    expect(trimStreamedAnswer('Authoritative   final answer.', final)).toBe(
+      'Authoritative   final answer.',
+    );
+    expect(trimStreamedAnswer(final, final)).toBe('');
+    expect(trimStreamedAnswer(' \n', final)).toBe(' \n');
+    expect(trimStreamedAnswer(original, '')).toBe(original);
+  });
+
+  it('handles large repetitive nonmatches and partial overlaps without rewriting text', () => {
+    const repeated = 'a'.repeat(320_000);
+    expect(trimStreamedAnswer(repeated + 'b', repeated + 'c')).toBe(repeated + 'b');
+    expect(trimStreamedAnswer('notes\n' + repeated, repeated + 'c')).toBe('notes\n');
+    expect(trimStreamedAnswer('prefixababababababababab', 'ababababababababac')).toBe('prefixab');
   });
 
   it('closes a superseded run without appending or reporting a synthetic assistant error', async () => {

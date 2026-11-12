@@ -37,7 +37,10 @@ describe('App mutation owner', () => {
         new File(['hello'], 'ok.txt', { type: 'text/plain' }),
       ]),
     );
-    expect(reportError).toHaveBeenCalledWith(expect.stringContaining('bad.pdf'));
+    await waitFor(() =>
+      expect(reportError).toHaveBeenCalledWith(expect.stringContaining('bad.pdf')),
+    );
+    await waitFor(() => expect(readAttachment).toHaveBeenCalled());
     current = false;
     await act(async () => {
       resolve({ name: 'ok.txt' });
@@ -83,4 +86,56 @@ describe('App mutation owner', () => {
       ),
     );
   });
+});
+
+it('admits backend-supported JSONL/JS and normalized generic UTF8 but reports binary rejection', async () => {
+  const realReader = await vi.importActual<typeof import('./readAttachment')>('./readAttachment');
+  vi.mocked(readAttachment).mockImplementation(realReader.readAttachment);
+  const reportError = vi.fn();
+  const setAttachment = vi.fn();
+  const { result } = renderHook(() =>
+    useAppMutations({
+      selected: undefined,
+      setAgents: vi.fn(),
+      refreshSessions: vi.fn(),
+      reportError,
+      writeModelSelection: vi.fn(),
+      attached: [],
+      isAttachmentScopeCurrent: () => true,
+      setAttachment,
+    }),
+  );
+  act(() =>
+    result.current.attachImage([
+      new File(['{"ok":true}\n'], 'data.jsonl', { type: 'application/x-ndjson' }),
+      new File(['export default true;'], 'module.mjs', { type: 'application/javascript' }),
+      new File(['name="José"'], 'config.toml'),
+      new File(['{\\rtf1 José}\r\n'], 'rich.rtf', { type: 'application/rtf' }),
+      new File([new Uint8Array([0, 1, 2])], 'binary.txt', { type: 'application/octet-stream' }),
+    ]),
+  );
+  await waitFor(() =>
+    expect(setAttachment).toHaveBeenCalledWith([
+      expect.objectContaining({
+        name: 'data.jsonl',
+        type: 'application/x-ndjson',
+        content: 'data:application/x-ndjson;base64,eyJvayI6dHJ1ZX0K',
+      }),
+      expect.objectContaining({ name: 'module.mjs', type: 'application/javascript' }),
+      expect.objectContaining({
+        name: 'config.toml',
+        type: 'text/plain',
+        size: 12,
+        encoding: 'data-url',
+        content: 'data:application/octet-stream;base64,bmFtZT0iSm9zw6ki',
+      }),
+      expect.objectContaining({
+        name: 'rich.rtf',
+        type: 'text/plain',
+        encoding: 'data-url',
+        content: 'data:application/rtf;base64,e1xydGYxIEpvc8OpfQ0K',
+      }),
+    ]),
+  );
+  expect(reportError).toHaveBeenCalledWith(expect.stringContaining('binary control'));
 });

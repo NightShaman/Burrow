@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseEnvironment, parseEnvironmentLines, quoteEnvironment } from '../src/environment-file.mjs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
@@ -152,7 +153,7 @@ async function validateInstall(root) {
   const pkg = JSON.parse(await fs.readFile(path.join(root, backend, 'package.json'), 'utf8'));
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Error('invalid package JSON');
   const env = await fs.readFile(path.join(root, 'burrow.env'), 'utf8');
-  if (env.includes('\0') || env.split('\n').some(line => line.trim() && !line.trim().startsWith('#') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(line))) throw new Error('invalid environment format');
+  parseEnvironment(env);
 }
 
 async function validateArchiveRoot(root) {
@@ -196,16 +197,13 @@ const RESTORED_INSTALL_PATHS = Object.freeze({
 async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot, mapping = {}) {
   const envPath = path.join(installRoot, 'burrow.env');
   const original = await fs.readFile(envPath, 'utf8');
-  const lines = original.split('\n');
-  const rebased = lines.map((line) => {
-    const separator = line.indexOf('=');
-    if (separator < 1) return line;
-    const key = line.slice(0, separator);
-    if (Object.hasOwn(mapping, key)) return `${key}=${mapping[key]}`;
+  const rebased = parseEnvironmentLines(original).map(({ line, key }) => {
+    if (!key) return line;
+    if (Object.hasOwn(mapping, key)) return `${key}=${quoteEnvironment(mapping[key])}`;
     const resolvePath = RESTORED_INSTALL_PATHS[key];
     if (!resolvePath) return line;
     const resolved = resolvePath(finalRoot);
-    return resolved === null ? null : `${key}=${resolved}`;
+    return resolved === null ? null : `${key}=${quoteEnvironment(resolved)}`;
   }).filter((line) => line !== null);
   await fs.writeFile(envPath, rebased.join('\n'), { mode: 0o600 });
   await fs.chmod(envPath, 0o600);

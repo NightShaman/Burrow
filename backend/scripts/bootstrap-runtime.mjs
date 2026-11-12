@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseEnvironment } from '../src/environment-file.mjs';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -81,7 +82,7 @@ export async function bootstrapRuntime(args = {}) {
     if (await exists(envPath) && !args.forceEnv) report.stages.push('env-preserved');
     else {
       const existing = envExists ? await fs.readFile(envPath, 'utf8') : '';
-      const hasKey = /^\s*(?:export\s+)?BURROW_SETTINGS_KEY=.+$/m.test(existing);
+      const hasKey = Boolean(parseEnvironment(existing).BURROW_SETTINGS_KEY);
       const template = envTemplate({ installDir, generateSettingsKey: generateSettingsKey && !hasKey, host, port });
       await fs.writeFile(envPath, mergeRuntimeEnv(template, existing), { mode: 0o600 });
       await fs.chmod(envPath, 0o600); report.stages.push('env-written'); }

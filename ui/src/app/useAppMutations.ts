@@ -2,15 +2,11 @@ import type { Dispatch, SetStateAction } from 'react';
 import { api, attachmentDisplayName, type ChatAttachment } from './api';
 import type { Agent } from './types';
 import { readAttachment } from './readAttachment';
-import { isWithinAttachmentBudget } from '../features/chat/attachmentValidation';
+import {
+  isWithinAttachmentBudget,
+  validatedAttachmentType,
+} from '../features/chat/attachmentValidation';
 
-const isSupportedAttachment = (file: File) =>
-  file.type.startsWith('image/') ||
-  file.type.startsWith('text/') ||
-  ['application/json', 'application/xml', 'application/rtf'].includes(file.type) ||
-  /\.(txt|md|markdown|json|csv|xml|html?|css|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|yaml|yml|rtf)$/i.test(
-    file.name,
-  );
 export function useAppMutations({
   selected,
   setAgents,
@@ -65,12 +61,6 @@ export function useAppMutations({
   const attachImage = (files: File[]) => {
     const admittedSizes = attached.map((item) => item.size);
     const accepted = files.filter((file) => {
-      if (!isSupportedAttachment(file)) {
-        reportError(
-          `${file.name}: Attach an image or text document. PDF extraction is not supported.`,
-        );
-        return false;
-      }
       if (!isWithinAttachmentBudget(admittedSizes, file.size)) {
         reportError(
           `${file.name}: Attachment exceeds the client file, count, or batch safety budget.`,
@@ -82,15 +72,24 @@ export function useAppMutations({
     });
     if (!accepted.length) return;
     void Promise.all(
-      accepted.map((file, index) => readAttachment(file, attachmentDisplayName(file, index + 1))),
-    )
-      .then((attachments) => {
-        if (!isAttachmentScopeCurrent()) return;
-        setAttachment(attachments);
-      })
-      .catch(() => {
-        if (isAttachmentScopeCurrent()) reportError('Could not read the attachment.');
-      });
+      accepted.map(async (file, index) => {
+        try {
+          const type = await validatedAttachmentType(file);
+          const attachment = await readAttachment(file, attachmentDisplayName(file, index + 1));
+          return { ...attachment, type };
+        } catch (reason) {
+          if (isAttachmentScopeCurrent())
+            reportError(
+              `${file.name}: ${reason instanceof Error ? reason.message : 'Could not read attachment.'}`,
+            );
+          return null;
+        }
+      }),
+    ).then((results) => {
+      if (!isAttachmentScopeCurrent()) return;
+      const attachments = results.filter((item): item is ChatAttachment => item !== null);
+      if (attachments.length) setAttachment(attachments);
+    });
   };
   return { updateAgent, attachImage };
 }

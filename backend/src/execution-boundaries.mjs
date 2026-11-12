@@ -1,4 +1,4 @@
-import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 export const EXECUTION_BOUNDARIES_META_KEY = 'execution_boundaries';
 export const BOUNDARY_OPERATIONS = Object.freeze(['read', 'write', 'delete', 'execute', 'delegate']);
@@ -84,74 +84,64 @@ export async function saveExecutionBoundaries(input = {}, { metadataStore } = {}
   return { ok: true, boundaries: checked.boundaries, validation: { ok: true, errors: [] } };
 }
 
-function globToRegex(pattern) {
-  let source = '^';
-  const input = text(pattern);
-  for (let index = 0; index < input.length; index += 1) {
-    const char = input[index];
-    if (char === '*') {
-      if (input[index + 1] === '*') { source += '.*'; index += 1; }
-      else source += '[^/]*';
-    } else if ('\\^$+?.()|{}[]'.includes(char)) source += `\\${char}`;
-    else source += char;
+// A wall-clock evaluation budget, not a pattern/target content cap. Include
+// worker startup and all rules/targets so pathological JS regexes (or globs)
+// cannot monopolize the main loop. Trusted callers may supply a different
+// budget; an existing monotonic request deadline and cancellation win earlier.
+export const DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS = 1000;
+
+function evaluationFailure(status, timeoutMs) {
+  return { ok: false, blockers: [`blast_radius:hard_policy_block:execution_boundary_evaluation_${status}`], matches: [], evaluation: { status, timeoutMs } };
+}
+
+export async function evaluateExecutionBoundaries({ boundaries = null, operation = null, command = '', paths = [], baseRoot = null, signal = null, deadline = null, timeoutMs = DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS } = {}) {
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS;
+  const end = Math.min(performance.now() + budget, Number.isFinite(deadline) ? deadline : Infinity);
+  const remaining = end - performance.now();
+  if (signal?.aborted) return evaluationFailure('cancelled', budget);
+  if (remaining <= 0) return evaluationFailure('timeout', budget);
+  // No matching work exists in this case. Do not start a worker for the default
+  // empty policy, but do not treat malformed/nonempty policies as empty.
+  const source = boundaries?.boundaries && typeof boundaries.boundaries === 'object' ? boundaries.boundaries : boundaries;
+  if (boundaries == null || (Array.isArray(source?.hardBlocks) && source.hardBlocks.length === 0)) return { ok: true, blockers: [], matches: [] };
+
+  let worker;
+  let timer;
+  let onAbort;
+  try {
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = async (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        // Await actual termination even after timeout/error/success: no stuck
+        // matching worker may survive a returned safety review.
+        try { await worker?.terminate(); }
+        catch { result = evaluationFailure('worker_error', budget); }
+        resolve(result);
+      };
+      onAbort = () => { void finish(evaluationFailure('cancelled', budget)); };
+      try {
+        worker = new Worker(new URL('./execution-boundary-worker.mjs', import.meta.url), {
+          workerData: { boundaries, operation, command, paths, baseRoot },
+        });
+        worker.once('message', (result) => { void finish(performance.now() >= end ? evaluationFailure('timeout', budget) : signal?.aborted ? evaluationFailure('cancelled', budget) : result); });
+        worker.once('error', () => { void finish(evaluationFailure('worker_error', budget)); });
+        worker.once('exit', () => { void finish(evaluationFailure('worker_error', budget)); });
+        timer = setTimeout(() => { void finish(evaluationFailure('timeout', budget)); }, Math.max(1, end - performance.now()));
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted) onAbort();
+      } catch {
+        void finish(evaluationFailure('worker_error', budget));
+      }
+    });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+    worker?.removeAllListeners();
   }
-  return new RegExp(`${source}$`);
-}
-
-function resolveTarget(value, baseRoot = null) {
-  const raw = text(value);
-  if (!raw) return null;
-  if (path.isAbsolute(raw)) return path.resolve(raw);
-  return path.resolve(baseRoot || process.cwd(), raw);
-}
-
-function pathMatches(value, rule, { baseRoot = null } = {}) {
-  const resolved = resolveTarget(value, baseRoot);
-  if (!resolved) return false;
-  const pattern = path.isAbsolute(rule.pattern) ? path.resolve(rule.pattern) : rule.pattern;
-  if (rule.match === 'exact') return resolved === pattern;
-  if (rule.match === 'prefix') return resolved === pattern || resolved.startsWith(pattern.endsWith(path.sep) ? pattern : `${pattern}${path.sep}`);
-  if (rule.match === 'contains') return resolved.includes(rule.pattern);
-  if (rule.match === 'regex') return new RegExp(rule.pattern).test(resolved);
-  return globToRegex(rule.pattern).test(resolved);
-}
-
-function commandMatches(command, rule) {
-  const value = String(command || '');
-  if (!value) return false;
-  if (rule.match === 'exact') return value === rule.pattern;
-  if (rule.match === 'prefix') return value.startsWith(rule.pattern);
-  if (rule.match === 'contains') return value.includes(rule.pattern);
-  if (rule.match === 'glob') return globToRegex(rule.pattern).test(value);
-  return new RegExp(rule.pattern, 'i').test(value);
-}
-
-function blockerFor(rule) { return `blast_radius:hard_policy_block:user_configured_hard_block:${rule.id}`; }
-
-export function evaluateExecutionBoundaries({ boundaries = null, operation = null, command = '', paths = [], baseRoot = null } = {}) {
-  const op = text(operation).toLowerCase();
-  const checked = validateExecutionBoundaries(boundaries || emptyExecutionBoundaries());
-  const rules = checked.boundaries.hardBlocks.filter((rule) => rule.enabled && rule.operations.includes(op));
-  const matches = [];
-  for (const rule of rules) {
-    if (rule.type === 'command' && op === 'execute' && commandMatches(command, rule)) matches.push({ rule, target: String(command || '') });
-    if (rule.type === 'path') {
-      for (const item of asArray(paths)) if (pathMatches(item, rule, { baseRoot })) matches.push({ rule, target: resolveTarget(item, baseRoot) });
-    }
-  }
-  const uniqueMatches = [];
-  const seen = new Set();
-  for (const match of matches) {
-    const key = `${match.rule.id}:${match.target}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniqueMatches.push(match);
-  }
-  return {
-    ok: uniqueMatches.length === 0,
-    blockers: unique(uniqueMatches.map(({ rule }) => blockerFor(rule))),
-    matches: uniqueMatches.map(({ rule, target }) => ({ id: rule.id, type: rule.type, pattern: rule.pattern, match: rule.match, operations: rule.operations, operation: op, target, reason: rule.reason || null, blocker: blockerFor(rule) })),
-  };
 }
 
 export function executionBoundaryStatus(boundaries = null) {
@@ -159,5 +149,3 @@ export function executionBoundaryStatus(boundaries = null) {
   const hardBlocks = checked.boundaries.hardBlocks;
   return { enabled: hardBlocks.some((rule) => rule.enabled), hardBlockCount: hardBlocks.length, enabledHardBlockCount: hardBlocks.filter((rule) => rule.enabled).length, hardBlocks };
 }
-
-export const __executionBoundaries = Object.freeze({ globToRegex, pathMatches, commandMatches, blockerFor });

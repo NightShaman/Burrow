@@ -1,3 +1,4 @@
+import { verificationExecutionResult } from './verification.mjs';
 import path from 'node:path';
 import { createTraceLogger } from './trace-logger.mjs';
 import { loadRuntimeConfig } from './runtime-config-loader.mjs';
@@ -100,12 +101,12 @@ export async function runWorkbenchStep({ rootDir, configPath, step = 'inspect', 
     // Verification traces are runtime diagnostics, not workspace content. Keep them under
     // the configured cache trace root so a workspace inspection cannot discover them.
     const logger = createTraceLogger({ rootDir: resolveRuntimeTracePath({ ...runtime.runtimeState, sessionId: 'default' }), runId: resolvedRunId });
-    const review = reviewProposalActions({ actions: [{ index: 0, tool: 'shell_exec', command: verifyCommand }], workspaceRoot }).reviews[0];
+    const review = (await reviewProposalActions({ actions: [{ index: 0, tool: 'shell_exec', command: verifyCommand }], workspaceRoot })).reviews[0];
     if (review.status !== 'allowed') {
       await logger.router({ stage: 'workbench-verify-blocked', review });
       return { ok: false, step, decision: 'blocked', blockers: [`verify_command_not_allowed:${review.status}`], review, runId: logger.runId, traceDir: logger.traceDir, mayMutateInline: false, mayCommitInline: false };
     }
-    const execResult = { ...await runExec({ command: verifyCommand, cwd, traceLogger: logger, artifactPrefix: 'workbench-verify' }), verificationCheck: true };
+    const execResult = verificationExecutionResult(await runExec({ command: verifyCommand, cwd, traceLogger: logger, artifactPrefix: 'workbench-verify' }));
     await logger.router({ stage: 'workbench-verify-result', ok: execResult.ok, command: verifyCommand, verificationCheck: true });
     return { ok: execResult.ok, step, decision: execResult.ok ? 'verified' : 'verification_failed', runId: logger.runId, traceDir: logger.traceDir, review, verification: { command: verifyCommand, ok: execResult.ok, exitCode: execResult.exitCode, verificationCheck: true, result: execResult }, mayMutateInline: false, mayCommitInline: false };
   }

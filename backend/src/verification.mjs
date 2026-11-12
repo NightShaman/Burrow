@@ -41,28 +41,13 @@ function resultIsArtifactEvidence(result = {}) {
   return Boolean(result.ok && resultIsMutationResult(result));
 }
 
-function checkLikeCommand(command) {
-  const normalized = String(command || '').trim().toLowerCase();
-  if (!normalized) return false;
-  const segments = normalized
-    .split(/\s*(?:&&|;)\s*/u)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-  return segments.some((segment) => [
-    /^npm\s+(run\s+)?(check|test|smoke)/u,
-    /^node\s+--check\b/u,
-    /^node\s+--test\b/u,
-    /^test\s+-[efsd]\b/u,
-    /^git\s+diff\s+--check\b/u,
-  ].some((pattern) => pattern.test(segment)));
-}
-
+// Only the explicit verification execution contract is evidence. Shell text is
+// not a record of which commands ran, including in compound shell programs.
 function resultIsCheckEvidence(result = {}) {
-  return Boolean(result.ok && result.tool === 'shell_exec' && (result.verificationCheck || checkLikeCommand(result.command)));
+  return Boolean(result.ok === true && result.tool === 'shell_exec' && result.verificationCheck === true);
 }
-
 function resultIsFailedCheck(result = {}) {
-  return Boolean(!result.ok && result.tool === 'shell_exec' && (result.verificationCheck || checkLikeCommand(result.command)));
+  return Boolean(result.ok === false && result.tool === 'shell_exec' && result.verificationCheck === true);
 }
 
 function mutationTargetsFromResult(result = {}, scope = {}) {
@@ -92,6 +77,7 @@ export function evidenceFromToolResults(toolResults = [], { normalizationRoot = 
       checks.push({
         name: result.command || result.tool || 'shell_exec',
         ok: true,
+        scope: result.verificationExecution?.scope || 'shell_command',
         tool: result.tool || 'shell_exec',
         exitCode: result.exitCode ?? null,
         artifacts: artifactPathsFromResult(result),
@@ -101,6 +87,7 @@ export function evidenceFromToolResults(toolResults = [], { normalizationRoot = 
       failedChecks.push({
         name: result.command || result.tool || 'shell_exec',
         ok: false,
+        scope: result.verificationExecution?.scope || 'shell_command',
         tool: result.tool || 'shell_exec',
         exitCode: result.exitCode ?? null,
         artifacts: artifactPathsFromResult(result),
@@ -195,4 +182,14 @@ export function evaluateVerification({ mode, action, model, artifacts = [], chec
   };
 }
 
-export const __test__ = { mutatingAction, artifactPathsFromResult, checkLikeCommand, resultIsMutationResult, resultIsArtifactEvidence, resultIsCheckEvidence, resultIsFailedCheck, mutationTargetsFromResult, normalizeEvidencePath };
+export const __test__ = { mutatingAction, artifactPathsFromResult, resultIsMutationResult, resultIsArtifactEvidence, resultIsCheckEvidence, resultIsFailedCheck, mutationTargetsFromResult, normalizeEvidencePath };
+
+// Called only by a dedicated verification execution boundary, after dispatch.
+// The receipt attests the whole shell program's outcome, never its subcommands.
+export function verificationExecutionResult(result = {}) {
+  const hasOutcome = Number.isInteger(result.exitCode) || result.timedOut === true || result.cancelled === true || Boolean(result.error);
+  return { ...result, verificationCheck: hasOutcome, verificationExecution: {
+    scope: 'shell_command', status: !hasOutcome ? 'not_run' : result.ok === true ? 'passed' : 'failed',
+    exitCode: result.exitCode ?? null, subcommandsAttested: false,
+  } };
+}

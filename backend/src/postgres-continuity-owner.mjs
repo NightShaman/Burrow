@@ -33,7 +33,14 @@ export function createContinuityOwner(pool) {
         await client.query('SELECT pg_advisory_lock_shared($1::bigint)', [keyFor(id)]);
       })().catch(error => { lost = true; throw error; });
       await starting;
-      await client.query('SELECT 1');
+      try {
+        await client.query('SELECT 1');
+      } catch (cause) {
+        // A query can reject before pg emits its connection error/end event.
+        // Fence that race with the same stable owner-loss error as the event path.
+        lost = true;
+        throw new Error('continuity_owner_connection_lost', { cause });
+      }
       if (lost) throw new Error('continuity_owner_connection_lost');
     },
     async alive(ownerId) {

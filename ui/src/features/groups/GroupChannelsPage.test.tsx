@@ -438,3 +438,103 @@ it.each(['resolve', 'reject'] as const)(
     expect(vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   },
 );
+
+it('uses shared byte validation for JSONL, JavaScript, generic text and binary errors', async () => {
+  const bodies: Array<{ attachments: Array<Record<string, unknown>> }> = [];
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (init?.method === 'POST') {
+      bodies.push(JSON.parse(String(init.body)));
+      return { ok: true };
+    }
+    if (path === '/api/settings/identities') return {};
+    return { channel: { id: 'room-1', turns: [] } };
+  });
+  render(<GroupChannelsPage channelId="room-1" agents={[]} />);
+  await screen.findByPlaceholderText('Message the group…');
+  fireEvent.change(document.querySelector('input[type="file"]')!, {
+    target: {
+      files: [
+        new File(['{"ok":true}\n'], 'data.jsonl', { type: 'application/x-ndjson' }),
+        new File(['export default true;'], 'module.mjs', { type: 'application/javascript' }),
+        new File(['[project]\nname="José"'], 'config.toml'),
+        new File(['{\\rtf1 José}\r\n'], 'rich.rtf', { type: 'application/rtf' }),
+        new File([new Uint8Array([0, 1, 2])], 'disguised.txt', {
+          type: 'application/octet-stream',
+        }),
+      ],
+    },
+  });
+  for (const name of ['data.jsonl', 'module.mjs', 'config.toml', 'rich.rtf'])
+    expect(await screen.findByRole('button', { name: `Remove ${name}` })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Remove disguised.txt' })).toBeNull();
+  expect(screen.getByRole('alert').textContent).toContain('binary control');
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0].attachments).toEqual([
+    {
+      name: 'data.jsonl',
+      type: 'application/x-ndjson',
+      size: 12,
+      encoding: 'data-url',
+      content: 'data:application/x-ndjson;base64,eyJvayI6dHJ1ZX0K',
+    },
+    {
+      name: 'module.mjs',
+      type: 'application/javascript',
+      size: 20,
+      encoding: 'data-url',
+      content: 'data:application/javascript;base64,ZXhwb3J0IGRlZmF1bHQgdHJ1ZTs=',
+    },
+    {
+      name: 'config.toml',
+      type: 'text/plain',
+      size: 22,
+      encoding: 'data-url',
+      content: 'data:application/octet-stream;base64,W3Byb2plY3RdCm5hbWU9Ikpvc8OpIg==',
+    },
+    {
+      name: 'rich.rtf',
+      type: 'text/plain',
+      size: 15,
+      encoding: 'data-url',
+      content: 'data:application/rtf;base64,e1xydGYxIEpvc8OpfQ0K',
+    },
+  ]);
+});
+
+it('sends Unicode mention recipient IDs only while the nonliteral token remains', async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (path === '/api/settings/identities') return {};
+    if (init?.method === 'POST') {
+      bodies.push(JSON.parse(String(init.body)));
+      return { ok: true };
+    }
+    return { channel: { id: 'room-1', participantAgentIds: ['jose', 'yamada'], turns: [] } };
+  });
+  render(
+    <GroupChannelsPage
+      channelId="room-1"
+      agents={
+        [
+          { id: 'jose', name: 'José', enabled: true },
+          { id: 'yamada', name: '山田', enabled: true },
+        ] as any
+      }
+    />,
+  );
+  const input = await screen.findByPlaceholderText('Message the group…');
+  fireEvent.change(input, { target: { value: '@José' } });
+  expect(screen.getByRole('option', { name: /@José/ })).toBeTruthy();
+  fireEvent.keyDown(input, { key: 'Tab' });
+  fireEvent.change(input, {
+    target: { value: '@José help; ops@hatchet and `@山田` are literals' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  await waitFor(() => expect(bodies[0]?.agentIds).toEqual(['jose']));
+  await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(''));
+  fireEvent.change(input, { target: { value: '`@José` literal only' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  await waitFor(() => expect(bodies.length).toBe(2));
+  expect(bodies[1]).not.toHaveProperty('agentIds');
+});

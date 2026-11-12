@@ -247,6 +247,24 @@ export class PostgresScheduledJobStore {
     const result = await this.pool.query(sql, args);
     return Promise.all(result.rows.map(row => this.resolved(row)));
   }
+  // One statement gives count and limit+1 under the same MVCC snapshot.
+  async listJobsPage({ agentId = null, ownerModId = undefined, enabled = null, limit = 50, after = null } = {}) {
+    limit = Math.max(1, Math.min(100, Math.floor(Number(limit) || 50)));
+    const args = [], where = [];
+    if (agentId) where.push(`j.agent_id=$${args.push(agentId)}`);
+    if (ownerModId !== undefined) where.push(ownerModId === null ? 'j.owner_mod_id IS NULL' : `j.owner_mod_id=$${args.push(id(ownerModId, 'scheduled_job_owner_mod_id'))}`);
+    if (enabled !== null) where.push(`j.enabled=$${args.push(Boolean(enabled))}`);
+    const filter = where.length ? where.join(' AND ') : 'true';
+    const keyset = after === null ? '' : ` AND j.id COLLATE "C">$${args.push(id(after, 'scheduled_job_id'))} COLLATE "C"`;
+    const result = await this.pool.query(`SELECT totals.total_count,p.* FROM
+      (SELECT count(*) AS total_count FROM scheduled_jobs j WHERE ${filter}) totals
+      LEFT JOIN LATERAL (${JOB_SELECT} WHERE ${filter}${keyset} ORDER BY j.id COLLATE "C" LIMIT $${args.push(limit + 1)}) p ON true`, args);
+    const rows = result.rows.filter(row => row.id);
+    const hasMore = rows.length > limit;
+    const values = rows.slice(0, limit);
+    const zone = values.length ? await this.effective(null) : null;
+    return { jobs: values.map(row => ({ ...jobRow(row), effectiveTimezone: zone })), totalCount: Number(result.rows[0].total_count), hasMore, nextAfter: hasMore ? values.at(-1).id : null };
+  }
   async getOwnedJob(ownerModId, jobId) {
     const result = await this.pool.query(
       `${JOB_SELECT} WHERE j.id=$1 AND j.owner_mod_id=$2`,
@@ -325,14 +343,34 @@ export class PostgresScheduledJobStore {
     )
       return [];
     const result = await this.pool.query(
-      "SELECT * FROM scheduled_job_runs WHERE job_id=$1 ORDER BY scheduled_for DESC,created_at DESC LIMIT $2 OFFSET $3",
+      `SELECT * FROM scheduled_job_runs WHERE job_id=$1 ORDER BY scheduled_for DESC,created_at DESC,id DESC${limit === null ? "" : " LIMIT $2 OFFSET $3"}`,
       [
         id(jobId, "scheduled_job_id"),
-        Math.max(1, Math.min(Number(limit) || 50, 200)),
-        Math.max(0, Number(offset) || 0),
+        ...(limit === null ? [] : [Math.max(1, Math.min(Number(limit) || 50, 201)), Math.max(0, Number(offset) || 0)]),
       ],
     );
     return result.rows.map(runRow);
+  }
+  async listRunsPage(jobId, { limit = 50, after = null } = {}) {
+    limit = Math.max(1, Math.min(200, Math.floor(Number(limit) || 50)));
+    const args = [id(jobId, 'scheduled_job_id')];
+    let keyset = '';
+    if (after !== null) {
+      if (!Array.isArray(after) || after.length !== 3) throw new Error('cursor_invalid');
+      args.push(after[0], after[1], id(after[2], 'scheduled_job_run_id'));
+      keyset = ' AND (scheduled_for,created_at,id COLLATE "C")<($2::timestamptz,$3::timestamptz,$4::text COLLATE "C")';
+    }
+    const result = await this.pool.query(`SELECT totals.total_count,p.* FROM
+      (SELECT count(*) AS total_count FROM scheduled_job_runs WHERE job_id=$1) totals
+      LEFT JOIN LATERAL (SELECT *,scheduled_for::text AS cursor_scheduled_for,created_at::text AS cursor_created_at
+        FROM scheduled_job_runs WHERE job_id=$1${keyset}
+        ORDER BY scheduled_for DESC,created_at DESC,id COLLATE "C" DESC LIMIT $${args.push(limit + 1)}) p ON true`, args);
+    const rows = result.rows.filter(row => row.id);
+    const hasMore = rows.length > limit;
+    const values = rows.slice(0, limit), last = values.at(-1);
+    // Preserve PostgreSQL microseconds in the key, even though public dates use JS ISO milliseconds.
+    return { runs: values.map(runRow), totalCount: Number(result.rows[0].total_count), hasMore,
+      nextAfter: hasMore ? [last.cursor_scheduled_for, last.cursor_created_at, last.id] : null };
   }
   async getRun(runId) {
     const result = await this.pool.query(

@@ -34,7 +34,6 @@ export function mcpProvidersReceipt({ connections, grants, agentId } = {}) {
   if (!(connections instanceof Map)) return { tool: 'mcp_providers', ok: true, providers: [], resultCount: 0 };
   const providers = [...connections.values()]
     .filter((connection) => connection?.enabled)
-    .slice(0, 50)
     .map((connection) => {
       const catalog = Array.isArray(connection.tools) ? connection.tools : [];
       const grantedToolCount = catalog.filter((tool) => toolAvailable(connection, tool, grants)).length;

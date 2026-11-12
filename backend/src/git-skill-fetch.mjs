@@ -1,3 +1,4 @@
+import { frontmatterMetadata } from './skill-frontmatter.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -105,12 +106,7 @@ function parseTree(data) {
 }
 
 function metadata(text, fallback) {
-  const front = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-  const fields = {};
-  if (front) for (const line of front[1].split(/\r?\n/)) {
-    const item = /^([A-Za-z][\w-]*):\s*(.*?)\s*$/.exec(line);
-    if (item) fields[item[1]] = item[2].replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, (_, double, single) => double ?? single);
-  }
+  const fields = frontmatterMetadata(text);
   return { name: fields.name || fallback, description: fields.description || '', version: fields.version || null };
 }
 

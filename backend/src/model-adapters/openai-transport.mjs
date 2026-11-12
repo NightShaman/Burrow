@@ -10,6 +10,7 @@ export function openAIEnvelopeError(data, mode) {
   if (mode === 'openai-responses') {
     if (data.status !== 'completed') return `model_response_${data.status || 'missing_status'}`;
     if (!Array.isArray(data.output) && typeof data.output_text !== 'string') return 'model_response_malformed_envelope';
+    if (responsesTextOverBudget(data)) return 'model_response_text_budget_exceeded';
     const choice = normalizeResponseChoice(data);
     if (choice.toolCalls.some(call => call.argumentsError)) return 'model_tool_call_arguments_invalid';
     const media = (data.output || []).some(item => item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result.length);
@@ -53,16 +54,24 @@ function normalizeChoice(data = {}) {
   };
 }
 
+function responsesTextOverBudget(data = {}) {
+  if (typeof data.output_text === 'string') return data.output_text.length > MAX_MODEL_TEXT_CHARS;
+  let length = 0;
+  for (const item of (Array.isArray(data.output) ? data.output : [])) {
+    for (const part of (Array.isArray(item?.content) ? item.content : [])) {
+      if (typeof part?.text === 'string') length += part.text.length;
+      if (length > MAX_MODEL_TEXT_CHARS) return true;
+    }
+  }
+  return false;
+}
+
 function textFromResponses(data = {}) {
-  if (typeof data.output_text === 'string') return boundedText(data.output_text, MAX_MODEL_TEXT_CHARS);
+  if (typeof data.output_text === 'string') return data.output_text;
   const chunks = [];
-  let remaining = MAX_MODEL_TEXT_CHARS;
-  for (const item of (data.output || [])) {
-    for (const part of (item.content || []).slice(0, 64)) {
-      if (typeof part.text !== 'string' || remaining <= 0) continue;
-      const text = part.text.slice(0, remaining);
-      chunks.push(text);
-      remaining -= text.length;
+  for (const item of (Array.isArray(data.output) ? data.output : [])) {
+    for (const part of (Array.isArray(item?.content) ? item.content : [])) {
+      if (typeof part?.text === 'string') chunks.push(part.text);
     }
   }
   return chunks.join('');
@@ -317,6 +326,10 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let dataLines = [];
   let dataChars = 0;
   const emit = async (delta, terminalSnapshot = false) => {
+    if (mode === 'openai-responses' && text.length + String(delta || '').length > MAX_MODEL_TEXT_CHARS) {
+      streamError = 'model_response_text_budget_exceeded';
+      return;
+    }
     const safe = boundedAppend(text, delta);
     if (!safe) return;
     text += safe;
@@ -367,7 +380,12 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (event?.type === 'response.completed') terminalEventSeen = true;
       if (event?.type === 'response.completed' && event.response && typeof event.response === 'object') {
         terminalSeen = event.response.status === 'completed';
+        if (responsesTextOverBudget(event.response)) { streamError = 'model_response_text_budget_exceeded'; return; }
         finalData = compactResponseCompletion(event.response);
+        if (!text && !finalData.output_text) {
+          const snapshotText = textFromResponses(event.response);
+          if (snapshotText) finalData.output_text = snapshotText;
+        }
         if (!finalData.model && responsesModel) finalData.model = responsesModel;
         if (!finalData.id && responsesId) finalData.id = responsesId;
         usage = finalData.usage || usage;

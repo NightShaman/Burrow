@@ -34,11 +34,11 @@ function validationReview({ action = 'plan', tool = null, targets = [], workspac
   };
 }
 
-function addBoundaryBlockers({ blockers, review, boundaries, operation, command = '', paths = [], workspaceRoot = null } = {}) {
-  const boundary = evaluateExecutionBoundaries({ boundaries, operation, command, paths, baseRoot: workspaceRoot });
+async function addBoundaryBlockers({ blockers, review, boundaries, operation, command = '', paths = [], workspaceRoot = null, signal = null, deadline = null, timeoutMs = undefined } = {}) {
+  const boundary = await evaluateExecutionBoundaries({ boundaries, operation, command, paths, baseRoot: workspaceRoot, signal, deadline, timeoutMs });
   if (!boundary.ok) blockers.push(...boundary.blockers);
   if (review && typeof review === 'object') {
-    review.boundary = boundary.matches.length ? { ok: boundary.ok, matches: boundary.matches } : null;
+    review.boundary = boundary.matches.length || !boundary.ok ? boundary : null;
     review.blockers = [...new Set([...(review.blockers || []), ...boundary.blockers])];
     review.ok = review.blockers.length === 0;
     review.state = review.ok ? review.state : 'hard_policy_block';
@@ -58,7 +58,7 @@ function patchPaths(patch = '') {
   return [...new Set(paths.filter(Boolean))];
 }
 
-function reviewAction(action = {}, { workspaceRoot = null, executionContext = null } = {}) {
+async function reviewAction(action = {}, { workspaceRoot = null, executionContext = null, signal = executionContext?.abortSignal, deadline = executionContext?.deadline, timeoutMs = executionContext?.boundaryEvaluationTimeoutMs } = {}) {
   const blockers = [];
   const warnings = [];
   const risk = [];
@@ -160,7 +160,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
     risk.push('mutation');
     const review = validationReview({ message: action.intent || '', action: 'edit', tool: action.tool, targets: action.filePath ? [action.filePath] : [], workspaceRoot, errors: action.errors });
     blockers.push(...review.blockers);
-    addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', verificationRequired: true, risk, blockers: [...new Set(blockers)], warnings, review };
   }
 
@@ -175,7 +175,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -201,7 +201,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths, workspaceRoot });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths, workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -239,7 +239,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    addBoundaryBlockers({ blockers, review, boundaries, operation: 'delegate', paths: targetRoot ? [targetRoot] : [], workspaceRoot });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'delegate', paths: targetRoot ? [targetRoot] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -264,7 +264,7 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    addBoundaryBlockers({ blockers, review, boundaries, operation: 'execute', command, paths: action.cwd ? [action.cwd] : [], workspaceRoot });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'execute', command, paths: action.cwd ? [action.cwd] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     if (/^(npm\s+(run\s+)?(test|check|lint|build)|node\s+--test|node\s+--check|git\s+status\b|git\s+diff\b|grep\b|cat\b|ls\b|pwd\b|test\b)/i.test(command)) risk.push('safe-check');
     if (!risk.length) risk.push('unknown-shell_exec');
@@ -291,8 +291,10 @@ function reviewAction(action = {}, { workspaceRoot = null, executionContext = nu
   };
 }
 
-export function reviewProposalActions({ actions = [], workspaceRoot = null, executionContext = null } = {}) {
-  const reviews = actions.map((action) => reviewAction(action, { workspaceRoot, executionContext }));
+export async function reviewProposalActions({ actions = [], workspaceRoot = null, executionContext = null, signal = executionContext?.abortSignal, deadline = executionContext?.deadline, timeoutMs = executionContext?.boundaryEvaluationTimeoutMs } = {}) {
+  const reviews = [];
+  // Sequential review avoids spawning one CPU worker per action in a large batch.
+  for (const action of actions) reviews.push(await reviewAction(action, { workspaceRoot, executionContext, signal, deadline, timeoutMs }));
   return {
     ok: reviews.every((review) => review.status === 'allowed'),
     reviews,

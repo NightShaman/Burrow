@@ -57,3 +57,17 @@ export async function discoverGoogleModels(config, { fetchImpl = fetch, signal }
   } while (token);
   return models;
 }
+
+// Pure contract detection stays below adapters to avoid an image/video import cycle.
+export function googleVideoSupported(config = {}) {
+  const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
+  const methods = config.supportedGenerationMethods;
+  try {
+    return googleNativeApi(config) && googleNativeBase(config).endsWith('/v1beta')
+      && (!config.auth?.type || config.auth.type === 'api_key')
+      && Array.isArray(outputs) && outputs.includes('video')
+      && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(googleModelId(config.model))
+      // Discovery methods for legacy-only Veo cannot authorize Interactions.
+      && (!Array.isArray(methods) || !methods.includes('predictLongRunning') || methods.includes('interactions.create'));
+  } catch { return false; }
+}

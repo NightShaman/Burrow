@@ -196,6 +196,12 @@ function normalizeResult(result = null) {
     blockers: safeArray(result.blockers),
     warnings: safeArray(result.warnings),
     evidence: Array.isArray(result.evidence) ? result.evidence : [],
+    evidenceTraceDir: typeof result.evidenceTraceDir === 'string' ? result.evidenceTraceDir : null,
+    evidenceDelivery: result.evidenceDelivery ? {
+      originalCount: result.evidenceDelivery.originalCount, deliveredCount: result.evidenceDelivery.deliveredCount,
+      omittedCount: result.evidenceDelivery.omittedCount, truncated: Boolean(result.evidenceDelivery.truncated),
+    } : null,
+    omittedToolResults: result.omittedToolResults ?? null,
     artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
     changedFiles: safeArray(result.changedFiles),
     memoryWrites: Array.isArray(result.memoryWrites) ? result.memoryWrites : [],

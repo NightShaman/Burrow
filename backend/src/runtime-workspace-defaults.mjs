@@ -1,3 +1,4 @@
+import { frontmatterMetadata } from './skill-frontmatter.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -12,16 +13,7 @@ async function copyMissingTree(source, destination) {
   return true;
 }
 
-function frontmatterMetadata(content = '') {
-  const match = String(content).match(/^---\r?\n([\s\S]{0,8192}?)\r?\n---/);
-  if (!match) return {};
-  const fields = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    const entry = /^([A-Za-z][\w-]*):\s*["']?(.+?)["']?\s*$/.exec(line);
-    if (entry) fields[entry[1]] = entry[2];
-  }
-  return fields;
-}
+
 
 async function bundledSkillKind(skillRoot) {
   const entries = await fs.readdir(skillRoot, { withFileTypes: true });

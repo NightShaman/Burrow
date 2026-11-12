@@ -87,18 +87,29 @@ const runKey = (agentId: string, sessionId: string) => `${agentId}:${sessionId}`
 const minimumStreamOverlap = 16;
 
 /**
- * Preserve only stream text that does not reappear at the beginning of the
- * terminal answer. Whitespace is normalized for the comparison so harmless
- * stream chunking differences do not leave a duplicated tail behind.
+ * Remove an exact stream suffix repeated at the start of the terminal answer.
+ * KMP keeps repetitive responses linear; retained text is always an original
+ * slice, never whitespace-normalized (code and list indentation are content).
  */
 export function trimStreamedAnswer(streamedAnswer: string, finalAnswer: string) {
-  const stream = streamedAnswer.trim().replace(/\s+/g, ' ');
-  const final = finalAnswer.trim().replace(/\s+/g, ' ');
-  const maxOverlap = Math.min(stream.length, final.length);
-  for (let length = maxOverlap; length >= minimumStreamOverlap; length -= 1) {
-    if (stream.slice(-length) === final.slice(0, length)) return stream.slice(0, -length).trim();
+  const limit = Math.min(streamedAnswer.length, finalAnswer.length);
+  if (limit < minimumStreamOverlap) return streamedAnswer;
+  const pattern = finalAnswer.slice(0, limit);
+  const prefixes = new Uint32Array(limit);
+  for (let index = 1, matched = 0; index < limit; index += 1) {
+    while (matched > 0 && pattern[index] !== pattern[matched]) matched = prefixes[matched - 1];
+    if (pattern[index] === pattern[matched]) matched += 1;
+    prefixes[index] = matched;
   }
-  return streamedAnswer.trim();
+  let overlap = 0;
+  for (let index = streamedAnswer.length - limit; index < streamedAnswer.length; index += 1) {
+    while (overlap > 0 && (overlap === limit || streamedAnswer[index] !== pattern[overlap]))
+      overlap = prefixes[overlap - 1];
+    if (streamedAnswer[index] === pattern[overlap]) overlap += 1;
+  }
+  return overlap >= minimumStreamOverlap
+    ? streamedAnswer.slice(0, streamedAnswer.length - overlap)
+    : streamedAnswer;
 }
 
 /** Owns one-to-one chat run state, stream lifecycle, and cancellation. */

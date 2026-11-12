@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolveRuntimeTraceRoot } from '../config.mjs';
 import { createTraceLogger } from '../trace-logger.mjs';
 import { runExec } from './exec.mjs';
+import { parse } from 'acorn';
 
 function safeName(value) {
   return String(value || '')
@@ -71,15 +72,62 @@ export function detectPatchDialect(patch = '') {
   return 'unknown';
 }
 
-function touchedFilesFromUnifiedPatch(patch) {
-  const files = new Set();
+// Git's quoted paths are byte strings, with non-ASCII UTF-8 often expressed
+// as octal escapes. Decode bytes together rather than decoding each escape.
+function unifiedHeaderPath(line) {
+  const value = line.slice(4);
+  if (!value.startsWith('"')) return value.split('\t', 1)[0];
+  const bytes = [];
+  let i = 1;
+  const escapes = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+  while (i < value.length) {
+    if (value[i] === '"') return Buffer.from(bytes).toString('utf8');
+    if (value[i] === '\\') {
+      i++;
+      const octal = value.slice(i).match(/^[0-7]{3}/);
+      if (octal) { bytes.push(parseInt(octal[0], 8)); i += 3; continue; }
+      if (!(value[i] in escapes)) return null;
+      bytes.push(escapes[value[i++]]); continue;
+    }
+    const cp = value.codePointAt(i);
+    bytes.push(...Buffer.from(String.fromCodePoint(cp)));
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return null;
+}
+
+// Only recognize file headers outside hunks: removed source lines may
+// themselves start with --- or +++.
+function unifiedLines(patch, onHeader, onAnchor = () => {}) {
+  let oldLeft = 0, newLeft = 0, currentFile = null;
   for (const line of String(patch || '').split(/\r?\n/)) {
-    if (line.startsWith('+++ ') || line.startsWith('--- ')) {
-      const raw = line.slice(4).trim().split(/\s+/)[0];
-      const file = stripDiffPrefix(raw);
-      if (file) files.add(file);
+    if (oldLeft || newLeft) {
+      if (line.startsWith(' ') || line.startsWith('-')) {
+        if (currentFile && line.slice(1).trim()) onAnchor(currentFile, line.slice(1));
+        oldLeft--;
+      }
+      if (line.startsWith(' ') || line.startsWith('+')) newLeft--;
+      continue;
+    }
+    const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (hunk) { oldLeft = Number(hunk[2] ?? 1); newLeft = Number(hunk[4] ?? 1); continue; }
+    if (/^(?:rename|copy) (?:from|to) /.test(line)) {
+      const raw = unifiedHeaderPath('--- ' + line.replace(/^(?:rename|copy) (?:from|to) /, ''));
+      if (raw) onHeader(raw);
+      continue;
+    }
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+      const raw = unifiedHeaderPath(line);
+      const file = raw == null ? null : stripDiffPrefix(raw);
+      if (line.startsWith('+++ ')) currentFile = file;
+      if (file) onHeader(file);
     }
   }
+}
+
+function touchedFilesFromUnifiedPatch(patch) {
+  const files = new Set();
+  unifiedLines(patch, (file) => files.add(file));
   return [...files];
 }
 
@@ -114,21 +162,8 @@ export function classifyPatchFailure({ patch = '', error = '', exitCode = null }
 
 function patchAnchorsByFile(patch = '') {
   const anchors = new Map();
-  let currentFile = null;
-  for (const line of String(patch || '').split(/\r?\n/)) {
-    if (line.startsWith('+++ ')) {
-      const raw = line.slice(4).trim().split(/\s+/)[0];
-      currentFile = stripDiffPrefix(raw);
-      if (currentFile) anchors.set(currentFile, anchors.get(currentFile) || []);
-      continue;
-    }
-    if (!currentFile) continue;
-    if (line.startsWith('--- ') || line.startsWith('@@') || line.startsWith('++')) continue;
-    if (line.startsWith('-') || line.startsWith(' ')) {
-      const anchor = line.slice(1);
-      if (anchor.trim()) anchors.get(currentFile)?.push(anchor);
-    }
-  }
+  unifiedLines(patch, (file) => { if (!anchors.has(file)) anchors.set(file, []); },
+    (file, anchor) => anchors.get(file)?.push(anchor));
   return anchors;
 }
 
@@ -203,34 +238,39 @@ function hunkBlocksFromStructuredPatchLines(lines = []) {
   return hunks;
 }
 
-function bracedScopeEnd(content, opening) {
-  let depth = 0;
-  let quote = null;
-  let comment = null;
-  for (let i = opening; i < content.length; i += 1) {
-    const char = content[i];
-    const next = content[i + 1];
-    if (comment === 'line') { if (char === '\n') comment = null; continue; }
-    if (comment === 'block') { if (char === '*' && next === '/') { comment = null; i += 1; } continue; }
-    if (quote) {
-      if (char === '\\') { i += 1; continue; }
-      if (char === quote) quote = null;
-      else if (char === '\n') return { error: 'patch_scope_unsupported' };
-      continue;
+function parsedScopeEnd(content, selected, file) {
+  if (!/\.(?:[cm]?js)$/i.test(file)) return { error: 'patch_scope_unsupported' };
+  let tree;
+  try { tree = parse(content, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }); }
+  catch { return { error: 'patch_scope_unsupported' }; }
+  const candidates = [];
+  function visit(node) {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.type === 'string') {
+      const headerEnd = selected.lineEnd < 0 ? content.length : selected.lineEnd;
+      if (node.start >= selected.start && node.start <= headerEnd &&
+          /^\s*(?:export\s+(?:default\s+)?)?$/.test(content.slice(selected.start, node.start)) &&
+          ['FunctionDeclaration', 'ClassDeclaration', 'MethodDefinition', 'Property', 'VariableDeclaration'].includes(node.type)) {
+        // Properties and variables must actually define a function/class;
+        // ordinary declarations are not safe substitute scope boundaries.
+        const value = node.type === 'Property' ? node.value : null;
+        const valid = node.type !== 'Property' || /FunctionExpression|ArrowFunctionExpression/.test(value?.type || '');
+        const vars = node.type !== 'VariableDeclaration' || node.declarations.length === 1 && node.declarations.some(d => /FunctionExpression|ArrowFunctionExpression|ClassExpression/.test(d.init?.type || ''));
+        if (valid && vars) candidates.push(node);
+      }
     }
-    if (char === '/' && next === '/') { comment = 'line'; i += 1; continue; }
-    if (char === '/' && next === '*') { comment = 'block'; i += 1; continue; }
-    // Template interpolation and regex literals cannot be bounded safely by
-    // this lightweight matcher. Reject the scoped edit instead of guessing.
-    if (char === '`' || (char === '/' && /[=(,:!]/u.test(content.slice(opening, i).trimEnd().slice(-1)))) return { error: 'patch_scope_unsupported' };
-    if (char === '"' || char === "'") { quote = char; continue; }
-    if (char === '{') depth += 1;
-    if (char === '}' && --depth === 0) return { end: i + 1 };
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
   }
-  return { error: 'patch_scope_unclosed' };
+  visit(tree);
+  if (!candidates.length) return { error: 'patch_scope_unsupported' };
+  candidates.sort((a, b) => a.start - b.start || b.end - a.end);
+  return { end: candidates[0].end };
 }
 
-function uniqueHunkOffset(content, { oldBlock, scope }) {
+function uniqueHunkOffset(content, { oldBlock, scope, file }) {
   let start = 0;
   let end = content.length;
   if (scope) {
@@ -251,20 +291,9 @@ function uniqueHunkOffset(content, { oldBlock, scope }) {
     if (scopes.length !== 1) return { error: scopes.length ? 'patch_scope_ambiguous' : 'patch_scope_not_found' };
     const selected = scopes[0];
     start = selected.start;
-    const indent = selected.header.match(/^\s*/u)[0].length;
-    if (selected.header.includes('{')) {
-      const boundary = bracedScopeEnd(content, selected.start + selected.header.indexOf('{'));
-      if (boundary.error) return boundary;
-      end = boundary.end;
-    } else {
-      let position = selected.lineEnd + 1;
-      while (position > 0 && position < content.length) {
-        const next = content.indexOf('\n', position);
-        const line = content.slice(position, next < 0 ? content.length : next);
-        if (line.trim() && line.match(/^\s*/u)[0].length <= indent) { end = position; break; }
-        position = next < 0 ? content.length : next + 1;
-      }
-    }
+    const boundary = parsedScopeEnd(content, selected, file);
+    if (boundary.error) return boundary;
+    end = boundary.end;
   }
   const positions = [];
   let at = content.indexOf(oldBlock, start);
@@ -340,7 +369,7 @@ async function applyStructuredPatch({ patch, baseRoot, logger, prefix }) {
             failedHunkIndex: hunkIndex,
           };
         }
-        const located = uniqueHunkOffset(after, { oldBlock, scope });
+        const located = uniqueHunkOffset(after, { oldBlock, scope, file: operation.file });
         if (located.error) {
           return {
             ok: false,

@@ -13,8 +13,9 @@ export function parseChatCommand(message = '') {
   const text = String(message || '');
   if (!text.startsWith('/')) return null;
   const match = /^\/([A-Za-z][A-Za-z0-9_-]*)(?:\s+(.*))?\s*$/u.exec(text);
-  if (!match) return { command: null, args: '', error: 'command_invalid' };
+  if (!match) return null;
   const command = match[1].toLowerCase();
+  if (!BY_NAME.has(command)) return null;
   return { command, args: String(match[2] || '').trim(), definition: BY_NAME.get(command) || null, error: null };
 }
 

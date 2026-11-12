@@ -1,3 +1,4 @@
+import { verificationExecutionResult } from './verification.mjs';
 import { hasExecutedMutationEvidence } from './mutation-gates.mjs';
 // Public compatibility adapter for the legacy `runBurrow(...)` entrypoint.
 // Route/policy/prompt setup and result-shape compatibility stay here;
@@ -298,7 +299,7 @@ export async function runBurrow({
     const adapter = modelAdapter || createModelAdapter({ config: modelConfig || {} });
     const verificationRepair = await completeVerificationAfterMutation({ adapter, prompt, message, toolResults: verificationGate.toolResults, modelConfig, contextThreshold, traceLogger: logger });
     const verificationProposal = proposalFromNativeToolCalls(verificationRepair?.choice?.toolCalls, verificationRepair?.choice?.text ?? '') || (verificationRepair ? parseActionProposal(verificationRepair.choice?.text ?? '') : null);
-    const verificationReview = reviewProposalActions({ actions: verificationProposal?.actions ?? [], workspaceRoot });
+    const verificationReview = (await reviewProposalActions({ actions: verificationProposal?.actions ?? [], workspaceRoot }));
     const verificationExecution = verificationProposal
       ? await executeReviewedProposalActions({
           actions: (verificationProposal.actions || []).filter((item) => item.tool === 'shell_exec'),
@@ -315,6 +316,7 @@ export async function runBurrow({
           observedToolResults: verificationGate.toolResults,
         })
       : { executed: 0, skipped: [], toolResults: [] };
+    verificationExecution.toolResults = verificationExecution.toolResults.map(verificationExecutionResult);
     proposalExecution.verificationRepair = true;
     proposalExecution.verificationRepairModel = verificationRepair || null;
     proposalExecution.skipped = [...(proposalExecution.skipped || []), ...(verificationExecution.skipped || [])];

@@ -444,7 +444,6 @@ export function ChatComposer({
                 name="attachments"
                 type="file"
                 multiple
-                accept="image/*,text/*,.txt,.md,.markdown,.json,.csv,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.yaml,.yml,.rtf"
                 onChange={chooseFiles}
               />
             </label>

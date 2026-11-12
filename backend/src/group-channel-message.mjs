@@ -19,7 +19,7 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
         return { id: agentId, name: runtime.agent?.name || agentId };
       }));
       const mentions = resolveGroupMentionTargets({ message, participants: participantProfiles });
-      if (mentions.unknown.length) return { ok: false, error: 'group_channel_unknown_mentions', mentions: mentions.unknown };
+      if (!requested.length && mentions.unknown.length) return { ok: false, error: 'group_channel_unknown_mentions', mentions: mentions.unknown };
       const mentionTargets = mentions.targets;
       const targetIds = requested.length ? requested : (mentionTargets.length ? mentionTargets : channel.participantAgentIds);
       const targets = targetIds.filter((agentId) => channel.participantAgentIds.includes(agentId));

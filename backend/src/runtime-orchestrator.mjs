@@ -75,7 +75,7 @@ function ownershipMetrics(value) {
 async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = null, dataRoot = null, sessionId = null, conversationId = null, iteration = 0, traceLogger = null, executionPolicy = null, modelConfig = null, executionContext = null, abortSignal = null } = {}) {
   const toolCalls = normalizeNativeToolCalls(model?.choice?.toolCalls || []);
   const proposal = proposalFromNativeToolCalls(toolCalls, model?.choice?.text ?? '', executionContext);
-  const proposalReview = reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext });
+  const proposalReview = (await reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext, signal: abortSignal || executionContext?.abortSignal }));
   const proposalExecution = proposal
     ? await executeReviewedProposalActions({
         actions: proposal.actions,

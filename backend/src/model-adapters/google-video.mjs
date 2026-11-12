@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { googleNativeApi, googleNativeBase, googleNativeHeaders, googleModelId } from './google-native-catalog.mjs';
+import { googleNativeBase, googleNativeHeaders, googleModelId, googleVideoSupported } from './google-native-catalog.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
 import { validatedSourceImages } from './reference-image-capability.mjs';
 import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
@@ -12,18 +12,7 @@ import { readProviderError } from '../forge-diagnostics.mjs';
 // REST uses steps[].content[].data, NOT the SDK-only output_video convenience field.
 // Default synchronous Interactions calls need no LRO/poll. The reference images
 // are content items, not Veo's retired predictLongRunning referenceImages.
-export function googleVideoSupported(config = {}) {
-  const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
-  const methods = config.supportedGenerationMethods;
-  try {
-    return googleNativeApi(config) && googleNativeBase(config).endsWith('/v1beta')
-      && (!config.auth?.type || config.auth.type === 'api_key')
-      && Array.isArray(outputs) && outputs.includes('video')
-      && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(googleModelId(config.model))
-      // Discovery methods for legacy-only Veo cannot authorize Interactions.
-      && (!Array.isArray(methods) || !methods.includes('predictLongRunning') || methods.includes('interactions.create'));
-  } catch { return false; }
-}
+export { googleVideoSupported } from './google-native-catalog.mjs';
 
 const abortError = () => Object.assign(new Error('google_video_cancelled'), { name: 'AbortError' });
 const timeoutError = () => Object.assign(new Error('google_video_timeout'), { name: 'TimeoutError' });
