@@ -120,6 +120,7 @@ it('uses the same successful status label for both vendors and preserves unknown
     accountUsageStatus({
       ...base,
       vendor: 'OpenAI',
+      clock: { serverMs: Date.now(), receivedAt: performance.now() },
       accountStatus: {
         status: 'available',
         label: 'Active',

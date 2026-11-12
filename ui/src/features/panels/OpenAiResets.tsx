@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type OpenAiResetCredits } from '../../app/api';
+import { responseClock, serverNow, type ServerClock } from '../../app/serverClock';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { formatResetIn } from './AccountStatus';
 
@@ -45,24 +46,35 @@ export function OpenAiResets({
   onUsageRefresh: () => void;
 }) {
   const confirm = useConfirm();
-  const [snapshot, setSnapshot] = useState<OpenAiResetCredits | null>(null);
+  const [snapshot, setSnapshot] = useState<
+    (OpenAiResetCredits & { clock: ServerClock | null }) | null
+  >(null);
   const [fetchError, setFetchError] = useState(false);
   const [busy, setBusy] = useState<'checking' | 'confirming' | 'consuming' | null>(null);
   const [message, setMessage] = useState('');
   const [uncertain, setUncertain] = useState(() => uncertainAccounts.has(connectionId));
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(performance.now());
   const pending = useRef(false);
   const mounted = useRef(true);
   const path = `/api/openai/oauth/reset-credits?connectionId=${encodeURIComponent(connectionId)}`;
   const fetchCredits = async () => {
-    const value = await api<OpenAiResetCredits>(path);
+    let clock: ServerClock | null = null;
+    const value = await api<OpenAiResetCredits>(
+      path,
+      {},
+      {
+        onResponse: (response) => {
+          clock = responseClock(response);
+        },
+      },
+    );
     if (
       !value?.ok ||
       !Number.isInteger(value.credits?.availableCount) ||
       !Array.isArray(value.credits?.available)
     )
       throw new Error('Invalid reset credits');
-    return value;
+    return { ...value, clock };
   };
 
   useEffect(() => {
@@ -82,7 +94,7 @@ export function OpenAiResets({
     };
     void load();
     const timer = window.setInterval(() => {
-      setNow(Date.now());
+      setNow(performance.now());
       void load();
     }, 60_000);
     return () => {
@@ -103,7 +115,9 @@ export function OpenAiResets({
       if (!mounted.current) return;
       setSnapshot(fresh);
       setFetchError(false);
-      const credit = soonestReset(fresh);
+      const checkedNow = serverNow(fresh.clock);
+      if (checkedNow === null) throw new Error('Server time unavailable');
+      const credit = soonestReset(fresh, checkedNow);
       if (!credit) {
         setMessage('No available reset. Availability refreshed.');
         return;
@@ -116,7 +130,7 @@ export function OpenAiResets({
         tone: 'danger',
       });
       if (!accepted || !mounted.current) return;
-      if (credit.expiresAt && Date.parse(credit.expiresAt) <= Date.now()) {
+      if (credit.expiresAt && Date.parse(credit.expiresAt) <= serverNow(fresh.clock)!) {
         setMessage('That reset expired. Check availability again.');
         return;
       }
@@ -124,16 +138,25 @@ export function OpenAiResets({
       const requestId = resetRequestId();
       dispatched = true;
       uncertainAccounts.add(connectionId);
-      const result = await api<ConsumeResult>('/api/openai/oauth/reset-credits/consume', {
-        method: 'POST',
-        body: JSON.stringify({ connectionId, creditId: credit.id, requestId }),
-      });
+      let clock: ServerClock | null = null;
+      const result = await api<ConsumeResult>(
+        '/api/openai/oauth/reset-credits/consume',
+        {
+          method: 'POST',
+          body: JSON.stringify({ connectionId, creditId: credit.id, requestId }),
+        },
+        {
+          onResponse: (response) => {
+            clock = responseClock(response);
+          },
+        },
+      );
       if (!result.ok) throw new Error('Reset outcome unknown');
       uncertainAccounts.delete(connectionId);
       if (!mounted.current) return;
       const refreshed = result.creditsRefresh;
       if (refreshed?.ok) {
-        setSnapshot(refreshed);
+        setSnapshot({ ...refreshed, clock });
         setFetchError(false);
       } else {
         setSnapshot(null);
@@ -198,14 +221,18 @@ export function OpenAiResets({
     }
   };
 
+  const currentNow = serverNow(snapshot?.clock, now);
   const stale =
+    currentNow === null ||
     !snapshot ||
     !Number.isFinite(Date.parse(snapshot.fetchedAt)) ||
-    now - Date.parse(snapshot.fetchedAt) > 120_000;
+    currentNow - Date.parse(snapshot.fetchedAt) > 120_000;
   const expired =
-    snapshot?.credits.nearestExpiresAt && Date.parse(snapshot.credits.nearestExpiresAt) <= now;
+    currentNow !== null &&
+    snapshot?.credits.nearestExpiresAt &&
+    Date.parse(snapshot.credits.nearestExpiresAt) <= currentNow;
   const known = snapshot && !fetchError && !stale && !expired;
-  const credit = soonestReset(snapshot, now);
+  const credit = currentNow === null ? null : soonestReset(snapshot, currentNow);
   return (
     <div className="account-resets" aria-busy={!!busy}>
       <div className="account-resets-row">
@@ -229,7 +256,7 @@ export function OpenAiResets({
           {known && snapshot.credits.availableCount > 0 && (
             <small>
               {snapshot.credits.nearestExpiresAt
-                ? `expires ${formatResetIn(snapshot.credits.nearestExpiresAt, now)}`
+                ? `expires ${formatResetIn(snapshot.credits.nearestExpiresAt, currentNow!)}`
                 : 'expiry unknown'}
             </small>
           )}

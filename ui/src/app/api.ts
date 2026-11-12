@@ -707,7 +707,7 @@ export async function apiLocal<T>(path: string, init: RequestInit = {}): Promise
 export async function api<T>(
   path: string,
   init: RequestInit = {},
-  options: { deadlineMs?: number } = {},
+  options: { deadlineMs?: number; onResponse?: (response: Response) => void } = {},
 ): Promise<T> {
   if (path === '/api/chat') return parseApiResponse<T>(await fetchApi(path, init));
   const controller = new AbortController();
@@ -720,6 +720,7 @@ export async function api<T>(
   );
   try {
     const response = await fetch(path, browserRequestInit({ ...init, signal }));
+    options.onResponse?.(response);
     return await parseApiResponse<T>(response);
   } finally {
     window.clearTimeout(timeout);

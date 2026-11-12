@@ -6,6 +6,7 @@ import {
   type OpenAiAccountStatus,
 } from '../../app/api';
 import { readAccountOrder, writeAccountOrder } from '../../app/accountOrderStorage';
+import { responseClock, serverNow, type ServerClock } from '../../app/serverClock';
 import type { SavedProvider } from '../../app/types';
 import { AccountCard } from './AccountCard';
 import { OpenAiResets } from './OpenAiResets';
@@ -25,6 +26,7 @@ export type AccountUsageCard = {
   state: 'loading' | 'ready' | 'error';
   bars: UsageBar[];
   accountStatus?: OpenAiAccountStatus;
+  clock?: ServerClock | null;
   error?: string;
 };
 
@@ -177,18 +179,29 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000,
             vendor,
             plan: null as string | null,
           };
+          let clock: ServerClock | null = null;
+          const options = {
+            onResponse: (response: Response) => {
+              clock = responseClock(response);
+            },
+          };
           try {
             if (vendor === 'Anthropic') {
               const result = await api<{ usage?: AnthropicUsage | null }>(
                 `/api/anthropic/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`,
+                {},
+                options,
               );
-              next = { ...base, state: 'ready', bars: anthropicBars(result.usage ?? null) };
+              next = { ...base, clock, state: 'ready', bars: anthropicBars(result.usage ?? null) };
             } else {
               const result = await api<{ usage?: OpenAiUsage | null }>(
                 `/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`,
+                {},
+                options,
               );
               next = {
                 ...base,
+                clock,
                 accountStatus: result.usage?.accountStatus,
                 plan: result.usage?.planType ? titleCase(result.usage.planType) : null,
                 state: 'ready',
@@ -230,7 +243,7 @@ export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000,
 
 export function accountUsageStatus(
   card: AccountUsageCard,
-  now = Date.now(),
+  elapsed = performance.now(),
 ): { label: string; tone: 'active' | 'paused' | 'quota-exceeded'; detail?: string } {
   if (card.state === 'loading') return { label: 'Checking', tone: 'paused' };
   if (card.state === 'error') return { label: 'Usage unavailable', tone: 'paused' };
@@ -244,6 +257,8 @@ export function accountUsageStatus(
   const status = card.accountStatus;
   if (!status || !Number.isFinite(Date.parse(status.checkedAt)))
     return { label: 'Unknown', tone: 'paused' };
+  const now = serverNow(card.clock, elapsed);
+  if (now === null) return { label: 'Unknown', tone: 'paused' };
   const detail = `${status.reason} · ${status.scope}${status.resetAt ? ` · resets ${new Date(status.resetAt).toLocaleString()}` : ''} · checked ${new Date(status.checkedAt).toLocaleString()}`;
   if (
     now - Date.parse(status.checkedAt) > 600_000 ||
@@ -262,7 +277,15 @@ export function accountUsageStatus(
   };
 }
 
-function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary' }) {
+function UsageMeter({
+  bar,
+  tone,
+  now,
+}: {
+  bar: UsageBar;
+  tone: 'primary' | 'secondary';
+  now: number | null;
+}) {
   const remaining = bar.remainingPercent;
   const level =
     remaining === null ? 'unknown' : remaining <= 15 ? 'low' : remaining <= 50 ? 'medium' : 'high';
@@ -275,7 +298,7 @@ function UsageMeter({ bar, tone }: { bar: UsageBar; tone: 'primary' | 'secondary
         {remaining === null ? '—' : `${remaining}%`}
       </small>
       <small className="account-reset-time" aria-hidden={!bar.resetAt}>
-        {bar.resetAt ? formatResetIn(bar.resetAt) : '\u00a0'}
+        {bar.resetAt ? (now === null ? '—' : formatResetIn(bar.resetAt, now)) : '\u00a0'}
       </small>
     </div>
   );
@@ -294,9 +317,9 @@ export function orderAccountStatusCards(cards: AccountUsageCard[], order: string
 export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   const [revision, setRevision] = useState(0);
   const cards = useAccountUsage(providers, 300_000, revision);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(performance.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    const timer = window.setInterval(() => setNow(performance.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
   const [order, setOrder] = useState(() => readAccountOrder(accountStatusOrderKey));
@@ -391,6 +414,7 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
                       key={bar.key}
                       bar={bar}
                       tone={index === 0 ? 'primary' : 'secondary'}
+                      now={serverNow(card.clock, now)}
                     />
                   ))}
                 </div>

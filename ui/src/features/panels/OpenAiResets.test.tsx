@@ -4,9 +4,13 @@ import { api, type OpenAiResetCredits } from '../../app/api';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { OpenAiResets, soonestReset, resetRequestId } from './OpenAiResets';
 import { accountUsageStatus, type AccountUsageCard } from './AccountStatus';
+const apiMock = vi.hoisted(() => vi.fn());
 vi.mock('../../app/api', async (original) => ({
   ...(await original<typeof import('../../app/api')>()),
-  api: vi.fn(),
+  api: (...args: Parameters<typeof api>) => {
+    args[2]?.onResponse?.(new Response(null, { headers: { date: new Date().toUTCString() } }));
+    return apiMock(...args);
+  },
 }));
 afterEach(() => {
   cleanup();
@@ -37,14 +41,14 @@ function setup() {
   );
   return { ...view, refresh, connectionId };
 }
-const posts = () => vi.mocked(api).mock.calls.filter(([, init]) => init?.method === 'POST');
+const posts = () => apiMock.mock.calls.filter(([, init]) => init?.method === 'POST');
 async function openConfirm() {
   await screen.findByText('2 banked');
   fireEvent.click(screen.getByRole('button', { name: 'Use reset' }));
   await screen.findByRole('alertdialog');
 }
 it('keeps banked count and soonest expiry inside its control, cancels without mutation', async () => {
-  vi.mocked(api).mockResolvedValue(credits());
+  apiMock.mockResolvedValue(credits());
   setup();
   await openConfirm();
   expect(screen.getByText(/Consume one banked reset expiring/)).toBeTruthy();
@@ -55,7 +59,7 @@ it('keeps banked count and soonest expiry inside its control, cancels without mu
 });
 it('rechecks availability, picks soonest expiry, sends one UUID POST, blocks duplicates and refreshes', async () => {
   let complete!: (value: unknown) => void;
-  vi.mocked(api).mockImplementation((_path, init) =>
+  apiMock.mockImplementation((_path, init) =>
     init?.method === 'POST'
       ? (new Promise((resolve) => {
           complete = resolve;
@@ -91,7 +95,7 @@ it('rechecks availability, picks soonest expiry, sends one UUID POST, blocks dup
   }
 });
 it('reports successful redemption separately from failed refreshes', async () => {
-  vi.mocked(api).mockImplementation(
+  apiMock.mockImplementation(
     (_path, init) =>
       Promise.resolve(
         init?.method === 'POST'
@@ -115,7 +119,7 @@ it('reports successful redemption separately from failed refreshes', async () =>
   expect(posts()).toHaveLength(1);
 });
 it('unknown is not zero; a GET failure never sends a POST', async () => {
-  vi.mocked(api).mockRejectedValue(new Error('offline'));
+  apiMock.mockRejectedValue(new Error('offline'));
   setup();
   await screen.findByText('Resets unavailable');
   expect(screen.queryByText('0 banked')).toBeNull();
@@ -124,7 +128,7 @@ it('unknown is not zero; a GET failure never sends a POST', async () => {
   expect(posts()).toHaveLength(0);
 });
 it('locks ambiguous operations across remount and never automatically retries', async () => {
-  vi.mocked(api).mockImplementation((_path, init) =>
+  apiMock.mockImplementation((_path, init) =>
     init?.method === 'POST'
       ? Promise.reject(new Error('network timeout'))
       : (Promise.resolve(credits()) as ReturnType<typeof api>),
@@ -146,7 +150,7 @@ it('locks ambiguous operations across remount and never automatically retries', 
   expect(posts()).toHaveLength(1);
 });
 it('handles explicit rejection without pretending success', async () => {
-  vi.mocked(api).mockImplementation((_path, init) =>
+  apiMock.mockImplementation((_path, init) =>
     init?.method === 'POST'
       ? Promise.reject(
           Object.assign(new Error('reset_credit_unavailable'), {
@@ -164,12 +168,10 @@ it('handles explicit rejection without pretending success', async () => {
   expect(screen.getByRole('button', { name: 'Use reset' }).hasAttribute('disabled')).toBe(false);
 });
 it('uses refreshed availability rather than stale displayed credits', async () => {
-  vi.mocked(api)
-    .mockResolvedValueOnce(credits())
-    .mockResolvedValue({
-      ...credits(),
-      credits: { availableCount: 0, available: [], nearestExpiresAt: null },
-    });
+  apiMock.mockResolvedValueOnce(credits()).mockResolvedValue({
+    ...credits(),
+    credits: { availableCount: 0, available: [], nearestExpiresAt: null },
+  });
   setup();
   await screen.findByText('2 banked');
   fireEvent.click(screen.getByRole('button', { name: 'Use reset' }));
@@ -178,13 +180,13 @@ it('uses refreshed availability rather than stale displayed credits', async () =
   expect(posts()).toHaveLength(0);
 });
 it('does not consume a credit that expires while confirming', async () => {
-  const clock = vi.spyOn(Date, 'now');
-  const now = Date.now();
+  const clock = vi.spyOn(performance, 'now');
+  const now = performance.now();
   clock.mockReturnValue(now);
-  vi.mocked(api).mockResolvedValue(credits());
+  apiMock.mockResolvedValue(credits());
   setup();
   await openConfirm();
-  clock.mockReturnValue(now + 3_600_001);
+  clock.mockReturnValue(now + 3_601_000);
   fireEvent.click(screen.getByRole('button', { name: 'Consume one reset' }));
   await screen.findByText('That reset expired. Check availability again.');
   expect(posts()).toHaveLength(0);
@@ -212,6 +214,7 @@ it('sorts unknown expiry last, filters expired credits, and distinguishes stale 
   ]) {
     const card = {
       ...base,
+      clock: { serverMs: Date.now(), receivedAt: performance.now() },
       accountStatus: {
         status,
         label,
@@ -222,7 +225,7 @@ it('sorts unknown expiry last, filters expired credits, and distinguishes stale 
       },
     };
     expect(accountUsageStatus(card).label).toBe(label);
-    expect(accountUsageStatus(card, Date.now() + 3_600_001).label).toBe('Stale');
+    expect(accountUsageStatus(card, performance.now() + 3_600_001).label).toBe('Stale');
   }
 });
 
