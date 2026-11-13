@@ -257,3 +257,34 @@ it('copies useful projected diagnostics and recovery without arbitrary errors', 
     expect(copied).toContain(detail);
   expect(copied).not.toContain('private');
 });
+
+it.each([
+  ['context_compression_failed', 'Conversation compaction failed.'],
+  ['context_compression_unavailable', 'Conversation compaction is unavailable.'],
+  [
+    'context_preparation_prompt_over_budget',
+    'The prepared conversation still exceeds the model’s context budget.',
+  ],
+  [
+    'context_preparation_uncovered_history',
+    'Conversation preparation could not safely include all required history.',
+  ],
+  ['CONTEXT_BOUNDARY_VIOLATION', 'Conversation context failed a runtime boundary check.'],
+])('shows evidenced runtime cause and code %s without arbitrary exception prose', (code, label) => {
+  const metadata = {
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: { origin: 'burrow', code, retryable: false, message: 'SECRET_SENTINEL' },
+  };
+  for (const envelope of [metadata, { result: metadata }, { summary: metadata }]) {
+    const terminal = chatTerminalResult(envelope, 'run.failed');
+    expect(chatTerminalDiagnostic(terminal)).toEqual({
+      message: `${label} (code: ${code})`,
+      overloaded: false,
+      upstream: false,
+    });
+    expect(terminal.modelFailure?.message).toBeUndefined();
+    expect(chatTerminalCopy(terminal)).toContain(code);
+    expect(chatTerminalCopy(terminal)).not.toContain('SECRET_SENTINEL');
+  }
+});

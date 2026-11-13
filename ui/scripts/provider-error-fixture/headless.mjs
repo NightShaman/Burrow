@@ -4,6 +4,13 @@ import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
+const runtimeCodes = [
+  'context_compression_failed',
+  'context_compression_unavailable',
+  'context_preparation_prompt_over_budget',
+  'context_preparation_uncovered_history',
+  'CONTEXT_BOUNDARY_VIOLATION',
+];
 const out = process.env.PROVIDER_ERROR_EVIDENCE;
 const base = process.env.PROVIDER_ERROR_FIXTURE_URL;
 if (!out || !base) throw Error('Set PROVIDER_ERROR_EVIDENCE and PROVIDER_ERROR_FIXTURE_URL');
@@ -134,11 +141,20 @@ try {
     await wait('!!document.querySelector(".composer-wrap")', 'fixture ready');
     await sleep(100);
   };
-  for (const state of ['provider', 'partial', 'side', 'long', 'success']) {
+  for (const state of ['provider', 'partial', 'side', 'long', 'success', ...runtimeCodes]) {
     await navigate('before', state);
     await capture('before-' + state + '-1920x1200');
   }
-  for (const state of ['provider', 'fallback', 'partial', 'side', 'local', 'long', 'success']) {
+  for (const state of [
+    'provider',
+    'fallback',
+    'partial',
+    'side',
+    'local',
+    'long',
+    'success',
+    ...runtimeCodes,
+  ]) {
     await navigate('after', state);
     const failed = state !== 'success';
     assert.equal(
@@ -150,12 +166,18 @@ try {
         await evaluate('document.querySelectorAll(".model-error-message .copy-message").length'),
         1,
       );
-      if (!['fallback', 'local'].includes(state))
+      if (!['fallback', 'local', ...runtimeCodes].includes(state))
         assert.ok(
           (await evaluate('document.querySelector(".model-error-card").innerText')).includes(
             'The usage limit has been reached',
           ),
         );
+      if (runtimeCodes.includes(state)) {
+        const text = await evaluate('document.querySelector(".model-error-card").innerText');
+        assert.ok(text.includes('code: ' + state));
+        assert.ok(!text.includes('SECRET_SENTINEL'));
+        assert.ok(!text.includes('could not complete this response'));
+      }
       if (state === 'local')
         assert.ok(
           (await evaluate('document.querySelector(".model-error-card").innerText')).includes(
@@ -191,7 +213,10 @@ try {
       const copied = await evaluate('window.providerErrorEvidence.copied[0]');
       assert.ok(copied.includes('Run status: failed'));
       assert.ok(copied.includes('Recovery 1: exhausted'));
-      if (state !== 'local') assert.ok(copied.includes('HTTP status: 429'));
+      assert.ok(!copied.includes('SECRET_SENTINEL'));
+      if (runtimeCodes.includes(state)) assert.ok(copied.includes('code: ' + state));
+      if (state !== 'local' && !runtimeCodes.includes(state))
+        assert.ok(copied.includes('HTTP status: 429'));
       if (state === 'partial')
         assert.ok(copied.includes('The genuine partial answer remains available.'));
       states.push({ name: 'copy-' + state, copied });

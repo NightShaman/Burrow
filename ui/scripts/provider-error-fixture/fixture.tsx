@@ -45,15 +45,33 @@ const agent = {
 } as Agent;
 const at = '2026-11-05T20:00:00Z';
 const no = () => {};
-const states = ['provider', 'fallback', 'partial', 'side', 'local', 'long', 'success'] as const;
+const runtimeCodes = [
+  'context_compression_failed',
+  'context_compression_unavailable',
+  'context_preparation_prompt_over_budget',
+  'context_preparation_uncovered_history',
+  'CONTEXT_BOUNDARY_VIOLATION',
+];
+const states = [
+  'provider',
+  'fallback',
+  'partial',
+  'side',
+  'local',
+  'long',
+  'success',
+  ...runtimeCodes,
+];
 function Fixture() {
   const [state, setState] = useState<string>(
     new URLSearchParams(location.search).get('state') ?? 'provider',
   );
   const [draft, setDraft] = useState('');
-  const upstream = state !== 'local';
-  const message =
-    state === 'long'
+  const runtime = runtimeCodes.includes(state);
+  const upstream = state !== 'local' && !runtime;
+  const message = runtime
+    ? 'SECRET_SENTINEL raw exception must not appear'
+    : state === 'long'
       ? `The usage limit has been reached. Try again after the account resets. Request reference: ${'a'.repeat(500)}\nContact support if this persists. <script>not executable</script>`
       : state === 'local'
         ? 'Not provider prose'
@@ -65,7 +83,7 @@ function Fixture() {
         terminalStatus: state === 'success' ? 'completed' : 'failed',
         modelFailure: {
           origin: upstream ? 'upstream' : 'burrow',
-          code: upstream ? 'provider_http_429' : 'model_result_invalid',
+          code: runtime ? state : upstream ? 'provider_http_429' : 'model_result_invalid',
           retryable: upstream,
           ...(upstream ? { status: 429 } : {}),
           ...(state === 'fallback' ? {} : { message }),
