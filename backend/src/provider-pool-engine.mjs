@@ -41,9 +41,10 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
   const pressure = windows.some(atHeadroom);
   const used = Math.max(...windows.map((window) => Number(window.usedPercent)));
   const resets = windows.map((window) => time(window.resetAt)).filter((reset) => Number.isFinite(reset) && reset > now);
+  const weeklyResets = family === 'openai' ? windows.filter(window => Number(window.windowSeconds) === 604_800).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now) : [];
   const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || atHeadroom(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
   return { eligible: !exhausted && !pressure, reason: exhausted ? 'quota_exhausted' : pressure ? 'quota_pressure' : null,
-    exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+    exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), ...(family === 'openai' ? { weeklyResetAt: weeklyResets.length ? Math.min(...weeklyResets) : null } : {}), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
 }
 
 // All known constraints for one account must expire; the first account to
@@ -118,25 +119,32 @@ export class ProviderPoolEngine {
       let owner = affinity?.owner_id;
       let substitute = null;
       let substituteUntil = null;
+      const weighted = (candidates) => {
+        const total = candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
+        let cursor = this.random() * total;
+        return candidates.find((candidate) => (cursor -= candidate.weight) < 0) || candidates.at(-1);
+      };
+      const weeklyCandidates = family === 'openai' && flags.preferEarlierReset === true
+        ? available.filter(candidate => candidate.weeklyResetAt != null) : [];
       if (requiredMemberId) {
         // Native IDs and signed blocks may only return to the account that made them.
         selected = eligible(requiredMemberId) || pinnedHeadroom;
         if (!selected) throw Object.assign(new Error('provider_pool_continuation_owner_unavailable'), { diagnostics, retryNotBefore: diagnostics.find(row => row.id === requiredMemberId)?.blockedUntil || null, rejection: { memberId: requiredMemberId, reason: diagnostics.find(row => row.id === requiredMemberId)?.reason || 'member_unavailable', hard: true } });
+      } else if (weeklyCandidates.length) {
+        const earliest = Math.min(...weeklyCandidates.map(candidate => candidate.weeklyResetAt));
+        selected = weighted(weeklyCandidates.filter(candidate => candidate.weeklyResetAt === earliest));
+        rebalanceReason = 'weekly_reset_preference';
       } else if (preferredMemberId && eligible(preferredMemberId)) {
         selected = eligible(preferredMemberId);
       } else if (flags.sticky !== false && owner && ids.includes(owner)) {
         if (affinity.substitute_id && time(affinity.substitute_until) > now) selected = eligible(affinity.substitute_id);
         if (!selected) selected = eligible(owner);
       }
-      if (!requiredMemberId && owner && !eligible(owner) &&
+      if (!requiredMemberId && !rebalanceReason && owner && !eligible(owner) &&
         diagnostics.find(candidate => candidate.id === owner)?.pressure) rebalanceReason = 'sticky_headroom_floor';
       if (!selected && available.length) {
-        if (flags.preferEarlierReset === true) selected = [...available].sort((a, b) => (a.resetAt ?? Infinity) - (b.resetAt ?? Infinity))[0];
-        else {
-          const total = available.reduce((sum, candidate) => sum + candidate.weight, 0);
-          let cursor = this.random() * total;
-          selected = available.find((candidate) => (cursor -= candidate.weight) < 0) || available.at(-1);
-        }
+        if (family === 'anthropic' && flags.preferEarlierReset === true) selected = [...available].sort((a, b) => (a.resetAt ?? Infinity) - (b.resetAt ?? Infinity))[0];
+        else selected = weighted(available);
       }
       // Only an existing portable continuation may use its pressured owner as
       // last resort. New requests and a failed/excluded owner never acquire it.
