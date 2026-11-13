@@ -69,7 +69,12 @@ function bounded(value, field, max, { pattern } = {}) {
 }
 const repositoryValue = value => bounded(value, 'repository', 255, { pattern: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/ });
 const uuidValue = value => bounded(value, 'id', 36, { pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i });
-function watchRow(r) { return { id: r.id, repository: r.repository, workflow: r.workflow, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, enabled: r.enabled, createdAt: r.created_at, updatedAt: r.updated_at }; }
+export const WORKFLOW_CONCLUSIONS = Object.freeze(['success', 'failure', 'neutral', 'cancelled', 'skipped', 'timed_out', 'action_required', 'startup_failure', 'stale']);
+function validateConclusions(value) {
+  if (!Array.isArray(value) || !value.length || new Set(value).size !== value.length || value.some(v => !WORKFLOW_CONCLUSIONS.includes(v))) throw new Error('completion_event_invalid_conclusions');
+  return value;
+}
+function watchRow(r) { return { id: r.id, repository: r.repository, workflow: r.workflow, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, enabled: r.enabled, conclusions: r.conclusions, createdAt: r.created_at, updatedAt: r.updated_at }; }
 function eventRow(r) { return { id: r.id, watchId: r.watch_id, repository: r.repository, workflow: r.workflow, runId: r.run_id, runAttempt: r.run_attempt, headSha: r.head_sha, conclusion: r.conclusion, url: r.url, completedAt: r.completed_at, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, status: r.status, ownerId: r.owner_id, chatRunId: r.chat_run_id, result: r.result, error: r.error, traceDir: r.trace_dir, createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at }; }
 
 export class PostgresCompletionEventStore {
@@ -83,7 +88,7 @@ export class PostgresCompletionEventStore {
     const { rows } = await this.pool.query('SELECT * FROM github_workflow_watches ORDER BY created_at,id');
     return rows.map(watchRow);
   }
-  async saveWatch({ id, repository, workflow, agentId, sessionId = 'ci-releases', instruction, enabled = true } = {}) {
+  async saveWatch({ id, repository, workflow, agentId, sessionId = 'ci-releases', instruction, enabled = true, conclusions } = {}) {
     id = id == null ? randomUUID() : uuidValue(id);
     repository = repositoryValue(repository);
     workflow = bounded(workflow, 'workflow', 255);
@@ -91,10 +96,11 @@ export class PostgresCompletionEventStore {
     sessionId = bounded(sessionId, 'sessionId', 255);
     instruction = bounded(instruction, 'instruction', 20000);
     if (typeof enabled !== 'boolean') throw new Error('completion_event_invalid_enabled');
-    const { rows } = await this.pool.query(`INSERT INTO github_workflow_watches(id,repository,workflow,agent_id,session_id,instruction,enabled)
-      VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET repository=EXCLUDED.repository,workflow=EXCLUDED.workflow,
-      agent_id=EXCLUDED.agent_id,session_id=EXCLUDED.session_id,instruction=EXCLUDED.instruction,enabled=EXCLUDED.enabled,updated_at=CURRENT_TIMESTAMP RETURNING *`,
-    [id, repository, workflow, agentId, sessionId, instruction, enabled]);
+    if (conclusions !== undefined) validateConclusions(conclusions);
+    const { rows } = await this.pool.query(`INSERT INTO github_workflow_watches(id,repository,workflow,agent_id,session_id,instruction,enabled,conclusions)
+      VALUES($1,$2,$3,$4,$5,$6,$7,COALESCE($8::text[], ARRAY['failure','timed_out','startup_failure','action_required']::text[])) ON CONFLICT (id) DO UPDATE SET repository=EXCLUDED.repository,workflow=EXCLUDED.workflow,
+      agent_id=EXCLUDED.agent_id,session_id=EXCLUDED.session_id,instruction=EXCLUDED.instruction,enabled=EXCLUDED.enabled,conclusions=COALESCE($8::text[],github_workflow_watches.conclusions),updated_at=CURRENT_TIMESTAMP RETURNING *`,
+    [id, repository, workflow, agentId, sessionId, instruction, enabled, conclusions ?? null]);
     return watchRow(rows[0]);
   }
   async deleteWatch(id) {
@@ -116,6 +122,7 @@ export class PostgresCompletionEventStore {
       const { rows: watches } = await client.query('SELECT * FROM github_workflow_watches WHERE enabled AND repository=$1 AND workflow=$2 ORDER BY id', [repository, workflow]);
       const accepted = [];
       for (const watch of watches) {
+        if (!watch.conclusions.includes(conclusion)) continue;
         const id = randomUUID();
         const { rows } = await client.query(`INSERT INTO github_completion_events(id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,agent_id,session_id,instruction,chat_run_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11,$12,$13,$14)

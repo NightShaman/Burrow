@@ -284,4 +284,7 @@ CREATE INDEX openai_reset_credit_claims_unknown_idx ON openai_reset_credit_claim
 ALTER TABLE task_board_tasks DROP CONSTRAINT task_board_tasks_status_check;
 ALTER TABLE task_board_tasks ADD CONSTRAINT task_board_tasks_status_check CHECK (status IN ('backlog','todo','in_progress','review','done','cancelled','parked'));
 ` },
+  { version: 101, name: 'workflow-watch-conclusions', sql: `
+ALTER TABLE github_workflow_watches ADD COLUMN conclusions TEXT[] NOT NULL DEFAULT ARRAY['failure','timed_out','startup_failure','action_required']::text[];
+` },
 ]);

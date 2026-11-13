@@ -1,7 +1,8 @@
+import { WORKFLOW_CONCLUSIONS } from '../../src/postgres-completion-event-store.mjs';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const MAX_WEBHOOK_BYTES = 256 * 1024;
-const CONCLUSIONS = new Set(['success', 'failure', 'neutral', 'cancelled', 'skipped', 'timed_out', 'action_required', 'startup_failure', 'stale']);
+const CONCLUSIONS = new Set(WORKFLOW_CONCLUSIONS);
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SHA = /^[0-9a-f]{40,64}$/i;
 const RUN_ID = /^[1-9][0-9]*$/;
@@ -72,15 +73,15 @@ function errorResponse(error) {
 }
 function watchBody(value) {
   if (!object(value)) invalid();
-  const { id, repository, workflow, agentId, sessionId = 'ci-releases', instruction, enabled = true } = value;
+  const { id, repository, workflow, agentId, sessionId = 'ci-releases', instruction, enabled = true, conclusions } = value;
   if (id !== undefined && (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) invalid();
   if (typeof repository !== 'string' || repository.length > 255 || !REPOSITORY.test(repository) ||
     typeof workflow !== 'string' || !workflow.trim() || workflow !== workflow.trim() || workflow.length > 255 ||
     typeof agentId !== 'string' || !agentId.trim() || agentId !== agentId.trim() || agentId.length > 255 ||
     typeof sessionId !== 'string' || !sessionId.trim() || sessionId !== sessionId.trim() || sessionId.length > 255 ||
     typeof instruction !== 'string' || !instruction.trim() || instruction !== instruction.trim() || instruction.length > 20000 ||
-    typeof enabled !== 'boolean') invalid();
-  return { ...(id === undefined ? {} : { id }), repository, workflow, agentId, sessionId, instruction, enabled };
+    typeof enabled !== 'boolean' || (conclusions !== undefined && (!Array.isArray(conclusions) || !conclusions.length || new Set(conclusions).size !== conclusions.length || conclusions.some(c => !CONCLUSIONS.has(c))))) invalid();
+  return { ...(id === undefined ? {} : { id }), repository, workflow, agentId, sessionId, instruction, enabled, ...(conclusions === undefined ? {} : { conclusions }) };
 }
 
 // The parent must call handle({ webhookOnly: true }) before UI authorization, and
