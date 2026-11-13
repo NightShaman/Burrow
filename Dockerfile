@@ -26,7 +26,9 @@ ENV NODE_ENV=production \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg git openssh-client \
     && install -d -m 0755 /etc/apt/keyrings \
-    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg \
+    && curl --http1.1 --fail --silent --show-error --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 --output /tmp/postgresql.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && gpg --dearmor --output /etc/apt/keyrings/postgresql.gpg /tmp/postgresql.asc \
+    && rm /tmp/postgresql.asc \
     && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 postgresql-17-pgvector \
