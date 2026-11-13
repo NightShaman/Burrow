@@ -79,7 +79,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget ca-certificates gnupg
           sudo install -d /usr/share/postgresql-common/pgdg
-          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
+          curl --http1.1 --fail --silent --show-error --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 --output /tmp/burrow-postgresql.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo install -m 0644 /tmp/burrow-postgresql.asc /etc/apt/trusted.gpg.d/postgresql.asc
+          rm /tmp/burrow-postgresql.asc
           . /etc/os-release
           echo "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update

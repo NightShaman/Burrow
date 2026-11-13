@@ -79,3 +79,16 @@ test('GPG rejection remains fatal after a successful download', async t => {
   assert.equal(readFileSync(join(f.root, 'seen'), 'utf8'), 'invalid-key');
   assert.equal(existsSync(join(f.root, 'key.gpg')), false);
 });
+
+test('assembly SQL gate requires a complete bounded key download before installing it', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml', import.meta.url), 'utf8');
+  const step = workflow.split('      - name: Install PostgreSQL 17 with pgvector for owned SQL component gate')[1].split('      - name: Gate development assembly')[0];
+  const lines = step.trim().split('\n').map(line => line.trim());
+  const curl = lines.findIndex(line => line.startsWith('curl '));
+  const install = lines.findIndex(line => line.startsWith('sudo install -m 0644 /tmp/burrow-postgresql.asc '));
+  const cleanup = lines.indexOf('rm /tmp/burrow-postgresql.asc');
+  assert.ok(curl >= 0 && install === curl + 1 && cleanup === install + 1);
+  for (const flag of ['--http1.1', '--fail', '--retry 3', '--retry-all-errors', '--connect-timeout 15', '--max-time 60', '--output /tmp/burrow-postgresql.asc']) assert.ok(lines[curl].includes(flag), flag);
+  assert.ok(!lines[curl].includes('|'));
+  assert.ok(lines.includes('set -eu'));
+});
