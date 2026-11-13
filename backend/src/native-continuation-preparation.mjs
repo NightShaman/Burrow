@@ -1,3 +1,5 @@
+import { compactSearchMatch } from './search-match-receipt.mjs';
+import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
 import { structuredCompressionSummary } from './session-compression.mjs';
 // Native Chat Completions continuation preparation.
@@ -29,7 +31,7 @@ function projectValue(value, { maxChars, artifactRef = null } = {}) {
   if (Array.isArray(value)) return value.map((item) => projectValue(item, { maxChars, artifactRef }));
   if (!value || typeof value !== 'object') return value;
   // Receipt locators are identities, not excerpts: never clip the recovery path.
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, ['artifacts', 'artifactRef', 'execution', 'childRun', 'childSessionId', 'target', 'verification', 'blockers'].includes(key) ? item : projectValue(item, { maxChars, artifactRef })]));
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, ['nextCursor', 'artifacts', 'artifactRef', 'execution', 'childRun', 'childSessionId', 'target', 'verification', 'blockers'].includes(key) ? item : projectValue(item, { maxChars, artifactRef })]));
 }
 
 function projectToolFields(messages = [], maxChars = 0) {
@@ -40,6 +42,11 @@ function projectToolFields(messages = [], maxChars = 0) {
     try {
       const parsed = JSON.parse(message.content);
       if (['load_skill', 'spawn_subagent', 'finish_subagent'].includes(parsed.tool)) return message;
+      const scheduled = scheduledResultReceipt(parsed);
+      if (scheduled) return { ...message, content: JSON.stringify({ tool: parsed.tool, ok: parsed.ok, error: parsed.error, ...scheduled }) };
+      if (parsed.tool === 'files_search' && Array.isArray(parsed.matches)) {
+        return { ...message, content: JSON.stringify({ ...parsed, matches: parsed.matches.map(item => compactSearchMatch(item, Math.min(500, fieldBudget))) }) };
+      }
       if (parsed.tool === 'agents_list') {
         // Directory identities are atomic, never string excerpts. Its producer
         // already paginates; under request pressure disclose an omitted page and

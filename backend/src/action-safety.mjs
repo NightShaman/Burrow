@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { touchedFilesFromPatch, resolvePatchBaseRoot } from './harness/apply-patch.mjs';
 import { grantedMcpTool } from './mcp-menu.mjs';
 import { evaluateExecutionBoundaries } from './execution-boundaries.mjs';
 
@@ -47,16 +49,8 @@ async function addBoundaryBlockers({ blockers, review, boundaries, operation, co
   return boundary;
 }
 
-function patchPaths(patch = '') {
-  const paths = [];
-  for (const line of String(patch || '').split(/\r?\n/)) {
-    const diff = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-    if (diff) { paths.push(diff[1], diff[2]); continue; }
-    const marker = /^(?:---|\+\+\+)\s+(?:a\/|b\/)?(.+)$/.exec(line);
-    if (marker && marker[1] !== '/dev/null') paths.push(marker[1].split('\t')[0]);
-  }
-  return [...new Set(paths.filter(Boolean))];
-}
+// Review and execution must interpret exactly the same patch dialects/paths.
+const patchPaths = touchedFilesFromPatch;
 
 async function reviewAction(action = {}, { workspaceRoot = null, executionContext = null, signal = executionContext?.abortSignal, deadline = executionContext?.deadline, timeoutMs = executionContext?.boundaryEvaluationTimeoutMs } = {}) {
   const blockers = [];
@@ -192,6 +186,10 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
   if (action.tool === 'files_patch') {
     risk.push('mutation');
     const paths = patchPaths(action.patch);
+    const fallbackRoot = executionContext?.target?.kind === 'filesystem'
+      ? executionContext.target.root
+      : executionContext?.workspaceRoot || workspaceRoot || process.cwd();
+    const patchBaseRoot = await resolvePatchBaseRoot({ patch: action.patch, fallbackRoot: path.resolve(fallbackRoot) });
     const review = validationReview({
       message: action.intent || '',
       action: 'patch',
@@ -201,7 +199,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths, workspaceRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths, workspaceRoot: patchBaseRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,

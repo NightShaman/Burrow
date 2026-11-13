@@ -48,7 +48,7 @@ async function nearestGitRoot(startPath) {
   }
 }
 
-async function resolvePatchBaseRoot({ patch, fallbackRoot }) {
+export async function resolvePatchBaseRoot({ patch, fallbackRoot }) {
   const absoluteTargets = touchedFilesFromPatch(patch).filter((item) => path.isAbsolute(item));
   if (!absoluteTargets.length) return fallbackRoot;
   const gitRoots = await Promise.all(absoluteTargets.map(nearestGitRoot));

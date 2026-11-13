@@ -168,7 +168,7 @@ export async function searchFilesEnvelope({ query, dirPath, workspaceRoot, maxDe
           const end = Math.min(line.length, start + Math.max(1_000, String(query).length + 500));
           const snippetBounds = start > 0 || end < line.length
             ? { textStartColumn: start + 1, textEndColumn: end + 1, lineLength: line.length, textTruncated: true } : {};
-          matches.push({ filePath: entry.path, line: lineNumber, text: line.slice(start, end), ...snippetBounds });
+          matches.push({ filePath: entry.path, line: lineNumber, column: matchIndex + 1, matchLength: String(query).length, text: line.slice(start, end), ...snippetBounds });
         }
       } catch (error) { scanWarnings.push(`unreadable_file:${entry.path}:${error?.code || 'error'}`); }
       finally { scannedBytes += stream.bytesRead; lines.close(); stream.destroy(); }

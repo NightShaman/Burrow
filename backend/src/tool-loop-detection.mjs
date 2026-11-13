@@ -1,3 +1,5 @@
+import { compactSearchMatch } from './search-match-receipt.mjs';
+import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
 import { runtimeHeapStage } from './runtime-heap-diagnostics.mjs';
 function compactToolCalls(toolCalls = []) {
@@ -203,7 +205,7 @@ function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
 function normalizedToolOutcome(result = {}) {
   return {
     // Hash full observed payload before any bounded display projection.
-    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'agents', 'totalCount', 'nextCursor', 'includeDisabled', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
+    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'runs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'agents', 'totalCount', 'nextCursor', 'includeDisabled', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
     ok: Boolean(result.ok),
     tool: result.tool || null,
     filePath: result.filePath || null,
@@ -375,7 +377,7 @@ function compactPromptEvidenceResult(result = {}) {
   if (typeof result.project === 'string') compact.project = result.project.slice(0, 500);
   if (Array.isArray(result.entries)) compact.entries = result.entries.slice(0, 20).map((item) => ({ path: item?.path || null, type: item?.type || null }));
   if (Array.isArray(result.paths)) compact.paths = result.paths.slice(0, 20);
-  if (Array.isArray(result.matches)) compact.matches = result.matches.slice(0, 20).map((item) => ({ filePath: item?.filePath || null, line: item?.line ?? null, text: typeof item?.text === 'string' ? item.text.slice(0, 500) : null }));
+  if (Array.isArray(result.matches)) compact.matches = result.matches.slice(0, 20).map((item) => compactSearchMatch(item));
   if (typeof result.requestedProject === 'string') compact.requestedProject = result.requestedProject.slice(0, 500);
   if (Number.isFinite(Number(result.resultCount))) compact.resultCount = Number(result.resultCount);
   if (Array.isArray(result.results)) {
@@ -418,6 +420,7 @@ function compactPromptEvidenceResult(result = {}) {
   for (const key of payloadFields[result.tool] || []) {
     if (result[key] !== undefined) compact[key] = boundedToolArgumentValue(result[key], { maxStringChars: CHAT_TOOL_SINGLE_EXCERPT_CHARS });
   }
+  Object.assign(compact, scheduledResultReceipt(result));
   compact.incomplete = Boolean(result.incomplete);
   const omissions = {};
   for (const key of ['content', 'stdout', 'stderr', 'summary', 'entries', 'paths', 'matches', 'results', 'tasks', 'warnings']) {

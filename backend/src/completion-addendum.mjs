@@ -24,7 +24,7 @@ export function completionEvidence({ toolResults = [], consequences = null, veri
   return {
     meaningful: Boolean(changedFiles.length || checks.length || mcp.length || failed.length || verification?.required || validation),
     changedFiles,
-    checks: checks.map((result) => ({ command: text(result.command) || 'check', ok: result.ok === true, scope: 'shell_command' })).slice(0, MAX_ITEMS),
+    checks: checks.map((result) => ({ command: text(result.command) || 'check', ok: result.ok === true, scope: 'shell_command', subcommandsAttested: false })).slice(0, MAX_ITEMS),
     mcp: mcp.map((result) => ({ name: mcpLabel(result), ok: result.ok === true, provider: result.provider || null })).slice(0, MAX_ITEMS),
     inspected: inspected.length,
     failed: failed.map((result) => text(result.error || result.reason || result.tool || 'operation failed')).filter(Boolean).slice(0, MAX_ITEMS),

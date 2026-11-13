@@ -1,6 +1,7 @@
 // Nonexecuting environment grammar: one assignment per line, optional indentation
 // and export, single/double quotes, shell-style backslash escapes, and comments.
-// Expansion, command substitution, and multiline values are deliberately rejected.
+// Expansion, command substitution, multiline values, and adjacent quoted/unquoted
+// word concatenation are deliberately rejected.
 export function parseEnvironmentLines(text) {
   return String(text).split(/\r?\n/).map((line, index) => {
     if (line.includes('\0')) throw new Error(`invalid environment format at line ${index + 1}`);
@@ -27,6 +28,9 @@ export function parseEnvironmentLines(text) {
       }
     }
     if (quote && !closed) throw new Error(`unterminated environment quote at line ${index + 1}`);
+    // A # immediately after a closing quote is part of the same shell word,
+    // not a comment. This grammar does not support adjacent word segments.
+    if (quote && i < line.length && line[i] !== ' ' && line[i] !== '\t') throw new Error(`environment concatenation not supported at line ${index + 1}`);
     const tail = line.slice(i).trim();
     if (tail && !tail.startsWith('#')) throw new Error(`invalid environment format at line ${index + 1}`);
     return { line, key: match[1], value };

@@ -1,3 +1,5 @@
+import { compactSearchMatch } from './search-match-receipt.mjs';
+import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 
 const text = (value) => typeof value === 'string' ? value : String(value ?? '');
@@ -18,13 +20,15 @@ function collectionReceipt(label, value) {
 
 function projection(result = {}) {
   const base = { tool: result.tool || 'unknown', ok: result.ok ?? null, error: result.error || null, failureClass: result.failureClass || null, artifacts: result.artifacts || null, retentionOmissions: result.retentionOmissions || null };
+  const scheduled = scheduledResultReceipt(result);
+  if (scheduled) return { ...base, ...scheduled };
   if (result.tool === 'files_read') {
     const returnedBytes = result.delivery?.returnedBytes ?? result.returnedBytes ?? Buffer.byteLength(text(result.content), result.encoding || 'utf8');
     const offsetBytes = Number(result.offsetBytes || 0);
     return { ...base, path: result.filePath || null, coverage: { start: offsetBytes, end: offsetBytes + returnedBytes, bytes: result.bytes ?? returnedBytes, returnedBytes, truncated: Boolean(result.delivery?.truncated || result.truncated), observedReturnedBytes: result.returnedBytes ?? null, nextOffsetBytes: result.delivery?.nextOffsetBytes ?? result.nextOffsetBytes ?? null }, contentHash: result.contentHash || null };
   }
   if (result.tool === 'shell_exec' || result.tool === 'git_status' || result.tool === 'git_diff') return { ...base, command: result.command || null, exitCode: result.exitCode ?? null, durationMs: result.durationMs ?? null, stdoutBytes: Buffer.byteLength(text(result.stdout)), stderrBytes: Buffer.byteLength(text(result.stderr)) };
-  if (result.tool === 'files_search') return { ...base, path: result.dirPath || null, query: result.query || null, ...collectionReceipt('matches', result.matches), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
+  if (result.tool === 'files_search') return { ...base, path: result.dirPath || null, query: result.query || null, ...collectionReceipt('matches', result.matches), matches: Array.isArray(result.matches) ? result.matches.slice(0, 20).map(item => compactSearchMatch(item)) : [], matchesOmitted: Math.max(0, (result.matches?.length || 0) - 20), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
   if (result.tool === 'files_list') return { ...base, path: result.dirPath || null, ...collectionReceipt('entries', result.entries), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
   if (result.tool === 'files_find') return { ...base, path: result.dirPath || null, pattern: result.pattern || null, ...collectionReceipt('paths', result.paths), resultFingerprint: result.resultFingerprint || null, toolTruncated: Boolean(result.truncated), toolIncomplete: Boolean(result.incomplete), toolWarnings: Array.isArray(result.warnings) ? result.warnings : [] };
   if (mutation(result)) return { ...base, filePath: result.filePath || null, touchedFiles: result.touchedFiles || result.changedFiles || [] };
@@ -45,7 +49,9 @@ function jsonField(label, value) {
 function rawFields(result = {}) {
   if (result.tool === 'files_read' && result.ok && typeof result.content === 'string') return [{ label: 'files_read content', text: result.content }];
   if (result.tool === 'shell_exec' || result.tool === 'git_status' || result.tool === 'git_diff') return [...(result.stderr ? [{ label: `${result.tool} stderr`, text: result.stderr }] : []), ...(result.stdout ? [{ label: `${result.tool} stdout`, text: result.stdout }] : [])];
-  if (result.tool === 'files_search') return jsonField('files_search matches', result.matches);
+  // Match snippets + their offset metadata are an atomic bounded receipt above,
+  // not optional prefix excerpts that can clip away the decisive match again.
+  if (result.tool === 'files_search') return [];
   if (result.tool === 'files_list') return jsonField('files_list entries', result.entries);
   if (result.tool === 'files_find') return jsonField('files_find paths', result.paths);
   if (result.tool === 'session_search' || result.tool === 'memory_working_search' || result.tool === 'memory_rolling_search') return jsonField(`${result.tool} results`, result.results);

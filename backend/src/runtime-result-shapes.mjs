@@ -1,3 +1,5 @@
+import { compactSearchMatch } from './search-match-receipt.mjs';
+import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import path from 'node:path';
 
@@ -214,7 +216,7 @@ export function summarizeToolResults(toolResults = []) {
     connectionId: toolResult.tool === 'mcp_call' ? undefined : (typeof toolResult.connectionId === 'string' ? compactText(toolResult.connectionId, 120) : undefined),
     mcpToolName: typeof toolResult.mcpToolName === 'string' ? compactText(toolResult.mcpToolName, 240) : undefined,
     modToolName: toolResult.tool === 'mod_agent_tool' && typeof toolResult.modToolName === 'string' ? compactText(toolResult.modToolName, 240) : undefined,
-    nextCursor: typeof toolResult.nextCursor === 'string' ? compactText(toolResult.nextCursor, 120) : undefined,
+    nextCursor: typeof toolResult.nextCursor === 'string' ? toolResult.nextCursor : undefined,
     totalCount: Number.isFinite(Number(toolResult.totalCount)) ? Number(toolResult.totalCount) : undefined,
     providers: Array.isArray(toolResult.providers)
       ? toolResult.providers.slice(0, RECEIPT_TEXT_LIMITS.list).map((provider) => ({ id: provider?.id || null, name: typeof provider?.name === 'string' ? compactText(provider.name, 120) : null, transport: provider?.transport || null, catalogToolCount: Number(provider?.catalogToolCount) || 0, grantedToolCount: Number(provider?.grantedToolCount) || 0, available: provider?.available === true }))
@@ -229,7 +231,7 @@ export function summarizeToolResults(toolResults = []) {
     skill: toolResult.skill ? compactSkillCard(toolResult.skill) : undefined,
     entries: Array.isArray(toolResult.entries) ? toolResult.entries.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => ({ path: item?.path || null, type: item?.type || null })) : undefined,
     paths: compactList(toolResult.paths),
-    matches: Array.isArray(toolResult.matches) ? toolResult.matches.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => ({ filePath: item?.filePath || null, line: item?.line ?? null, text: compactText(item?.text, 500) })) : undefined,
+    matches: Array.isArray(toolResult.matches) ? toolResult.matches.slice(0, RECEIPT_TEXT_LIMITS.list).map((item) => compactSearchMatch(item)) : undefined,
     results: Array.isArray(toolResult.results)
       ? toolResult.results.slice(0, RECEIPT_TEXT_LIMITS.evidence).map((item) => ({
         kind: item?.kind || null,
@@ -312,6 +314,7 @@ export function summarizeToolResults(toolResults = []) {
         } : {}),
       }
       : undefined,
+    ...scheduledResultReceipt(toolResult),
     coverage: coverageFromToolResult(toolResult),
     delivery: deliveryFromToolResult(toolResult),
     // Child evidence is itself converted to receipts. Never retain an opaque

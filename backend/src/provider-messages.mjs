@@ -138,6 +138,10 @@ function compactReceiptFact(round = []) {
       // prose. Keep the exact receipt when moving its protocol round.
       return `- ${name}: ${renderedContent(result?.content)}`;
     }
+    if (['scheduled_jobs_list', 'scheduled_job_runs'].includes(name)) {
+      try { return `- ${name}: ${JSON.stringify(JSON.parse(renderedContent(result?.content)))}`; }
+      catch { return `- ${name}: result unavailable; repeat this page before advancing pagination.`; }
+    }
     if (name === 'agents_list') {
       // Peer IDs and pagination cursors are identities, not prose excerpts.
       // Keep the public receipt atomic even when a later round displaces it.
@@ -151,6 +155,10 @@ function compactReceiptFact(round = []) {
 function clipEvidenceFact(fact, maxChars) {
   if (maxChars <= 0) return null;
   if (fact.length <= maxChars) return fact;
+  if (fact.startsWith('- scheduled_jobs_list:') || fact.startsWith('- scheduled_job_runs:')) {
+    const omitted = '- scheduling page omitted by provider budget; repeat the last page with the same scope and cursor before advancing.';
+    return omitted.length <= maxChars ? omitted : null;
+  }
   if (fact.startsWith('- agents_list:')) {
     const omitted = '- agents_list: directory receipt omitted; query agents_list again before messaging or continuing pagination.';
     const short = '- agents_list: omitted; query again.';

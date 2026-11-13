@@ -1,3 +1,5 @@
+import { compactSearchMatch } from './search-match-receipt.mjs';
+import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 // Source coverage belongs to the producing tool; delivery coverage belongs to
 // this projection. Reprojection must never turn a delivery omission into a
 // claim that the source tool itself stopped early.
@@ -41,10 +43,7 @@ export function compactSubagentEvidence(result = {}, { textLimit = 6_000, stdout
     out[key] = result[key].slice(0, limit).map((item) => {
       if (key === 'entries') return { path: item?.path || null, type: item?.type || null };
       if (key === 'matches') {
-        const originalChars = item?.textDelivery?.originalCount ?? String(item?.text || '').length;
-        const text = prefix(item?.text, 500);
-        return { filePath: item?.filePath || null, line: item?.line ?? null, text,
-          textDelivery: { unit: 'chars', originalCount: originalChars, deliveredCount: text.length, omittedCount: originalChars - text.length } };
+        return compactSearchMatch(item);
       }
       return item;
     });
@@ -53,7 +52,8 @@ export function compactSubagentEvidence(result = {}, { textLimit = 6_000, stdout
     out.deliveryFields[key] = { unit: 'items', originalCount, deliveredCount: out[key].length, omittedCount: originalCount - out[key].length };
     if (['entries', 'paths', 'matches'].includes(key)) out.deliveryCounts = { originalCount, deliveredCount: out[key].length, omittedCount: originalCount - out[key].length, sourceTruncated: source.truncated };
   }
-  out.deliveryTruncated = Boolean(result.deliveryTruncated) || Object.values(out.deliveryFields).some(field => field.omittedCount > 0)
+  Object.assign(out, scheduledResultReceipt(result));
+  out.deliveryTruncated = Boolean(result.deliveryTruncated) || (out.pageDelivery?.omittedCount || 0) > 0 || Object.values(out.deliveryFields).some(field => field.omittedCount > 0)
     || (out.matches || []).some(item => item.textDelivery.omittedCount > 0);
   if (result.tool === 'files_read') {
     const returnedBytes = Buffer.byteLength(out.content || '', result.encoding || 'utf8');
