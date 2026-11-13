@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { isWithinAttachmentBudget } from '../../app/clientBudgets';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { admitAttachments } from './useAttachmentAdmission';
 import type { ChatAttachment } from '../../app/api';
 import { conversationCacheKey } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
@@ -16,6 +16,7 @@ export function useChatComposer(
     scope: object;
     files: ChatAttachment[];
   } | null>(null);
+  const attachmentStateRef = useRef(attachmentState);
   const [composerResetGeneration, setComposerResetGeneration] = useState(0);
   const noteComposerReset = useCallback(() => setComposerResetGeneration((value) => value + 1), []);
   const draftKey = agentId && sessionId ? conversationCacheKey(agentId, sessionId) : '';
@@ -40,33 +41,34 @@ export function useChatComposer(
   const attached = attachmentState?.scope === scope ? attachmentState.files : [];
   const setAttachment = useCallback(
     (attachments: ChatAttachment[]) => {
-      if (!isScopeCurrent()) return;
-      setAttachmentState((current) => {
-        const files = [...(current?.scope === scope ? current.files : [])];
-        for (const attachment of attachments)
-          if (
-            isWithinAttachmentBudget(
-              files.map((item) => item.size),
-              attachment.size,
-            )
-          )
-            files.push(attachment);
-        return { scope, files };
-      });
+      if (!isScopeCurrent()) return [];
+      const current = attachmentStateRef.current;
+      const { files, rejected } = admitAttachments(
+        current?.scope === scope ? current.files : [],
+        attachments,
+      );
+      const next = { scope, files };
+      attachmentStateRef.current = next;
+      setAttachmentState(next);
+      return rejected;
     },
     [scope, isScopeCurrent],
   );
-  const clearAttachment = useCallback(() => setAttachmentState(null), []);
+  const clearAttachment = useCallback(() => {
+    attachmentStateRef.current = null;
+    setAttachmentState(null);
+  }, []);
   const removeAttachment = useCallback(
-    (index: number) =>
-      setAttachmentState((current) =>
-        current?.scope === scope
-          ? {
-              ...current,
-              files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index),
-            }
-          : current,
-      ),
+    (index: number) => {
+      const current = attachmentStateRef.current;
+      if (current?.scope !== scope) return;
+      const next = {
+        ...current,
+        files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index),
+      };
+      attachmentStateRef.current = next;
+      setAttachmentState(next);
+    },
     [scope],
   );
   return {

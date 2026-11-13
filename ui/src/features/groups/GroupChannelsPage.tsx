@@ -1,7 +1,7 @@
 import { isAgentEnabled } from '../../app/agentCatalog';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { api, attachmentDisplayName, jsonMutation } from '../../app/api';
+import { api, jsonMutation } from '../../app/api';
 import type { Agent } from '../../app/types';
 import type {
   ChatAttachment,
@@ -11,12 +11,11 @@ import type {
   SessionTurn,
   ToolActivity,
 } from '../../app/api';
-import { readAttachment } from '../../app/readAttachment';
 import { ChatComposer } from '../chat/ChatComposer';
 import { ChatMessage } from '../chat/ChatMessage';
 import { usePolling } from '../../app/usePolling';
 import { useComposerHistory } from '../chat/useComposerHistory';
-import { isWithinAttachmentBudget, validatedAttachmentType } from '../chat/attachmentValidation';
+import { admitAttachments, useAttachmentAdmission } from '../chat/useAttachmentAdmission';
 
 type GroupTurn = {
   id: string;
@@ -137,6 +136,8 @@ export function GroupChannelsPage({
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [attached, setAttached] = useState<ChatAttachment[]>([]);
+  const attachedRef = useRef(attached);
+  const admit = useAttachmentAdmission();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [attachmentError, setAttachmentError] = useState('');
@@ -180,6 +181,7 @@ export function GroupChannelsPage({
   );
   useEffect(() => {
     setMessage('');
+    attachedRef.current = [];
     setAttached([]);
     setAttachmentError('');
     setSending(false);
@@ -337,8 +339,10 @@ export function GroupChannelsPage({
               text(record(item).name) === submittedAttachments[index].name &&
               Boolean(text(record(item).artifactPath)),
           ));
-      if (attachmentsAccepted)
-        setAttached((current) => (current === submittedAttachments ? [] : current));
+      if (attachmentsAccepted && attachedRef.current === submittedAttachments) {
+        attachedRef.current = [];
+        setAttached([]);
+      }
       await refreshSentMessage();
       if (!mounted.current || scope.current !== owner) return;
       if (!attachmentsAccepted)
@@ -353,49 +357,18 @@ export function GroupChannelsPage({
     }
   }
   function attachImage(files: File[]) {
-    const admittedSizes = attached.map((item) => item.size);
     const owner = scope.current;
-    const accepted = files.filter((file) => {
-      if (!isWithinAttachmentBudget(admittedSizes, file.size)) {
-        setAttachmentError(
-          `${file.name}: Attachment exceeds the client file, count, or batch safety budget.`,
-        );
-        return false;
-      }
-      admittedSizes.push(file.size);
-      return true;
-    });
-    void Promise.all(
-      accepted.map(async (file, index) => {
-        try {
-          const type = await validatedAttachmentType(file);
-          const attachment = await readAttachment(file, attachmentDisplayName(file, index + 1));
-          return { ...attachment, type };
-        } catch (reason) {
-          if (mounted.current && scope.current === owner)
-            setAttachmentError(
-              `${file.name}: ${reason instanceof Error ? reason.message : 'Could not read attachment.'}`,
-            );
-          return null;
-        }
-      }),
-    ).then((results) => {
-      if (!mounted.current || scope.current !== owner) return;
-      setAttached((current) => {
-        const next = [...current];
-        for (const attachment of results) {
-          if (!attachment) continue;
-          if (
-            isWithinAttachmentBudget(
-              next.map((item) => item.size),
-              attachment.size,
-            )
-          )
-            next.push(attachment);
-        }
-        return next;
-      });
-    });
+    return admit(
+      files,
+      () => mounted.current && scope.current === owner,
+      (candidates) => {
+        const { files: next, rejected } = admitAttachments(attachedRef.current, candidates);
+        attachedRef.current = next;
+        setAttached(next);
+        return rejected;
+      },
+      setAttachmentError,
+    );
   }
 
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -562,11 +535,13 @@ export function GroupChannelsPage({
             onKeyDown={handleComposerKeyDown}
             attached={attached}
             onAttach={attachImage}
-            onRemoveAttachment={(index) =>
-              setAttached((current) =>
-                current.filter((_, attachmentIndex) => attachmentIndex !== index),
-              )
-            }
+            onRemoveAttachment={(index) => {
+              const next = attachedRef.current.filter(
+                (_, attachmentIndex) => attachmentIndex !== index,
+              );
+              attachedRef.current = next;
+              setAttached(next);
+            }}
             disabled={sending}
             onSend={() => void send()}
             conversationTurns={channel.turns.map(

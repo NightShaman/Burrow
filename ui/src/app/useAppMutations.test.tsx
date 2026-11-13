@@ -18,7 +18,7 @@ describe('App mutation owner', () => {
       }),
     );
     const reportError = vi.fn();
-    const setAttachment = vi.fn();
+    const setAttachment = vi.fn(() => []);
     const { result } = renderHook(() =>
       useAppMutations({
         selected: undefined,
@@ -66,7 +66,7 @@ describe('App mutation owner', () => {
         writeModelSelection: vi.fn(),
         attached: [],
         isAttachmentScopeCurrent: () => true,
-        setAttachment: vi.fn(),
+        setAttachment: vi.fn(() => []),
       }),
     );
     await act(async () => {
@@ -92,7 +92,7 @@ it('admits backend-supported JSONL/JS and normalized generic UTF8 but reports bi
   const realReader = await vi.importActual<typeof import('./readAttachment')>('./readAttachment');
   vi.mocked(readAttachment).mockImplementation(realReader.readAttachment);
   const reportError = vi.fn();
-  const setAttachment = vi.fn();
+  const setAttachment = vi.fn(() => []);
   const { result } = renderHook(() =>
     useAppMutations({
       selected: undefined,
