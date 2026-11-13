@@ -209,7 +209,7 @@ export type ProviderPool = {
   enabled: boolean;
   memberConnectionIds: string[];
   sticky?: true;
-  preferEarlierReset?: false;
+  preferEarlierReset?: boolean;
 };
 
 export type ModelConnection = {

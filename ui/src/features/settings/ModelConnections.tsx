@@ -367,6 +367,23 @@ function LoadBalancingPools({
             />
             <span>Enabled</span>
           </label>
+          {editor.apiType === 'openai-lb' && (
+            <div>
+              <label className="pool-account">
+                <input
+                  type="checkbox"
+                  checked={editor.preferEarlierReset}
+                  onChange={(event) => editor.setPreferEarlierReset(event.target.checked)}
+                  aria-describedby="pool-weekly-reset-help"
+                />
+                <span>Prefer earlier weekly reset</span>
+              </label>
+              <p id="pool-weekly-reset-help" className="settings-help">
+                Spend weekly allowance that resets soonest. Overrides sticky routing only when safe;
+                account-bound continuations stay pinned.
+              </p>
+            </div>
+          )}
           <fieldset className="provider-pool">
             <legend>Member accounts</legend>
             <div className="pool-accounts">

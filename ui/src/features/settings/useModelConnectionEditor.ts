@@ -44,6 +44,7 @@ export function useModelConnectionEditor({
   const [provider, setProvider] = useState(loadBalancing ? 'OpenAI LB' : '');
   const [apiType, setApiType] = useState(loadBalancing ? 'openai-lb' : 'openai-chat-completions');
   const [poolEnabled, setPoolEnabled] = useState(true);
+  const [preferEarlierReset, setPreferEarlierReset] = useState(false);
   const [memberConnectionIds, setMemberConnectionIds] = useState<string[]>([]);
   const poolConnection = isProviderPool(apiType);
   const poolMembers = compatiblePoolMembers(apiType, savedProviders);
@@ -54,7 +55,7 @@ export function useModelConnectionEditor({
     enabled: poolEnabled,
     memberConnectionIds,
     sticky: true as const,
-    preferEarlierReset: false as const,
+    preferEarlierReset,
   };
   const [url, setUrl] = useState('');
   const connectionReady = Boolean(
@@ -105,6 +106,7 @@ export function useModelConnectionEditor({
     oauthRefreshToken,
     availableModels,
     autoUseExpiringResets,
+    preferEarlierReset,
   ]);
   const latestDraft = useRef(draft);
   latestDraft.current = draft;
@@ -124,6 +126,7 @@ export function useModelConnectionEditor({
       '',
       [],
       false,
+      false,
     ]),
   );
 
@@ -134,6 +137,7 @@ export function useModelConnectionEditor({
     setEditingId(null);
     setConnectionRecoveryRequired(false);
     setPoolEnabled(true);
+    setPreferEarlierReset(false);
     setMemberConnectionIds([]);
     setProvider(loadBalancing ? 'OpenAI LB' : '');
     setApiType(loadBalancing ? 'openai-lb' : 'openai-chat-completions');
@@ -164,6 +168,7 @@ export function useModelConnectionEditor({
         '',
         '',
         [],
+        false,
         false,
       ]),
     );
@@ -354,6 +359,7 @@ export function useModelConnectionEditor({
     setApiKeyConfigured(Boolean(connection.apiKeyConfigured || connection.authConfigured));
     setOauthConnection(Boolean(connection.authConfigured));
     setAutoUseExpiringResets(connection.autoUseExpiringResets === true);
+    setPreferEarlierReset(false);
     const models = selectedRuntimeModels(connection.models).map((model) => ({
       ...model,
       selected: true,
@@ -375,6 +381,7 @@ export function useModelConnectionEditor({
         '',
         models,
         connection.autoUseExpiringResets === true,
+        false,
       ]),
     );
   };
@@ -532,6 +539,7 @@ export function useModelConnectionEditor({
     setProvider(item.provider);
     setApiType(item.apiType);
     setPoolEnabled(item.pool?.enabled ?? true);
+    setPreferEarlierReset(item.pool?.preferEarlierReset === true);
     setMemberConnectionIds(item.pool?.memberConnectionIds ?? []);
     setUrl(item.url);
     setApiKey('');
@@ -582,6 +590,7 @@ export function useModelConnectionEditor({
         '',
         models,
         item.autoUseExpiringResets === true,
+        item.pool?.preferEarlierReset === true,
       ]),
     );
     setRequestError('');
@@ -706,6 +715,8 @@ export function useModelConnectionEditor({
     poolConnection,
     poolEnabled,
     setPoolEnabled,
+    preferEarlierReset,
+    setPreferEarlierReset,
     poolMembers,
     memberConnectionIds,
     missingPoolMembers,

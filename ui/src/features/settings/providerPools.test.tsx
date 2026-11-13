@@ -282,3 +282,75 @@ it('keeps multiple pools separately editable without exposing direct accounts or
   unmount();
   overflow.remove();
 });
+
+it.each(['openai-lb', 'anthropic-lb'])(
+  'preserves an enabled reset preference when loading and saving %s',
+  async (apiType) => {
+    vi.mocked(api).mockResolvedValue({});
+    const { result } = renderHook(() =>
+      useModelConnectionEditor({
+        savedProviders: accounts,
+        loadBalancing: true,
+        onModelConnectionsChanged: vi.fn().mockResolvedValue(undefined),
+      }),
+    );
+    act(() =>
+      result.current.editProvider({
+        ...pool,
+        apiType,
+        pool: {
+          enabled: true,
+          memberConnectionIds: [apiType === 'openai-lb' ? 'first' : 'claude'],
+          preferEarlierReset: true,
+        },
+      }),
+    );
+    expect(result.current.preferEarlierReset).toBe(true);
+    await act(async () => {
+      await result.current.saveProvider();
+    });
+    expect(JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body)).pool.preferEarlierReset).toBe(
+      true,
+    );
+    expect(result.current.preferEarlierReset).toBe(false);
+  },
+);
+
+it('loads the OpenAI checkbox, persists toggles both ways and defaults new pools to off', async () => {
+  vi.mocked(api).mockResolvedValue({});
+  const saved = { ...pool, pool: { ...pool.pool!, preferEarlierReset: true } };
+  render(
+    <ModelConnections
+      loadBalancing
+      savedProviders={[...accounts, saved]}
+      onModelConnectionsChanged={vi.fn().mockResolvedValue(undefined)}
+      mcpConnections={null}
+    />,
+  );
+  const preference = () =>
+    screen.getByRole('checkbox', { name: 'Prefer earlier weekly reset' }) as HTMLInputElement;
+  expect(preference().checked).toBe(false);
+  fireEvent.click(screen.getByText('Saved pools'));
+  fireEvent.click(screen.getByRole('button', { name: /OpenAI LB.*accounts/ }));
+  expect(preference().checked).toBe(true);
+  fireEvent.click(preference());
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledTimes(1));
+  expect(JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body)).pool.preferEarlierReset).toBe(
+    false,
+  );
+  await waitFor(() =>
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('OpenAI LB'),
+  );
+  fireEvent.click(screen.getByLabelText('first'));
+  fireEvent.click(preference());
+  expect(preference().checked).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(String(vi.mocked(api).mock.calls[1][1]?.body)).pool.preferEarlierReset).toBe(
+    true,
+  );
+  await waitFor(() => expect(preference().checked).toBe(false));
+  fireEvent.change(screen.getByLabelText('Adapter'), { target: { value: 'anthropic-lb' } });
+  expect(screen.queryByRole('checkbox', { name: 'Prefer earlier weekly reset' })).toBeNull();
+});
