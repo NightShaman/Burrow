@@ -4,7 +4,7 @@ import type { ChatAttachment } from '../../app/api';
 import { conversationCacheKey } from './chatConversationCache';
 import { readDraftCache, writeDraftCache, type DraftCache } from './chatDraftCache';
 
-/** Owns persisted drafts and scoped attachment lifetime; navigation owns the scope token. */
+/** Owns persisted text drafts and in-memory attachment drafts per conversation. */
 export function useChatComposer(
   agentId: string,
   sessionId: string,
@@ -12,11 +12,8 @@ export function useChatComposer(
   isScopeCurrent: () => boolean,
 ) {
   const [draftCache, setDraftCache] = useState<DraftCache>(readDraftCache);
-  const [attachmentState, setAttachmentState] = useState<{
-    scope: object;
-    files: ChatAttachment[];
-  } | null>(null);
-  const attachmentStateRef = useRef(attachmentState);
+  const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, ChatAttachment[]>>({});
+  const attachmentsRef = useRef(attachmentDrafts);
   const [composerResetGeneration, setComposerResetGeneration] = useState(0);
   const noteComposerReset = useCallback(() => setComposerResetGeneration((value) => value + 1), []);
   const draftKey = agentId && sessionId ? conversationCacheKey(agentId, sessionId) : '';
@@ -38,38 +35,40 @@ export function useChatComposer(
   useEffect(() => {
     writeDraftCache(draftCache);
   }, [draftCache]);
-  const attached = attachmentState?.scope === scope ? attachmentState.files : [];
+  const attachmentKey = conversationCacheKey(agentId, sessionId);
+  const attached = attachmentDrafts[attachmentKey] ?? [];
+  const updateAttachments = useCallback(
+    (files: ChatAttachment[]) => {
+      const next = { ...attachmentsRef.current };
+      if (files.length) next[attachmentKey] = files;
+      else delete next[attachmentKey];
+      attachmentsRef.current = next;
+      setAttachmentDrafts(next);
+    },
+    [attachmentKey],
+  );
   const setAttachment = useCallback(
     (attachments: ChatAttachment[]) => {
       if (!isScopeCurrent()) return [];
-      const current = attachmentStateRef.current;
       const { files, rejected } = admitAttachments(
-        current?.scope === scope ? current.files : [],
+        attachmentsRef.current[attachmentKey] ?? [],
         attachments,
       );
-      const next = { scope, files };
-      attachmentStateRef.current = next;
-      setAttachmentState(next);
+      updateAttachments(files);
       return rejected;
     },
-    [scope, isScopeCurrent],
+    [attachmentKey, scope, isScopeCurrent, updateAttachments],
   );
-  const clearAttachment = useCallback(() => {
-    attachmentStateRef.current = null;
-    setAttachmentState(null);
-  }, []);
+  // A delayed send acceptance clears its captured origin, not the newly selected chat.
+  const clearAttachment = useCallback(() => updateAttachments([]), [updateAttachments]);
   const removeAttachment = useCallback(
     (index: number) => {
-      const current = attachmentStateRef.current;
-      if (current?.scope !== scope) return;
-      const next = {
-        ...current,
-        files: current.files.filter((_, attachmentIndex) => attachmentIndex !== index),
-      };
-      attachmentStateRef.current = next;
-      setAttachmentState(next);
+      if (!isScopeCurrent()) return;
+      updateAttachments(
+        (attachmentsRef.current[attachmentKey] ?? []).filter((_, itemIndex) => itemIndex !== index),
+      );
     },
-    [scope],
+    [attachmentKey, isScopeCurrent, updateAttachments],
   );
   return {
     draft,
