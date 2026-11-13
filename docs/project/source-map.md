@@ -6,9 +6,9 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.12.2` | `6eaeba62b03b7b5a527512c9df36e92ba7d67faf` |
+| Assembled Burrow, build `2026.11.12.3` | `e2f6c49c9d449bced1d18244b2551e9fee9a7755` |
 | Core / Backend | `f589673df9124a459617f76230e90d021577a067` |
-| UI | `cf5098158596b64597516a70e11a4bb490d57c0e` |
+| UI | `f86bf45bf239606da23e6cf8bc370495e81eda88` |
 | Skills | `31470b9f184efbe88dd8ae420d5286a7fd8303c5` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -156,3 +156,10 @@ Source inspection covered `ChatMessage.tsx`, its regression cases and the assemb
 Checked **12 November 2026**: Assembly **2026.11.12.2** and the current table pins reconcile the delta since the successful 11 November baseline. Inspected changes cover typed GIF/native Google video and references, turn-owned artifact delivery, mod tool attribution, complete accepted chat inputs, mention/command parsing, persistent authored drafts, server-anchored account freshness, filesystem/search/patch evidence, scheduler pagination, MCP discovery, Responses aggregation and bounded rule evaluation. Tutor cross-contract notes distinguish newer Core capabilities from unchanged lab routes.
 
 The full review remains **8 November**. Source and regression-test definitions were inspected statically; no application/provider tests, external chat calls, runtime changes or release promotion were performed. Unchanged historical evidence remains dated. These are implementation pins, not the later documentation-only commit IDs, which belong in maintenance receipts. Installed builds and public mirrors may lag this source.
+
+## 13 November ordinary delta review
+
+The current table records assembly **2026.11.12.3** and its exact Backend/UI pins. Compared with the 12 November implementation baseline, runtime changes are confined to chat render reuse and terminal-summary reconciliation in the UI. Review covered `ChatMessage.tsx`, `chatValueEquality.ts`, `chatActivityProjection.ts`, `useChatInputs.ts`, `useChatRecovery.ts`, `useChatSession.ts`, their regression-test definitions, and the assembly manifest. The separate Backend head `58e2c3c0be3cd5556d18bcacb225e8df66c2f513` adds the previous documentation/skill correction only; it does not introduce another runtime change.
+
+See [the interface behavior](../concepts/interface.md#chat-polling-and-render-reuse). This is a static ordinary delta, not another full review, performance benchmark or application/provider test. Earlier dated review sections retain their own pins; unchanged pages inherit the **8 November** full reconciliation and subsequent reviewed deltas.
+

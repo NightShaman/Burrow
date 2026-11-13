@@ -423,3 +423,10 @@ Mod activity displays the actual declared tool identity when available, rather t
 ## Forge media choices
 
 Checked **12 November 2026**: GIF is offered only when the selected model’s saved output capabilities include `gif`, not because its name resembles a known model. GIF-only models stay in Image mode; mixed models keep a still-image default. Catalog-qualified Google video supports saved portraits and existing PNG/JPEG/WebP Forge images (up to 20 MiB each), at most six combined references. Use **Use as video reference** or **Add Forge image** where offered; unavailable controls do not imply provider support. See [typed options and references](../reference/api/artifacts.md#typed-image-options-and-animated-gif).
+
+## Chat polling and render reuse
+
+Checked **13 November 2026**: Chat still polls runtime activity and queued inputs. Unchanged responses reuse the existing activity, input and transcript rows; unchanged historical Markdown is not parsed again merely because live activity changes. Changed text, attachments, terminal diagnostics and input-action state still update. This reduces redundant browser work; it does not stop polling, pause a run or remove history.
+
+A retained completed/failed run summary is not live activity. After its transcript refresh succeeds for the current conversation generation, an identical terminal summary does not trigger another transcript reload on every poll. Failed or discarded refreshes remain retryable, and changed summaries or a new generation require reconciliation again. Active work, pending Forge deliveries and child-session reads continue their existing refresh behavior. These contracts were checked in source and regression-test definitions, not by running the application.
+

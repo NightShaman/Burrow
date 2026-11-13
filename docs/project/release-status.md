@@ -136,3 +136,10 @@ The full page review remains dated **8 November**. Source and test definitions w
 Assembly **2026.11.11.1** (`a487b1c1f64c2e87de655e865b8951f5ac3d6bcc`) contains UI `f5da4b189745935f60112abf00462ddcba6ccf42` and unchanged Backend `60427dd6c41e129d6597ee2f4e9bc08eca13f4e1`. Chat message links open in a new tab for operator and agent messages, including group conversations; code URLs remain non-link text. See [everyday use](../guide/everyday-use.md#follow-links-without-leaving-chat). Archive and Settings links are outside this change.
 
 The ordinary review found no new mod or skill implementation delta. This is source reconciliation, not runtime installation or acceptance testing.
+
+## Ordinary update: 13 November 2026
+
+Inspected assembly **2026.11.12.3** (`e2f6c49c9d449bced1d18244b2551e9fee9a7755`) contains UI `f86bf45bf239606da23e6cf8bc370495e81eda88` and unchanged runtime Backend `f589673df9124a459617f76230e90d021577a067`. The UI reuses unchanged chat rows and historical Markdown, and avoids repeating a successfully reconciled unchanged terminal transcript refresh. Polling and live-work reconciliation remain enabled; this is not a new transport or a change to history retention. See [chat polling and render reuse](../concepts/interface.md#chat-polling-and-render-reuse).
+
+The ordinary pass compares the successful 12 November implementation baseline. The **8 November** full-review scope remains unchanged. Source and regression-test definitions were inspected statically; no application/provider tests, runtime deployment or release promotion were performed. Documentation publication does not update an installed build.
+
