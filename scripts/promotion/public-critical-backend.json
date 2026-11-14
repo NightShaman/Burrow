@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    "tests/postgres-migration-baseline.test.mjs",
+    "tests/portable-install-restore.test.mjs",
+    "tests/postgres-http-routes.integration.test.mjs",
+    "tests/chat-input-http.integration.test.mjs",
+    "tests/developer-tools.test.mjs",
+    "tests/mcp-runtime-tools.test.mjs",
+    "tests/ui-auth-service.test.mjs",
+    "tests/provider-pool-replay.test.mjs",
+    "tests/provider-pool-failure-preservation.test.mjs"
+  ]
+}

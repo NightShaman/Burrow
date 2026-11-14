@@ -20,23 +20,22 @@ test('manifest lookup distinguishes missing manifests from request failures', ()
   assert.match(workflow, /public manifest HTTP \$status.*exit 1/);
   assert.doesNotMatch(workflow, /output previous.json \|\|/);
 });
-test('Node Goblin documentation validates its mounted site including error pages', () => {
-  assert.match(workflow, /cd sources\/Node-Goblin && python -m unittest discover -s scripts\/docs -p 'test_\*\.py'/);
-  assert.match(workflow, /cd sources\/Node-Goblin[^\n]*python scripts\/docs\/check_site\.py site --base-path \/node-goblin\//);
+test('Public promotion runs only selected backend critical files and retains component checks', () => {
+  const gate = workflow.slice(workflow.indexOf('- name: Run critical frozen-source test suites'), workflow.indexOf('- name: Stage allowlisted public trees'));
+  assert.match(gate, /BURROW_TEST_DISPOSABLE_POSTGRES: '1'/);
+  assert.match(gate, /run-critical-backend\.mjs sources\/Burrow-Backend/);
+  assert.doesNotMatch(gate, /npm test.*Burrow-Backend|Run complete frozen documentation|mkdocs|playwright/);
+  for (const component of ['Burrow-UI', 'Node-Goblin/gateway', 'Goblin-Secret-Store', 'Burrow-Backdoor', 'Burrow-Tutor', 'Burrow-Theater', 'Burrow-Switchboard']) assert.ok(gate.includes(component), component);
+  assert.match(workflow, /packaged-smoke\.mjs burrow-public-candidate staged\/Burrow/);
 });
-test('complete validation stays bounded and gives serial backend validation room to finish', () => {
-  const validation = workflow.slice(
-    workflow.indexOf('- name: Run complete frozen-source test suites'),
-    workflow.indexOf('- uses: actions/setup-python@v6'),
-  );
-  assert.match(validation, /BURROW_TEST_TIMEOUT_MS: '3600000'/);
-  assert.match(validation, /BURROW_TEST_DISPOSABLE_POSTGRES: '1'/);
-  assert.match(validation, /timeout-minutes: 90/);
-  assert.match(validation, /cd sources\/Burrow-Backend && npm ci --no-audit --no-fund && npm test/);
-  assert.equal(validation.match(/timeout --kill-after=15s 10m npm test/g)?.length, 2);
-  assert.doesNotMatch(validation, /BURROW_TEST_CONCURRENCY|--test-concurrency|--test-name-pattern/);
+test('deep regression and rendered docs are manually dispatched and cannot publish', () => {
+  const deep = readFileSync(new URL('../../.github/workflows/public-deep-validation.yml', import.meta.url), 'utf8');
+  assert.match(deep, /workflow_dispatch:/);
+  assert.doesNotMatch(deep, /cron:|publish-snapshot|publish-tested-image|docker push/);
+  assert.match(deep, /npm test/);
+  assert.match(deep, /check_mermaid\.py/);
+  assert.match(deep, /if: failure\(\)/);
 });
-
 test('artifact handoff wraps the validated tree and checks restored executable modes before any publication', () => {
   const bundle = workflow.indexOf('tar -cpf public-promotion.tar staged sources.json plan.json release-notes release-assets executable-modes.json tested-image.json tested-image.tar.gz tested-image.tar.gz.sha256');
   const upload = workflow.indexOf('uses: actions/upload-artifact@v4');
@@ -57,6 +56,7 @@ test('promotion changes run installer, assembly and promotion regressions on pus
   assert.equal(installerWorkflow.match(/'scripts\/assembly\/\*\*'/g)?.length, 2);
   assert.equal(installerWorkflow.match(/'\.github\/workflows\/assemble\.yml'/g)?.length, 2);
   assert.equal(installerWorkflow.match(/'\.github\/workflows\/daily-public-promotion\.yml'/g)?.length, 2);
+  assert.equal(installerWorkflow.match(/'\.github\/workflows\/public-deep-validation\.yml'/g)?.length, 2);
   assert.match(installerWorkflow, /node --test scripts\/install\/\*\.test\.mjs scripts\/assembly\/\*\.test\.mjs scripts\/promotion\/\*\.test\.mjs/);
 });
 

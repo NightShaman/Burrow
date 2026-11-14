@@ -1,0 +1,77 @@
+name: Public deep regression and rendered docs (non-publishing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deep-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve frozen backend from SOURCE_VERSIONS
+        id: backend
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+        run: |
+          set -eu
+          sha=$(awk '$1=="Burrow-Backend" {print $2}' SOURCE_VERSIONS)
+          test "${#sha}" -eq 40
+          gh api "repos/NightShaman/Burrow-Backend/commits/$sha" --jq .sha | grep -Fx "$sha"
+          echo "backend_sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: NightShaman/Burrow-Backend
+          ref: ${{ steps.backend.outputs.backend_sha }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Burrow-Backend
+      - name: Install PostgreSQL 17 and pgvector
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates gnupg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
+          . /etc/os-release
+          echo "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
+      - name: Full backend regression (never publishes)
+        env:
+          BURROW_TEST_DISPOSABLE_POSTGRES: '1'
+          BURROW_TEST_TIMEOUT_MS: '3600000'
+        run: |
+          cd sources/Burrow-Backend
+          npm ci --no-audit --no-fund
+          npm test
+      - name: Resolve Node Goblin docs revision
+        id: goblin
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+        run: echo "sha=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: NightShaman/Node-Goblin
+          ref: ${{ steps.goblin.outputs.sha }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          path: sources/Node-Goblin
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Render and browser-check both docs sites (never publishes)
+        run: |
+          python -m pip install -r requirements-docs.txt -r requirements-docs-test.txt -r sources/Node-Goblin/requirements-docs.txt -r sources/Node-Goblin/requirements-docs-test.txt
+          python -m playwright install --with-deps chromium
+          python -m mkdocs build --strict
+          python scripts/docs/check_site.py site
+          python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts
+          (cd sources/Node-Goblin && python -m unittest discover -s scripts/docs -p 'test_*.py' && python -m mkdocs build --strict && python scripts/docs/check_site.py site --base-path /node-goblin/ && python scripts/docs/check_mermaid.py site --artifacts docs-browser-artifacts)
+      - name: Report failure in GitHub Actions summary
+        if: failure()
+        run: |
+          echo 'Deep Public validation failed; inspect this run. No release or deployment was attempted.' >> "$GITHUB_STEP_SUMMARY"
