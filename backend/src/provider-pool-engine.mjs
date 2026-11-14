@@ -16,9 +16,9 @@ export function poolThreadKey(options = {}) {
 }
 
 export function evaluatePoolUsage(result, { family, model = '', now = Date.now(), staleMs = USAGE_STALE_MS } = {}) {
-  if (!result?.ok || !result.usage) return { eligible: false, reason: 'usage_missing' };
+  if (!result?.ok || result.error || result.lastError || !result.usage) return { eligible: false, reason: 'usage_missing' };
   const fetched = time(result.fetchedAt);
-  if (!Number.isFinite(fetched) || now - fetched > staleMs || fetched > now + 60_000) return { eligible: false, reason: 'usage_stale' };
+  if (!Number.isFinite(fetched) || now - fetched >= staleMs || fetched > now + 60_000) return { eligible: false, reason: 'usage_stale' };
   const usage = result.usage;
   const metadata = usage.tierMetadata;
   const capacity = Number(metadata?.capacity ?? metadata?.capacityMultiplier ?? metadata?.weight ?? metadata?.multiplier);
@@ -83,7 +83,7 @@ export class ProviderPoolEngine {
         if (refreshed && !refreshed.members.find(member => member.id === id)?.models?.some(item => item.id === model)) return { id, eligible: false, reason: 'model_unavailable' };
         const method = family === 'anthropic' ? 'anthropicOauthUsage' : 'openaiOauthUsage';
         const usage = await this.usageService?.[method]?.({ connectionId: id });
-        return { id, ...evaluatePoolUsage(usage, { family, model, now }) };
+        return { id, ...evaluatePoolUsage(usage, { family, model, now: this.clock() }) };
       } catch { return { id, eligible: false, reason: 'usage_missing' }; }
     }));
     const client = await this.db.connect();

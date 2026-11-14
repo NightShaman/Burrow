@@ -289,4 +289,7 @@ ALTER TABLE task_board_tasks ADD CONSTRAINT task_board_tasks_status_check CHECK 
 ALTER TABLE github_workflow_watches ADD COLUMN conclusions TEXT[] NOT NULL DEFAULT ARRAY['failure','timed_out','startup_failure','action_required']::text[];
 ` },
   { version: 102, name: 'forge-image-gallery', sql: POSTGRES_FORGE_GALLERY_SCHEMA_SQL },
+  { version: 103, name: 'anthropic-coordination-state', sql: `
+CREATE TABLE anthropic_coordination_state (key TEXT PRIMARY KEY, state_json JSONB NOT NULL);
+` },
 ]);

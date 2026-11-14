@@ -7,6 +7,7 @@ import { createModelConnectionService } from './ui/model-connection-service.mjs'
 import { createMcpConnectionService } from './ui/mcp-connection-service.mjs';
 import { createChatSessionService, publicChatProgress } from './ui/chat-session-service.mjs';
 import { createModLifecycleService } from './ui/mod-lifecycle-service.mjs';
+import { createPostgresAnthropicCoordinationStore } from '../src/anthropic-coordination-store.mjs';
 import { createPostgresOpenAiResetStore } from '../src/postgres-openai-reset-store.mjs';
 import { startOpenAiResetScheduler } from '../src/openai-reset-scheduler.mjs';
 import { activeSessionDetail } from './ui/active-session-detail.mjs';
@@ -231,6 +232,7 @@ const postgresApplication = await createPostgresApplication({
   resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
 });
 const { anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, pollExpiringResets } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now,
+  anthropicCoordinationStore: createPostgresAnthropicCoordinationStore(modelsStore().pool),
   resetStore: createPostgresOpenAiResetStore(modelsStore().pool), openaiUsageUrl: OPENAI_OAUTH_USAGE_URL });
 await serverLogger.event('database_ready', {}, { component: 'postgres' });
 configureMcpProviderStateStore(postgresApplication.stores.mcpProviderStates, { logger: serverLogger });

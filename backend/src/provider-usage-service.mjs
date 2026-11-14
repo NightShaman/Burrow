@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isProviderPool } from './provider-pool-settings.mjs';
 import { createOpenAiResetCreditsService, stableResetAccount } from './openai-reset-credits-service.mjs';
 
@@ -35,7 +36,7 @@ export function anthropicTierMetadata(profile, { unavailable = false } = {}) {
   return metadata;
 }
 
-export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), resetStore, resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
+export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicCoordinationStore, random = Math.random, openaiOauthUsageCache = new Map(), resetStore, resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
   let cacheGeneration = openaiUsageGeneration;
   const ANTHROPIC_USAGE_CACHE_MS = 30_000;
   const OPENAI_OAUTH_USAGE_CACHE_MS = 30_000;
@@ -241,54 +242,68 @@ function anthropicConnectionCandidate(connection = {}) {
     };
   }
 
-  // Cache only allowlisted metadata, never the raw OAuth profile or error details.
-  async function anthropicProfileMetadata(source, { force = false } = {}) {
-    const nowMs = clock();
-    const cached = anthropicProfileCache.get(source.connectionId);
-    if (!force && cached && nowMs - cached.fetchedAtMs < ANTHROPIC_USAGE_CACHE_MS) return cached.metadata;
-    let metadata = anthropicTierMetadata(null, { unavailable: true });
-    try {
-      const response = await fetchImpl(`${source.origin}/api/oauth/profile`, {
-        method: 'GET',
-        headers: { accept: 'application/json', authorization: `Bearer ${source.token}`, 'anthropic-beta': 'oauth-2025-04-20' },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (response.ok) metadata = anthropicTierMetadata(await response.json());
-    } catch { /* Profile failure must not hide successful usage. */ }
-    anthropicProfileCache.set(source.connectionId, { fetchedAtMs: nowMs, metadata });
-    return metadata;
-  }
-
+  // The credential hash identifies identical credentials, not an account.
   async function anthropicOauthUsage({ connectionId = '', force = false } = {}) {
     const source = await resolveAnthropicUsageSource(connectionId);
-    if (!source?.origin || !source?.token) return { ok: false, status: 503, error: 'anthropic_oauth_usage_config_missing', usage: null };
-    const cacheKey = source.connectionId;
-    const cached = anthropicUsageCache.get(cacheKey);
-    const nowMs = clock();
-    if (!force && cached && nowMs - cached.fetchedAtMs < ANTHROPIC_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, ANTHROPIC_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
+    const empty = (error, status) => ({ ok:false, status, error, usage:null, fetchedAt:null, cached:false, cacheTtlMs:0, serverTime:new Date(clock()).toISOString(), sampleAgeMs:null, stale:true, lastSuccess:null, lastError:{error,status,at:new Date(clock()).toISOString()}, retryAt:null, retryAfterMs:0, refreshing:false });
+    if (!source?.origin || !source?.token) return empty('anthropic_oauth_usage_config_missing', 503);
+    if (!anthropicCoordinationStore) return empty('anthropic_oauth_coordination_unavailable', 503);
+    const key = createHash('sha256').update(JSON.stringify([source.origin, source.token])).digest('hex');
+    const retryDelay = (response, failures, now) => {
+      const header = response?.headers?.get('retry-after');
+      let ms = 0;
+      if (header && /^\d+(?:\.\d+)?$/.test(header.trim())) ms = Number(header) * 1000;
+      else if (header) ms = Date.parse(header) - now;
+      if (Number.isFinite(ms) && ms > 0) return ms;
+      return Math.min(300_000, 5_000 * 2 ** Math.min(failures - 1, 6)) * (1 + Math.max(0, Math.min(1, random())) * 0.25);
+    };
     try {
-      const response = await fetchImpl(`${source.origin}/api/oauth/usage`, {
-        headers: { accept: 'application/json', authorization: `Bearer ${source.token}`, 'anthropic-beta': 'oauth-2025-04-20' },
-        signal: AbortSignal.timeout(10_000),
+      return await anthropicCoordinationStore.run(key, async (state, observedGeneration) => {
+        let now = clock();
+        let cached = true;
+        const age = () => state.lastSuccess ? Math.max(0, now - Date.parse(state.lastSuccess.fetchedAt)) : null;
+        const cooldown = () => (state.retryAtMs || 0) > now;
+        // A force request queued behind another fetch shares that completed attempt.
+        if (!cooldown() && (state.generation || 0) === observedGeneration && (force || !state.lastSuccess || age() >= ANTHROPIC_USAGE_CACHE_MS || state.lastError)) {
+          cached = false;
+          let response;
+          try {
+            response = await fetchImpl(`${source.origin}/api/oauth/usage`, { headers:{ accept:'application/json', authorization:`Bearer ${source.token}`, 'anthropic-beta':'oauth-2025-04-20' }, signal:AbortSignal.timeout(10_000) });
+            if (!response.ok) throw Object.assign(new Error('upstream'), { status:response.status });
+            const data = await response.json();
+            if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('malformed'), { malformed:true });
+            const usage = sanitizeAnthropicUsage(data);
+            now = clock();
+            // Profile has an independent, longer cache and retry schedule; refresh never forces it.
+            if (!state.profile || now >= state.profile.expiresAtMs) {
+              try {
+                const profileResponse = await fetchImpl(`${source.origin}/api/oauth/profile`, { method:'GET', headers:{ accept:'application/json', authorization:`Bearer ${source.token}`, 'anthropic-beta':'oauth-2025-04-20' }, signal:AbortSignal.timeout(10_000) });
+                if (!profileResponse.ok) {
+                  const failures = (state.profile?.failures || 0) + 1;
+                  state.profile = { metadata:state.profile?.metadata || anthropicTierMetadata(null, {unavailable:true}), failures, expiresAtMs:clock() + retryDelay(profileResponse, failures, clock()) };
+                } else state.profile = { metadata:anthropicTierMetadata(await profileResponse.json()), failures:0, expiresAtMs:clock() + 3_600_000 };
+              } catch { const failures = (state.profile?.failures || 0) + 1; state.profile = { metadata:state.profile?.metadata || anthropicTierMetadata(null, {unavailable:true}), failures, expiresAtMs:clock() + retryDelay(null, failures, clock()) }; }
+            }
+            state.lastSuccess = { fetchedAt:new Date(now).toISOString(), usage:{...usage, tierMetadata:state.profile.metadata} };
+            state.lastError = null; state.failures = 0; state.retryAtMs = 0;
+          } catch (err) {
+            now = clock();
+            const status = err.status || 502;
+            const error = (err.malformed || err instanceof SyntaxError) ? 'anthropic_oauth_usage_invalid' : err.status ? `anthropic_oauth_usage_failed:${status}` : 'anthropic_oauth_usage_unavailable';
+            state.failures = (state.failures || 0) + 1;
+            state.lastError = {error,status,at:new Date(now).toISOString()};
+            state.retryAtMs = now + retryDelay(response, state.failures, now);
+          }
+          state.generation = (state.generation || 0) + 1;
+        }
+        now = clock();
+        const sampleAgeMs = age();
+        const ok = Boolean(state.lastSuccess && !state.lastError);
+        const retryAfterMs = Math.max(0, (state.retryAtMs || 0) - now);
+        const result = { ok, status:ok ? 200 : state.lastError?.status || 503, error:ok ? null : state.lastError?.error || 'anthropic_oauth_usage_unavailable', source:'anthropic-oauth', endpoint:'/api/oauth/usage', connectionId:source.connectionId, provider:source.provider, usage:ok ? state.lastSuccess.usage : null, fetchedAt:state.lastSuccess?.fetchedAt || null, cached, cacheTtlMs:ok ? Math.max(0, ANTHROPIC_USAGE_CACHE_MS - sampleAgeMs) : 0, serverTime:new Date(now).toISOString(), sampleAgeMs, stale:sampleAgeMs === null || sampleAgeMs >= ANTHROPIC_USAGE_CACHE_MS, lastSuccess:state.lastSuccess || null, lastError:state.lastError || null, retryAt:retryAfterMs ? new Date(state.retryAtMs).toISOString() : null, retryAfterMs, refreshing:false };
+        return {state,result};
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) return { ok: false, status: response.status, error: `anthropic_oauth_usage_failed:${response.status}`, usage: null };
-      const result = {
-        ok: true,
-        source: 'anthropic-oauth',
-        endpoint: '/api/oauth/usage',
-        connectionId: source.connectionId,
-        provider: source.provider,
-        cached: false,
-        cacheTtlMs: ANTHROPIC_USAGE_CACHE_MS,
-        fetchedAt: new Date(nowMs).toISOString(),
-        usage: { ...sanitizeAnthropicUsage(data), tierMetadata: await anthropicProfileMetadata(source, { force }) },
-      };
-      anthropicUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
-      return result;
-    } catch (error) {
-      return { ok: false, status: 502, error: 'anthropic_oauth_usage_unavailable', usage: null };
-    }
+    } catch { return { ...empty('anthropic_oauth_coordination_unavailable', 503), connectionId:source.connectionId, provider:source.provider }; }
   }
 
 

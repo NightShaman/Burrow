@@ -1,3 +1,4 @@
+import { createPostgresAnthropicCoordinationStore } from './anthropic-coordination-store.mjs';
 import { isProviderPool, assertProviderPoolMembers } from './provider-pool-settings.mjs';
 import { createProviderUsageService } from './provider-usage-service.mjs';
 import path from 'node:path';
@@ -172,6 +173,7 @@ export async function resolveModelConfig(args = {}) {
     const usageService = args.providerUsageService || createProviderUsageService({
       modelLookup: () => store, authSecretToken: auth => auth?.token || auth?.accessToken || auth?.apiKey,
       fetchImpl: args.fetchImpl || fetch,
+      ...(store?.pool ? { anthropicCoordinationStore: createPostgresAnthropicCoordinationStore(store.pool) } : {}),
     });
     result.providerPool = {
       connection, store, usageService,
