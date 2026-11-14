@@ -180,3 +180,10 @@
 .forge-gallery-picture footer > button {
   flex-shrink: 0;
 }
+
+.forge-gallery-media > .forge-media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}

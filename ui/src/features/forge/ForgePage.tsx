@@ -2,7 +2,7 @@ import { useConfirm } from '../../app/ConfirmDialog';
 import { rovingKeys } from '../../app/keyboardWidgets';
 import { useOwnedApi } from '../../app/useOwnedApi';
 import { ImagePreview } from '../../app/ImagePreview';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { Agent, SavedProvider } from '../../app/types';
 import './forge.css';
@@ -97,7 +97,7 @@ async function copyReference(text: string): Promise<boolean> {
   textarea.value = text;
   textarea.setAttribute('readonly', '');
   textarea.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-  document.body.append(textarea);
+  (previous?.closest('[role="dialog"]') ?? document.body).append(textarea);
   textarea.select();
   try {
     return document.execCommand('copy');
@@ -207,8 +207,10 @@ function artifactPath(url: string): string {
 export function ArtifactOutput({
   artifact,
   fetchMedia,
+  viewerFooter,
 }: {
   artifact: Artifact;
+  viewerFooter?: (close: () => void) => ReactNode;
   fetchMedia: ReturnType<typeof useOwnedApi>['fetch'];
 }) {
   const [src, setSrc] = useState('');
@@ -311,7 +313,7 @@ export function ArtifactOutput({
           Loading preview…
         </div>
       ) : artifact.kind === 'image' ? (
-        <ImagePreview src={src} alt={artifact.name} />
+        <ImagePreview src={src} alt={artifact.name} viewerFooter={viewerFooter} />
       ) : artifact.kind === 'video' ? (
         <video controls src={src} />
       ) : artifact.kind === 'audio' ? (
@@ -505,7 +507,8 @@ export function Forge({
     setArtifactReferenceState(null);
   }, [videoReferenceScope]);
   const useArtifactReference = (job: Job, artifact: Artifact) => {
-    if (!artifactReferencesAvailable || !eligibleVideoReference(job, artifact) || busy) return;
+    if (!artifactReferencesAvailable || !eligibleVideoReference(job, artifact) || busy)
+      return false;
     const exists = artifactReferences.some(
       (ref) => ref.jobId === job.id && ref.artifactId === artifact.id,
     );
@@ -516,7 +519,7 @@ export function Forge({
       setError(
         `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`,
       );
-      return;
+      return false;
     }
     setArtifactReferenceState({
       scope: videoReferenceScope,
@@ -525,10 +528,12 @@ export function Forge({
         : [...artifactReferences, { jobId: job.id, artifactId: artifact.id }],
     });
     setMode('video');
+    setShowGallery(false);
     setShowRecents(false);
     setSelectedJobId('');
     setError('');
     setNotice('');
+    return true;
   };
   const imageCapability = mode === 'image' ? activeModel?.imageOptions : undefined;
   const imageScope = JSON.stringify([mode, selectedModel, imageCapability]);
@@ -724,12 +729,14 @@ export function Forge({
       setDeleting(false);
     }
   };
-  const attach = async (artifact: Artifact) => {
+  const attach = async (jobId: string, artifact: Artifact) => {
     const agentAtStart = selectedAgentId;
-    if (!selectedJob || !sessionId || !agentAtStart) return;
+    if (!sessionId || !agentAtStart) return;
+    setError('');
+    setNotice('');
     try {
       const resourceAgentId = agentAtStart;
-      await api(`/api/forge/jobs/${encodeURIComponent(selectedJob.id)}/attach`, {
+      await api(`/api/forge/jobs/${encodeURIComponent(jobId)}/attach`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ agentId: resourceAgentId, sessionId, artifactId: artifact.id }),
@@ -741,6 +748,53 @@ export function Forge({
         setError(`Could not attach artifact: ${(e as Error).message}`);
     }
   };
+  const renderMediaActions = (jobId: string, artifact: Artifact, close?: () => void) => {
+    const job = jobs.find((item) => item.id === jobId);
+    return (
+      <div className="forge-media-actions">
+        {artifactReferencesAvailable && job && eligibleVideoReference(job, artifact) && (
+          <button
+            type="button"
+            className="forge-reference-action"
+            disabled={busy || selectionSaving}
+            onClick={() => {
+              if (useArtifactReference(job, artifact)) close?.();
+            }}
+          >
+            Use as video reference
+          </button>
+        )}
+        {['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
+          artifact.mimeType?.toLowerCase(),
+        ) &&
+          artifact.sizeBytes <= 20 * 1024 * 1024 && (
+            <button
+              type="button"
+              onClick={async () => {
+                const copied = await copyReference(`[forge:${jobId}:${artifact.id}]`);
+                setNotice(copied ? 'Reference copied.' : '');
+                setError(copied ? '' : 'Could not copy reference. Try again.');
+              }}
+            >
+              Copy reference
+            </button>
+          )}
+        <button type="button" onClick={() => void attach(jobId, artifact)} disabled={!sessionId}>
+          Attach to conversation
+        </button>
+      </div>
+    );
+  };
+  const feedback = (
+    <>
+      {error && (
+        <p role="alert" className="forge-error">
+          {error}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+    </>
+  );
   return (
     <main ref={machineRef} className="forge-page forge-machine">
       <header className="forge-heading">
@@ -795,11 +849,26 @@ export function Forge({
         </div>
       </header>
       {showGallery && (
-        <ForgeGallery
-          renderArtifact={(artifact) => (
-            <ArtifactOutput artifact={artifact} fetchMedia={owned.fetch} />
-          )}
-        />
+        <>
+          {feedback}
+          <ForgeGallery
+            renderArtifact={(artifact, jobId) => (
+              <>
+                <ArtifactOutput
+                  artifact={artifact}
+                  fetchMedia={owned.fetch}
+                  viewerFooter={(close) => (
+                    <>
+                      {renderMediaActions(jobId, artifact, close)}
+                      {feedback}
+                    </>
+                  )}
+                />
+                {artifact.kind !== 'image' && renderMediaActions(jobId, artifact)}
+              </>
+            )}
+          />
+        </>
       )}
       <div hidden={showGallery} className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}>
         <canvas className="forge-seam-sparks" aria-hidden="true" />
@@ -1157,43 +1226,7 @@ export function Forge({
                       />
                       <footer>
                         <strong>{artifact.name}</strong>
-                        <div>
-                          {artifactReferencesAvailable &&
-                            eligibleVideoReference(selectedJob, artifact) && (
-                              <button
-                                type="button"
-                                className="forge-reference-action"
-                                disabled={busy || selectionSaving}
-                                onClick={() => useArtifactReference(selectedJob, artifact)}
-                              >
-                                Use as video reference
-                              </button>
-                            )}
-                          {['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
-                            artifact.mimeType?.toLowerCase(),
-                          ) &&
-                            artifact.sizeBytes <= 20 * 1024 * 1024 && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const copied = await copyReference(
-                                    `[forge:${selectedJob.id}:${artifact.id}]`,
-                                  );
-                                  setNotice(copied ? 'Reference copied.' : '');
-                                  setError(copied ? '' : 'Could not copy reference. Try again.');
-                                }}
-                              >
-                                Copy reference
-                              </button>
-                            )}
-                          <button
-                            type="button"
-                            onClick={() => void attach(artifact)}
-                            disabled={!sessionId}
-                          >
-                            Attach to conversation
-                          </button>
-                        </div>
+                        {renderMediaActions(selectedJob.id, artifact)}
                       </footer>
                     </article>
                   ))}

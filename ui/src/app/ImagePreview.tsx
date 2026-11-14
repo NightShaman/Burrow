@@ -1,10 +1,15 @@
 import { AccessibleModal } from './AccessibleModal';
 import { useRef, useState } from 'react';
-import type { ImgHTMLAttributes } from 'react';
+import type { ImgHTMLAttributes, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './imagePreview.css';
 
-export function ImagePreview(props: ImgHTMLAttributes<HTMLImageElement>) {
+export function ImagePreview({
+  viewerFooter,
+  ...props
+}: ImgHTMLAttributes<HTMLImageElement> & {
+  viewerFooter?: (close: () => void) => ReactNode;
+}) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [actualSize, setActualSize] = useState(false);
@@ -60,6 +65,11 @@ export function ImagePreview(props: ImgHTMLAttributes<HTMLImageElement>) {
                   <img src={props.src} alt={props.alt || 'Image'} onError={() => setFailed(true)} />
                 )}
               </div>
+              {viewerFooter && (
+                <footer className="image-viewer-footer">
+                  {viewerFooter(() => setOpen(false))}
+                </footer>
+              )}
             </AccessibleModal>
           </div>,
           document.body,

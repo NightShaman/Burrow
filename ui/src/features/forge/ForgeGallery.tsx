@@ -22,7 +22,7 @@ type Catalog = {
 export function ForgeGallery({
   renderArtifact,
 }: {
-  renderArtifact: (artifact: Artifact) => ReactNode;
+  renderArtifact: (artifact: Artifact, jobId: string) => ReactNode;
 }) {
   const owned = useOwnedApi();
   const confirm = useConfirm();
@@ -59,7 +59,7 @@ export function ForgeGallery({
     name: image.artifact.name,
     jobId: image.jobId,
     artifactId: image.artifactId,
-    media: renderArtifact(image.artifact),
+    media: renderArtifact(image.artifact, image.jobId),
   }));
   const placements = Object.fromEntries(
     catalog.images.map((image) => [`${image.jobId}:${image.artifactId}`, image.folderId]),
