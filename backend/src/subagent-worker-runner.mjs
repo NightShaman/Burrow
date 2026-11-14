@@ -1,3 +1,4 @@
+import { runCodexMinion } from './codex-minion-runner.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import { CHAT_RESULT_VERSION, chatResultMetadata } from './chat-result-metadata.mjs';
 import { canSpawnMinion, nextMinionDepth, normalizeMinionDepth } from './minion-depth.mjs';
@@ -466,7 +467,9 @@ export async function runSpawnSubagentChild(options = {}) {
   let result;
   try {
     signal?.throwIfAborted();
-    result = await runRegisteredSpawnSubagentChild({ ...options, parentExecutionContext: childExecutionContext, signal });
+    result = options.harness === 'codex'
+      ? await runCodexMinion({ ...options, parentExecutionContext: childExecutionContext, signal })
+      : await runRegisteredSpawnSubagentChild({ ...options, parentExecutionContext: childExecutionContext, signal });
     return result;
   } catch (error) {
     result = { ok: false, error: error?.message || String(error), cancelled: error?.name === 'AbortError' };

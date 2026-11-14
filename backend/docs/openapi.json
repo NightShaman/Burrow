@@ -7065,9 +7065,9 @@
         "tags": [
           "Settings"
         ],
-        "summary": "Read an agent minion depth setting",
+        "summary": "Read agent minion settings",
         "operationId": "getAgentMinionSettings",
-        "description": "Read the per-agent maximum nesting depth (integer 0–2, default 1). This is independent of minion model selection. Zero disables spawning, one permits direct children, and two also permits grandchildren. Requires an enabled registered agent.",
+        "description": "Read per-agent maxDepth (integer 0–2, default 1) and defaultHarness (burrow or codex, default burrow). Independent of minion model selection. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7075,7 +7075,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "Durable agent minion settings; defaults to maxDepth 1 and defaultHarness burrow when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7083,7 +7083,8 @@
                 },
                 "example": {
                   "ok": true,
-                  "maxDepth": 1
+                  "maxDepth": 1,
+                  "defaultHarness": "burrow"
                 }
               }
             }
@@ -7145,9 +7146,9 @@
         "tags": [
           "Settings"
         ],
-        "summary": "Save an agent minion depth setting",
+        "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist maxDepth for this agent only. maxDepth is required and must be a JSON integer 0, 1 or 2; missing, null, strings, booleans, fractions and out-of-range values are rejected without changing saved settings. This operation does not change model selection or expose any additional minion settings. Child status retains the saved spawn-time budget; root status reports the current setting.",
+        "description": "Persist maxDepth, defaultHarness, or both for this agent only. Omitted fields retain saved values. maxDepth must be a JSON integer 0, 1 or 2; defaultHarness must be burrow or codex. Invalid updates are rejected without changing saved settings. Model selection and saved child lineage are unchanged.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7161,14 +7162,15 @@
                 "$ref": "#/components/schemas/AgentMinionSettingsUpdate"
               },
               "example": {
-                "maxDepth": 1
+                "maxDepth": 1,
+                "defaultHarness": "burrow"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The agent’s durable minion depth setting; defaults to one when unset.",
+            "description": "Durable agent minion settings; defaults to maxDepth 1 and defaultHarness burrow when unset.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7176,13 +7178,14 @@
                 },
                 "example": {
                   "ok": true,
-                  "maxDepth": 1
+                  "maxDepth": 1,
+                  "defaultHarness": "burrow"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid maxDepth or malformed JSON. Saved settings are unchanged.",
+            "description": "Invalid maxDepth, defaultHarness, empty update, or malformed JSON. Saved settings are unchanged.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7201,6 +7204,13 @@
                       "ok": false,
                       "status": 400,
                       "error": "invalid_json"
+                    }
+                  },
+                  "minion_default_harness_invalid": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "minion_default_harness_invalid"
                     }
                   }
                 }
@@ -18853,22 +18863,31 @@
       },
       "AgentMinionSettingsUpdate": {
         "type": "object",
-        "required": [
-          "maxDepth"
-        ],
         "properties": {
           "maxDepth": {
             "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
           }
         },
         "additionalProperties": true,
-        "description": "The only supported minion setting is maxDepth. It is required even though the default for an unset agent is 1; unknown fields do not create additional settings."
+        "description": "Provide maxDepth, defaultHarness, or both. Omitted fields retain their saved value (defaults: maxDepth 1, defaultHarness burrow). Unknown fields are ignored; an update with neither supported field is invalid.",
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/AgentMinionDepthUpdate"
+          },
+          {
+            "$ref": "#/components/schemas/AgentMinionHarnessUpdate"
+          }
+        ]
       },
       "AgentMinionSettingsResponse": {
         "type": "object",
         "required": [
           "ok",
-          "maxDepth"
+          "maxDepth",
+          "defaultHarness"
         ],
         "properties": {
           "ok": {
@@ -18877,6 +18896,9 @@
           },
           "maxDepth": {
             "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
           }
         },
         "additionalProperties": false
@@ -18973,6 +18995,14 @@
               "null"
             ],
             "additionalProperties": true
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "burrow",
+              "codex"
+            ],
+            "description": "Actual spawn-time child harness; legacy children default to burrow. Root chats use burrow."
           }
         },
         "additionalProperties": true
@@ -19069,6 +19099,14 @@
               "null"
             ],
             "additionalProperties": true
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "burrow",
+              "codex"
+            ],
+            "description": "Actual spawn-time child harness; legacy children default to burrow. Root chats use burrow."
           }
         },
         "additionalProperties": true
@@ -20222,6 +20260,45 @@
             }
           }
         }
+      },
+      "MinionDefaultHarness": {
+        "type": "string",
+        "enum": [
+          "burrow",
+          "codex"
+        ],
+        "default": "burrow",
+        "description": "Default harness for new minions. Legacy or unset settings use burrow."
+      },
+      "AgentMinionDepthUpdate": {
+        "type": "object",
+        "required": [
+          "maxDepth"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AgentMinionHarnessUpdate": {
+        "type": "object",
+        "required": [
+          "defaultHarness"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          }
+        },
+        "additionalProperties": true
       }
     },
     "securitySchemes": {

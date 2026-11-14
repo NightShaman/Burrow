@@ -1,0 +1,274 @@
+import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+
+const failure = (code, message) => Object.assign(new Error(message), { code });
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  // Terminal events may arrive before the caller starts awaiting completion.
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+};
+const tokensPayload = (tokens) => {
+  if (!tokens || typeof tokens.accessToken !== 'string' || !tokens.accessToken
+      || typeof tokens.chatgptAccountId !== 'string' || !tokens.chatgptAccountId) {
+    throw failure('AUTH_INVALID', 'External ChatGPT tokens require accessToken and chatgptAccountId');
+  }
+  return { accessToken: tokens.accessToken, chatgptAccountId: tokens.chatgptAccountId,
+    ...(tokens.chatgptPlanType == null ? {} : { chatgptPlanType: tokens.chatgptPlanType }) };
+};
+
+/** Transport-only stdio app-server client. Runtime integration lives in codex-minion-runner.
+ * See docs/codex-minion-client.md for the public contract and protocol sources.
+ */
+export class CodexMinionClient {
+  constructor({ executable = 'codex', cwd, env = process.env, spawnProcess = spawn,
+    clientInfo = { name: 'burrow', title: 'Burrow', version: '0.1.0' },
+    onActivity = () => {}, refreshAuthTokens,
+    requestTimeoutMs = 15_000, turnTimeoutMs = 300_000,
+    refreshTimeoutMs = 8_000, interruptTimeoutMs = 5_000, shutdownTimeoutMs = 1_000,
+    maxLineBytes = 8 * 1024 * 1024 } = {}) {
+    for (const value of [requestTimeoutMs, turnTimeoutMs, refreshTimeoutMs,
+      interruptTimeoutMs, shutdownTimeoutMs, maxLineBytes]) {
+      if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError('Limits must be positive integers');
+    }
+    Object.assign(this, { executable, cwd, env, spawnProcess, clientInfo, onActivity,
+      refreshAuthTokens, requestTimeoutMs, turnTimeoutMs, refreshTimeoutMs,
+      interruptTimeoutMs, shutdownTimeoutMs, maxLineBytes });
+    this.pending = new Map();
+    this.nextId = 1;
+    this.buffer = '';
+    this.decoder = new StringDecoder('utf8');
+    this.closed = false;
+  }
+
+  async initialize() {
+    if (this.initializing) return this.initializing;
+    if (this.closed) throw failure('CLOSED', 'Codex client is closed');
+    this.initializing = (async () => {
+      try {
+        this.proc = this.spawnProcess(this.executable, ['app-server', '--listen', 'stdio://'],
+          { cwd: this.cwd, env: this.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+        this.exit = deferred();
+        this.proc.on('error', () => this.fail(failure('PROCESS_ERROR', 'Codex process failed')));
+        this.proc.on('close', () => {
+          this.exited = true;
+          this.exit.resolve();
+          this.fail(failure('PROCESS_EXIT', 'Codex process closed'));
+        });
+        this.proc.stdin.on('error', () => this.fail(failure('STDIN_ERROR', 'Codex stdin failed')));
+        this.proc.stdout.on('error', () => this.fail(failure('STDOUT_ERROR', 'Codex stdout failed')));
+        this.proc.stdout.on('data', (chunk) => this.consume(this.decoder.write(chunk)));
+        this.proc.stdout.on('end', () => {
+          this.consume(this.decoder.end());
+          if (!this.closed) this.fail(failure('STDOUT_EOF', 'Codex stdout ended'));
+        });
+        // Never forward stderr: native diagnostics can contain credentials.
+        this.proc.stderr?.on('data', () => {});
+        this.proc.stderr?.on('error', () => {});
+        const result = await this.request('initialize', {
+          clientInfo: this.clientInfo, capabilities: { experimentalApi: true },
+        });
+        this.send({ method: 'initialized', params: {} });
+        this.ready = true;
+        return result;
+      } catch (error) {
+        this.fail(error?.code ? error : failure('PROCESS_ERROR', 'Could not start Codex'));
+        await this.close();
+        throw this.fatal;
+      }
+    })();
+    return this.initializing;
+  }
+
+  assertReady() {
+    if (!this.ready || this.closed) throw failure('NOT_READY', 'Initialize Codex before using this method');
+  }
+  async login(tokens) {
+    this.assertReady();
+    return this.request('account/login/start', { type: 'chatgptAuthTokens', ...tokensPayload(tokens) });
+  }
+  async startThread(params = {}) {
+    this.assertReady();
+    return this.request('thread/start', params);
+  }
+  async resumeThread(threadId, params = {}) {
+    this.assertReady();
+    return this.request('thread/resume', { ...params, threadId });
+  }
+
+  /** Resolves only on turn/completed; only one active turn per client. */
+  async startTurn(params, { signal } = {}) {
+    this.assertReady();
+    if (this.active) throw failure('TURN_ACTIVE', 'A Codex turn is already active');
+    if (!params?.threadId) throw new TypeError('threadId is required');
+    if (signal?.aborted) throw failure('ABORTED', 'Codex turn cancelled');
+    const active = { threadId: params.threadId, done: deferred(), items: new Map(), early: [] };
+    this.active = active;
+    const abort = () => { void this.interrupt().catch(() => {}); };
+    signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => {
+      active.done.reject(failure('TURN_TIMEOUT', 'Codex turn timed out'));
+      void this.interrupt().catch(() => {});
+    }, this.turnTimeoutMs);
+    try {
+      const result = await this.request('turn/start', params);
+      if (!result?.turn?.id) throw failure('PROTOCOL_ERROR', 'Missing Codex turn id');
+      active.turnId = result.turn.id;
+      active.started?.();
+      for (const message of active.early) this.turnEvent(message);
+      active.early = [];
+      return await active.done.promise;
+    } catch (error) {
+      // A start RPC failure leaves server state uncertain; do not reuse it.
+      if (!active.turnId) this.fail(error);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      if (this.active === active) this.active = null;
+    }
+  }
+
+  async interrupt() {
+    const active = this.active;
+    if (!active) return;
+    if (active.interrupting) return active.interrupting;
+    active.interrupting = (async () => {
+      try {
+        // Cancellation during turn/start waits for its response, bounded by RPC timeout.
+        if (!active.turnId) {
+          await this.bounded(new Promise((resolve) => {
+            active.started = resolve;
+          }), this.interruptTimeoutMs);
+        }
+        await this.request('turn/interrupt', { threadId: active.threadId, turnId: active.turnId }, this.interruptTimeoutMs);
+        await this.bounded(active.done.promise.catch(() => {}), this.interruptTimeoutMs);
+      } catch {
+        this.fail(failure('INTERRUPT_TIMEOUT', 'Codex cancellation failed or timed out'));
+        await this.close();
+      }
+    })();
+    return active.interrupting;
+  }
+
+  bounded(promise, ms) {
+    let timer;
+    return Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(failure('TIMEOUT', 'Codex operation timed out')), ms);
+    })]).finally(() => clearTimeout(timer));
+  }
+  send(message) {
+    if (this.closed || !this.proc) throw failure('CLOSED', 'Codex client is closed');
+    this.proc.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+  request(method, params, timeout = this.requestTimeoutMs) {
+    const id = this.nextId++;
+    const done = deferred();
+    const timer = setTimeout(() => {
+      this.fail(failure('RPC_TIMEOUT', 'Codex request timed out'));
+    }, timeout);
+    this.pending.set(id, { ...done, timer });
+    try { this.send({ id, method, params }); }
+    catch { this.fail(failure('IPC_ERROR', 'Could not write to Codex')); }
+    return done.promise;
+  }
+  consume(text) {
+    if (this.closed) return;
+    this.buffer += text;
+    let index;
+    while ((index = this.buffer.indexOf('\n')) !== -1) {
+      const line = this.buffer.slice(0, index);
+      this.buffer = this.buffer.slice(index + 1);
+      if (Buffer.byteLength(line) > this.maxLineBytes) return this.fail(failure('PROTOCOL_ERROR', 'Codex message exceeds limit'));
+      if (!line.trim()) continue;
+      try { this.message(JSON.parse(line)); }
+      catch { return this.fail(failure('PROTOCOL_ERROR', 'Invalid Codex JSONL message')); }
+      if (this.closed) return;
+    }
+    if (Buffer.byteLength(this.buffer) > this.maxLineBytes) this.fail(failure('PROTOCOL_ERROR', 'Codex message exceeds limit'));
+  }
+  message(message) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error();
+    if (message.method && message.id != null) {
+      void this.serverRequest(message);
+      return;
+    }
+    if (message.id != null) {
+      const done = this.pending.get(message.id);
+      if (!done) return;
+      clearTimeout(done.timer);
+      this.pending.delete(message.id);
+      // Do not expose server error messages/data (which may echo auth params).
+      if (message.error) done.reject(failure('RPC_ERROR', 'Codex request rejected'));
+      else if ('result' in message) done.resolve(message.result);
+      else done.reject(failure('PROTOCOL_ERROR', 'Invalid Codex response'));
+      return;
+    }
+    if (typeof message.method !== 'string') throw new Error();
+    try { Promise.resolve(this.onActivity(message)).catch(() => {}); } catch { /* observer only */ }
+    if (this.active && !this.active.turnId) {
+      if (this.active.early.length >= 10_000) return this.fail(failure('PROTOCOL_ERROR', 'Too many early Codex events'));
+      this.active.early.push(message);
+    } else this.turnEvent(message);
+  }
+  turnEvent({ method, params = {} }) {
+    const active = this.active;
+    if (!active || params.threadId !== active.threadId) return;
+    const turnId = params.turnId ?? params.turn?.id;
+    if (turnId !== active.turnId) return;
+    if (method === 'item/completed' && params.item?.id) active.items.set(params.item.id, params.item);
+    if (method === 'error' && params.willRetry !== true) {
+      active.done.reject(failure('TURN_ERROR', 'Codex turn reported an error'));
+      this.fail(failure('TURN_ERROR', 'Codex turn reported an error'));
+    }
+    if (method !== 'turn/completed') return;
+    if (params.turn.status === 'completed') {
+      const items = [...active.items.values()];
+      active.done.resolve({ threadId: active.threadId, turnId: active.turnId,
+        status: 'completed', items, text: items.filter((item) => item.type === 'agentMessage').map((item) => item.text).join('\n') });
+    } else active.done.reject(failure(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
+      params.turn.status === 'interrupted' ? 'Codex turn cancelled' : 'Codex turn failed'));
+  }
+  async serverRequest(message) {
+    const { id, method, params } = message;
+    try {
+      if (method !== 'account/chatgptAuthTokens/refresh' || !this.refreshAuthTokens) {
+        this.send({ id, error: { code: -32601, message: 'Unsupported client request' } });
+        return;
+      }
+      const tokens = await this.bounded(Promise.resolve().then(() => this.refreshAuthTokens(params)), this.refreshTimeoutMs);
+      this.send({ id, result: tokensPayload(tokens) });
+    } catch {
+      if (!this.closed) {
+        try { this.send({ id, error: { code: -32603, message: 'Token refresh failed' } }); } catch { /* closing */ }
+      }
+    }
+  }
+  fail(error) {
+    if (this.closed) return;
+    this.fatal = error;
+    this.closed = true;
+    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
+    this.pending.clear();
+    this.active?.done.reject(error);
+    void Promise.resolve().then(() => this.close()).catch(() => {});
+  }
+  close() {
+    if (this.closing) return this.closing;
+    this.closing = (async () => {
+      if (!this.closed) this.fail(failure('CLOSED', 'Codex client closed'));
+      if (!this.proc || this.exited) return;
+      this.proc.stdin.end();
+      try { await this.bounded(this.exit.promise, this.shutdownTimeoutMs); return; } catch { /* escalate */ }
+      this.proc.kill('SIGTERM');
+      try { await this.bounded(this.exit.promise, this.shutdownTimeoutMs); return; } catch { /* escalate */ }
+      this.proc.kill('SIGKILL');
+      try { await this.bounded(this.exit.promise, this.shutdownTimeoutMs); }
+      catch { throw failure('CLEANUP_TIMEOUT', 'Codex process did not close after SIGKILL'); }
+    })();
+    // Internal fire-and-forget cleanup must not cause unhandled rejection.
+    this.closing.catch(() => {});
+    return this.closing;
+  }
+}

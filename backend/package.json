@@ -1,6 +1,6 @@
 {
   "name": "burrow",
-  "version": "2026.11.14.23",
+  "version": "2026.11.14.24",
   "private": true,
   "type": "module",
   "bin": {
@@ -59,7 +59,8 @@
     "pg": "^8.16.3",
     "acorn": "^8.18.0",
     "js-yaml": "^5.2.3",
-    "undici": "^6.29.1"
+    "undici": "^6.29.1",
+    "@openai/codex": "0.169.0"
   },
   "devDependencies": {
     "@redocly/openapi-core": "^2.46.1",

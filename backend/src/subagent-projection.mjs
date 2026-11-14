@@ -39,6 +39,7 @@ export function projectSubagentTree(records = [], { agentId = null, sessionId = 
     const marker = record.minionDepth || record;
     return {
       ...record,
+      harness: record.harness === 'codex' ? 'codex' : 'burrow',
       ...(agentId ? { agentId } : {}),
       sessionId: text(record.trace?.childSessionId) || text(record.sessionId),
       parentSessionId: text(record.owner?.sessionId) || text(record.parentSessionId),
@@ -149,12 +150,13 @@ export function sessionMinionAncestry({ sessionId, runId = null, metadata = {}, 
   // depth-zero root reports the current setting supplied by the caller.
   if (subagent) {
     const { parentSessionId, parentRunId, subagentId, depth, maxDepth: savedMaxDepth, rootSessionId, rootRunId } = subagent;
-    return { sessionId, runId: runId || subagent.runId, parentSessionId, parentRunId, subagentId, depth, maxDepth: savedMaxDepth, rootSessionId, rootRunId };
+    return { sessionId, harness: subagent.harness === 'codex' ? 'codex' : 'burrow', runId: runId || subagent.runId, parentSessionId, parentRunId, subagentId, depth, maxDepth: savedMaxDepth, rootSessionId, rootRunId };
   }
   const marker = metadata?.minionDepth || {};
   const child = metadata?.sessionKind === 'subagent' || metadata?.parentChild === true || marker.depth > 0;
   return {
     sessionId,
+    harness: child && metadata.harness === 'codex' ? 'codex' : 'burrow',
     runId,
     parentSessionId: child ? text(metadata?.parentSessionId) : null,
     parentRunId: child ? text(metadata?.parentRunId) : null,

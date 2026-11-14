@@ -1,3 +1,4 @@
+import { runCodexSessionFollowup } from './codex-session-followup.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { operatorPreferenceTurn } from './preference-learning.mjs';
 import { resolveTurnMinionDepth } from './minion-depth.mjs';
@@ -453,6 +454,14 @@ async function runAskChatUnserialized({
     : null;
   const minionDepth = await resolveTurnMinionDepth({ metadata: stores?.metadata, conversations: stores?.conversations, agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId });
   const executionContext = createRuntimeExecutionContext({ minionDepth, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  // Native child sessions never fall through to Burrow planning or tools.
+  const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
+    agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,
+    message, dataRoot, traceDir: logger.traceDir, signal: normalizedArgs.abort_signal,
+    attachments: turnAttachments, noCallModel: noCallModel || normalizedArgs.no_call_model });
+  if (codexFollowup) return commitTerminalResult({ branch: 'codex-followup',
+    finalize: async () => ({ ...codexFollowup, mode: 'ask', command,
+      runId: resolvedRunId, sessionId: resolvedSessionId, traceDir: logger.traceDir }) });
   const effectiveSkillCatalog = modAgent && modAgent.capabilities?.skills !== true ? { skills: [] } : await loadEffectiveSkillCatalog({
     workspaceRoot: runtimeState.workspaceRoot,
     agentId: runtimeState.agentId,

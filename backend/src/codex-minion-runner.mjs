@@ -1,0 +1,209 @@
+import { readSubagentRecord, updateSubagentStatus } from './subagent-store.mjs';
+import { constants } from 'node:fs';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { CodexMinionClient } from './codex-minion-client.mjs';
+import { conversationAuthority } from './conversation-authority.mjs';
+import { resolveProcessExecutionTarget } from './process-execution-router.mjs';
+import { refreshOpenAiOAuth, openaiOAuthIdentity } from './openai-oauth-login.mjs';
+import { isProviderPool } from './provider-pool-settings.mjs';
+import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
+
+const refreshes = new WeakMap();
+const fail = (code) => { throw Object.assign(new Error(code), { runnerCode: code }); };
+
+/** Explicit override is authoritative: a broken override never falls back to PATH. */
+export async function discoverCodexExecutable(env = process.env) {
+  const override = env.BURROW_CODEX_EXECUTABLE;
+  if (override && !path.isAbsolute(override)) fail('codex_executable_override_must_be_absolute');
+  const candidates = override ? [override] : String(env.PATH || '').split(path.delimiter)
+    .filter((dir) => path.isAbsolute(dir)).map((dir) => path.join(dir, 'codex'));
+  if (!override) candidates.push(fileURLToPath(new URL('../node_modules/.bin/codex', import.meta.url)));
+  for (const candidate of candidates) {
+    try {
+      if (!(await fs.stat(candidate)).isFile()) continue;
+      await fs.access(candidate, constants.X_OK);
+      return candidate;
+    } catch { /* discovery only; never disclose filesystem diagnostics */ }
+  }
+  fail('codex_executable_unavailable');
+}
+
+/** Server-only adapter. Admission, session initialization and terminal receipts remain parent-owned. */
+export async function runCodexMinion({ id, task, target, dataRoot, childSessionId, owner = {},
+  modelConfig, traceDir = null, parentExecutionContext = null,
+  signal = parentExecutionContext?.abortSignal, executionPolicy = null, continuation = null } = {}) {
+  const cancellation = new AbortController();
+  signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
+  let cancellationPoll;
+  let nativeStarted = false;
+  let recorded = false;
+  let sequence = 0;
+  let client;
+  let authority;
+  let dispatched = false;
+  let writes = Promise.resolve();
+  let persistenceFailed = false;
+  let nativeSession;
+  let conversationStore;
+  const saveNative = async (patch) => {
+    nativeSession = { ...nativeSession, ...patch };
+    await conversationStore.updateMetadata({ agentId: owner.agentId, sessionId: childSessionId,
+      update: old => ({ ...old, codexSession: nativeSession }) });
+  };
+  const secrets = new Set();
+  const redact = (value) => {
+    let text = String(value || '');
+    for (const secret of secrets) if (secret) text = text.split(secret).join('[redacted]');
+    return text;
+  };
+  const base = { evidence: [], artifacts: [], changedFiles: [], memoryWrites: [],
+    verificationTarget: target?.root || null, verification: { status: 'not_run',
+      check: 'Native Codex work independently verified by Burrow', observed: 'Native tool results are not promoted Burrow evidence.', actionRequired: false } };
+  const append = (content, activity = false) => authority.append({ sessionId: childSessionId,
+    runId: id, traceDir, type: activity ? 'event' : 'message', role: activity ? null : 'assistant',
+    content: redact(content), visibility: activity ? 'activity' : 'chat', entersPrompt: !activity,
+    metadata: { kind: activity ? 'codex-minion-activity' : 'codex-minion-response', subagentExecution: true } });
+  let result;
+  try {
+    // Check host routing before touching the target path, credentials or executable.
+    if (resolveProcessExecutionTarget(parentExecutionContext || {}).kind !== 'local') fail('codex_remote_app_server_unavailable');
+    const boundaries = parentExecutionContext?.executionBoundaries;
+    if (boundaries && (!Array.isArray(boundaries.hardBlocks) || boundaries.hardBlocks.some(rule => rule.enabled !== false))) fail('codex_execution_boundaries_unsupported');
+    if (!id || !task?.trim() || !dataRoot || !childSessionId) fail('codex_runner_input_required');
+    if (target?.kind !== 'filesystem' || !path.isAbsolute(target.root || '')) fail('codex_target_invalid');
+    if (!(await fs.stat(target.root)).isDirectory()) fail('codex_target_invalid');
+    if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('codex_owner_invalid');
+    const models = parentExecutionContext?.stores?.models;
+    if (!models?.get || !models?.auth || !models?.resolveAuth) fail('codex_model_settings_store_required');
+    const connectionId = modelConfig?.connectionId;
+    if (!connectionId || !modelConfig?.model) fail('codex_model_selection_required');
+    const connection = await models.get(connectionId);
+    if (!connection || isProviderPool(connection) || !['openai-responses', 'openai-chat-completions'].includes(connection.apiType)) fail('codex_openai_oauth_required');
+    if (!(connection.models || []).some((model) => model.id === modelConfig.model && model.selected !== false)) fail('codex_model_not_enabled');
+    conversationStore = parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations;
+    authority = conversationAuthority({ store: conversationStore, agentId: owner.agentId });
+    if (!conversationStore.updateMetadata) fail('codex_session_metadata_required');
+    if (continuation && (!continuation.threadId || continuation.state === 'running')) fail('codex_session_unavailable');
+    const tokens = async (force = false) => {
+      signal?.throwIfAborted();
+      const prior = await models.auth(connectionId);
+      if (prior?.type !== 'oauth' || !/openai/i.test(prior.provider || connection.provider)) fail('codex_openai_oauth_required');
+      for (const value of [prior.accessToken, prior.refreshToken, prior.idToken]) if (value) secrets.add(value);
+      if (force) {
+        if (!models.persistAuth) fail('codex_oauth_refresh_unavailable');
+        let pending = refreshes.get(models);
+        if (!pending) { pending = new Map(); refreshes.set(models, pending); }
+        if (!pending.has(connectionId)) {
+          const refresh = (async () => {
+            const current = await models.auth(connectionId);
+            if (current?.type !== 'oauth') fail('codex_openai_oauth_required');
+            const fresh = await refreshOpenAiOAuth(current, { signal: AbortSignal.timeout(8_000) });
+            await models.persistAuth(connectionId, fresh, undefined, current.refreshToken, current);
+          })();
+          pending.set(connectionId, refresh);
+          refresh.finally(() => pending.delete(connectionId)).catch(() => {});
+        }
+        await pending.get(connectionId);
+      }
+      // Normal expiry refresh remains owned by the store's advisory-lock lifecycle.
+      const resolved = await models.resolveAuth(connectionId, { signal });
+      if (resolved.type !== 'oauth' || !resolved.token) fail('codex_openai_oauth_required');
+      secrets.add(resolved.token);
+      const identity = openaiOAuthIdentity(resolved.token);
+      const saved = await models.auth(connectionId);
+      for (const value of [saved?.accessToken, saved?.refreshToken, saved?.idToken]) if (value) secrets.add(value);
+      const accountId = identity.accountId || (saved?.accessToken === resolved.token ? saved.accountId : null);
+      if (!accountId) fail('codex_oauth_account_required');
+      return { accessToken: resolved.token, chatgptAccountId: accountId,
+        ...(identity.planType ? { chatgptPlanType: identity.planType } : {}) };
+    };
+    recorded = !continuation && Boolean(await readSubagentRecord({ dataRoot, id }));
+    if (recorded) {
+      cancellationPoll = setInterval(() => {
+        void readSubagentRecord({ dataRoot, id }).then(record => {
+          if (record?.status === 'cancelled') cancellation.abort();
+        }).catch(() => cancellation.abort());
+      }, 200);
+      cancellationPoll.unref();
+    }
+    const executable = await discoverCodexExecutable();
+    const login = await tokens();
+    const policy = normalizeExecutionPolicyInput(executionPolicy);
+    if (policy.blockers.length) fail('codex_execution_policy_blocked');
+    signal?.throwIfAborted();
+    client = new CodexMinionClient({ executable, cwd: target.root,
+      refreshAuthTokens: () => tokens(true),
+      onActivity: ({ method }) => {
+        // Never retain native params, commands, outputs, errors, IDs or unknown notifications.
+        const label = { 'turn/started': 'Codex turn started.', 'item/started': 'Codex item started.',
+          'item/completed': 'Codex item completed.', 'turn/completed': 'Codex turn completed.' }[method];
+        if (label) writes = writes.then(async () => {
+          await append(label, true);
+          if (recorded && !signal.aborted) await updateSubagentStatus({ dataRoot, id, status: 'running', phase: 'codex-native',
+            activity: { kind: 'run', status: 'running', phase: 'codex-native', label, sequence: ++sequence, lastActualActivityAt: new Date().toISOString() } });
+        }).catch(() => { persistenceFailed = true; });
+      },
+    });
+    // Cancellation covers initialization/login/thread RPCs as well as the turn.
+    const abort = () => {
+      // Interrupt an active native turn before process teardown; initialization
+      // has no turn to interrupt and is closed immediately.
+      void (client.active ? client.interrupt().finally(() => client.close()) : client.close()).catch(() => {});
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      signal?.throwIfAborted();
+      await append('Codex app-server starting.', true);
+      nativeStarted = true;
+      await client.initialize();
+      await client.login(login);
+      const threadParams = { cwd: target.root, model: modelConfig.model,
+        approvalPolicy: 'never', sandbox: policy.mayMutate ? 'danger-full-access' : 'read-only' };
+      if (continuation && continuation.accountId !== login.chatgptAccountId) fail('codex_session_account_changed');
+      const { thread } = continuation
+        ? await client.resumeThread(continuation.threadId, threadParams)
+        : await client.startThread({ ...threadParams, ephemeral: false });
+      if (!thread?.id || (continuation && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
+      nativeSession = { version: 1, threadId: thread.id, target, modelConfig: { connectionId, model: modelConfig.model,
+        ...(modelConfig.extra ? { extra: modelConfig.extra } : {}) }, executionPolicy: policy, accountId: login.chatgptAccountId };
+      // Persist resume identity before dispatch: never silently create a new thread
+      // if the native turn later fails, is cancelled, or Burrow loses its process.
+      await saveNative({ state: 'running', runId: id });
+      signal?.throwIfAborted();
+      dispatched = true;
+      const turn = await client.startTurn({ threadId: thread.id,
+        ...(modelConfig.extra?.reasoning?.effort ? { effort: modelConfig.extra.reasoning.effort } : {}),
+        input: [{ type: 'text', text: `Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` }] }, { signal });
+      const final = turn.items.filter((item) => item.type === 'agentMessage' && item.phase === 'final_answer');
+      const summary = redact((final.length ? final.map((item) => item.text).join('\n') : turn.text).trim());
+      if (!summary) fail('codex_final_response_missing');
+      await writes;
+      if (persistenceFailed) fail('codex_transcript_write_failed');
+      await append(summary);
+      await saveNative({ state: 'ready' });
+      result = { ...base, ok: true, summary, blockers: [],
+        warnings: ['codex_native_tool_evidence_not_promoted'], sideEffectsApplied: null };
+    } finally { signal?.removeEventListener('abort', abort); }
+  } catch (error) {
+    const code = signal?.aborted ? 'codex_cancelled' : error?.runnerCode || 'codex_native_run_failed';
+    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : 'Codex minion unavailable or failed.',
+      blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
+  } finally {
+    clearInterval(cancellationPoll);
+    if (nativeSession && !result?.ok) {
+      try { await saveNative({ state: signal.aborted ? 'interrupted' : 'failed' }); }
+      catch { /* Original failure stays sanitized; stale running state fails closed. */ }
+    }
+    await writes;
+    try { await client?.close(); } catch {
+      if (nativeSession) {
+        try { await saveNative({ state: 'running', cleanupUnconfirmed: true }); } catch { /* Fail closed where possible. */ }
+      }
+      result = { ...base, ok: false, summary: 'Codex process cleanup could not be confirmed.',
+        blockers: ['codex_cleanup_failed'], warnings: [], sideEffectsApplied: dispatched ? null : false };
+    }
+  }
+  return { ...result, spawned: nativeStarted, cancelled: signal.aborted };
+}
