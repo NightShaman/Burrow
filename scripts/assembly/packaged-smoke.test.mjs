@@ -13,7 +13,7 @@ test('index must reference actual JS and CSS assets', () => {
  assert.deepEqual(assetPaths('<script src="/assets/index.js"></script><link href="/assets/index.css">'), ['/assets/index.js','/assets/index.css']);
  assert.throws(()=>assetPaths('<html>fixture</html>'));
 });
-test('development assembly requires scoped owned SQL gate and smoke-tested dev image; complete validation stays in daily promotion', () => {
+test('development assembly requires scoped owned SQL gate and smoke-tested dev image; critical validation stays in daily promotion', () => {
  const workflow = readFileSync(new URL('../../.github/workflows/assemble.yml',import.meta.url),'utf8');
  const promotion = readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml',import.meta.url),'utf8');
  assert.match(workflow,/component-gate\.mjs NightShaman\/Burrow-Backend/);
@@ -25,7 +25,8 @@ test('development assembly requires scoped owned SQL gate and smoke-tested dev i
  assert.match(workflow,/for tag in latest dev/);
  assert.match(workflow,/ghcr\.io\/nightshaman\/burrow:\$tag/);
  assert.match(workflow,/sha-\$\{\{ steps\.publish\.outputs\.commit \}\}/);
- assert.match(promotion,/Run complete frozen-source test suites/);
+ assert.match(promotion,/Run critical frozen-source test suites/);
+ assert.match(promotion,/run-critical-backend\.mjs sources\/Burrow-Backend/);
  assert.match(promotion,/npm test/);
  assert.match(promotion,/Build and smoke the public Burrow image/);
  assert.match(promotion,/packaged-smoke\.mjs/);
