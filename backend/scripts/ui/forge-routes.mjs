@@ -6,6 +6,12 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
     try {
       const forge = store();
       if (req.method === 'GET' && url.pathname === '/api/archive/forge') sendJson(res, 200, { records: await forge.archive() });
+      else if (req.method === 'GET' && url.pathname === '/api/forge/gallery') sendJson(res, 200, { ok: true, ...await forge.gallery() });
+      else if (req.method === 'POST' && url.pathname === '/api/forge/gallery/folders') sendJson(res, 201, { ok: true, folder: await forge.createGalleryFolder(await readJsonBody(req)) });
+      else if (req.method === 'PUT' && /^\/api\/forge\/gallery\/images\/[^/]+\/[^/]+$/.test(url.pathname)) {
+        const [, , , , , jobId, artifactId] = url.pathname.split('/');
+        sendJson(res, 200, { ok: true, ...await forge.moveGalleryImage(decodeURIComponent(jobId), decodeURIComponent(artifactId), await readJsonBody(req)) });
+      }
       else if (req.method === 'GET' && url.pathname === '/api/forge/catalog') sendJson(res, 200, await forge.catalog());
       else if (req.method === 'GET' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.selections() });
       else if (req.method === 'PUT' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.setSelection(await readJsonBody(req)) });

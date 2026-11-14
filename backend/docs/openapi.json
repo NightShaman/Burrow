@@ -9027,6 +9027,186 @@
           }
         }
       }
+    },
+    "/api/forge/gallery": {
+      "get": {
+        "tags": [
+          "Forge"
+        ],
+        "operationId": "getForgeGallery",
+        "summary": "List generated images and persistent folder hierarchy (root is null; excludes private mod images and chat uploads)",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgeGallery"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "404": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "503": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          }
+        }
+      }
+    },
+    "/api/forge/gallery/folders": {
+      "post": {
+        "tags": [
+          "Forge"
+        ],
+        "operationId": "createForgeGalleryFolder",
+        "summary": "Create folder or subfolder",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "folder": {
+                      "$ref": "#/components/schemas/ForgeGalleryFolder"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "404": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "503": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "parentId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/forge/gallery/images/{jobId}/{artifactId}": {
+      "put": {
+        "tags": [
+          "Forge"
+        ],
+        "operationId": "moveForgeGalleryImage",
+        "summary": "Move generated image to folder or root without modifying source job",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "artifactId": {
+                      "type": "string"
+                    },
+                    "folderId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "404": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "503": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "folderId"
+                ],
+                "properties": {
+                  "folderId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -19881,6 +20061,94 @@
           "seedOnly": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "ForgeGalleryFolder": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "parentId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ForgeGalleryImage": {
+        "type": "object",
+        "required": [
+          "jobId",
+          "artifactId",
+          "folderId",
+          "createdAt",
+          "artifact"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "artifactId": {
+            "type": "string"
+          },
+          "folderId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "artifact": {
+            "$ref": "#/components/schemas/ForgeArtifact"
+          }
+        }
+      },
+      "ForgeGallery": {
+        "type": "object",
+        "required": [
+          "ok",
+          "folders",
+          "images"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForgeGalleryFolder"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForgeGalleryImage"
+            }
           }
         }
       }

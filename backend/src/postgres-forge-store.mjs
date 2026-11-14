@@ -1,3 +1,4 @@
+import { readForgeGallery, createForgeGalleryFolder, moveForgeGalleryImage } from './postgres-forge-gallery.mjs';
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { createGoogleVideoAdapter, googleVideoSupported } from './model-adapters/google-video.mjs';
 import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
@@ -415,6 +416,9 @@ export class PostgresForgeStore {
     const r = await this.pool.query(sql, values);
     return r.rows.map((x) => this.public(parse(x.record)));
   }
+  async gallery() { return readForgeGallery(this); }
+  async createGalleryFolder(body) { return createForgeGalleryFolder(this, body); }
+  async moveGalleryImage(jobId, artifactId, body) { return moveForgeGalleryImage(this, jobId, artifactId, body); }
   async archive() {
     await this.owner();
     const result = await this.pool.query('SELECT record FROM forge_archive ORDER BY created_at DESC,id DESC');
