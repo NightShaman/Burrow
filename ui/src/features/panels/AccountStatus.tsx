@@ -137,11 +137,17 @@ export function openAiBars(usage: OpenAiUsage | null): UsageBar[] {
     }));
 }
 
+const ACCOUNT_REFRESH_MS = 30_000;
+
 // Session-only last successful values keep remounts from flashing empty cards.
 const usageCardCache = new Map<string, AccountUsageCard>();
 const accountCacheKey = (id: string, vendor: AccountVendor) => `${vendor}:${id}`;
 
-export function useAccountUsage(providers: SavedProvider[], refreshMs = 300_000, revision = 0) {
+export function useAccountUsage(
+  providers: SavedProvider[],
+  refreshMs = ACCOUNT_REFRESH_MS,
+  revision = 0,
+) {
   const accounts = useMemo(() => oauthAccounts(providers), [providers]);
   const signature = accounts.map((entry) => `${entry.provider.id}:${entry.vendor}`).join('|');
   const [cards, setCards] = useState<AccountUsageCard[]>([]);
@@ -316,10 +322,10 @@ export function orderAccountStatusCards(cards: AccountUsageCard[], order: string
 
 export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
   const [revision, setRevision] = useState(0);
-  const cards = useAccountUsage(providers, 300_000, revision);
+  const cards = useAccountUsage(providers, ACCOUNT_REFRESH_MS, revision);
   const [now, setNow] = useState(performance.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(performance.now()), 30_000);
+    const timer = window.setInterval(() => setNow(performance.now()), ACCOUNT_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, []);
   const [order, setOrder] = useState(() => readAccountOrder(accountStatusOrderKey));
