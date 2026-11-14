@@ -1,6 +1,6 @@
 import './inventoryCardDensity.css';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../../app/api';
 import { useConfirm } from '../../app/ConfirmDialog';
@@ -28,6 +28,7 @@ type McpConnection = {
   apiKeyConfigured: boolean;
   environmentVariables: McpEnvironmentVariable[];
   headerNames?: string[];
+  verifyTls?: boolean;
   tools: McpTool[];
 };
 
@@ -54,7 +55,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
   const confirm = useConfirm();
   const navigate = useUnsavedNavigation();
   const saving = useRef(false);
-  const emptyDraft = JSON.stringify(['', 'http', 'ephemeral', '', '', '', '', [], []]);
+  const emptyDraft = JSON.stringify(['', 'http', 'ephemeral', '', '', '', '', [], [], true]);
   const [baseline, setBaseline] = useState(emptyDraft);
   const nextEnvironmentId = useRef(0);
   const nextHeaderId = useRef(0);
@@ -65,6 +66,8 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
   const [transport, setTransport] = useState<'http' | 'stdio'>('http');
   const [lifecycle, setLifecycle] = useState<'ephemeral' | 'keep_alive'>('ephemeral');
   const [baseUrl, setBaseUrl] = useState('');
+  const [verifyTls, setVerifyTls] = useState(true);
+  const tlsWarningId = useId();
   const [command, setCommand] = useState('');
   const [argsText, setArgsText] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -108,6 +111,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
     setTransport('http');
     setLifecycle('ephemeral');
     setBaseUrl('');
+    setVerifyTls(true);
     setCommand('');
     setArgsText('');
     setApiKey('');
@@ -134,6 +138,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
           configured: true,
           replacing: false,
         })),
+        connection.verifyTls !== false,
       ]),
     );
     setHttpHeaders(
@@ -150,6 +155,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
     setTransport(connection.transport === 'stdio' ? 'stdio' : 'http');
     setLifecycle(connection.lifecycle ?? 'ephemeral');
     setBaseUrl(connection.baseUrl ?? '');
+    setVerifyTls(connection.verifyTls !== false);
     setCommand(connection.command ?? '');
     setArgsText((connection.args ?? []).join('\n'));
     setApiKey('');
@@ -200,6 +206,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
           ...(transport === 'http'
             ? {
                 baseUrl: baseUrl.trim(),
+                verifyTls,
                 headers: serializeHttpHeaders(httpHeaders),
                 ...(apiKey ? { apiKey } : {}),
               }
@@ -244,6 +251,7 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
         apiKey,
         environmentVariables.map(({ rowId: _rowId, ...variable }) => variable),
         httpHeaders.map(({ rowId: _rowId, ...header }) => header),
+        verifyTls,
       ]) !== baseline,
     busy: busy !== 'idle',
     save,
@@ -489,6 +497,26 @@ export function McpConnections({ overflowTarget }: { overflowTarget?: HTMLElemen
               />
             </Field>
           </div>
+        )}
+        {transport === 'http' && (
+          <>
+            <label className="settings-checkbox-row">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={verifyTls}
+                disabled={savedRefreshPending || busy !== 'idle'}
+                onChange={(event) => setVerifyTls(event.target.checked)}
+                aria-describedby={!verifyTls ? tlsWarningId : undefined}
+              />
+              <span>Verify TLS certificate</span>
+            </label>
+            {!verifyTls && (
+              <p className="settings-auth-warning" id={tlsWarningId} role="status">
+                HTTPS certificate checks are off for this server. Connections may be impersonated.
+              </p>
+            )}
+          </>
         )}
         {transport === 'http' && (
           <McpHttpHeaders

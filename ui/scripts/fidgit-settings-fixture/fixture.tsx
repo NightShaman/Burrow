@@ -106,6 +106,7 @@ const mcpConnections = [
     name: 'GitHub MCP',
     transport: 'http',
     baseUrl: 'https://github-mcp.invalid',
+    verifyTls: true,
     command: null,
     args: [],
     enabled: true,
@@ -117,6 +118,7 @@ const mcpConnections = [
     name: 'Documentation MCP',
     transport: 'http',
     baseUrl: 'https://docs-mcp.invalid',
+    verifyTls: false,
     command: null,
     args: [],
     enabled: true,
@@ -598,8 +600,25 @@ window.fetch = (async (input, init) => {
         },
       ],
     };
-  else if (path === '/api/settings/mcp-connections') data = { connections: mcpConnections };
-  else if (path.endsWith('/mcp-tools')) {
+  else if (path === '/api/settings/mcp-connections') {
+    if (method === 'POST') {
+      if (new URLSearchParams(location.search).has('mcp-save-error'))
+        return Response.json({ error: 'Synthetic MCP save unavailable' }, { status: 503 });
+      const id = body.id ?? `fixture-mcp-${mcpConnections.length + 1}`;
+      const index = mcpConnections.findIndex((connection) => connection.id === id);
+      const connection = {
+        ...(mcpConnections[index] ?? { tools: [], apiKeyConfigured: false }),
+        ...body,
+        id,
+        verifyTls: body.verifyTls !== false,
+      };
+      if (index < 0) mcpConnections.push(connection);
+      else mcpConnections[index] = connection;
+    }
+    data = { connections: mcpConnections };
+  } else if (path === '/api/settings/mcp-connections/discover') {
+    data = { connection: mcpConnections.find((connection) => connection.id === body.connectionId) };
+  } else if (path.endsWith('/mcp-tools')) {
     const agentId = decodeURIComponent(path.split('/')[3]);
     if (method === 'PUT') grantsByAgent[agentId] = body.tools;
     data = { ok: true, agentId, tools: grantsByAgent[agentId] ?? [] };
