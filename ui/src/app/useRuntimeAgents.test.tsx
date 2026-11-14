@@ -177,6 +177,7 @@ describe('useRuntimeAgents registry state', () => {
                   sessionId: 'child-1',
                   parentSessionId: 'default',
                   label: 'CSS audit',
+                  harness: 'codex',
                   status: 'VERIFYING',
                   subagentId: 'sub-1',
                 },
@@ -227,6 +228,7 @@ describe('useRuntimeAgents registry state', () => {
     });
     expect(result.current.agents[0].subagents[0]).toMatchObject({
       name: 'CSS audit',
+      harness: 'codex',
       activity: 'Verifying',
       context: 12,
     });

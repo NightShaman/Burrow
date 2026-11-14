@@ -48,6 +48,7 @@ export type ContextDetails = ContextEvidence & {
   recallSourceCount?: number;
 };
 export type Subagent = import('./api').MinionAncestry & {
+  harness?: import('./api').MinionHarness;
   agentId?: string;
   outcomeReason?: string;
   retained?: boolean;

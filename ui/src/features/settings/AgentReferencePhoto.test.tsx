@@ -9,6 +9,7 @@ import { AgentSettings } from './AgentSettings';
 
 vi.mock('../../app/api', () => ({ api: vi.fn(), fetchApi: vi.fn() }));
 vi.mock('./DefaultMinionModel', () => ({ DefaultMinionModel: () => null }));
+vi.mock('./MinionTypeSettings', () => ({ MinionTypeSettings: () => null }));
 vi.mock('./MinionDepthSettings', () => ({ MinionDepthSettings: () => null }));
 const agent = {
   id: 'ui-a',

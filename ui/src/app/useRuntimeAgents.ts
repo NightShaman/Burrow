@@ -296,6 +296,7 @@ export function useRuntimeAgents({
               agentId: entry.agent.id,
               targetId: 'local',
               subagentId: child.subagentId,
+              harness: child.harness,
               runId: child.runId,
               parentSessionId: child.parentSessionId,
               parentRunId: child.parentRunId,

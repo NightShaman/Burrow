@@ -342,7 +342,7 @@ describe('AgentsPanel', () => {
       />,
     );
     const status = screen.getByRole('button', { name: 'Select Child' }).querySelector('small');
-    expect(status?.textContent).toBe(activity);
+    expect(status?.textContent).toBe(`Burrow Minion · ${activity}`);
     expect(status?.getAttribute('title')).toBeNull();
     expect(screen.queryByText(/Recorded diagnostic reason/)).toBeNull();
   });
@@ -508,7 +508,8 @@ it.each([
     );
     expect(screen.getByText(notice)).toBeTruthy();
     expect(screen.queryByText('Minions for the requested session only')).toBeNull();
-    if (minionCoverage === 'stale') expect(screen.getByText('Last seen · Working')).toBeTruthy();
+    if (minionCoverage === 'stale')
+      expect(screen.getByText('Burrow Minion · Last seen · Working')).toBeTruthy();
   },
 );
 
@@ -656,3 +657,33 @@ it('keeps expansion for non-Menagerie mod agents and hides it for residents in t
   expect(screen.getAllByRole('button', { name: 'Select Child' })).toHaveLength(1);
   expect(screen.queryByRole('button', { name: /Expand Kerning|Collapse Kerning/ })).toBeNull();
 });
+
+it.each(['regular', 'compact'] as const)(
+  'labels actual child harness in %s rail without changing selection',
+  (view) => {
+    const onSelectSubagent = vi.fn();
+    render(
+      <AgentsPanel
+        agents={[
+          {
+            ...agent,
+            subagents: [
+              agent.subagents[0],
+              { ...agent.subagents[0], id: 'codex', name: 'Code worker', harness: 'codex' },
+            ],
+          },
+        ]}
+        view={view}
+        selectedStreamId="smatchet"
+        expandedAgents={new Set(['smatchet'])}
+        onSelectAgent={vi.fn()}
+        onToggleAgent={vi.fn()}
+        onSelectSubagent={onSelectSubagent}
+      />,
+    );
+    expect(screen.getByText('Burrow Minion · Working')).toBeTruthy();
+    expect(screen.getByText('Codex Minion · Working')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Code worker' }));
+    expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'codex');
+  },
+);

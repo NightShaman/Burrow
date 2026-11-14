@@ -73,6 +73,8 @@ export type RuntimeAgent = {
   } | null;
 };
 
+export type MinionHarness = 'burrow' | 'codex';
+
 /** Runtime-owned lineage; a child keeps its spawn-time depth budget. */
 export type MinionAncestry = {
   runId?: string | null;
@@ -85,6 +87,7 @@ export type MinionAncestry = {
 };
 
 export type AgentStatus = MinionAncestry & {
+  harness?: MinionHarness;
   sessionId: string;
   label?: string;
   status?: string;
@@ -356,6 +359,7 @@ export type ActiveSubagentActivity = {
   counts?: Record<string, unknown> | null;
 };
 export type ActiveSubagent = MinionAncestry & {
+  harness?: MinionHarness;
   id: string;
   status?: string | null;
   phase?: string | null;

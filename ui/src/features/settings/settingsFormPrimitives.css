@@ -142,3 +142,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.minion-model-settings {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
