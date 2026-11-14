@@ -15189,7 +15189,7 @@
               "array",
               "null"
             ],
-            "description": "Ordered prior Forge PNG/JPEG/WebP image artifacts for supported video models, after saved portraits. Maximum six combined references. No source bytes or paths.",
+            "description": "Ordered prior succeeded Forge PNG/JPEG/WebP image artifacts for supported image/video models, after saved portraits. Video accepts at most six combined references. No bytes or paths.",
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -15208,6 +15208,17 @@
                 }
               }
             }
+          },
+          "referenceAttachmentIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Ordered runtime-owned PNG/JPEG/WebP chat attachment IDs. Requires trusted runtime agent/session context; operator HTTP calls without that context fail closed. No bytes or arbitrary paths. Snapshotted with hashes before dispatch."
           }
         },
         "required": [
@@ -15291,7 +15302,22 @@
               },
               "maxImages": {
                 "type": "integer",
-                "description": "Combined saved portraits and artifact reference limit."
+                "description": "Combined reference image limit when advertised."
+              }
+            }
+          },
+          "referenceAttachments": {
+            "type": "object",
+            "required": [
+              "available"
+            ],
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "maxImages": {
+                "type": "integer",
+                "description": "Combined reference image limit when advertised."
               }
             }
           }
@@ -15322,20 +15348,19 @@
           },
           "sourceAttachments": {
             "type": "object",
-            "properties": {
-              "available": {
-                "const": false,
-                "type": "boolean"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
             "required": [
               "available",
-              "reason"
+              "field"
             ],
-            "additionalProperties": false
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "field": {
+                "type": "string",
+                "const": "referenceAttachmentIds"
+              }
+            }
           },
           "video": {
             "type": "object",

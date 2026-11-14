@@ -25,16 +25,16 @@ export function forgeCatalog(connections) {
     const agentReferenceImage = available && ['image', 'video'].includes(kind)
       ? referenceImageCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } })
       : { available: false, reason: 'agent_reference_image_unsupported' };
-    // Artifact references are supported only for video with a usable image-input contract.
-    const referenceArtifacts = kind === 'video' && agentReferenceImage.available
-      ? { available: true, maxImages: 6 }
+    // Use only existing native image-input generation contracts.
+    const referenceArtifacts = ['image', 'video'].includes(kind) && agentReferenceImage.available
+      ? { available: true, ...(kind === 'video' ? { maxImages: 6 } : {}) }
       : { available: false };
     const imageOptions = available && kind === 'image' ? imageOptionsCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } }) : null;
-    return [{ ...(imageOptions ? { imageOptions } : {}), connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [], agentReferenceImage, referenceArtifacts }];
+    return [{ ...(imageOptions ? { imageOptions } : {}), connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [], agentReferenceImage, referenceArtifacts, referenceAttachments: { ...referenceArtifacts } }];
   }));
   const musicModels = models.filter(m => m.kind === 'audio' && m.available && googleLyriaSupported({ ...connections.find(c => c.id === m.connectionId), model: m.modelId }));
   const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };
-  return { ok: true, models, music, sourceAttachments: { available: false, reason: 'source_attachments_unsupported' }, video: models.some(m => m.kind === 'video' && m.available)
+  return { ok: true, models, music, sourceAttachments: { available: models.some(m => m.referenceAttachments.available), field: 'referenceAttachmentIds' }, video: models.some(m => m.kind === 'video' && m.available)
     ? { available: true, reason: null } : { available: false, reason: 'video_provider_contract_unavailable' } };
 }
 

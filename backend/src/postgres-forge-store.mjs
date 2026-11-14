@@ -22,7 +22,7 @@ import {
   deleteGeneratedArtifact,
   resolveGeneratedArtifact,
 } from "./generated-artifact-store.mjs";
-import { persistChatAttachments } from "./attachment-store.mjs";
+import { readAttachmentArtifact, persistChatAttachments } from "./attachment-store.mjs";
 import { diagnostic } from "./forge-diagnostics.mjs";
 import {
   postgresTransactionContext,
@@ -276,6 +276,27 @@ export class PostgresForgeStore {
     }
     return snapshots;
   }
+  // Membership comes from persisted session metadata, never caller-supplied paths/MIME.
+  async attachmentReferenceSnapshot({ agentId, sessionId, attachmentId }) {
+    const destination = await this.attachmentDestination({ agentId, sessionId });
+    const result = await this.pool.query(`SELECT item FROM conversation_entries e,
+      LATERAL jsonb_array_elements(COALESCE(e.entry::jsonb->'metadata'->'attachments','[]'::jsonb)) item
+      WHERE e.agent_id=$1 AND e.session_id=$2 AND item->>'artifactPath'=$3 LIMIT 1`, [agentId, sessionId, attachmentId]);
+    const metadata = result.rows[0]?.item;
+    if (!metadata) fail('forge_reference_attachment_not_found', 404);
+    const image = await readAttachmentArtifact({ agentWorkspaceRoot: destination.agentWorkspaceRoot,
+      artifactPath: metadata.artifactPath, attachment: metadata, maxImageBytes: REFERENCE_IMAGE_MAX_BYTES });
+    if (!image) fail('forge_reference_attachment_not_found', 404);
+    let sourceImages;
+    try {
+      if (image.kind !== 'image') throw new Error('invalid');
+      sourceImages = validatedSourceImages([{ bytes: Buffer.from(image.dataUrl.split(',')[1], 'base64'), mimeType: image.type, name: image.name }]);
+    } catch { fail('forge_reference_attachment_invalid', 409); }
+    const bytes = sourceImages[0].bytes;
+    return { sourceImages, referenceImage: Object.freeze({ attachmentId, agentId, sessionId,
+      name: image.name, mimeType: image.type, sizeBytes: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex') }) };
+  }
   async artifactReferenceSnapshot({ jobId, artifactId }) {
     const { job, artifact, resolved } = await this.artifact(jobId, artifactId);
     if (job.modOwnerId || job.status !== 'succeeded' || job.kind !== 'image')
@@ -476,7 +497,7 @@ export class PostgresForgeStore {
           )))
     );
   }
-  async create(body, {agentId = null, ownerModId = null, referenceImages: privateReferences = null, chatDelivery = null} = {}) {
+  async create(body, {agentId = null, sessionId = null, ownerModId = null, referenceImages: privateReferences = null, chatDelivery = null} = {}) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       fail("forge_request_invalid");
     if ("attachments" in body || "sourceAttachments" in body)
@@ -492,6 +513,7 @@ export class PostgresForgeStore {
       "useOperatorReferenceImage",
       "referenceAgentIds",
       "referenceArtifacts",
+      "referenceAttachmentIds",
       "imageOptions",
     ];
     if (
@@ -519,14 +541,16 @@ export class PostgresForgeStore {
       body.referenceArtifacts.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
         Object.keys(ref).length !== 2 || ['jobId', 'artifactId'].some(k => typeof ref[k] !== 'string' || !ref[k].trim() || ref[k] !== ref[k].trim())))) fail('forge_request_invalid');
     const artifactReferences = body.referenceArtifacts ?? [];
-    if (artifactReferences.length && body.mode && body.mode !== 'video') fail('forge_reference_artifacts_video_only');
-    if (privateReferences && artifactReferences.length) fail('forge_request_invalid');
+    if (body.referenceAttachmentIds != null && (!Array.isArray(body.referenceAttachmentIds) || body.referenceAttachmentIds.some(id => typeof id !== 'string' || !id.trim() || id !== id.trim()))) fail('forge_request_invalid');
+    const attachmentIds = body.referenceAttachmentIds ?? [];
+    if (attachmentIds.length && (!agentId || !sessionId || ownerModId)) fail('forge_context_unavailable', 409);
+    if (privateReferences && (artifactReferences.length || attachmentIds.length)) fail('forge_request_invalid');
     if (privateReferences != null && (!ownerModId || !Array.isArray(privateReferences) || !privateReferences.length ||
       privateReferences.some(ref => !ref || Array.isArray(ref) || typeof ref !== 'object' ||
         Object.keys(ref).some(key => !['key', 'id', 'name'].includes(key)) ||
         ['key', 'id', 'name'].some(key => typeof ref[key] !== 'string' || !ref[key].trim())))) fail('forge_request_invalid');
     if (privateReferences && (useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length || body.referenceAgentIds != null)) fail('forge_request_invalid');
-    const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences) || artifactReferences.length > 0;
+    const hasReferences = useOperatorReferenceImage || useAgentReferenceImage || referenceAgentIds.length > 0 || Boolean(privateReferences) || artifactReferences.length > 0 || attachmentIds.length > 0;
     if (hasReferences && body.mode && !['image', 'video'].includes(body.mode)) fail('agent_reference_image_image_only');
     const explicit =
       body.connectionId !== undefined || body.modelId !== undefined;
@@ -570,13 +594,17 @@ export class PostgresForgeStore {
     }
     // Preserve the self-only identity/prompt for existing callers. New explicit
     // lists (even one other agent), and Theater-owned refs use ordered snapshots.
-    const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences && !artifactReferences.length;
+    const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences && !artifactReferences.length && !attachmentIds.length;
     const snapshots = legacySelf ? [await this.referenceImageSnapshot(agentId)] : hasReferences
       ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, useOperatorReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
-    if (artifactReferences.length && snapshots.length + artifactReferences.length > 6) fail('google_video_reference_image_limit_exceeded');
+    if (model?.kind === 'video' && snapshots.length + artifactReferences.length + attachmentIds.length > 6) fail('google_video_reference_image_limit_exceeded');
     for (const ref of artifactReferences) {
       const snapshot = await this.artifactReferenceSnapshot(ref);
       snapshots.push(snapshot);
+      if (snapshots.reduce((total, item) => total + item.sourceImages.reduce((n, image) => n + image.bytes.length, 0), 0) > snapshotMaxBytes) fail('reference_images_too_large', 413);
+    }
+    for (const attachmentId of attachmentIds) {
+      snapshots.push(await this.attachmentReferenceSnapshot({ agentId, sessionId, attachmentId }));
       if (snapshots.reduce((total, item) => total + item.sourceImages.reduce((n, image) => n + image.bytes.length, 0), 0) > snapshotMaxBytes) fail('reference_images_too_large', 413);
     }
     const referenceImage = legacySelf ? snapshots[0].referenceImage : null;
@@ -584,12 +612,12 @@ export class PostgresForgeStore {
       ? { key: ref.key, id: ref.id, name: ref.name, mimeType: ref.mimeType, sizeBytes: ref.sizeBytes, sha256: ref.sha256 }
       : ref) : null;
     const dispatch = snapshots.length ? { sourceImages: snapshots.flatMap(snapshot => snapshot.sourceImages) } : null;
-    if (dispatch && multiReferences && multiReferences.some(ref => !ref.jobId)) {
+    if (dispatch && multiReferences && multiReferences.some(ref => !ref.jobId && !(ref.attachmentId && ref.sessionId))) {
       // Keep the selected identities aligned with the adapter's image order.
       // Only the provider prompt gets this mapping; the job's caller prompt
       // stays unchanged and no single-self exact prompt changes.
       dispatch.prompt = `${body.prompt}\n\nUse the supplied portrait reference images as canonical character identities: preserve each character's face, species, build and distinctive features. Do not blend identities; depict only the characters called for by the scene.\nReference images (in the order supplied):\n${multiReferences.map((ref, index) =>
-        ref.jobId ? `${index + 1}. Image ${index + 1} is the Forge source image ${JSON.stringify(ref.name)}; follow the scene instructions for this image.` : `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ref.operatorId ? ' (operator)' : ''}.`).join('\n')}`;
+        (ref.jobId || (ref.attachmentId && ref.sessionId)) ? `${index + 1}. Image ${index + 1} is the Forge source image ${JSON.stringify(ref.name)}; follow the scene instructions for this image.` : `${index + 1}. Image ${index + 1} depicts ${JSON.stringify(ref.name)}${ref.agentId ? ` (agent ${JSON.stringify(ref.agentId)})` : ref.operatorId ? ' (operator)' : ''}.`).join('\n')}`;
     }
     // Config resolution may borrow this same pool. Resolve before holding the
     // claim transaction (including max-one pools), but defer admission errors
@@ -648,7 +676,8 @@ export class PostgresForgeStore {
           // Shape/bounds were normalized before claiming; support comes from
           // the same configured-output catalog exposed to UI and agents.
         }
-        if (artifactReferences.length && (model.kind !== 'video' || !model.referenceArtifacts?.available)) fail('forge_reference_artifacts_unsupported', 409);
+        if (artifactReferences.length && (!['image', 'video'].includes(model.kind) || !model.referenceArtifacts?.available)) fail('forge_reference_artifacts_unsupported', 409);
+        if (attachmentIds.length && !model.referenceAttachments?.available) fail('forge_reference_attachments_unsupported', 409);
         if (dispatch) {
           if (dispatch.sourceImages.reduce((total, image) => total + image.bytes.length, 0) > maxReferenceBytes) fail('reference_images_too_large', 413);
           if (!['image', 'video'].includes(model.kind)) fail('agent_reference_image_image_only');
@@ -731,7 +760,7 @@ export class PostgresForgeStore {
     await this.attachmentDestination({ agentId, sessionId });
     const metadata = await new PostgresSessionStore({ pool: this.pool }).getMetadata({ agentId, sessionId });
     const resetGeneration = Number(metadata?.resetGeneration || 0);
-    const created = await this.create(body, { agentId, chatDelivery: { agentId, sessionId, runId, resetGeneration } });
+    const created = await this.create(body, { agentId, sessionId, chatDelivery: { agentId, sessionId, runId, resetGeneration } });
     const job = await this.waitForCompletion(created.job.id, { signal });
     if (job.status !== 'succeeded') return { ...created, ok: false, error: job.error || 'generation_interrupted', job: this.public(job) };
     const attachments = await this.deliverChat(job.id);
