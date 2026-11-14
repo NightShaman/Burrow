@@ -28,6 +28,9 @@ export type AccountUsageCard = {
   accountStatus?: OpenAiAccountStatus;
   clock?: ServerClock | null;
   error?: string;
+  sample?: { ageMs: number; receivedAt: number } | null;
+  rateLimited?: boolean;
+  retry?: { afterMs: number; receivedAt: number } | null;
 };
 
 const oauthConfigured = (provider: SavedProvider) =>
@@ -139,9 +142,81 @@ export function openAiBars(usage: OpenAiUsage | null): UsageBar[] {
 
 const ACCOUNT_REFRESH_MS = 30_000;
 
-// Session-only last successful values keep remounts from flashing empty cards.
+// Session-only display state retains the original sample age and cooldown across remounts.
+// Retained percentages never establish model-pool eligibility.
 const usageCardCache = new Map<string, AccountUsageCard>();
 const accountCacheKey = (id: string, vendor: AccountVendor) => `${vendor}:${id}`;
+
+type AnthropicUsageResponse = {
+  ok?: boolean;
+  usage?: AnthropicUsage | null;
+  fetchedAt?: string | null;
+  serverTime?: string;
+  sampleAgeMs?: number | null;
+  lastSuccess?: { fetchedAt: string; usage: AnthropicUsage } | null;
+  lastError?: { status: number; error: string } | null;
+  retryAfterMs?: number;
+  error?: string;
+};
+
+function anthropicCard(base: AccountUsageCard, result: AnthropicUsageResponse): AccountUsageCard {
+  const receivedAt = performance.now();
+  const serverMs = result.serverTime ? Date.parse(result.serverTime) : NaN;
+  const clock = Number.isFinite(serverMs) ? { serverMs, receivedAt } : base.clock;
+  const fetchedAt = result.fetchedAt ?? result.lastSuccess?.fetchedAt;
+  const derivedAge = fetchedAt && clock ? clock.serverMs - Date.parse(fetchedAt) : NaN;
+  const age = 'sampleAgeMs' in result ? (result.sampleAgeMs ?? NaN) : derivedAge;
+  const usage = result.usage ?? result.lastSuccess?.usage;
+  const failed = base.state === 'error' || result.ok === false;
+  return {
+    ...base,
+    clock,
+    state: failed ? 'error' : 'ready',
+    bars: usage ? anthropicBars(usage) : 'lastSuccess' in result ? [] : base.bars,
+    sample:
+      Number.isFinite(age) && age >= 0
+        ? { ageMs: age, receivedAt }
+        : 'lastSuccess' in result
+          ? null
+          : (base.sample ?? null),
+    rateLimited:
+      failed &&
+      (result.lastError?.status === 429 || result.error === 'anthropic_oauth_usage_failed:429'),
+    retry:
+      typeof result.retryAfterMs === 'number' &&
+      Number.isFinite(result.retryAfterMs) &&
+      result.retryAfterMs > 0
+        ? { afterMs: result.retryAfterMs, receivedAt }
+        : null,
+    error: result.error ?? base.error,
+  };
+}
+
+function sampleAge(card: AccountUsageCard, elapsed: number): number | null {
+  return card.sample ? card.sample.ageMs + Math.max(0, elapsed - card.sample.receivedAt) : null;
+}
+
+function elapsedLabel(ms: number) {
+  if (ms < 30_000) return 'just now';
+  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+export function anthropicFreshness(card: AccountUsageCard, elapsed = performance.now()) {
+  const age = sampleAge(card, elapsed);
+  const sample = age === null ? 'No usage sample' : `Updated ${elapsedLabel(age)}`;
+  const remaining = card.retry
+    ? card.retry.afterMs - Math.max(0, elapsed - card.retry.receivedAt)
+    : 0;
+  const retry =
+    card.state === 'error' && remaining > 0
+      ? ` · retry in ${remaining < 60_000 ? `${Math.max(1, Math.ceil(remaining / 1000))}s` : `${Math.ceil(remaining / 60_000)}m`}`
+      : '';
+  return `${sample}${retry}`;
+}
 
 export function useAccountUsage(
   providers: SavedProvider[],
@@ -186,19 +261,27 @@ export function useAccountUsage(
             plan: null as string | null,
           };
           let clock: ServerClock | null = null;
+          let failedBody: Promise<AnthropicUsageResponse | null> | undefined;
           const options = {
             onResponse: (response: Response) => {
               clock = responseClock(response);
+              if (vendor === 'Anthropic' && !response.ok) {
+                // api() intentionally throws on HTTP errors; retain the additive usage metadata.
+                failedBody = response
+                  .clone()
+                  .json()
+                  .catch(() => null);
+              }
             },
           };
           try {
             if (vendor === 'Anthropic') {
-              const result = await api<{ usage?: AnthropicUsage | null }>(
+              const result = await api<AnthropicUsageResponse>(
                 `/api/anthropic/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`,
                 {},
                 options,
               );
-              next = { ...base, clock, state: 'ready', bars: anthropicBars(result.usage ?? null) };
+              next = anthropicCard({ ...base, clock, state: 'ready', bars: [] }, result);
             } else {
               const result = await api<{ usage?: OpenAiUsage | null }>(
                 `/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`,
@@ -215,16 +298,26 @@ export function useAccountUsage(
               };
             }
           } catch (error) {
+            const previous = usageCardCache.get(key);
             next = {
               ...base,
-              plan: usageCardCache.get(key)?.plan ?? null,
+              ...previous,
               state: 'error',
-              bars: usageCardCache.get(key)?.bars ?? [],
+              bars: previous?.bars ?? [],
               error: error instanceof Error ? error.message : 'Usage unavailable',
             };
+            if (vendor === 'Anthropic') {
+              const metadata = await failedBody;
+              if (metadata && typeof metadata === 'object') {
+                next = anthropicCard({ ...next, clock: clock ?? next.clock }, metadata);
+              } else {
+                // A network failure cannot renew a sample or a cooldown.
+                next.rateLimited = false;
+              }
+            }
           }
           if (cancelled) return;
-          if (next.state === 'ready') usageCardCache.set(key, next);
+          usageCardCache.set(key, next);
           setCards((current) =>
             current.map((card) =>
               card.id === provider.id && card.vendor === vendor ? next : card,
@@ -252,10 +345,14 @@ export function accountUsageStatus(
   elapsed = performance.now(),
 ): { label: string; tone: 'active' | 'paused' | 'quota-exceeded'; detail?: string } {
   if (card.state === 'loading') return { label: 'Checking', tone: 'paused' };
-  if (card.state === 'error') return { label: 'Usage unavailable', tone: 'paused' };
+  if (card.state === 'error')
+    return { label: card.rateLimited ? 'Usage rate limited' : 'Usage unavailable', tone: 'paused' };
   if (card.vendor !== 'OpenAI') {
     const known = card.bars.filter((bar) => bar.remainingPercent !== null);
     if (!known.length) return { label: 'Unknown', tone: 'paused' };
+    const age = sampleAge(card, elapsed);
+    if (age === null) return { label: 'Unknown', tone: 'paused' };
+    if (age >= ACCOUNT_REFRESH_MS) return { label: 'Stale', tone: 'paused' };
     return known.some((bar) => bar.remainingPercent === 0)
       ? { label: 'Limit Exceeded', tone: 'quota-exceeded' }
       : { label: 'Available', tone: 'active' };
@@ -407,7 +504,12 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
               onDragEnd={clearDrag}
             >
               {card.state === 'loading' && <small className="hint">Loading usage</small>}
-              {card.state === 'error' && (
+              {card.vendor === 'Anthropic' && card.state !== 'loading' && (
+                <small className="hint" title={card.state === 'error' ? card.error : undefined}>
+                  {anthropicFreshness(card, now)}
+                </small>
+              )}
+              {card.vendor !== 'Anthropic' && card.state === 'error' && (
                 <small className="hint">{card.error ?? 'Usage unavailable'}</small>
               )}
               {card.state === 'ready' && !card.bars.length && (

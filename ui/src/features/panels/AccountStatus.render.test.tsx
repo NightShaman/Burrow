@@ -108,6 +108,7 @@ it('shows a completed account without waiting for a slow peer and retains usage 
 
 it('uses the same successful status label for both vendors and preserves unknown/limited Anthropic usage', () => {
   const base: AccountUsageCard = {
+    sample: { ageMs: 0, receivedAt: performance.now() },
     id: 'status',
     name: 'Anthropic',
     vendor: 'Anthropic',
