@@ -51,7 +51,7 @@ import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
 import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-store.mjs';
 import { POSTGRES_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_MINION_MODEL_SETTINGS_SCHEMA_SQL, POSTGRES_PROVIDER_POOL_SCHEMA_SQL } from './postgres-model-settings-store.mjs';
-import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL } from './postgres-mcp-settings-store.mjs';
+import { POSTGRES_MCP_SETTINGS_SCHEMA_SQL, POSTGRES_MCP_VERIFY_TLS_SQL } from './postgres-mcp-settings-store.mjs';
 import { POSTGRES_TASK_BOARD_SCHEMA_SQL } from './postgres-task-board-store.mjs';
 import { POSTGRES_TASK_AUDIT_SCHEMA_SQL } from './postgres-task-audit-schema.mjs';
 import { POSTGRES_SCHEDULED_JOB_SCHEMA_SQL } from './postgres-scheduled-job-store.mjs';
@@ -292,4 +292,5 @@ ALTER TABLE github_workflow_watches ADD COLUMN conclusions TEXT[] NOT NULL DEFAU
   { version: 103, name: 'anthropic-coordination-state', sql: `
 CREATE TABLE anthropic_coordination_state (key TEXT PRIMARY KEY, state_json JSONB NOT NULL);
 ` },
+  { version: 104, name: 'mcp-connection-tls-verification', sql: POSTGRES_MCP_VERIFY_TLS_SQL },
 ]);

@@ -170,10 +170,26 @@ export function publicMcpFailureDetail(error, protectedValues = []) {
   return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(httpStatus ? { httpStatus } : {}), ...(detail ? { diagnostic: detail } : {}) };
 }
 
-function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [], signal = null } = {}) {
+// This environment is passed only to this connection's mcporter subprocess
+// (and its inherited daemon), including the full-content launcher.
+function connectionEnvironment(connection) {
+  const env = { ...process.env };
+  delete env.BURROW_MCP_TLS_ORIGIN;
+  if (connection.transport === 'http' && connection.verifyTls === false) {
+    const url = new URL(connection.baseUrl);
+    if (url.protocol === 'https:') {
+      env.BURROW_MCP_TLS_ORIGIN = url.origin;
+      const preload = new URL('./mcporter-tls-preload.mjs', import.meta.url).href;
+      env.NODE_OPTIONS = `${env.NODE_OPTIONS || ''} --import=${JSON.stringify(preload)}`.trim();
+    }
+  }
+  return env;
+}
+
+function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxStreamCaptureBytes = DEFAULT_STREAM_CAPTURE_BYTES, protectedValues = [], signal = null, env = process.env } = {}) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const captureLimit = Math.max(1, Number(maxStreamCaptureBytes) || DEFAULT_STREAM_CAPTURE_BYTES);
     const stdoutState = { chunks: [], originalBytes: 0, capturedBytes: 0 };
     const stderrState = { chunks: [], originalBytes: 0, capturedBytes: 0 };
@@ -226,13 +242,16 @@ function configFor(connection, apiKey, environmentVariables = {}, headers = {}) 
   const definition = connection.transport === 'stdio'
     ? { command: connection.command, args: Array.isArray(connection.args) ? connection.args : [], ...(Object.keys(childEnvironment).length ? { env: childEnvironment } : {}), ...lifecycle }
     : { baseUrl: connection.baseUrl, headers: httpHeaders, ...lifecycle };
-  return { mcpServers: { connection: definition } };
+  // mcporter ignores this extension, but config identity/mtime must change
+  // when certificate policy changes so an old daemon cannot retain opt-out.
+  return { mcpServers: { connection: definition }, ...(connection.transport === 'http' ? { burrowTls: { verifyTls: connection.verifyTls !== false } } : {}) };
 }
 
 async function withConnectionConfig(connection, apiKey, environmentVariables, headers, operation, { runtimeRoot = null, binary = null, runCommand = run, signal = null } = {}) {
   signal?.throwIfAborted();
   const resolved = resolveMcporterRuntime({ runtimeRoot, binary });
   runtimeRoot = resolved.root; binary = resolved.binary;
+  const env = connectionEnvironment(connection);
   const configRoot = path.join(runtimeRoot, 'runtime');
   await mkdir(configRoot, { recursive: true, mode: 0o700 });
   signal?.throwIfAborted();
@@ -252,7 +271,7 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, he
       // daemon and recreates one that vanished. Never advertise a keep-alive
       // provider merely because its old catalog is cached.
       signal?.throwIfAborted();
-      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, signal, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      await runCommand(binary, ['daemon', 'start', '--config', configPath], { cwd: runtimeRoot, env, signal, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
       signal?.throwIfAborted();
     } catch (error) {
       if (!signal?.aborted) await providerEvent(connection, 'unavailable', { runtimeRoot, error });
@@ -260,7 +279,7 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, he
     }
     try {
       signal?.throwIfAborted();
-      const result = await operation(configPath, { binary, runtimeRoot });
+      const result = await operation(configPath, { binary, runtimeRoot, env });
       await providerEvent(connection, 'ready', { runtimeRoot });
       return result;
     } catch (error) {
@@ -272,7 +291,7 @@ async function withConnectionConfig(connection, apiKey, environmentVariables, he
   signal?.throwIfAborted();
   const temporary = await mkdtemp(path.join(configRoot, 'mcp-'));
   const configPath = path.join(temporary, 'mcporter.json');
-  try { signal?.throwIfAborted(); await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables, headers)), { mode: 0o600 }); signal?.throwIfAborted(); return await operation(configPath, { binary, runtimeRoot }); } finally { await rm(temporary, { recursive: true, force: true }); }
+  try { signal?.throwIfAborted(); await writeFile(configPath, JSON.stringify(configFor(connection, apiKey, environmentVariables, headers)), { mode: 0o600 }); signal?.throwIfAborted(); return await operation(configPath, { binary, runtimeRoot, env }); } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
 export async function stopPersistentMcpConnection(connection, { apiKey, environmentVariables = {}, headers = {}, binary = null, runtimeRoot = null, runCommand = run } = {}) {
@@ -287,7 +306,7 @@ export async function stopPersistentMcpConnection(connection, { apiKey, environm
   });
   if (!configExists) return true;
   try {
-    await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+    await runCommand(binary, ['daemon', 'stop', '--config', configPath], { cwd: runtimeRoot, env: connectionEnvironment(connection), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     await providerEvent(connection, 'stopped', { runtimeRoot });
   } catch (error) {
     await providerEvent(connection, 'unavailable', { runtimeRoot, error });
@@ -317,7 +336,7 @@ export async function discoverMcpTools(connection, { apiKey, environmentVariable
   if (!['http', 'stdio'].includes(connection.transport)) throw new Error('mcp_transport_invalid');
   try {
     return await withConnectionConfig(connection, apiKey, environmentVariables, headers, async (configPath, runtime) => {
-      const output = await runCommand(runtime.binary, ['list', 'connection', '--config', configPath, '--json'], { cwd: runtime.runtimeRoot, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      const output = await runCommand(runtime.binary, ['list', 'connection', '--config', configPath, '--json'], { cwd: runtime.runtimeRoot, env: runtime.env, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
       const parsed = JSON.parse(output);
       if (parsed?.status !== 'ok' || !Array.isArray(parsed.tools)) throw new Error('mcp_discovery_invalid_response');
       return parsed.tools.map((tool) => ({ name: text(tool.name), description: text(tool.description) || null, inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} } })).filter((tool) => tool.name);
@@ -339,7 +358,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
         ? [fileURLToPath(new URL('./mcporter-content-launcher.mjs', import.meta.url)), runtime.binary, configPath, toolName, JSON.stringify(toolArguments), connection.lifecycle || 'ephemeral']
         : ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'];
       signal?.throwIfAborted();
-      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, signal, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, env: runtime.env, signal, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     } catch (error) {
       // mcporter deliberately exits non-zero for a valid MCP `{ isError:
       // true }` result, while writing that result to stdout. Parse it before
@@ -382,4 +401,4 @@ export async function diagnoseMcpConnection(connection, { apiKey, environmentVar
   }
 }
 
-export const __test__ = { appendTail, renderedStream, run, configFor, resolveMcporterRuntime, diagnosticText, providerStates, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES };
+export const __test__ = { appendTail, renderedStream, run, configFor, connectionEnvironment, resolveMcporterRuntime, diagnosticText, providerStates, defaultStreamCaptureBytes: DEFAULT_STREAM_CAPTURE_BYTES };

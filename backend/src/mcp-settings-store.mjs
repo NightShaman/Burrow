@@ -50,6 +50,7 @@ export function normalizeMcpHeaders(headers) {
   return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 }
 export function normalizeMcpInput(value = {}) {
+  if (value.verifyTls !== undefined && typeof value.verifyTls !== 'boolean') throw new Error('mcp_verify_tls_invalid');
   const name = text(value.name); const transport = text(value.transport).toLowerCase();
   if (!name || name.length > 120) throw new Error('mcp_name_invalid');
   if (!['http', 'stdio'].includes(transport)) throw new Error('mcp_transport_invalid');
@@ -61,7 +62,7 @@ export function normalizeMcpInput(value = {}) {
   if (transport === 'http' && !/^https?:\/\//i.test(baseUrl)) throw new Error('mcp_base_url_invalid');
   if (transport === 'stdio' && (!command || command.length > 240)) throw new Error('mcp_command_invalid');
   if (args.some((item) => item.length > 2_000)) throw new Error('mcp_args_invalid');
-  return { name, transport, lifecycle, baseUrl: transport === 'http' ? baseUrl : '', command: transport === 'stdio' ? command : null, args: transport === 'stdio' ? args : [], enabled: value.enabled !== false, tools: normalizeMcpTools(value.tools), environmentVariables: normalizeMcpEnvironmentVariables(value), headers: normalizeMcpHeaders(value.headers) };
+  return { name, transport, lifecycle, baseUrl: transport === 'http' ? baseUrl : '', command: transport === 'stdio' ? command : null, args: transport === 'stdio' ? args : [], enabled: value.enabled !== false, verifyTls: value.verifyTls !== false, tools: normalizeMcpTools(value.tools), environmentVariables: normalizeMcpEnvironmentVariables(value), headers: normalizeMcpHeaders(value.headers) };
 }
 // Compatibility export only; persistence requires the PostgreSQL store.
 export class McpSettingsStore {

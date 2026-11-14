@@ -11920,6 +11920,11 @@
               "maxLength": 8192
             },
             "description": "HTTP headers, encrypted and never returned. Omit to preserve all; supplied map defines retained names; null preserves an existing case-insensitive name (error if absent); {} clears. Names are case-insensitive and duplicates rejected; values reject CR/LF/NUL and are limited to 8192 UTF-8 bytes. Explicit Authorization overrides legacy Bearer apiKey. Not sent to stdio providers."
+          },
+          "verifyTls": {
+            "type": "boolean",
+            "default": true,
+            "description": "Verify HTTPS server certificates for this MCP connection. Set false only for a trusted self-signed or private endpoint; disables certificate verification for this connection only. No effect for plain HTTP or stdio. Omission defaults to true, including legacy imports."
           }
         },
         "additionalProperties": false
@@ -11938,7 +11943,8 @@
           "createdAt",
           "updatedAt",
           "environmentVariables",
-          "headerNames"
+          "headerNames",
+          "verifyTls"
         ],
         "properties": {
           "id": {
@@ -12008,6 +12014,11 @@
               "type": "string"
             },
             "description": "Configured lowercase HTTP header names only; never values."
+          },
+          "verifyTls": {
+            "type": "boolean",
+            "default": true,
+            "description": "Verify HTTPS server certificates for this MCP connection. Set false only for a trusted self-signed or private endpoint; disables certificate verification for this connection only. No effect for plain HTTP or stdio. Omission defaults to true, including legacy imports."
           }
         },
         "additionalProperties": false
