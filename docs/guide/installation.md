@@ -150,6 +150,8 @@ Then open **http://127.0.0.1:42817**. On a remote Docker host, use the SSH tunne
 
 The repository's own `compose.yml` publishes both **42817** (web interface) and **7443** (Host Gateway controller) on the host's network interfaces. The example here deliberately publishes only the local web interface. Publish the gateway port only when configuring execution nodes, and restrict its network access. Do not use `docker compose down -v` unless you intend to delete the stored data.
 
+For agents that need to work on the Docker host, we recommend running **Node Goblin natively on that host** rather than exposing the host root inside Burrow. Use **`localhost:7443`** for the native same-host runtime once the controller listener and Docker port publishing are configured. See [host access with Node Goblin](../operations/containers.md#host-access-with-node-goblin) for the setup and networking requirements; this is not the container's own loopback address.
+
 ## Before enabling network access
 
 Open **Settings → Connections → Authentication** and configure Basic Username/Password, OIDC, or a correctly configured Trusted Proxy. Put remote access behind HTTPS. Authentication preferences can be overridden by environment settings; the page displays the effective mode and warns when an environment override is active.

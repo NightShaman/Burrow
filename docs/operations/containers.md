@@ -42,6 +42,24 @@ The local tag above names the reviewed source snapshot; it is not a claim that a
 
 Open `http://127.0.0.1:42817` on the Docker host and follow [initial setup](../getting-started/initial-setup.md). Remote access requires deliberate port/proxy configuration and [authentication](../security/authentication.md).
 
+## Host access with Node Goblin
+
+For agents that need files or commands on the Docker host, we recommend running the **Node Goblin host runtime natively on that host** and assigning the agent to that gateway. This avoids exposing the host root inside Burrow or making its container privileged merely for host workspace access. **Local controller** execution still stays inside the Burrow container.
+
+For the native runtime on the same machine, use **`localhost:7443`** as its controller address, not the web-interface port. With ordinary Docker bridge networking, enable the Host Gateway controller with a listener on `0.0.0.0:7443` inside the container and add this same-host-only mapping beside the existing web port:
+
+```yaml
+ports:
+  - "127.0.0.1:42817:42817"
+  - "127.0.0.1:7443:7443"
+```
+
+Recreate the container after changing Compose port mappings. Container loopback alone cannot receive bridge-forwarded traffic. With Linux host networking, the controller can instead listen on host loopback directly; `ports` mappings do not apply. Remote nodes need a reachable hostname/address and deliberately exposed controller port, not `localhost`.
+
+Install and pair the native runtime, then select its **Configured gateway** target and a host workspace for the agent. Host service-account permissions still apply; the workspace is not a sandbox, and Docker access is a separate privileged capability. Keep a local or SSH recovery path when maintaining the Burrow container or Node Goblin service.
+
+See [Node Goblin's Docker-host setup](https://docs.goblin-kingdom.com/node-goblin/installation/#burrow-in-docker-run-node-goblin-on-the-host) for installation, pairing, and networking details.
+
 ## Image layout
 
 | Item | Default |
