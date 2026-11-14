@@ -37,8 +37,8 @@ export function anthropicTierMetadata(profile, { unavailable = false } = {}) {
 
 export function createProviderUsageService({ modelLookup, authSecretToken, fetchImpl = globalThis.fetch, clock = Date.now, anthropicUsageCache = new Map(), anthropicProfileCache = new Map(), openaiOauthUsageCache = new Map(), resetStore, resetCreditsUrl, timeoutMs, openaiUsageUrl = 'https://chatgpt.com/backend-api/wham/usage' } = {}) {
   let cacheGeneration = openaiUsageGeneration;
-  const ANTHROPIC_USAGE_CACHE_MS = 60_000;
-  const OPENAI_OAUTH_USAGE_CACHE_MS = 60_000;
+  const ANTHROPIC_USAGE_CACHE_MS = 30_000;
+  const OPENAI_OAUTH_USAGE_CACHE_MS = 30_000;
   const OPENAI_OAUTH_USAGE_URL = openaiUsageUrl;
 function anthropicConnectionCandidate(connection = {}) {
     const provider = String(connection.provider || '').toLowerCase();
