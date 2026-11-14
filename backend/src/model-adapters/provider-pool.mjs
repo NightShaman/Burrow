@@ -5,7 +5,7 @@ import { providerIdentity, providerCompletion, configuredProviderId, configuredP
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { classifyModelFailure, markModelInternalError, modelFailureResult, retainModelFailure } from '../model-failure.mjs';
 import { poolAttemptUsage } from '../postgres-provider-pool-metrics.mjs';
-import { portablePoolReplay } from './pool-replay.mjs';
+import { portablePoolReplay, portablePoolComplete } from './pool-replay.mjs';
 import { ProviderPoolEngine, poolThreadKey, AFFINITY_CACHE_TTL_MS } from '../provider-pool-engine.mjs';
 
 // Only protocol guard codes may cross the diagnostic boundary; unexpected
@@ -106,7 +106,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
   const invokeInner = async (method, args = {}, metric = null) => {
     const previousRoute = args.previousModel?.providerPool;
     const recoveryRoute = args.recoveryContext ? args.recoveryRoute : null;
-    let continuation = method !== 'complete' || Boolean(args.toolContinuation);
+    let continuation = method !== 'complete' || Boolean(args.toolContinuation) || Boolean(previousRoute);
     // Complete() can also be given opaque signed Anthropic history. Without
     // explicit route provenance it is not portable between OAuth accounts.
     const history = [...(args.messages || []), ...(args.preparedMessages || []), ...(args.baseMessages || [])];
@@ -121,8 +121,12 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     if (continuation && (!previousRoute?.servingConnectionId || previousRoute.logicalConnectionId !== pool.connection.id)) {
       throw new Error('provider_pool_continuation_owner_missing');
     }
-    const replay = continuation && method === 'continueWithToolResults' ? (() => {
-      try { return portablePoolReplay(args, family); } catch (error) {
+    const replay = continuation ? (() => {
+      try {
+        if (method === 'continueWithToolResults') return portablePoolReplay(args, family);
+        if (args.toolContinuation) return { error: new Error('provider_pool_replay_incomplete_history') };
+        return portablePoolComplete(args, family);
+      } catch (error) {
         // Ordinary owner-pinned continuation remains available. Portability
         // failures only veto switching; the original account may still serve.
         return { error };
@@ -151,6 +155,9 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
               return { ...prior, retryNotBefore: error.retryNotBefore || prior.retryNotBefore || null, recoveryUnavailable: true };
             }
             throw retainSecondary(error, prior);
+          }
+          if (replay?.error) {
+            try { Object.defineProperty(error, 'providerPool', { value: { ...previousRoute, failover: replayBlockDiagnostic(replay.error) }, enumerable: true }); } catch {}
           }
           throw error;
         }
