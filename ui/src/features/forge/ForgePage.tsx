@@ -592,8 +592,21 @@ export function Forge({
       window.clearInterval(timer);
     };
   }, [jobs]);
-  const scopedJobs = showRecents ? jobs : jobs.filter((job) => jobMode(job) === mode);
-  const recentJobs = showRecents ? scopedJobs : scopedJobs.slice(0, 5);
+  const [recentNow, setRecentNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!showRecents) return;
+    setRecentNow(Date.now());
+    const timer = window.setInterval(() => setRecentNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [showRecents]);
+  const orderedJobs = [...jobs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const scopedJobs = showRecents
+    ? orderedJobs.filter((job) => {
+        const age = Math.max(recentNow, Date.now()) - Date.parse(job.createdAt);
+        return age >= 0 && age <= 24 * 60 * 60 * 1000;
+      })
+    : orderedJobs.filter((job) => jobMode(job) === mode).slice(0, 5);
+  const recentJobs = scopedJobs;
   const selectedJob = scopedJobs.find((job) => job.id === selectedJobId) ?? scopedJobs[0];
   const motion = useForgeMotion(machineRef, selectedJob, submittedJobRef.current, () => {
     const output = machineRef.current?.querySelector('.forge-output-content');
@@ -1226,7 +1239,7 @@ export function Forge({
           <div className="forge-panel-head">
             <div>
               <span className="eyebrow">HISTORY</span>
-              <h2>{showRecents ? `Recent creations (${jobs.length})` : 'Recent creations'}</h2>
+              <h2>{showRecents ? `Last 24 hours (${recentJobs.length})` : 'Recent creations'}</h2>
             </div>
             <button type="button" disabled={loading || selectionSaving} onClick={() => void load()}>
               Refresh
@@ -1259,7 +1272,7 @@ export function Forge({
               {loading
                 ? 'Loading creations…'
                 : showRecents
-                  ? 'No recent creations.'
+                  ? 'No creations in the last 24 hours.'
                   : `No recent ${modeLabels[mode].toLowerCase()} creations.`}
             </p>
           )}

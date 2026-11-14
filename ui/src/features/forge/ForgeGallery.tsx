@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useConfirm } from '../../app/ConfirmDialog';
 import { AccessibleModal } from '../../app/AccessibleModal';
 import './forgeGallery.css';
 import { useOwnedApi } from '../../app/useOwnedApi';
@@ -24,6 +25,7 @@ export function ForgeGallery({
   renderArtifact: (artifact: Artifact) => ReactNode;
 }) {
   const owned = useOwnedApi();
+  const confirm = useConfirm();
   const [catalog, setCatalog] = useState<Catalog>({ folders: [], images: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -87,7 +89,7 @@ export function ForgeGallery({
     return labels.join(' / ');
   };
   return (
-    <section className="forge-gallery" aria-label="Image gallery">
+    <section className="forge-gallery" aria-label="Media gallery">
       <header className="forge-gallery-toolbar">
         <nav aria-label="Gallery folders">
           <button
@@ -133,7 +135,7 @@ export function ForgeGallery({
         tabIndex={0}
       >
         {loading ? (
-          <p role="status">Loading images…</p>
+          <p role="status">Loading media…</p>
         ) : (
           <>
             {children.length > 0 && (
@@ -151,7 +153,7 @@ export function ForgeGallery({
                         galleryPictures.filter((picture) => placements[picture.id] === folder.id)
                           .length
                       }{' '}
-                      images · {folders.filter((item) => item.parent === folder.id).length} folders
+                      items · {folders.filter((item) => item.parent === folder.id).length} folders
                     </small>
                   </button>
                 ))}
@@ -164,6 +166,7 @@ export function ForgeGallery({
                   <footer>
                     <span title={picture.name}>{picture.name}</span>
                     <button
+                      disabled={busy}
                       aria-label={`Move ${picture.name}`}
                       onClick={() => {
                         setMoving(picture);
@@ -172,6 +175,42 @@ export function ForgeGallery({
                     >
                       Move
                     </button>
+                    <button
+                      disabled={busy}
+                      aria-label={`Delete ${picture.name}`}
+                      onClick={async () => {
+                        if (
+                          busy ||
+                          !(await confirm({
+                            title: 'Delete media?',
+                            message: `Permanently delete “${picture.name}”? Its original Forge links will stop working. Archive history and copies already sent in chat stay intact.`,
+                            confirmLabel: 'Delete',
+                            tone: 'danger',
+                          }))
+                        )
+                          return;
+                        setBusy(true);
+                        setError('');
+                        try {
+                          await owned.api(
+                            `/api/forge/gallery/images/${encodeURIComponent(picture.jobId)}/${encodeURIComponent(picture.artifactId)}`,
+                            { method: 'DELETE' },
+                          );
+                          setCatalog((data) => ({
+                            ...data,
+                            images: data.images.filter(
+                              (image) => `${image.jobId}:${image.artifactId}` !== picture.id,
+                            ),
+                          }));
+                        } catch {
+                          setError('Could not delete the media. Please try again.');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
                   </footer>
                 </article>
               ))}
@@ -179,10 +218,10 @@ export function ForgeGallery({
             {!error && !visible.length && (
               <p className="forge-gallery-empty">
                 {current
-                  ? 'No images in this folder yet.'
+                  ? 'No media in this folder yet.'
                   : children.length
-                    ? 'All images are in folders.'
-                    : 'No generated images yet.'}
+                    ? 'All media are in folders.'
+                    : 'No generated images or videos yet.'}
               </p>
             )}
           </>

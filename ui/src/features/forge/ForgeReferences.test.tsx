@@ -96,7 +96,7 @@ function setup({
           id: `job${posts.length}`,
           kind: models.find((m) => m.modelId === body.modelId)?.kind,
           status: 'succeeded',
-          createdAt: '2026-11-11T19:00:00Z',
+          createdAt: new Date().toISOString(),
           updatedAt: '2026-11-11T19:00:00Z',
           artifacts: [],
         },
@@ -277,7 +277,7 @@ const imageJob = (id = 'source', extra = {}) => ({
   kind: 'image',
   status: 'succeeded',
   prompt: `Dragon study ${id}`,
-  createdAt: '2026-11-11T19:00:00Z',
+  createdAt: new Date().toISOString(),
   updatedAt: '2026-11-11T19:00:00Z',
   artifacts: [
     {

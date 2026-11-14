@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { ForgeGallery } from './ForgeGallery';
 const api = vi.hoisted(() => vi.fn());
 vi.mock('../../app/api', () => ({ api, fetchApi: vi.fn() }));
@@ -22,7 +23,11 @@ const image = {
   },
 };
 const renderGallery = () =>
-  render(<ForgeGallery renderArtifact={(artifact) => <img alt={artifact.name} />} />);
+  render(
+    <ConfirmProvider>
+      <ForgeGallery renderArtifact={(artifact) => <img alt={artifact.name} />} />
+    </ConfirmProvider>,
+  );
 it('persists folders/subfolders and moves; remount reads saved placement', async () => {
   const data = {
     folders: [] as { id: string; name: string; parentId: string | null }[],
@@ -94,7 +99,7 @@ it('keeps failed folder creation open and allows retry', async () => {
     return { folders: [], images: [] };
   });
   renderGallery();
-  await waitFor(() => expect(screen.queryByText('Loading images…')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('Loading media…')).toBeNull());
   fireEvent.click(screen.getByText('＋ New folder'));
   fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: 'Test' } });
   fireEvent.click(screen.getByText('Create folder'));
@@ -117,4 +122,55 @@ it('uses the shared Forge themed fields for folder names and move destinations',
   expect(
     screen.getByLabelText('Destination').closest('label')?.classList.contains('forge-field'),
   ).toBe(true);
+});
+
+it('confirms artifact-only deletion, retains failures and removes on successful retry', async () => {
+  let fail = true;
+  api.mockImplementation(async (_path, init) => {
+    if (init?.method === 'DELETE') {
+      if (fail) throw Error('offline');
+      return { ok: true };
+    }
+    return { folders: [], images: [image] };
+  });
+  renderGallery();
+  await screen.findByAltText('Portrait');
+  fireEvent.click(screen.getByLabelText('Delete Portrait'));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(api.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  fireEvent.click(screen.getByLabelText('Delete Portrait'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  await screen.findByRole('alert');
+  expect(screen.getByAltText('Portrait')).toBeTruthy();
+  fail = false;
+  fireEvent.click(screen.getByLabelText('Delete Portrait'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(screen.queryByAltText('Portrait')).toBeNull());
+  expect(api).toHaveBeenCalledWith(
+    '/api/forge/gallery/images/job/art',
+    expect.objectContaining({ method: 'DELETE' }),
+  );
+});
+it('passes video media through the shared renderer and allows moving and deleting it', async () => {
+  api.mockResolvedValue({
+    folders: [],
+    images: [
+      {
+        ...image,
+        artifact: { ...image.artifact, kind: 'video', mimeType: 'video/mp4', name: 'Outfit.mp4' },
+      },
+    ],
+  });
+  render(
+    <ConfirmProvider>
+      <ForgeGallery
+        renderArtifact={(artifact) =>
+          artifact.kind === 'video' ? <video aria-label={artifact.name} controls /> : null
+        }
+      />
+    </ConfirmProvider>,
+  );
+  await screen.findByLabelText('Outfit.mp4');
+  expect(screen.getByLabelText('Move Outfit.mp4')).toBeTruthy();
+  expect(screen.getByLabelText('Delete Outfit.mp4')).toBeTruthy();
 });

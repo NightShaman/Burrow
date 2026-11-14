@@ -1,6 +1,6 @@
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
 import { composeMusicPrompt, Forge } from './ForgePage';
 
@@ -61,7 +61,11 @@ function renderForge(initialJobs: unknown[] = []) {
   );
 }
 
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-27T01:00:00Z'));
+});
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.clearAllMocks();
 });
@@ -306,7 +310,7 @@ describe('Forge workspace', () => {
       expect(screen.getByRole('button', { name: 'Refresh' }).hasAttribute('disabled')).toBe(false),
     );
     fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
-    expect(screen.getByText('No recent creations.')).toBeTruthy();
+    expect(screen.getByText('No creations in the last 24 hours.')).toBeTruthy();
   });
 
   it('restores per-mode selections, saves only explicit changes, and retains work across agents and remounts', async () => {
@@ -894,4 +898,37 @@ describe('Forge internal references', () => {
     await screen.findByRole('button', { name: 'Attach to conversation' });
     expect(screen.queryByRole('button', { name: 'Copy reference' })).toBeNull();
   });
+});
+
+it('limits mode histories to the newest five and Recents to the last 24 hours', async () => {
+  const now = Date.parse('2026-09-27T01:00:00Z');
+  const jobs = Array.from({ length: 8 }, (_, i) => ({
+    id: `age-${i}`,
+    kind: 'image',
+    modelId: 'model',
+    prompt: `aged ${i}`,
+    status: 'succeeded',
+    createdAt: new Date(now - i * 3600000).toISOString(),
+    artifacts: [],
+  }));
+  jobs.push({
+    ...jobs[0],
+    id: 'expired',
+    prompt: 'expired',
+    createdAt: new Date(now - 86400001).toISOString(),
+  });
+  jobs.push({
+    ...jobs[0],
+    id: 'boundary',
+    prompt: 'boundary',
+    createdAt: new Date(now - 86400000).toISOString(),
+  });
+  renderForge(jobs.reverse());
+  await screen.findByRole('button', { name: 'Image succeeded: aged 0' });
+  expect(screen.getByRole('button', { name: 'Image succeeded: aged 4' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Image succeeded: aged 5' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: /Recents/ }));
+  expect(screen.getByRole('button', { name: 'Image succeeded: aged 7' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Image succeeded: boundary' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Image succeeded: expired' })).toBeNull();
 });

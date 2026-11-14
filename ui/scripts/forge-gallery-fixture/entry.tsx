@@ -52,6 +52,11 @@ window.fetch = async (input, init) => {
   }
   if (path.startsWith('/api/forge/gallery/images/')) {
     const id = path.split('/').pop();
+    if (method === 'DELETE') {
+      catalog.images = catalog.images.filter((p: { artifactId: string }) => p.artifactId !== id);
+      sessionStorage.setItem('gallery-fixture', JSON.stringify(catalog));
+      return json({ ok: true });
+    }
     const body = JSON.parse(String(init?.body));
     catalog.images.find((p: { artifactId: string }) => p.artifactId === id).folderId =
       body.folderId;
