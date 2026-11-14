@@ -4,7 +4,7 @@
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-This reference reviews application storage ownership and records the current migration ledger through **100**, checked against Core on **8 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference reviews application storage ownership and records the current migration ledger through **102**, checked against Core on **14 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -367,3 +367,12 @@ Migration **100**, `parked-board-task-status`, adds `parked` to the task-board s
 Checked **9 November 2026**: allowlisted UI preferences live in the existing `settings_meta` entry `ui_preferences`; atomic per-key writes require no new application migration. The record is operator-wide and stores raw strings, not credentials or conversation caches. See [UI preference API](api/settings.md#operator-ui-preferences).
 
 Creating a mod-owned agent now inserts its `default` conversation in the same transaction. Session listing repairs an agent with no conversation sessions at all, under an agent-row lock. It does not resurrect a missing default when any other session exists, including retained/archived history. Group deletion targets only the `group-channel` shared transcript identity and leaves participant sessions intact.
+
+## Forge gallery storage
+
+Checked **14 November 2026**: migration **102**, `forge-image-gallery`, adds `forge_gallery_folders` (named parent/child folders) and `forge_gallery_placements` (one folder placement per job/artifact pair). Root placement has no placement row. These operator-wide records organize existing generated media; they do not ingest chat attachments or duplicate file bytes. Live artifact tombstones preserve deletion metadata while removing the storage locator and suppressing deleted media from public projections. Use the [Gallery API](api/artifacts.md#forge-gallery), not direct SQL. No database migration was run during this review.
+
+
+## Workflow watch conclusions
+
+Migration **101**, `workflow-watch-conclusions`, adds `conclusions` to `github_workflow_watches`. Existing and default watches select `failure`, `timed_out`, `startup_failure` and `action_required`; explicit supported filters can include other terminal conclusions. See [workflow watches](api/work.md). No migration was executed during this documentation review.

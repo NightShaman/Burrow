@@ -53,6 +53,10 @@ Current Core adds `/compact`: it invokes the existing planner through serialized
 
 Historical replay is budgeted by retained provider-visible user content and image-token estimates rather than encoded image/data-URI byte length. Runtime-tagged old support packs remain immutable dispatch evidence but are omitted from replay; current support is assembled and charged once. User-authored headings are not a stripping rule, and legacy untagged content keeps its existing representation. Uncovered history displaced by preparation can trigger compaction even if an older request receipt was below threshold. The planner refreshes authority before rotation; below-window screenshots are not compacted just for large encoded bytes. Required/current material that still cannot fit fails the final assembled-request budget guard. Summaries remain lossy navigation, never original proof.
 
+### Native continuation summaries
+
+Checked **14 November 2026**: the requested summary length is guidance, not a hard character rejection limit. A valid summary is no longer rejected merely for exceeding the requested length. Each next summary request still reserves output capacity, and the final assembled continuation must fit the real model-context budget. Empty, failed, invalid or tool-calling summary responses remain errors, classified as `context_compression_failed`; this change does not make context capacity unlimited or recover omitted historical evidence.
+
 ### Targeted originals and cancellation
 
 Current development rebuilds a summary by requesting its covered original entry IDs directly. The PostgreSQL store deduplicates IDs and uses batched indexed live/archive precedence lookup rather than scanning all retained history for each ID. This changes retrieval work, not the lossy nature of the recap or the retention of original evidence.

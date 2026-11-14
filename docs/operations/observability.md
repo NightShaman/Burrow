@@ -66,7 +66,7 @@ Replace `assistant` and `RUN_ID` with actual identifiers. These commands need a 
 
 `/context` shows a concise overview of the last captured provider request: model, matching usage measurement, included message groups and captured profile/context record sizes. `/context full` expands that same capture in provider-message order. Neither command reconstructs a preview from current settings. If no capture exists, the command reports `provider_request_unavailable`; send a normal message first rather than treating an absent capture as empty context.
 
-Current Chat renders expandable capture details, message contents, tool schemas/provider options and the redacted raw request. Plain clients receive readable Markdown. Usage is unavailable when the capture and meter request IDs do not match. Capture-time omission/redaction markers remain, and provider-held history referenced by a response/conversation ID may not be inside the capture. These views can still expose private conversation, profiles and tool evidence; review before sharing.
+Current Chat renders expandable capture details, message contents, tool schemas/provider options and the redacted raw request. Plain clients receive readable Markdown. Usage is unavailable when the capture and meter request IDs do not match. New structured provider-request captures retain the complete serialized message sequence, tool schemas and nesting while redacting sensitive fields and configured protected values; the former generic metadata array/key/depth cutoffs no longer apply to this JSON capture. Existing provider-specific image representations and retention rules remain. Older omitted content cannot be reconstructed, and provider-held history referenced by a response/conversation ID may not be inside the capture. These views can still expose private conversation, profiles and tool evidence; review before sharing.
 
 A receipt can show that a command ran without proving the user's overall objective. Prefer concrete changed-file, exit-status, verification, and terminal-result evidence over narrative success claims.
 
@@ -112,7 +112,7 @@ Current OTel runtime exposes bounded overall and per-destination exporter failur
 
 A `diagnostics:read` token is limited to the server's allowed GET routes. It is not a general chat/settings API credential. Token creation/revocation belongs to an authenticated operator, and some read surfaces remain outside the token allowlist. See [authentication](../security/authentication.md) and [API reference](../reference/api.md).
 
-Do not publish tokens, complete provider requests, attachment contents, or raw trace archives in an issue. Redaction is bounded and does not make every operational artifact safe to share. Progress can contain commands, paths, queries, and error text.
+Do not publish tokens, complete provider requests, attachment contents, or raw trace archives in an issue. Redaction does not make every operational artifact safe to share. Progress can contain commands, paths, queries, and error text.
 
 ## Maintenance tools and limitations
 

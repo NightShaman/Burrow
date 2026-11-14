@@ -290,3 +290,9 @@ Checked **7 November 2026**:
 ## Workspace preferences do not restore or synchronize
 
 Checked **9 November 2026**: **Couldn't restore your workspace** means the bootstrap read/migration failed; existing local settings are not automatically replaced. Choose **Retry**, or **Use this browser only** for a visibly unsynchronized fallback. **UI changes haven't synced to Burrow yet** means pending edits remain locally for retry. Preserve site data until those edits are reconciled. Check the authenticated home-server preference endpoint, not a selected-node or mod API. Credentials, drafts and conversation caches are outside this synchronization contract.
+
+## Actual error detail and safe boundaries
+
+Checked **14 November 2026**: model failures retain a sanitized actual diagnostic message separately from the structured origin/code/retry decision. Runtime-internal and unknown failures can carry this message too; wording alone does not classify a failure or authorize retry. Inspect the terminal result and run receipt, not just a generic failed indicator. Invalid native continuation summaries use `context_compression_failed`; the former summary-character rejection is removed, but real request/context budget checks remain.
+
+Authenticated settings, skill-source, Forge, reference-image and final HTTP failure responses can include sanitized `message` alongside their stable `error` code/status. Public/pre-authentication and webhook failures intentionally remain generic. Ordinary tool activity may carry safe error detail; MCP activity uses only its dedicated sanitized diagnostic field, never arbitrary output, while mod/skill raw payloads remain excluded. This is not a guarantee that every historical error or every service response contains recoverable detail. Errors already stripped from old records cannot be reconstructed.

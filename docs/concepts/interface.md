@@ -89,6 +89,8 @@ While a main run is active, choose the composer action explicitly: **Queue next*
 
 Single-agent chat accepts supported image and text formats. Default browser budgets are **8 MiB per file**, **16 MiB per batch**, and **8 files**; deployments can override these budgets. Check the attachment list and any validation error before sending. PDF extraction is not supported; convert the relevant content to a supported text format before attaching. Persisted attachments and generated artifacts have separate download routes under `/api/attachments/` and `/api/generated-artifacts/`; images can be enlarged.
 
+Checked **14 November 2026**: unsent single-agent attachment drafts belong to their agent/session and remain in browser memory while switching conversations. They are not a durable upload or reload-safe backup. Files are admitted in selection order against the current draft's count/byte budgets; a rejected file does not reserve a slot. Delayed reads must not add files to a newly selected conversation, and accepted sends clear their originating draft rather than another chat. Review the visible attachments before sending.
+
 Choose **Group Chat** to create or reopen a room. A new room needs a name and at least two agents from the local registry. Participant-scoped `@` suggestions help address messages; the runtime parses the submitted text. Each participant's active run can be cancelled separately. Rooms use `/api/group-channels`; browser tabs can be restored, while room content is fetched from the server. Unsupported or oversized group attachments are skipped, so verify the attachment list.
 ## Workspace and layout
 
@@ -293,11 +295,19 @@ Brains search searches saved memories, not conversation transcripts. The old Alb
 
 ## Forge
 
-Forge provides **Image**, **Video**, **Speech**, **Music**, and **Recents** views. Available generation models come from `GET /api/forge/catalog`; a visible mode may have no supported or configured model. In particular, the interface explicitly represents unavailable video and source-attachment capabilities.
+Forge provides **Image**, **Video**, **Speech**, **Music**, **Recents**, and **Gallery** views. Available generation models come from `GET /api/forge/catalog`; a visible mode may have no supported or configured model. In particular, the interface explicitly represents unavailable video and source-attachment capabilities.
 
 Choose **Provider**, then an available **Model** for that connection and media mode, enter the prompt or speech script, and start generation. Music has separate musical-direction and optional lyrics inputs; lyrics are guidance rather than a guarantee of verbatim output. `POST /api/forge/jobs` accepts the job, and the UI polls queued or running jobs. Inspect the resulting artifact or failure details. **Attach to conversation** uses the current agent and session, so verify that destination first.
 
 Supported PNG, JPEG, GIF and WebP artifacts up to 20 MiB also offer **Copy reference**. Paste the resulting `[forge:job-id:artifact-id]` into a chat so the agent can inspect that retained original with `attachment_view`, without attaching a new chat copy. It is a reference within the same operator-owned Burrow, not a public URL or a backup. Deleted or unavailable originals cannot be reopened. See [Forge references](../guide/everyday-use.md#reuse-a-forge-image-in-another-chat).
+
+### Gallery and recent jobs
+
+Checked **14 November 2026**: **Gallery** collects retained, succeeded operator-owned images and videos, including eligible older agent-generated jobs. It is not limited to the last 24 hours. Audio, failed jobs, ordinary chat uploads and mod-private creations are not included. **Recents** remains the last 24 hours of jobs; individual generation modes show their five latest matching jobs.
+
+Use **New folder** inside the current folder to create a nested folder, navigate with the breadcrumb, and choose **Move** to place media in a folder or return it to the Gallery root. Folders and placements persist on the server; they do not move chat copies or rename the generated file. Opening media uses the existing image/video viewer and download controls.
+
+**Delete** asks for confirmation and permanently removes that media from the live gallery. Its original Forge preview/download and copied references stop working. Archive metadata and already-delivered chat copies remain; deleting one item is not deleting its whole job. Folder rename, move and deletion are not offered by this version. See [Gallery API and deletion](../reference/api/artifacts.md#forge-gallery).
 
 ### Failed job
 
@@ -429,4 +439,5 @@ Checked **12 November 2026**: GIF is offered only when the selected model’s sa
 Checked **13 November 2026**: Chat still polls runtime activity and queued inputs. Unchanged responses reuse the existing activity, input and transcript rows; unchanged historical Markdown is not parsed again merely because live activity changes. Changed text, attachments, terminal diagnostics and input-action state still update. This reduces redundant browser work; it does not stop polling, pause a run or remove history.
 
 A retained completed/failed run summary is not live activity. After its transcript refresh succeeds for the current conversation generation, an identical terminal summary does not trigger another transcript reload on every poll. Failed or discarded refreshes remain retryable, and changed summaries or a new generation require reconciliation again. Active work, pending Forge deliveries and child-session reads continue their existing refresh behavior. These contracts were checked in source and regression-test definitions, not by running the application.
+
 
