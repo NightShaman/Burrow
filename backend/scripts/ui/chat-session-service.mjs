@@ -471,17 +471,16 @@ async function handleSerializedChat({ req, res, body, agentRuntime, sessionId, l
       return sendJson(res, 499, response);
     }
     const modelFailure = classifyModelFailure(error);
-    const contextFailure = modelFailure.origin === 'burrow' && new Set(['context_preparation_prompt_over_budget', 'context_preparation_uncovered_history', 'context_compression_unavailable', 'context_compression_failed', 'CONTEXT_BOUNDARY_VIOLATION']).has(modelFailure.code);
-    const failureMetadata = chatResultMetadata({ ok: false, decision: 'failed', ...(contextFailure ? { modelFailure } : {}) });
+    const failureMetadata = chatResultMetadata({ ok: false, decision: 'failed', modelFailure });
     const errorResponse = chatTurnErrorResponse(error);
     if (errorResponse) {
-      const response = { ...errorResponse.body, ...(contextFailure ? { error: modelFailure.code } : {}), ...failureMetadata };
+      const response = { ...errorResponse.body, ...failureMetadata };
       if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response } }, { status: errorResponse.status }); return res.end(); }
       return sendJson(res, errorResponse.status, response);
     }
     recordHttpFailure(res, { error, status: 500, event: 'run_failed', errorCode: 'chat_run_failed' });
-    if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...failureMetadata, ok: false, error: modelFailure.code, runId } } }); return res.end(); }
-    throw error;
+    if (streaming) { writeNdjson(res, { type: 'run.failed', runId, sessionId, ts: new Date().toISOString(), data: { response: { ...failureMetadata, ok: false, error: modelFailure.message || modelFailure.code, runId } } }); return res.end(); }
+    return sendJson(res, 500, { ...failureMetadata, ok: false, error: modelFailure.message || modelFailure.code, runId });
   } finally {
     if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));
   }

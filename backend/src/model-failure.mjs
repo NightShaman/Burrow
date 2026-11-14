@@ -2,9 +2,22 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { redactProtectedText } from './redaction.mjs';
 
 const providerErrorScopes = new AsyncLocalStorage();
-export const withProviderErrorScope = (protectedValues, operation) => providerErrorScopes.run(protectedValues || [], operation);
+export const withProviderErrorScope = (protectedValues, operation) => providerErrorScopes.run(
+  [...(providerErrorScopes.getStore() || []), ...(protectedValues || [])], () => {
+    // Capture even unmarked parser/callback failures before configured secrets
+    // leave scope. Keep identity and classification; never revisit raw text later.
+    const capture = error => {
+      if (isObject(error)) scopeSet(provenance, error, classifyModelFailure(error));
+      else error = markModelCallbackError(new Error(typeof error === 'string' ? error : 'model_failure_unknown'));
+      throw error;
+    };
+    try {
+      const result = operation();
+      return result && typeof result.then === 'function' ? Promise.resolve(result).catch(capture) : result;
+    } catch (error) { return capture(error); }
+  });
 
-// Only provider boundaries supply text. Classification never depends on prose.
+// Diagnostic text is sanitized independently of classification and retry policy.
 export function providerErrorSecrets(config = {}, headers = {}) {
   const values = [config.apiKey, config.auth?.token, config.auth?.apiKey, config.auth?.accessToken, config.auth?.refreshToken];
   for (const [key, value] of Object.entries({ ...config.headers, ...headers })) {
@@ -37,13 +50,13 @@ export function sanitizeProviderMessage(value, protectedValues = providerErrorSc
   return message ? message.slice(0, 2048) : undefined;
 }
 const withMessage = (failure, value) => {
-  const message = failure.origin === 'upstream' ? sanitizeProviderMessage(value) : undefined;
+  const message = sanitizeProviderMessage(value);
   return message ? { ...failure, message } : failure;
 };
 
 const failureScopes = new AsyncLocalStorage();
 export const withModelFailureScope = operation => failureScopes.run({}, operation);
-// Failure classification is a bounded decision aid. Optional upstream message
+// Failure classification is a bounded decision aid. Optional diagnostic message
 // is separately sanitized display text. Thrown-error provenance belongs to the exact object that crossed a
 // transport boundary; a TypeError name or a status property is not proof.
 // Provenance and retained results are scoped to a single invocation. A frozen
@@ -111,7 +124,7 @@ const transientStatus = (status) => status === 408 || status === 429 || (status 
 const failureHttpStatus = (status) => Number.isInteger(status) && status >= 100 && status <= 599 && (status < 200 || status >= 300);
 const httpFailure = (status) => ({ origin: 'upstream', code: `provider_http_${status}`, retryable: transientStatus(status), status });
 
-// Keep cause traversal bounded and never return cause text in metadata.
+// Keep cause traversal bounded; cause text is sanitized before projection.
 function errorChain(error) {
   const seen = new Set();
   const chain = [];
@@ -125,12 +138,12 @@ function errorChain(error) {
 export function markProviderTransportError(error, { stage } = {}) {
   if (!isObject(error) || !['fetch', 'read', 'configuration'].includes(stage) || cancelled(error)) return error;
   if (stage === 'configuration') {
-    scopeSet(provenance, error, { origin: 'burrow', code: 'provider_transport_configuration_invalid', retryable: false });
+    scopeSet(provenance, error, withMessage({ origin: 'burrow', code: 'provider_transport_configuration_invalid', retryable: false }, diagnosticText(error)));
     return error;
   }
   const chain = errorChain(error);
   if (chain.some((item) => INVALID_CONFIGURATION_CODES.has(get(item, 'code')))) {
-    scopeSet(provenance, error, { origin: 'burrow', code: 'provider_transport_configuration_invalid', retryable: false });
+    scopeSet(provenance, error, withMessage({ origin: 'burrow', code: 'provider_transport_configuration_invalid', retryable: false }, diagnosticText(error)));
     return error;
   }
   const recognized = chain.some((item) => TRANSIENT_TRANSPORT_CODES.has(get(item, 'code')));
@@ -139,7 +152,7 @@ export function markProviderTransportError(error, { stage } = {}) {
   // A failed body read is itself a transport boundary. No parser, decoder,
   // callback, diagnostics or response processing runs within this boundary.
   if (recognized || fetchFailed || stage === 'read') {
-    scopeSet(provenance, error, withMessage({ origin: 'upstream', code: stage === 'read' ? 'provider_read_failed' : 'provider_transport_failed', retryable: true }, get(error, 'message')));
+    scopeSet(provenance, error, withMessage({ origin: 'upstream', code: stage === 'read' ? 'provider_read_failed' : 'provider_transport_failed', retryable: true }, diagnosticText(error)));
   }
   return error;
 }
@@ -147,7 +160,7 @@ export function markProviderTransportError(error, { stage } = {}) {
 // Only stream parsers that actually reach EOF without their required terminal
 // should call this; vendor error messages must never be matched as proof.
 export function markProviderStreamTruncated(value) {
-  if (isObject(value)) scopeSet(provenance, value, { origin: 'upstream', code: 'provider_stream_truncated', retryable: true });
+  if (isObject(value)) scopeSet(provenance, value, withMessage({ origin: 'upstream', code: 'provider_stream_truncated', retryable: true }, diagnosticText(value)));
   return value;
 }
 
@@ -207,15 +220,29 @@ function safeClassification(value) {
 
 function safeMetadata(value) {
   const failure = safeClassification(value);
-  return failure ? withMessage(failure, get(value, 'message')) : null;
+  return failure ? failure.origin === 'cancelled' ? failure : withMessage(failure, get(value, 'message')) : null;
+}
+
+// Extract only explicit diagnostic text, never serialize arbitrary objects/configs.
+function diagnosticText(value) {
+  const seen = new Set();
+  const parts = [];
+  for (let depth = 0; depth < 5 && value != null; depth++) {
+    if (typeof value === 'string') { if (value.trim()) parts.push(value); break; }
+    if (!isObject(value) || seen.has(value)) break;
+    seen.add(value);
+    const message = get(value, 'message') ?? (get(value, 'ok') === false ? get(value, 'error') : undefined);
+    if (typeof message === 'string' && message.trim() && !parts.includes(message)) parts.push(message);
+    value = get(value, 'cause');
+  }
+  return parts.join(': ') || undefined;
 }
 
 export function classifyModelFailure(value, { signal } = {}) {
+  const text = diagnosticText(value);
   if (cancelled(value, signal)) return cancellation();
   const marked = isObject(value) ? scopeGet(provenance, value) : null;
   if (marked) return { ...marked };
-  // Annotated envelopes can be copied by a provider pool. Only accept the
-  // bounded metadata schema, never a bare error.status or arbitrary code.
   if (get(value, 'ok') === false) {
     const metadata = safeMetadata(get(value, 'modelFailure'));
     if (metadata) return metadata;
@@ -223,14 +250,14 @@ export function classifyModelFailure(value, { signal } = {}) {
   const code = get(value, 'code');
   const message = get(value, 'message') ?? (get(value, 'ok') === false ? get(value, 'error') : undefined);
   const internal = BURROW_CODES.has(code) ? code : BURROW_CODES.has(message) ? message : null;
-  if (internal) return { origin: 'burrow', code: BURROW_FIXED_CODE.get(internal) || internal, retryable: false };
-  return unknown();
+  if (internal) return withMessage({ origin: 'burrow', code: BURROW_FIXED_CODE.get(internal) || internal, retryable: false }, text);
+  return withMessage(unknown(), text);
 }
 
 // Callbacks may be arbitrary user code; they are local but not necessarily a
 // persistence fault. Clear any stale transport provenance in this scope.
 export function markModelCallbackError(error) {
-  if (isObject(error)) scopeSet(provenance, error, unknown());
+  if (isObject(error)) scopeSet(provenance, error, withMessage(unknown(), diagnosticText(error)));
   return error;
 }
 
@@ -238,20 +265,20 @@ export function markModelCallbackError(error) {
 // and cause chains are never evidence of a provider failure (or a safe code).
 export function markModelInternalError(error, code = 'provider_diagnostic_persistence_failed') {
   const safeCode = BURROW_CODES.has(code) ? BURROW_FIXED_CODE.get(code) || code : 'provider_diagnostic_persistence_failed';
-  if (!isObject(error)) error = new Error(safeCode);
-  scopeSet(provenance, error, { origin: 'burrow', code: safeCode, retryable: false });
+  if (!isObject(error)) error = new Error(typeof error === 'string' ? error : safeCode);
+  scopeSet(provenance, error, withMessage({ origin: 'burrow', code: safeCode, retryable: false }, diagnosticText(error)));
   return error;
 }
 
 /** A secondary fault must never authorize another provider dispatch. */
 export function classifyRecoveryFailure(error) {
   const failure = classifyModelFailure(error);
-  return failure.origin === 'burrow' ? failure : unknown();
+  return failure.origin === 'burrow' ? failure : withMessage(unknown(), failure.message);
 }
 
 /** Keep the original receipt only in process, attached to this failure scope. */
 export function retainModelFailure(error, result) {
-  if (!isObject(error)) error = new Error('model_failure_unknown');
+  if (!isObject(error)) error = new Error(typeof error === 'string' ? error : 'model_failure_unknown');
   scopeSet(retainedFailures, error, { originalResult: result, recoveryFailure: classifyRecoveryFailure(error) });
   return error;
 }
@@ -263,7 +290,7 @@ export function providerFailureResult(result) {
   const modelFailure = cancelled(result) ? cancellation()
     : failureHttpStatus(status) ? withMessage(httpFailure(status), classifyModelFailure(result).message)
       : classifyModelFailure(result);
-  const error = modelFailure.message || sanitizeProviderMessage(get(result, 'error')) || modelFailure.code;
+  const error = modelFailure.origin === 'cancelled' ? modelFailure.code : modelFailure.message || sanitizeProviderMessage(get(result, 'error')) || modelFailure.code;
   const raw = get(result, 'raw');
   const details = get(get(raw, 'error'), 'details');
   const safeDetails = {};
@@ -275,12 +302,6 @@ export function providerFailureResult(result) {
   return { ...result, error, ...(get(raw, 'error') ? { raw: { error: { message: error,
     ...(details ? { details: safeDetails } : {}),
   } } } : {}), modelFailure };
-}
-
-function originalErrorText(error) {
-  const message = get(error, 'message');
-  if (typeof message === 'string') return message;
-  try { return String(error); } catch { return 'model_failure_unknown'; }
 }
 
 /** Convert a caught dispatch exception without losing its original receipt. */
@@ -296,7 +317,7 @@ export function modelFailureResult(error, { signal } = {}) {
     const result = { ...originalResult, ok: false,
       // Keep the complete successful receipt only on originalResult; expose an
       // inert choice so no downstream JSON/proposal/tool path can execute it.
-      ...(originalFailed ? {} : { error: modelFailure.code, choice: { text: '' } }),
+      ...(originalFailed && modelFailure.origin !== 'cancelled' ? {} : { error: modelFailure.message || modelFailure.code, choice: { text: '' } }),
       ...(modelFailure.origin === 'cancelled' ? { cancelled: true } : {}),
       modelFailure, recoveryFailure: retained.recoveryFailure };
     Object.defineProperty(result, 'cause', { value: error });
@@ -309,7 +330,7 @@ export function modelFailureResult(error, { signal } = {}) {
   const result = {
     // The original thrown value remains available for investigation; decision
     // classification is separate from sanitized upstream display text.
-    ok: false, error: modelFailure.origin === 'upstream' ? (modelFailure.message || modelFailure.code) : originalErrorText(error), usage: null, choice: { text: '' },
+    ok: false, error: modelFailure.message || modelFailure.code, usage: null, choice: { text: '' },
     ...(status !== undefined ? { status } : {}),
     ...(providerPool !== undefined ? { providerPool } : {}),
     ...(modelFailure.origin === 'cancelled' ? { cancelled: true } : {}),

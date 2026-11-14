@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { classifyModelFailure, classifyRecoveryFailure, modelFailureResult, withModelFailureScope } from './model-failure.mjs';
+import { classifyModelFailure, classifyRecoveryFailure, modelFailureResult, withModelFailureScope, withProviderErrorScope } from './model-failure.mjs';
 import { projectModelFailure, projectModelRecoveryRecord, projectModelRecoverySummary } from './model-recovery-projection.mjs';
 
 const MAX_RETAINED_REQUESTS = 32;
@@ -14,7 +14,7 @@ function copyResult(result, fields = {}) {
 // planner, turn ingress or completed action is executed by this helper.
 export function createModelRequestRecovery(adapter, {
   maxAttempts = 3, maxRetriesPerRun = 4, delays = [1000, 3000],
-  clock = Date.now, maxRecoveryWaitMs = 30_000,
+  clock = Date.now, maxRecoveryWaitMs = 30_000, protectedValues = [],
   wait = (ms, signal) => sleep(ms, undefined, { signal }), beforeAttempt = null, onAttempt = null,
 } = {}) {
   maxAttempts = Math.min(3, Math.max(1, Number.isSafeInteger(maxAttempts) ? maxAttempts : 3));
@@ -176,8 +176,8 @@ export function createModelRequestRecovery(adapter, {
       }
     }
   };
-  return { ...adapter, complete: args => invoke('complete', args),
-    ...(typeof adapter.continueWithToolResults === 'function' ? { continueWithToolResults: args => invoke('continueWithToolResults', args) } : {}),
+  return { ...adapter, complete: args => withProviderErrorScope(protectedValues, () => invoke('complete', args)),
+    ...(typeof adapter.continueWithToolResults === 'function' ? { continueWithToolResults: args => withProviderErrorScope(protectedValues, () => invoke('continueWithToolResults', args)) } : {}),
     recoverySummary: summary,
   };
 }

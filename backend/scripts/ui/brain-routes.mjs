@@ -1,3 +1,4 @@
+import { sanitizeProviderMessage, classifyModelFailure } from '../../src/model-failure.mjs';
 import { readDreamPromotion, saveDreamPromotion } from '../../src/dream-promotion-settings.mjs';
 /** Mounted only behind the existing UI authentication and browser-origin policy. */
 export function createBrainRoutes({store,embeddings,metadata,readJsonBody,sendJson}) {
@@ -5,7 +6,7 @@ export function createBrainRoutes({store,embeddings,metadata,readJsonBody,sendJs
   if (url.pathname === '/api/settings/brain-memory') {
    if (!['GET','PUT'].includes(req.method)) return false;
    try { sendJson(res,200,await (req.method==='GET' ? readDreamPromotion(metadata) : saveDreamPromotion(metadata,await readJsonBody(req)))); }
-   catch { sendJson(res,400,{error:'promote_dreams_to_memory_invalid'}); }
+   catch(error) { sendJson(res,400,{error:'promote_dreams_to_memory_invalid',message:classifyModelFailure(error).message}); }
    return true;
   }
   if (url.pathname.startsWith('/api/settings/brain-embeddings')) {
@@ -19,7 +20,7 @@ export function createBrainRoutes({store,embeddings,metadata,readJsonBody,sendJs
     else if(req.method==='POST' && action==='/reindex') result=await embeddings.reindex();
     else return false;
     sendJson(res,200,result);
-   } catch { sendJson(res,400,{error:'brain_embedding_request_failed'}); }
+   } catch(error) { sendJson(res,400,{error:'brain_embedding_request_failed',message:(error?.diagnosticMessage ? sanitizeProviderMessage(error.diagnosticMessage) : classifyModelFailure(error).message)}); }
    return true;
   }
   const match=/^\/api\/brains(?:\/([^/]+))?$/.exec(url.pathname); if (!match) return false;

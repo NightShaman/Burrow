@@ -1,6 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { classifyModelFailure } from '../../src/model-failure.mjs';
 import { skillSourceError } from '../../src/postgres-skill-sources.mjs';
+
+function failureResponse(error) {
+ const message=classifyModelFailure(error).message;
+ return {ok:false,error:error?.statusCode?message||'skill_source_failed':'skill_source_failed',...(message?{message}:{})};
+}
 
 /** Operator management API; uses existing HTTP auth/origin/JSON boundaries. */
 export function createSkillSourceRoutes({sources,skills,sync,pool,readJsonBody,sendJson}={}) {
@@ -11,7 +17,7 @@ export function createSkillSourceRoutes({sources,skills,sync,pool,readJsonBody,s
     const importing=url.pathname.endsWith('/import');
     const result=await sync[importing?'import':'preview'](await readJsonBody(req));
     sendJson(res,importing?201:200,result);
-   } catch(e){sendJson(res,e.statusCode||500,{ok:false,error:e.statusCode?e.message:'skill_source_failed'});}
+   } catch(e){sendJson(res,e?.statusCode||500,failureResponse(e));}
    return true;
   }
   const match=/^\/api\/settings\/skills\/([^/]+)\/(source|sync|history|files)(?:\/(.+))?$/.exec(url.pathname);
@@ -45,7 +51,7 @@ export function createSkillSourceRoutes({sources,skills,sync,pool,readJsonBody,s
    }
    if(!result)throw skillSourceError('method_not_allowed',405);
    sendJson(res,result.ok?200:409,result);
-  } catch(e){sendJson(res,e.statusCode||500,{ok:false,error:e.statusCode?e.message:'skill_source_failed'});}
+  } catch(e){sendJson(res,e?.statusCode||500,failureResponse(e));}
   return true;
  };
 }

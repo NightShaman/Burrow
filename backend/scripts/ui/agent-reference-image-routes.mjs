@@ -1,3 +1,4 @@
+import { classifyModelFailure } from '../../src/model-failure.mjs';
 import { artifactResponseHeaders } from '../../src/artifact-response-policy.mjs';
 import { REFERENCE_IMAGE_MAX_BYTES } from '../../src/model-adapters/reference-image-capability.mjs';
 
@@ -21,7 +22,7 @@ export function createAgentReferenceImageRoutes({ store, readJsonBody, sendJson 
       } else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
     } catch (error) {
       const badId = error instanceof URIError;
-      sendJson(res, badId ? 400 : error.statusCode || 500, { ok: false, error: badId ? 'agent_reference_image_invalid' : error.statusCode ? error.message : 'agent_reference_image_unavailable' });
+      sendJson(res, badId ? 400 : error.statusCode || 500, { ok: false, error: badId ? 'agent_reference_image_invalid' : error.statusCode ? classifyModelFailure(error).message : 'agent_reference_image_unavailable', message: classifyModelFailure(error).message });
     }
     return true;
   };
@@ -41,7 +42,7 @@ export function createModReferenceImageContentRoute({ store, sendJson }) {
       res.end(bytes);
     } catch (error) {
       const badId = error instanceof URIError;
-      sendJson(res, badId ? 400 : error.statusCode || 500, { ok: false, error: badId ? 'mod_reference_image_invalid' : error.statusCode ? error.message : 'mod_reference_image_unavailable' });
+      sendJson(res, badId ? 400 : error.statusCode || 500, { ok: false, error: badId ? 'mod_reference_image_invalid' : error.statusCode ? classifyModelFailure(error).message : 'mod_reference_image_unavailable', message: classifyModelFailure(error).message });
     }
     return true;
   };
@@ -66,7 +67,7 @@ export function createOperatorReferenceImageRoutes({ store, readJsonBody, sendJs
         sendJson(res, 200, { ok: true, referenceImage });
       } else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
     } catch (error) {
-      sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message.replace(/^agent_reference_image_/, 'operator_reference_image_') : 'operator_reference_image_unavailable' });
+      sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? (classifyModelFailure(error).message || 'operator_reference_image_unavailable').replace(/^agent_reference_image_/, 'operator_reference_image_') : 'operator_reference_image_unavailable', message: classifyModelFailure(error).message });
     }
     return true;
   };

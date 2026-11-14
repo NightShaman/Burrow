@@ -1,3 +1,4 @@
+import { classifyModelFailure, withProviderErrorScope } from '../../src/model-failure.mjs';
 import { WORKFLOW_CONCLUSIONS } from '../../src/postgres-completion-event-store.mjs';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -116,7 +117,8 @@ export function createCompletionEventRoutes({ store, readJsonBody, sendJson, res
         return true;
       }
       if (path === '/api/events/settings') {
-        const settings = req.method === 'POST' ? await receiverSettings.save(await readJsonBody(req)) : await receiverSettings.read();
+        const body = req.method === 'POST' ? await readJsonBody(req) : undefined;
+        const settings = body !== undefined ? await withProviderErrorScope([body?.secret].filter(value => typeof value === 'string' && value.length), () => receiverSettings.save(body)) : await receiverSettings.read();
         sendJson(res, 200, { ok: true, settings });
         return true;
       }
@@ -148,7 +150,8 @@ export function createCompletionEventRoutes({ store, readJsonBody, sendJson, res
       return true;
     } catch (error) {
       const [status, code] = errorResponse(error);
-      sendJson(res, status, { ok: false, error: code });
+      // The webhook is public: actual operational reasons are restricted to UI-authenticated routes.
+      sendJson(res, status, { ok: false, error: code, ...(!webhook ? { message: classifyModelFailure(error).message } : {}) });
       return true;
     }
   };

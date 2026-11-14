@@ -8,7 +8,7 @@ import { activeConversationLimits } from './context-preparation.mjs';
 import { resolveContextConfig, resolveModelConfig, resolveRuntimeStateConfig, resolveRuntimeTracePath } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { createModelRequestRecovery } from './model-request-recovery.mjs';
-import { modelFailureResult } from './model-failure.mjs';
+import { modelFailureResult, providerErrorSecrets } from './model-failure.mjs';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
@@ -442,6 +442,7 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     if (typeof originalAdapter?.complete !== 'function') throw new Error('side_question_model_adapter_invalid');
     const adapter = recoveryAdapter = createModelRequestRecovery(originalAdapter, {
       ...modelRecoveryOptions,
+      protectedValues: providerErrorSecrets(config),
       ...(owner ? { beforeAttempt: async args => {
         assertOwner();
         await modelRecoveryOptions.beforeAttempt?.(args);
@@ -466,8 +467,7 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     }
     if (signal?.aborted || response?.cancelled) throw errorWithStatus('side_question_cancelled', 499);
     assertOwner();
-    // Keep the existing generic code for thrown adapter defects. The original
-    // value stays internal; only classified metadata crosses this boundary.
+    // Preserve stable status/blocker codes; diagnostic text is projected separately.
     if (!response?.ok && Object.hasOwn(response || {}, 'cause')) throw errorWithStatus('side_question_failed', 500);
     if (!response?.ok) throw errorWithStatus('side_question_model_failed', 502);
     if (response.choice?.toolCalls?.length || response.choice?.tool_calls?.length || response.toolCalls?.length || response.tool_calls?.length) throw errorWithStatus('side_question_tool_call_rejected', 502);
@@ -479,6 +479,7 @@ export async function answerSideQuestion({ job, stores, rootDir, agentRuntime, s
     const permitted = new Set(['side_question_snapshot_required', 'side_question_snapshot_target_mismatch', 'side_question_snapshot_generation_mismatch', 'side_question_message_required', 'side_question_attachments_unsupported', 'side_question_model_not_selected', 'side_question_context_over_budget', 'side_question_model_failed', 'side_question_tool_call_rejected', 'side_question_empty_answer', 'side_question_conversational_model_required', 'mod_agent_unavailable']);
     const code = cancelled ? 'side_question_cancelled' : permitted.has(error?.message) ? error.message : 'side_question_failed';
     result = fail(code, cancelled ? 499 : permitted.has(code) ? error.statusCode || 500 : 500, cancelled ? 'cancelled' : 'failed');
+    if (!cancelled && result.modelFailure?.message) result.error = result.modelFailure.message;
   }
   try {
     await logger.flushDiagnostics();

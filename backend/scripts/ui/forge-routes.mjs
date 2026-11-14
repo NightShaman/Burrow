@@ -1,3 +1,4 @@
+import { classifyModelFailure } from '../../src/model-failure.mjs';
 import { artifactResponseHeaders } from '../../src/artifact-response-policy.mjs';
 import { promises as fs } from 'node:fs';
 export function createForgeRoutes({ store, readJsonBody, sendJson }) {
@@ -27,7 +28,7 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
         else if (req.method === 'GET' && action === 'artifacts' && artifactId) { const { artifact, resolved } = await forge.artifact(id, artifactId); const bytes = await fs.readFile(resolved.filePath); res.writeHead(200, { 'content-type': artifact.mimeType, 'content-length': bytes.length, ...artifactResponseHeaders({ name: artifact.name, mimeType: artifact.mimeType, download: url.searchParams.get('download') === '1' }) }); res.end(bytes); }
         else sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
       }
-    } catch (error) { sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_unavailable' }); }
+    } catch (error) { sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'forge_unavailable', message: classifyModelFailure(error).message }); }
     return true;
   };
 }

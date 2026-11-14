@@ -49,7 +49,7 @@ export class PostgresBrainEmbeddings {
   const failed=Boolean(error),previous=this.operationalFailures.has(area);
   if(failed===previous)return;
   if(failed)this.operationalFailures.add(area);else this.operationalFailures.delete(area);
-  operationalEvent(this.logger,`brain_embedding_${area}_${failed?'unavailable':'restored'}`,{...fields,...(failed?{errorCode:area==='provider'?embeddingFailure(error).code:infrastructureErrorCode(error,'brain_embedding_storage_failed')}:{})},{level:failed?'warn':'info',component:'brain-embeddings'});
+  operationalEvent(this.logger,`brain_embedding_${area}_${failed?'unavailable':'restored'}`,{...fields,...(failed?{errorCode:area==='provider'?embeddingFailure(error).code:infrastructureErrorCode(error,'brain_embedding_storage_failed'),...(area==='provider' && embeddingFailure(error).message?{message:embeddingFailure(error).message}:{})}:{})},{level:failed?'warn':'info',component:'brain-embeddings'});
  }
  async settings(client=this.pool) { return (await client.query('SELECT * FROM brain_embedding_settings WHERE singleton')).rows[0]; }
  async reset(client) {

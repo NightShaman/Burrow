@@ -1,9 +1,18 @@
+import { classifyModelFailure } from '../../src/model-failure.mjs';
+
 export function createSettingsRoutes({ globalProfileDocuments, timezoneSettings, saveTimezoneSettings, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, archiveSummaryModelSelection, saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection, setupStatus, completeSetup, completeSetupOperation, listSkills, createSkill, getSkill, updateSkill, deleteSkill, agentSkills, saveAgentSkills } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok ? success : (result.status || 500), result);
     return true;
   };
-  const invoke = async (operation) => { try { return await operation(); } catch (error) { return { ok: false, status: error.statusCode || 500, error: error.statusCode ? error.message : 'skill_settings_failed' }; } };
+  const invoke = async (operation) => {
+    try { return await operation(); }
+    catch (error) {
+      // Respect diagnostics captured while provider secrets were still in scope.
+      const message = classifyModelFailure(error).message;
+      return { ok: false, status: error?.statusCode || 500, error: error?.statusCode ? message || 'skill_settings_failed' : 'skill_settings_failed', ...(message ? { message } : {}) };
+    }
+  };
   return async function handleSettingsRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/settings/global-profile-documents') return resultResponse(res, await globalProfileDocuments());
     if (req.method === 'PUT' && url.pathname === '/api/settings/global-profile-documents') return resultResponse(res, await globalProfileDocuments(await readJsonBody(req)));

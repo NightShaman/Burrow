@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createModelAdapter } from './model-adapter.mjs';
 import { createModelRequestRecovery } from './model-request-recovery.mjs';
-import { modelFailureResult } from './model-failure.mjs';
+import { modelFailureResult, providerErrorSecrets } from './model-failure.mjs';
 import { projectModelRecoveryMetadata, projectModelRecoveryRecord } from './model-recovery-projection.mjs';
 import { actionFromNativeToolCall, nativeToolSchemas } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
@@ -587,6 +587,7 @@ async function runRegisteredSpawnSubagentChild({
   let modelCall = 0;
   const adapter = createModelRequestRecovery(modelAdapter || createModelAdapter({ config: modelConfig }), {
     ...modelRecoveryOptions,
+    protectedValues: providerErrorSecrets(modelConfig || {}),
     onAttempt: () => ++modelCall,
   });
   const withRecovery = (result, source = {}) => ({
@@ -623,7 +624,7 @@ async function runRegisteredSpawnSubagentChild({
     const cancelled = Boolean(response.cancelled || signal?.aborted || response.modelFailure?.origin === 'cancelled');
     const code = projectModelRecoveryMetadata(response).modelFailure?.code || 'model_failure_unknown';
     const result = withRecovery(subagentResult({ ok: false,
-      summary: cancelled ? 'Minion model request cancelled.' : `${summary}: ${code}`,
+      summary: cancelled ? 'Minion model request cancelled.' : `${summary}: ${projectModelRecoveryMetadata(response).modelFailure?.message || code}`,
       blockers: [cancelled ? 'subagent_cancelled' : `subagent_model_failed:${code}`], toolResults, target }), response);
     const status = cancelled ? 'cancelled' : 'failed';
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result,

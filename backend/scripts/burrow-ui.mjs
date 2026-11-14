@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { classifyModelFailure, withProviderErrorScope } from '../src/model-failure.mjs';
+import { httpFailureResponse, postgresDiagnosticSecrets, otelDiagnosticSecrets } from './ui/http-error-response.mjs';
 import { uiPreferences, saveUiPreferences } from '../src/ui-preferences.mjs';
 import { createImportExportApplication } from './ui/import-export-application.mjs';
 import { createModelConnectionService } from './ui/model-connection-service.mjs';
@@ -1628,7 +1630,7 @@ const archiveReadProcess = createArchiveReadProcess({ poolConfig: runtimePostgre
 });
 const sessionRoute = createSessionRoutes({ resolveArchiveAgentRuntime: archiveAgentContext.resolveAgentRuntime, rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
-const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, uiPreferences: () => uiPreferences({ metadata: metadataStore() }), saveUiPreferences: body => saveUiPreferences(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() })); await applyOtelConfigurationToNodeGoblins(); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed' }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
+const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, uiPreferences: () => uiPreferences({ metadata: metadataStore() }), saveUiPreferences: body => saveUiPreferences(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { const config = await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() }); await withProviderErrorScope(otelDiagnosticSecrets(config), async () => { await otelRuntime.apply(config); await applyOtelConfigurationToNodeGoblins(); }); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed', message: classifyModelFailure(error).message }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
 const observabilityRoute = createObservabilityRoutes({ providerPoolMetrics: () => postgresApplication.stores.models.providerPoolMetrics.summary(), readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ serverLogger, runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
@@ -1777,11 +1779,12 @@ const modManagementRoute = createModManagementRoute({ distribution: modManagemen
 const server = createServer((req, res) => {
   instrumentHttpResponse({ req, res, logger: serverLogger });
   void requestLifecycle.track(async () => {
-    try { await handleRequest(req, res); }
+    try { await withProviderErrorScope(postgresDiagnosticSecrets(runtimePostgresConfig), () => handleRequest(req, res)); }
     catch (error) { recordHttpFailure(res, { error, status: 500 }); res.destroy(error); }
   }).catch(() => {});
 });
 async function handleRequest(req, res) {
+  let diagnosticsAuthorized = false;
   if (shuttingDown) return sendJson(res, 503, { ok: false, error: 'runtime_shutting_down' });
   try {
     const internal = coreApiCaller(req);
@@ -1801,6 +1804,7 @@ async function handleRequest(req, res) {
     if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/api/health')) return sendJson(res, 200, { ok: true, runtime: 'burrow', version: releaseVersion, buildIdentity: healthBuildIdentity, ...(healthReleaseProvenance ? { releaseProvenance: healthReleaseProvenance } : {}), ...(process.env.BURROW_SMOKE_TOKEN && req.headers['x-burrow-smoke-token'] === process.env.BURROW_SMOKE_TOKEN ? { smokeToken: process.env.BURROW_SMOKE_TOKEN } : {}) });
     if (await completionEventRoute({ req, res, url, webhookOnly: true })) return;
     if (!internal && !(await authorizeRequest(req, res, url))) return;
+    diagnosticsAuthorized = true;
     if (await completionEventRoute({ req, res, url })) return;
     if (req.method === 'GET' && url.pathname === '/api/auth/validate') {
       const runtime = await runtimeConfig();
@@ -1826,23 +1830,23 @@ async function handleRequest(req, res) {
         const diagnostic = url.pathname === '/api/diagnostics/brains' ? brainDiagnosticSummary
           : url.pathname === '/api/diagnostics/brains/memories' ? brainDiagnosticMemories : brainDiagnosticEmbeddingJobs;
         return sendJson(res, 200, await diagnostic(postgresApplication.pool, options));
-      } catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'brain_diagnostics_unavailable' }); }
+      } catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'brain_diagnostics_unavailable', message: classifyModelFailure(error).message }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/postgres') return sendJson(res, 200, await postgresDiagnostic(postgresApplication.pool));
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/forge/jobs') {
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
       const cursor = url.searchParams.get('cursor') || undefined;
       try { return sendJson(res, 200, await forgeDiagnosticJobs(postgresApplication.pool, { limit, cursor })); }
-      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_diagnostics_unavailable' }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'forge_diagnostics_unavailable', message: classifyModelFailure(error).message }); }
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/forge/jobs/')) {
       try { return sendJson(res, 200, await forgeDiagnosticJob(postgresApplication.pool, url.pathname.slice('/api/diagnostics/forge/jobs/'.length))); }
-      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'forge_diagnostics_unavailable' }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'forge_diagnostics_unavailable', message: classifyModelFailure(error).message }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/mods') return sendJson(res, 200, { ok: true, mods: diagnosticMods(modLifecycle.getMods()) });
     if (req.method === 'GET' && /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(url.pathname)) {
       try { return sendJson(res, 200, { ok: true, ...pendingModOperations(modLifecycle.getMods(), url.pathname.split('/')[4]) }); }
-      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'mod_diagnostics_unavailable', message: classifyModelFailure(error).message }); }
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/diagnostics/mods/')) {
       const match = /^\/api\/diagnostics\/mods\/([a-z0-9-]+)\/jobs(?:\/([A-Za-z0-9_-]+))?$/.exec(url.pathname);
@@ -1850,7 +1854,7 @@ async function handleRequest(req, res) {
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : 50;
       const cursor = url.searchParams.has('cursor') ? url.searchParams.get('cursor') : undefined;
       try { return sendJson(res, 200, { ok: true, ...await modJobs(modLifecycle.getMods(), match[1], { jobId: match[2], limit, cursor }) }); }
-      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? error.message : 'mod_diagnostics_unavailable' }); }
+      catch (error) { return sendJson(res, error.statusCode || 500, { ok: false, error: error.statusCode ? classifyModelFailure(error).message : 'mod_diagnostics_unavailable', message: classifyModelFailure(error).message }); }
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
       const mcpConfigured = (await mcpStore().list()).length;
@@ -1952,8 +1956,9 @@ async function handleRequest(req, res) {
     return sendJson(res, 404, { ok: false, error: 'not_found' });
   } catch (error) {
     const status = Number(error?.statusCode) >= 400 && Number(error.statusCode) < 500 ? Number(error.statusCode) : 500;
-    recordHttpFailure(res, { error, status });
-    return sendJson(res, status, { ok: false, error: String(error?.message || error), ...(error?.details ? { details: error.details } : {}), stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined });
+    const failure = httpFailureResponse(error, { authorized: diagnosticsAuthorized });
+    recordHttpFailure(res, { error: new Error(classifyModelFailure(error).message || 'http_request_failed'), status });
+    return sendJson(res, status, failure);
   }
 }
 

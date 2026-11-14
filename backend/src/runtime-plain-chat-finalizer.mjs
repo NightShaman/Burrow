@@ -1,3 +1,4 @@
+import { sanitizeProviderMessage } from './model-failure.mjs';
 import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { toolActivityPresentation } from './tool-activity-labels.mjs';
 import { appendRuntimeActivity, appendRuntimeSessionEntry, appendRuntimeSessionTurn } from './runtime-session-writer.mjs';
@@ -97,21 +98,28 @@ export function chatToolActivity(loop = null, runId = null) {
   for (const result of tools) {
     const label = activityLabel(result);
     const detail = activityDetail(result);
+    // MCP diagnostic is a dedicated, already-sanitized adapter field. Never
+    // inspect output/content or free-form MCP/mod/skill error payloads here.
+    const errorDetail = result.ok !== false ? undefined
+      : result.tool === 'mcp_call' ? sanitizeProviderMessage(result.diagnostic)
+        : ['mod_agent_tool', 'load_skill'].includes(result.tool) ? undefined
+          : sanitizeProviderMessage(result.error);
     const status = result.ok === false ? 'error' : result.ok === true ? 'ok' : 'pending';
     const key = activityGroupKey(result) || `${label}|${detail}`;
     const existing = groups.get(key);
     if (existing) {
       existing.count += 1;
-      if (status === 'error') existing.status = 'error';
+      if (status === 'error') { existing.status = 'error'; if(errorDetail)existing.errorDetail=errorDetail; }
       else if (status === 'pending' && existing.status !== 'error') existing.status = 'pending';
       if (!existing.detail && detail) existing.detail = detail;
       continue;
     }
-    groups.set(key, { label, detail, status, count: 1 });
+    groups.set(key, { label, detail, status, count: 1, errorDetail });
   }
   const items = [...groups.values()].map((group, index) => ({
     id: `activity-${index + 1}`,
     label: group.label,
+    ...(group.errorDetail ? {errorDetail:group.errorDetail} : {}),
     ...(groupedActivityDetail(group.detail, group.count) ? { detail: groupedActivityDetail(group.detail, group.count) } : {}),
     status: group.status,
     count: group.count,

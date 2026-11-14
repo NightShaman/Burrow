@@ -5,7 +5,7 @@ import { nativeToolSchemas, parseActionProposal } from './action-proposal.mjs';
 import { reviewProposalActions } from './action-safety.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
 import { createModelRequestRecovery } from './model-request-recovery.mjs';
-import { modelFailureResult } from './model-failure.mjs';
+import { modelFailureResult, providerErrorSecrets } from './model-failure.mjs';
 import { executeReviewedProposalActions } from './proposal-executor.mjs';
 import { createRuntimeTurnResult, assertRuntimeTurnContract } from './chat-runtime-contracts.mjs';
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
@@ -317,6 +317,7 @@ export async function runPlainModelTurn({
   try {
     const adapter = recoveryAdapter = createModelRequestRecovery(modelAdapter || createModelAdapter({ config: modelConfig || {} }), {
       ...modelRecoveryOptions,
+      protectedValues: providerErrorSecrets(modelConfig || {}),
       beforeAttempt: beforeModelAttempt,
       onAttempt: () => { partialAnswerText = ''; partialAnswerModelCall = null; return ++modelCall; },
     });
