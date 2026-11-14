@@ -1,11 +1,6 @@
 import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import {
-  AccountStatus,
-  accountUsageStatus,
-  anthropicFreshness,
-  useAccountUsage,
-} from './AccountStatus';
+import { AccountStatus, accountUsageStatus, useAccountUsage } from './AccountStatus';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 
 const server = Date.parse('2026-11-14T15:00:00Z');
@@ -64,7 +59,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('uses backend retained usage on initial 429, shows honest age/retry, not raw error or exhausted quota', async () => {
+it('uses retained usage on initial 429 without transport warnings, telemetry or false quota restriction', async () => {
   setup();
   respond(failure(), 429);
   render(
@@ -74,8 +69,8 @@ it('uses backend retained usage on initial 429, shows honest age/retry, not raw 
   );
   await act(async () => {});
   expect(screen.getByText('80%')).toBeTruthy();
-  expect(screen.getByText('Usage rate limited')).toBeTruthy();
-  expect(screen.getByText('Updated 4m ago · retry in 1m')).toBeTruthy();
+  expect(screen.getByText('Available')).toBeTruthy();
+  expect(screen.queryByText(/Usage rate limited|Updated|retry in/)).toBeNull();
   expect(screen.queryByText('anthropic_oauth_usage_failed:429')).toBeNull();
   expect(screen.queryByText('Limit Exceeded')).toBeNull();
   expect(screen.getByText('1h')).toBeTruthy();
@@ -89,7 +84,9 @@ it('does not invent percentage or sample time when a throttled account has never
     </ConfirmProvider>,
   );
   await act(async () => {});
-  expect(screen.getByText('No usage sample · retry in 1m')).toBeTruthy();
+  expect(screen.getByText('Unknown')).toBeTruthy();
+  expect(screen.queryByText(/Usage rate limited|Updated|retry in/)).toBeNull();
+  expect(screen.queryByText('Available')).toBeNull();
   expect(screen.queryByText('80%')).toBeNull();
 });
 it('ages server-reported samples monotonically and recovers at the next 30-second poll', async () => {
@@ -100,12 +97,11 @@ it('ages server-reported samples monotonically and recovers at the next 30-secon
   const view = renderHook(() => useAccountUsage([provider('age-and-recover')]));
   await act(async () => {});
   expect(accountUsageStatus(view.result.current[0], 30_099).label).toBe('Available');
-  expect(accountUsageStatus(view.result.current[0], 30_100).label).toBe('Stale');
+  expect(accountUsageStatus(view.result.current[0], 30_100).label).toBe('Available');
   fetcher.mockImplementation(async () => Response.json(failure(), { status: 429 }));
   elapsed.mockReturnValue(30_100);
   await act(async () => vi.advanceTimersByTime(30_000));
-  expect(anthropicFreshness(view.result.current[0], 90_100)).toBe('Updated 5m ago');
-  expect(accountUsageStatus(view.result.current[0], 90_100).label).toBe('Usage rate limited');
+  expect(accountUsageStatus(view.result.current[0], 90_100).label).toBe('Available');
   fetcher.mockImplementation(async () => Response.json(body()));
   elapsed.mockReturnValue(90_100);
   await act(async () => vi.advanceTimersByTime(30_000));
@@ -127,7 +123,6 @@ it('preserves sample and clock on network failure and rate-limit state across re
   const second = renderHook(() => useAccountUsage(p));
   expect(second.result.current[0].state).toBe('error');
   expect(second.result.current[0].rateLimited).toBe(true);
-  expect(anthropicFreshness(second.result.current[0], 60_100)).toBe('Updated 5m ago');
   second.unmount();
   respond(body());
   const third = renderHook(() => useAccountUsage(p));
@@ -141,8 +136,7 @@ it('preserves sample and clock on network failure and rate-limit state across re
   await act(async () => vi.advanceTimersByTime(30_000));
   expect(third.result.current[0].bars[0].remainingPercent).toBe(80);
   expect(third.result.current[0].clock?.serverMs).toBe(server);
-  expect(accountUsageStatus(third.result.current[0]).label).toBe('Usage unavailable');
-  expect(anthropicFreshness(third.result.current[0], 60_100)).toBe('Updated 1m ago');
+  expect(accountUsageStatus(third.result.current[0]).label).toBe('Available');
 });
 it('accepts old backend fetchedAt with HTTP server clock but never uses PC wall time', async () => {
   setup();
@@ -150,16 +144,14 @@ it('accepts old backend fetchedAt with HTTP server clock but never uses PC wall 
   respond({ usage, fetchedAt: new Date(server - 180_000).toISOString() });
   const view = renderHook(() => useAccountUsage([provider('old-backend')]));
   await act(async () => {});
-  expect(accountUsageStatus(view.result.current[0]).label).toBe('Stale');
-  expect(anthropicFreshness(view.result.current[0])).toBe('Updated 3m ago');
+  expect(accountUsageStatus(view.result.current[0]).label).toBe('Available');
 });
-it('missing or invalid age cannot imply fresh availability', async () => {
+it('missing age does not override known account usage with a polling status', async () => {
   setup();
   respond({ usage });
   const view = renderHook(() => useAccountUsage([provider('unknown-age')]));
   await act(async () => {});
-  expect(accountUsageStatus(view.result.current[0]).label).toBe('Unknown');
-  expect(anthropicFreshness(view.result.current[0])).toBe('No usage sample');
+  expect(accountUsageStatus(view.result.current[0]).label).toBe('Available');
 });
 it('clears retained state when the server explicitly has no sample for a rebound connection', async () => {
   setup();
@@ -170,4 +162,53 @@ it('clears retained state when the server explicitly has no sample for a rebound
   await act(async () => vi.advanceTimersByTime(30_000));
   expect(view.result.current[0].bars).toEqual([]);
   expect(view.result.current[0].sample).toBeNull();
+});
+
+it('keeps rendered status, tone and percentages stable across successful, throttled and offline polls', async () => {
+  setup();
+  const fetcher = respond(body());
+  const { container } = render(
+    <ConfirmProvider>
+      <AccountStatus providers={[provider('steady-render')]} />
+    </ConfirmProvider>,
+  );
+  await act(async () => {});
+  const assertSteady = () => {
+    expect(screen.getByText('Available')).toBeTruthy();
+    expect(container.querySelector('.account-connection-status.active')).toBeTruthy();
+    expect(screen.getByText('80%')).toBeTruthy();
+    expect(
+      screen.queryByText(/Usage rate limited|Updated|retry in|Usage unavailable|Stale/),
+    ).toBeNull();
+  };
+  assertSteady();
+  for (const response of [
+    () => Promise.resolve(Response.json(failure(), { status: 429 })),
+    () => Promise.reject(Error('offline')),
+    () => Promise.resolve(Response.json(body())),
+  ]) {
+    fetcher.mockImplementation(response);
+    await act(async () => vi.advanceTimersByTime(30_000));
+    assertSteady();
+  }
+  expect(fetcher).toHaveBeenCalledTimes(4);
+});
+
+it('does not hide known quota exhaustion behind a failed usage refresh', async () => {
+  setup();
+  const limited = failure();
+  limited.lastSuccess = {
+    ...limited.lastSuccess!,
+    usage: { windows: [{ ...usage.windows[0], usedPercent: 100 }] },
+  };
+  respond(limited, 429);
+  const { container } = render(
+    <ConfirmProvider>
+      <AccountStatus providers={[provider('real-exhaustion')]} />
+    </ConfirmProvider>,
+  );
+  await act(async () => {});
+  expect(screen.getByText('Limit Exceeded')).toBeTruthy();
+  expect(container.querySelector('.account-connection-status.quota-exceeded')).toBeTruthy();
+  expect(screen.getByText('0%')).toBeTruthy();
 });

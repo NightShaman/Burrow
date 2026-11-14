@@ -133,7 +133,7 @@
   background: none;
 }
 .account-status .account-connection-status.paused {
-  color: var(--danger);
+  color: var(--muted);
   background: none;
 }
 .account-status .account-connection-status .dot {

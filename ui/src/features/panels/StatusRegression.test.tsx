@@ -41,7 +41,8 @@ it('does not call pending account checks connected; distinguishes success and fa
       <AccountStatus providers={providers} />
     </ConfirmProvider>,
   );
-  await screen.findByText('Usage unavailable');
+  await screen.findByText('Unknown');
+  expect(screen.queryByText('Usage unavailable')).toBeNull();
 });
 it('runtime dot is not green while pending or failed and is green only on success', async () => {
   vi.mocked(api).mockImplementation(() => new Promise(() => {}));

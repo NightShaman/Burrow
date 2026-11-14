@@ -125,7 +125,7 @@ it('ages cached status and expires restrictions using elapsed time, retaining ac
   expect(accountUsageStatus(limited, 100).label).toBe('Rate Limited');
   expect(accountUsageStatus(limited, 60_100).label).toBe('Stale');
   expect(accountUsageStatus({ ...base, clock: null }, 100).label).toBe('Unknown');
-  expect(accountUsageStatus({ ...base, state: 'error' }, 100).label).toBe('Usage unavailable');
+  expect(accountUsageStatus({ ...base, state: 'error' }, 100).label).toBe('Available');
 });
 it('timer aging does not depend on wall-clock jumps', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });

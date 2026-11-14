@@ -192,32 +192,6 @@ function anthropicCard(base: AccountUsageCard, result: AnthropicUsageResponse): 
   };
 }
 
-function sampleAge(card: AccountUsageCard, elapsed: number): number | null {
-  return card.sample ? card.sample.ageMs + Math.max(0, elapsed - card.sample.receivedAt) : null;
-}
-
-function elapsedLabel(ms: number) {
-  if (ms < 30_000) return 'just now';
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-}
-
-export function anthropicFreshness(card: AccountUsageCard, elapsed = performance.now()) {
-  const age = sampleAge(card, elapsed);
-  const sample = age === null ? 'No usage sample' : `Updated ${elapsedLabel(age)}`;
-  const remaining = card.retry
-    ? card.retry.afterMs - Math.max(0, elapsed - card.retry.receivedAt)
-    : 0;
-  const retry =
-    card.state === 'error' && remaining > 0
-      ? ` · retry in ${remaining < 60_000 ? `${Math.max(1, Math.ceil(remaining / 1000))}s` : `${Math.ceil(remaining / 60_000)}m`}`
-      : '';
-  return `${sample}${retry}`;
-}
-
 export function useAccountUsage(
   providers: SavedProvider[],
   refreshMs = ACCOUNT_REFRESH_MS,
@@ -345,14 +319,11 @@ export function accountUsageStatus(
   elapsed = performance.now(),
 ): { label: string; tone: 'active' | 'paused' | 'quota-exceeded'; detail?: string } {
   if (card.state === 'loading') return { label: 'Checking', tone: 'paused' };
-  if (card.state === 'error')
-    return { label: card.rateLimited ? 'Usage rate limited' : 'Usage unavailable', tone: 'paused' };
+  // A failed meter refresh is not an account restriction. Use the last reported
+  // account evidence; transport errors/cooldowns must not replace its status.
   if (card.vendor !== 'OpenAI') {
     const known = card.bars.filter((bar) => bar.remainingPercent !== null);
     if (!known.length) return { label: 'Unknown', tone: 'paused' };
-    const age = sampleAge(card, elapsed);
-    if (age === null) return { label: 'Unknown', tone: 'paused' };
-    if (age >= ACCOUNT_REFRESH_MS) return { label: 'Stale', tone: 'paused' };
     return known.some((bar) => bar.remainingPercent === 0)
       ? { label: 'Limit Exceeded', tone: 'quota-exceeded' }
       : { label: 'Available', tone: 'active' };
@@ -504,14 +475,6 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
               onDragEnd={clearDrag}
             >
               {card.state === 'loading' && <small className="hint">Loading usage</small>}
-              {card.vendor === 'Anthropic' && card.state !== 'loading' && (
-                <small className="hint" title={card.state === 'error' ? card.error : undefined}>
-                  {anthropicFreshness(card, now)}
-                </small>
-              )}
-              {card.vendor !== 'Anthropic' && card.state === 'error' && (
-                <small className="hint">{card.error ?? 'Usage unavailable'}</small>
-              )}
               {card.state === 'ready' && !card.bars.length && (
                 <small className="hint">No usage windows reported.</small>
               )}
