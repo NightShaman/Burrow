@@ -136,10 +136,19 @@ export function boundedRedactedValue(value, {
   return visit(value);
 }
 
-/** Redact a serialized structured payload without applying credential regexes to prose leaves. */
+/**
+ * Serialized provider artifacts are complete diagnostic records, not bounded
+ * metadata projections. Traverse the JSON itself so message arrays, tool schemas
+ * and nested content survive intact while applying the same redaction boundary.
+ */
 export function redactStructuredJsonText(value, options = {}) {
   const source = String(value ?? '');
-  try { return JSON.stringify(redactValue(JSON.parse(source), options)); }
+  try {
+    return JSON.stringify(JSON.parse(source, (key, item) => {
+      if (isSensitiveField(key)) return '[redacted]';
+      return typeof item === 'string' ? redactProtectedText(item, options.protectedValues || []) : item;
+    }));
+  }
   catch { return redactProtectedText(source, options.protectedValues || []); }
 }
 
