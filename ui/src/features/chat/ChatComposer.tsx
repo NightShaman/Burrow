@@ -37,6 +37,7 @@ type ChatComposerProps = {
   setDraft: (value: string) => void;
   attached: ChatAttachment[];
   onAttach: (files: File[]) => void;
+  attachmentDisabledReason?: string;
   onRemoveAttachment: (index: number) => void;
   disabled?: boolean;
   sendDisabled?: boolean;
@@ -65,6 +66,7 @@ export function ChatComposer({
   attached,
   onAttach,
   onRemoveAttachment,
+  attachmentDisabledReason = '',
   disabled = false,
   sendDisabled = false,
   steeringActive = false,
@@ -86,7 +88,11 @@ export function ChatComposer({
   agentNames = new Map(),
 }: ChatComposerProps) {
   const sendLabel = showIntent ? intentLabels[busyIntent] : 'Send';
-  const canSend = Boolean(draft.trim() || attached.length) && !disabled && !sendDisabled;
+  const canSend =
+    Boolean(draft.trim() || attached.length) &&
+    !disabled &&
+    !sendDisabled &&
+    !(attachmentDisabledReason && attached.length);
   const [projectContext, setProjectContext] = useState<ProjectOption | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState('');
@@ -227,16 +233,16 @@ export function ChatComposer({
     );
     if (files.length) {
       event.preventDefault();
-      onAttach(files);
+      if (!attachmentDisabledReason) onAttach(files);
     }
   };
   const chooseFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    onAttach(Array.from(event.target.files ?? []));
+    if (!attachmentDisabledReason) onAttach(Array.from(event.target.files ?? []));
     event.target.value = '';
   };
   const dropFiles = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    onAttach(Array.from(event.dataTransfer.files));
+    if (!attachmentDisabledReason) onAttach(Array.from(event.dataTransfer.files));
   };
   const copyConversation = async () => {
     const transcript = formatConversationCopy(conversationTurns, {
@@ -281,6 +287,11 @@ export function ChatComposer({
             </button>
           ))}
         </div>
+      )}
+      {attachmentDisabledReason && attached.length > 0 && (
+        <p className="error" role="alert">
+          {attachmentDisabledReason} Remove attachments to send.
+        </p>
       )}
       {menuOpen && projectQuery === null && commandMatches.length > 0 && (
         <div
@@ -431,22 +442,24 @@ export function ChatComposer({
                 </div>
               )}
             </div>
-            <label
-              className="attach"
-              aria-label="Attach image or document"
-              title="Attach image or document"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9 17.4a2 2 0 0 1-2.8-2.8l8.2-8.2" />
-              </svg>
-              <input
-                id="chat-attachments"
-                name="attachments"
-                type="file"
-                multiple
-                onChange={chooseFiles}
-              />
-            </label>
+            {!attachmentDisabledReason && (
+              <label
+                className="attach"
+                aria-label="Attach image or document"
+                title="Attach image or document"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9 17.4a2 2 0 0 1-2.8-2.8l8.2-8.2" />
+                </svg>
+                <input
+                  id="chat-attachments"
+                  name="attachments"
+                  type="file"
+                  multiple
+                  onChange={chooseFiles}
+                />
+              </label>
+            )}
             {showIntent && (
               <select
                 className="chat-intent"

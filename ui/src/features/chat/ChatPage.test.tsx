@@ -918,3 +918,87 @@ it('passes the current agent registry through to saved A2A sender avatars', () =
     screen.getByLabelText('Hatchet → smatchet avatar').querySelector('img')?.getAttribute('src'),
   ).toBe('/portraits/hatchet.png');
 });
+
+describe('Codex minion text-only follow-ups', () => {
+  const child = {
+    id: 'codex-child',
+    name: 'Codex child',
+    avatar: 'C',
+    activity: '',
+    context: null,
+    stream: 'codex-child',
+    depth: 1,
+    harness: 'codex' as const,
+  };
+  const image = new File(['image'], 'image.png', { type: 'image/png' });
+
+  it('hides the file picker and blocks image paste/drop while allowing text send', () => {
+    const { container, props, onSend } = renderChat({ selected: child, draft: 'Follow up' });
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(screen.getByPlaceholderText('Message Codex minion (text only)…')).toBeTruthy();
+    const textarea = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.paste(textarea, { clipboardData: { files: [image] } });
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [image] } });
+    fireEvent(container.querySelector('.composer-wrap')!, drop);
+    expect(drop.defaultPrevented).toBe(true);
+    expect(props.onAttach).not.toHaveBeenCalled();
+    const pasteText = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteText, 'clipboardData', { value: { files: [] } });
+    fireEvent(textarea, pasteText);
+    expect(pasteText.defaultPrevented).toBe(false);
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledWith('Follow up', expect.any(Function));
+  });
+
+  it('preserves stale attachments for removal and blocks both send paths until removed', () => {
+    const attached = [
+      {
+        name: 'notes.txt',
+        type: 'text/plain',
+        content: 'data:text/plain;base64,bm90ZXM=',
+        size: 5,
+        encoding: 'data-url' as const,
+      },
+    ];
+    const { props, onSend, rerender } = renderChat({
+      selected: child,
+      draft: 'Follow up',
+      attached,
+    });
+    expect(screen.getByRole('alert').textContent).toContain('Remove attachments to send.');
+    const send = screen.getByRole('button', { name: 'Send message' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(send);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove notes.txt' }));
+    expect(props.onRemoveAttachment).toHaveBeenCalledWith(0);
+    rerender(<Chat {...props} attached={[]} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect(onSend).toHaveBeenCalledWith('Follow up', expect.any(Function));
+  });
+
+  it.each(['agent', 'burrow', 'legacy'])(
+    'preserves file selection, paste and drop in %s chat',
+    (kind) => {
+      const selected =
+        kind === 'agent'
+          ? agent
+          : { ...child, harness: kind === 'burrow' ? ('burrow' as const) : undefined };
+      const { container, props } = renderChat({ selected });
+      const input = container.querySelector('input[type="file"]')!;
+      expect(input).toBeTruthy();
+      fireEvent.change(input, { target: { files: [image] } });
+      fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), {
+        clipboardData: { files: [image] },
+      });
+      fireEvent.drop(container.querySelector('.composer-wrap')!, {
+        dataTransfer: { files: [image] },
+      });
+      expect(props.onAttach).toHaveBeenCalledTimes(3);
+      expect(props.onAttach).toHaveBeenLastCalledWith([image]);
+    },
+  );
+});
