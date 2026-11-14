@@ -333,6 +333,14 @@ export function TerminalErrorCard({ terminal }: { terminal: ChatTerminalMetadata
                     : 'Run failed'}
         </strong>
         <p>{diagnostic.message}</p>
+        {terminal.terminalStatus === 'failed' && terminal.modelFailure && (
+          <p>
+            <small>
+              Code: {terminal.modelFailure.code}
+              {terminal.modelFailure.status ? ` · HTTP ${terminal.modelFailure.status}` : ''}
+            </small>
+          </p>
+        )}
         {terminal.terminalStatus === 'superseded' ? (
           <span>The newer run owns this conversation.</span>
         ) : terminal.terminalStatus === 'failed' && diagnostic.upstream ? (
@@ -878,6 +886,7 @@ export function ToolActivityCard({ activity, live }: { activity: ToolActivity; l
               <div>
                 <strong>{item.label}</strong>
                 {item.detail && <small title={item.detail}>{item.detail}</small>}
+                {item.errorDetail && <small title={item.errorDetail}>{item.errorDetail}</small>}
               </div>
             </div>
           ))

@@ -128,7 +128,14 @@ describe('chat turn reconciliation', () => {
         {
           runId: 'run-1',
           summary: 'Read files',
-          items: [{ label: 'Read file', detail: 'app.ts', status: 'error' }],
+          items: [
+            {
+              label: 'Read file',
+              detail: 'app.ts',
+              errorDetail: 'Permission denied [REDACTED]',
+              status: 'error',
+            },
+          ],
         },
       ],
     );
@@ -140,7 +147,14 @@ describe('chat turn reconciliation', () => {
           runId: 'run-1',
           summary: 'Read files',
           status: 'warn',
-          items: [{ id: 'run-1:0', status: 'error' }],
+          items: [
+            {
+              id: 'run-1:0',
+              detail: 'app.ts',
+              errorDetail: 'Permission denied [REDACTED]',
+              status: 'error',
+            },
+          ],
         },
       },
     });

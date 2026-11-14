@@ -79,9 +79,7 @@ function chatFailure(value: unknown): ModelFailure | undefined {
     origin: failure.origin as ModelFailure['origin'],
     code: failure.code,
     retryable: failure.retryable,
-    ...(failure.origin === 'upstream' &&
-    typeof failure.message === 'string' &&
-    failure.message.trim()
+    ...(typeof failure.message === 'string' && failure.message.trim()
       ? { message: failure.message.trim().slice(0, 2048) }
       : {}),
     ...(Number.isInteger(failure.status) &&
@@ -253,24 +251,23 @@ export function chatTerminalDiagnostic(metadata: ChatTerminalMetadata): {
       failure.code === 'provider_unavailable' ||
       (failure.code === `provider_http_${failure.status}` &&
         (failure.status === 429 || failure.status === 503)));
-  const message =
-    failure?.origin === 'burrow' && Object.hasOwn(runtimeLabels, failure.code)
+  const message = failure?.message?.trim()
+    ? failure.message
+    : failure?.origin === 'burrow' && Object.hasOwn(runtimeLabels, failure.code)
       ? `${runtimeLabels[failure.code]} (code: ${failure.code})`
-      : upstream && failure.message?.trim()
-        ? failure.message
-        : upstream && failure.status && failure.code === `provider_http_${failure.status}`
-          ? failure.status === 429
-            ? 'The model provider is rate limiting requests (HTTP 429).'
-            : failure.status === 503
-              ? 'The model provider is temporarily unavailable (HTTP 503).'
-              : `The model provider returned HTTP ${failure.status}.`
-          : failure &&
-              (failure.origin === 'upstream' || !failure.code.startsWith('provider_')) &&
-              labels[failure.code]
-            ? labels[failure.code]
-            : failure
-              ? `${upstream ? 'The model provider' : failure.origin === 'burrow' ? 'The runtime' : 'The run'} could not complete this response (code: ${failure.code}).`
-              : 'The run could not be completed.';
+      : upstream && failure.status && failure.code === `provider_http_${failure.status}`
+        ? failure.status === 429
+          ? 'The model provider is rate limiting requests (HTTP 429).'
+          : failure.status === 503
+            ? 'The model provider is temporarily unavailable (HTTP 503).'
+            : `The model provider returned HTTP ${failure.status}.`
+        : failure &&
+            (failure.origin === 'upstream' || !failure.code.startsWith('provider_')) &&
+            labels[failure.code]
+          ? labels[failure.code]
+          : failure
+            ? `${upstream ? 'The model provider' : failure.origin === 'burrow' ? 'The runtime' : 'The run'} could not complete this response (code: ${failure.code}).`
+            : 'The run could not be completed.';
   return { message, overloaded, upstream };
 }
 

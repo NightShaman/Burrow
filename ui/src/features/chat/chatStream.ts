@@ -1,4 +1,4 @@
-import { fetchApi } from '../../app/api';
+import { fetchApi, parseApiResponse } from '../../app/api';
 import { chatTerminalResult } from './chatTerminal';
 
 export type ChatStreamResult = {
@@ -27,7 +27,9 @@ export async function streamChat({
   });
 
   if (!response.ok) {
-    // Rejected submissions have no assistant turn and no provider diagnostic to render.
+    // Use the same backend error contract as non-streaming API calls.
+    // A rejected submission still has a diagnostic, but no assistant turn.
+    await parseApiResponse(response);
     throw new Error(`HTTP ${response.status}`);
   }
 

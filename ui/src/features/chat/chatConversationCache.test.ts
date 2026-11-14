@@ -224,3 +224,28 @@ it('round trips empty v2 failure metadata and recovery without synthesizing cont
   writeConversationCache({ [key]: [turn] }, key);
   expect(readConversationCache()[key]).toEqual([turn]);
 });
+
+it('retains sanitized tool diagnostic through storage reload', () => {
+  const key = conversationCacheKey('hatchet', 'default');
+  const turns = [
+    {
+      role: 'assistant',
+      content: 'Done',
+      metadata: {
+        toolActivity: {
+          items: [
+            {
+              id: 'failed',
+              label: 'Read file',
+              detail: 'app.ts',
+              errorDetail: 'Permission denied [REDACTED]',
+              status: 'error' as const,
+            },
+          ],
+        },
+      },
+    },
+  ];
+  writeConversationCache({ [key]: turns }, key);
+  expect(readConversationCache()[key]).toEqual(turns);
+});

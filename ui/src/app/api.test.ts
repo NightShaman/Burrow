@@ -358,3 +358,27 @@ it.each(['/api/chat/runs/active?agentId=a', '/api/chat/run-id/cancel'])(
     vi.useRealTimers();
   },
 );
+
+it.each([500, 200])(
+  'prefers sanitized diagnostic and retains stable code/status (%s)',
+  async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error: 'brain_write_failed',
+            message: 'Database unavailable [REDACTED]',
+          }),
+          { status, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await expect(api('/api/brain')).rejects.toMatchObject({
+      message: 'Database unavailable [REDACTED]',
+      code: 'brain_write_failed',
+      status,
+    });
+  },
+);

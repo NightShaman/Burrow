@@ -70,11 +70,11 @@ function Fixture() {
   const runtime = runtimeCodes.includes(state);
   const upstream = state !== 'local' && !runtime;
   const message = runtime
-    ? 'SECRET_SENTINEL raw exception must not appear'
+    ? 'Compaction failed: selected model returned no summary. [REDACTED]'
     : state === 'long'
       ? `The usage limit has been reached. Try again after the account resets. Request reference: ${'a'.repeat(500)}\nContact support if this persists. <script>not executable</script>`
       : state === 'local'
-        ? 'Not provider prose'
+        ? 'Selected model configuration is missing. [REDACTED]'
         : 'The usage limit has been reached';
   const terminal = chatTerminalResult(
     {
@@ -114,7 +114,26 @@ function Fixture() {
             ? 'The response completed normally.'
             : '',
       ts: at,
-      metadata: terminal,
+      metadata: {
+        ...terminal,
+        ...(state === 'success'
+          ? {
+              toolActivity: {
+                summary: 'Read file',
+                status: 'warn' as const,
+                items: [
+                  {
+                    id: 'failed',
+                    label: 'Read file',
+                    detail: 'src/config.json',
+                    errorDetail: 'Permission denied: cannot read configuration. [REDACTED]',
+                    status: 'error' as const,
+                  },
+                ],
+              },
+            }
+          : {}),
+      },
     },
   ];
   if (state === 'side') {

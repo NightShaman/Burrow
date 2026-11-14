@@ -1,6 +1,9 @@
 import { expect, it, vi } from 'vitest';
 import { streamChat } from './chatStream';
-vi.mock('../../app/api', () => ({ fetchApi: vi.fn() }));
+vi.mock('../../app/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../app/api')>()),
+  fetchApi: vi.fn(),
+}));
 import { fetchApi } from '../../app/api';
 
 it('settles on the first terminal envelope without EOF and cancels the reader', async () => {
@@ -114,3 +117,30 @@ it('rejects malformed stream content without fabricating a terminal answer', asy
     streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() }),
   ).rejects.toThrow('streaming response was malformed');
 });
+
+it.each([
+  ['chat_session_busy_use_explicit_intent', 409],
+  [{ message: 'Selected model is not configured', code: 'model_configuration_invalid' }, 400],
+])(
+  'preserves rejected submission diagnostic %j without accepting the run',
+  async (error, status) => {
+    vi.mocked(fetchApi).mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error }), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const onAccepted = vi.fn();
+    const pending = streamChat({
+      requestBody: {},
+      signal: new AbortController().signal,
+      onEvent: vi.fn(),
+      onAccepted,
+    });
+    await expect(pending).rejects.toMatchObject({
+      message: typeof error === 'string' ? error : error.message,
+      status,
+    });
+    expect(onAccepted).not.toHaveBeenCalled();
+  },
+);

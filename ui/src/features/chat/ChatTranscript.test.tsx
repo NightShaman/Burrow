@@ -1721,3 +1721,46 @@ it('uses the same explicit mod identity in A2A activity', () => {
   expect(container.querySelector('.tool-dot.error')).toBeTruthy();
   expect(container.textContent).not.toContain('private-payload');
 });
+
+it('renders the sanitized tool failure as text beside its target after reload', () => {
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    isLoading: false,
+    error: '',
+    liveProgress: [],
+    liveAnswer: '',
+    isSending: false,
+    activeRunId: '',
+  };
+  render(
+    <ChatTranscript
+      {...props}
+      turns={[
+        {
+          type: 'message',
+          role: 'assistant',
+          content: 'Done',
+          metadata: {
+            toolActivity: {
+              items: [
+                {
+                  id: 'failed',
+                  label: 'Read file',
+                  detail: 'app.ts',
+                  errorDetail: 'Permission denied <script> [REDACTED]',
+                  status: 'error',
+                },
+              ],
+            },
+          },
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText('app.ts')).toBeTruthy();
+  expect(screen.getByText('Permission denied <script> [REDACTED]')).toBeTruthy();
+  expect(document.querySelector('.tool-activity script')).toBeNull();
+});

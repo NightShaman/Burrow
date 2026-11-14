@@ -27,6 +27,9 @@ export function mergeSessionActivities(
         id: `${activity.runId}:${index}`,
         label: item.label,
         detail: item.detail,
+        ...(typeof item.errorDetail === 'string' && item.errorDetail.trim()
+          ? { errorDetail: item.errorDetail }
+          : {}),
         status: item.status,
       })),
     };

@@ -214,7 +214,7 @@ it('bounds prose at the contract boundary and does not label local wording as pr
         message: 'Provider sounding prose',
       },
     }),
-  ).toMatchObject({ upstream: false, message: 'The runtime received an invalid model result.' });
+  ).toMatchObject({ upstream: false, message: 'Provider sounding prose' });
 });
 
 it('copies useful projected diagnostics and recovery without arbitrary errors', () => {
@@ -274,7 +274,8 @@ it.each([
   const metadata = {
     chatResultVersion: 2,
     terminalStatus: 'failed',
-    modelFailure: { origin: 'burrow', code, retryable: false, message: 'SECRET_SENTINEL' },
+    modelFailure: { origin: 'burrow', code, retryable: false },
+    error: { message: 'SECRET_SENTINEL' },
   };
   for (const envelope of [metadata, { result: metadata }, { summary: metadata }]) {
     const terminal = chatTerminalResult(envelope, 'run.failed');
@@ -287,4 +288,56 @@ it.each([
     expect(chatTerminalCopy(terminal)).toContain(code);
     expect(chatTerminalCopy(terminal)).not.toContain('SECRET_SENTINEL');
   }
+});
+
+it.each(['upstream', 'burrow', 'unknown', 'cancelled'] as const)(
+  'preserves backend-sanitized %s diagnostics across terminal and recovery projections',
+  (origin) => {
+    const failure = {
+      origin,
+      code: 'model_failure_unknown',
+      retryable: false,
+      status: 502,
+      message: '  Actual sanitized failure [REDACTED]  ',
+    };
+    const terminal = chatTerminalResult(
+      {
+        result: {
+          chatResultVersion: 2,
+          terminalStatus: 'failed',
+          modelFailure: failure,
+          modelRecovery: {
+            version: 1,
+            retryCount: 1,
+            requests: [{ state: 'exhausted', originalFailure: failure, lastFailure: failure }],
+          },
+          error: { message: 'SECRET_SENTINEL' },
+        },
+      },
+      'run.failed',
+    );
+    expect(terminal.modelFailure?.message).toBe('Actual sanitized failure [REDACTED]');
+    expect(chatTerminalDiagnostic(terminal).message).toBe('Actual sanitized failure [REDACTED]');
+    expect(terminal.modelRecovery?.requests[0].lastFailure?.message).toBe(
+      'Actual sanitized failure [REDACTED]',
+    );
+    expect(chatTerminalCopy(terminal)).toContain('Actual sanitized failure [REDACTED]');
+    expect(chatTerminalCopy(terminal)).toContain('HTTP status: 502');
+    expect(chatTerminalCopy(terminal)).not.toContain('SECRET_SENTINEL');
+  },
+);
+it('prefers the evidenced local diagnostic over a known runtime label', () => {
+  const terminal = chatTerminalMetadata({
+    chatResultVersion: 2,
+    terminalStatus: 'failed',
+    modelFailure: {
+      origin: 'burrow',
+      code: 'context_compression_failed',
+      retryable: false,
+      message: 'Compaction failed: selected model returned no summary.',
+    },
+  })!;
+  expect(chatTerminalDiagnostic(terminal).message).toBe(
+    'Compaction failed: selected model returned no summary.',
+  );
 });

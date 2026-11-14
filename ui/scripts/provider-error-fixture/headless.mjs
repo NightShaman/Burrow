@@ -141,7 +141,15 @@ try {
     await wait('!!document.querySelector(".composer-wrap")', 'fixture ready');
     await sleep(100);
   };
-  for (const state of ['provider', 'partial', 'side', 'long', 'success', ...runtimeCodes]) {
+  for (const state of [
+    'provider',
+    'partial',
+    'side',
+    'local',
+    'long',
+    'success',
+    ...runtimeCodes,
+  ]) {
     await navigate('before', state);
     await capture('before-' + state + '-1920x1200');
   }
@@ -174,14 +182,17 @@ try {
         );
       if (runtimeCodes.includes(state)) {
         const text = await evaluate('document.querySelector(".model-error-card").innerText');
-        assert.ok(text.includes('code: ' + state));
+        assert.ok(text.includes('Code: ' + state));
+        assert.ok(
+          text.includes('Compaction failed: selected model returned no summary. [REDACTED]'),
+        );
         assert.ok(!text.includes('SECRET_SENTINEL'));
         assert.ok(!text.includes('could not complete this response'));
       }
       if (state === 'local')
         assert.ok(
           (await evaluate('document.querySelector(".model-error-card").innerText')).includes(
-            'The runtime received an invalid model result.',
+            'Selected model configuration is missing. [REDACTED]',
           ),
         );
       if (state === 'fallback')
@@ -214,7 +225,7 @@ try {
       assert.ok(copied.includes('Run status: failed'));
       assert.ok(copied.includes('Recovery 1: exhausted'));
       assert.ok(!copied.includes('SECRET_SENTINEL'));
-      if (runtimeCodes.includes(state)) assert.ok(copied.includes('code: ' + state));
+      if (runtimeCodes.includes(state)) assert.ok(copied.includes('Code: ' + state));
       if (state !== 'local' && !runtimeCodes.includes(state))
         assert.ok(copied.includes('HTTP status: 429'));
       if (state === 'partial')

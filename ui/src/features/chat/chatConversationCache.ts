@@ -68,6 +68,7 @@ function isCacheEntry(value: unknown): value is ConversationCacheEntry {
             typeof item.id === 'string' &&
             typeof item.label === 'string' &&
             (item.detail === undefined || typeof item.detail === 'string') &&
+            (item.errorDetail === undefined || typeof item.errorDetail === 'string') &&
             (item.status === undefined ||
               item.status === 'pending' ||
               item.status === 'ok' ||
