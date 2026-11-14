@@ -24,10 +24,10 @@ const fail = (error, statusCode = 400) => { throw Object.assign(new Error(error)
 const parse = value => typeof value === 'string' ? JSON.parse(value) : value;
 const folder = row => ({ id: row.id, name: row.name, parentId: row.parent_id,
   createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString() });
-const eligibleJob = job => job.status === 'succeeded' && job.kind === 'image' && !job.modOwnerId;
-const eligibleArtifact = artifact => artifact.kind === 'image' && typeof artifact.id === 'string' &&
+export const eligibleGalleryJob = job => job.status === 'succeeded' && ['image', 'video'].includes(job.kind) && !job.modOwnerId;
+export const eligibleGalleryArtifact = artifact => ['image', 'video'].includes(artifact.kind) && !artifact.deletedAt && typeof artifact.id === 'string' &&
   typeof artifact.storageReference === 'string' && artifact.storageReference.length > 0 &&
-  typeof artifact.mimeType === 'string' && artifact.mimeType.startsWith('image/');
+  typeof artifact.mimeType === 'string' && artifact.mimeType.startsWith(`${artifact.kind}/`);
 const validId = id => typeof id === 'string' && id.length > 0 && id.length <= 200;
 function folderId(body, key) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(body, key) ||
@@ -47,15 +47,15 @@ export async function readForgeGallery(store) {
     (SELECT COALESCE(jsonb_agg(jsonb_build_object('record',j.record,'placements',
       (SELECT COALESCE(jsonb_object_agg(p.artifact_id,p.folder_id),'{}'::jsonb) FROM forge_gallery_placements p WHERE p.job_id=j.id))
       ORDER BY j.ordinal DESC,j.id DESC),'[]'::jsonb)
-      FROM forge_jobs j WHERE j.status='succeeded' AND j.record->>'kind'='image'
+      FROM forge_jobs j WHERE j.status='succeeded' AND j.record->>'kind' IN ('image','video')
         AND COALESCE(j.record->>'modOwnerId','')='') AS jobs`);
   const snapshot = result.rows[0];
   const images = [];
   for (const { record, placements } of parse(snapshot.jobs)) {
     const job = parse(record);
-    if (!eligibleJob(job)) continue;
+    if (!eligibleGalleryJob(job)) continue;
     for (const artifact of job.artifacts || []) {
-      if (!eligibleArtifact(artifact)) continue;
+      if (!eligibleGalleryArtifact(artifact)) continue;
       // Explicit public projection: never return file storage references, prompts,
       // provider request material, or private mod ownership metadata.
       const { id, kind, name, mimeType, sizeBytes } = artifact;
@@ -89,7 +89,7 @@ export async function moveForgeGalleryImage(store, jobId, artifactId, body) {
   return withPostgresTransaction(store.pool, async client => {
     const result = await client.query('SELECT record FROM forge_jobs WHERE id=$1 FOR SHARE', [jobId]);
     const job = result.rows[0] && parse(result.rows[0].record);
-    if (!job || !eligibleJob(job) || !(job.artifacts || []).some(a => a.id === artifactId && eligibleArtifact(a)))
+    if (!job || !eligibleGalleryJob(job) || !(job.artifacts || []).some(a => a.id === artifactId && eligibleGalleryArtifact(a)))
       fail('forge_gallery_image_not_found', 404);
     await requireFolder(client, target);
     if (target === null) await client.query('DELETE FROM forge_gallery_placements WHERE job_id=$1 AND artifact_id=$2', [jobId, artifactId]);

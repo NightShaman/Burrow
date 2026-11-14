@@ -13,6 +13,10 @@ export function createForgeRoutes({ store, readJsonBody, sendJson }) {
         const [, , , , , jobId, artifactId] = url.pathname.split('/');
         sendJson(res, 200, { ok: true, ...await forge.moveGalleryImage(decodeURIComponent(jobId), decodeURIComponent(artifactId), await readJsonBody(req)) });
       }
+      else if (req.method === 'DELETE' && /^\/api\/forge\/gallery\/images\/[^/]+\/[^/]+$/.test(url.pathname)) {
+        const [, , , , , jobId, artifactId] = url.pathname.split('/');
+        sendJson(res, 200, { ok: true, ...await forge.deleteGalleryImage(decodeURIComponent(jobId), decodeURIComponent(artifactId)) });
+      }
       else if (req.method === 'GET' && url.pathname === '/api/forge/catalog') sendJson(res, 200, await forge.catalog());
       else if (req.method === 'GET' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.selections() });
       else if (req.method === 'PUT' && url.pathname === '/api/forge/selections') sendJson(res, 200, { ok: true, selections: await forge.setSelection(await readJsonBody(req)) });

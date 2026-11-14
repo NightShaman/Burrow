@@ -1,4 +1,4 @@
-import { readForgeGallery, createForgeGalleryFolder, moveForgeGalleryImage } from './postgres-forge-gallery.mjs';
+import { readForgeGallery, createForgeGalleryFolder, moveForgeGalleryImage, eligibleGalleryJob, eligibleGalleryArtifact } from './postgres-forge-gallery.mjs';
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { createGoogleVideoAdapter, googleVideoSupported } from './model-adapters/google-video.mjs';
 import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
@@ -132,7 +132,7 @@ function publicJob(job) {
   return {
     ...safe,
     ...(chatDelivery ? { delivery: { status: chatDelivery.status, ...(chatDelivery.error ? { error: chatDelivery.error } : {}) } } : {}),
-    artifacts: (job.artifacts || []).map(({ storageReference: ref, ...a }) => ({
+    artifacts: (job.artifacts || []).filter(a => !a.deletedAt).map(({ storageReference: ref, ...a }) => ({
       ...a,
       previewUrl: `/api/forge/jobs/${job.id}/artifacts/${a.id}`,
       downloadUrl: `/api/forge/jobs/${job.id}/artifacts/${a.id}?download=1`,
@@ -419,6 +419,40 @@ export class PostgresForgeStore {
   async gallery() { return readForgeGallery(this); }
   async createGalleryFolder(body) { return createForgeGalleryFolder(this, body); }
   async moveGalleryImage(jobId, artifactId, body) { return moveForgeGalleryImage(this, jobId, artifactId, body); }
+  async deleteGalleryImage(jobId, artifactId) {
+    const owner = await this.owner();
+    return withPostgresTransaction(this.pool, async client => {
+      // Serialize generated-file reference mutations, including legacy shared
+      // files, with job deletion/admission while deciding whether bytes are owned.
+      await client.query('LOCK TABLE forge_jobs IN SHARE ROW EXCLUSIVE MODE');
+      const result = await client.query('SELECT record,agent_id FROM forge_jobs WHERE id=$1 FOR UPDATE', [jobId]);
+      const row = result.rows[0];
+      const job = row && parse(row.record);
+      const artifact = job?.artifacts?.find(a => a.id === artifactId && eligibleGalleryArtifact(a));
+      if (!job || !eligibleGalleryJob(job) || !artifact) fail('forge_gallery_image_not_found', 404);
+      const retained = await client.query('SELECT 1 FROM forge_archive WHERE id=$1', [jobId]);
+      if (!retained.rowCount) fail('forge_archive_missing', 409);
+      const source = { ...job };
+      if (!source.legacySourceAgentId && row.agent_id !== '__operator__') source.legacySourceAgentId = source.agentId || row.agent_id;
+      const root = await this.sourceRoot(source, owner);
+      if (!root) fail('forge_artifact_not_found', 404);
+      const shared = await client.query(`SELECT 1 FROM forge_jobs j,
+        LATERAL jsonb_array_elements(j.record->'artifacts') a
+        WHERE a->>'storageReference'=$1 AND NOT (j.id=$2 AND a->>'id'=$3) LIMIT 1`,
+        [artifact.storageReference, jobId, artifactId]);
+      const storageReference = artifact.storageReference;
+      // Retain original outcome/count for the Archive trigger; remove the file
+      // locator and suppress tombstones from public media projections.
+      delete artifact.storageReference;
+      artifact.deletedAt = at();
+      await client.query('UPDATE forge_jobs SET record=$2 WHERE id=$1', [jobId, JSON.stringify(job)]);
+      await client.query('DELETE FROM forge_gallery_placements WHERE job_id=$1 AND artifact_id=$2', [jobId, artifactId]);
+      // Perform all SQL work before irreversible cleanup, as in the existing
+      // generated-artifact lifecycle. PostgreSQL and unlink are not atomic.
+      if (!shared.rowCount) await deleteGeneratedArtifact({ agentWorkspaceRoot: root, storageReference });
+      return { jobId, artifactId };
+    });
+  }
   async archive() {
     await this.owner();
     const result = await this.pool.query('SELECT record FROM forge_archive ORDER BY created_at DESC,id DESC');

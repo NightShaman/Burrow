@@ -9034,7 +9034,7 @@
           "Forge"
         ],
         "operationId": "getForgeGallery",
-        "summary": "List generated images and persistent folder hierarchy (root is null; excludes private mod images and chat uploads)",
+        "summary": "List generated image and video gallery with folders",
         "responses": {
           "200": {
             "description": "Success",
@@ -9128,7 +9128,7 @@
           "Forge"
         ],
         "operationId": "moveForgeGalleryImage",
-        "summary": "Move generated image to folder or root without modifying source job",
+        "summary": "Move generated image or video to folder or root without modifying source job",
         "responses": {
           "200": {
             "description": "Success",
@@ -9186,6 +9186,66 @@
                 }
               }
             }
+          }
+        },
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Forge"
+        ],
+        "operationId": "deleteForgeGalleryImage",
+        "summary": "Permanently delete one generated image or video, preserving job and Archive history",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "artifactId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "404": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "503": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
+          },
+          "409": {
+            "description": "Original Archive receipt missing"
           }
         },
         "parameters": [
