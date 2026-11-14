@@ -103,3 +103,18 @@ it('keeps failed folder creation open and allows retry', async () => {
   });
   expect(screen.getByDisplayValue('Test')).toBeTruthy();
 });
+
+it('uses the shared Forge themed fields for folder names and move destinations', async () => {
+  api.mockResolvedValue({ folders: [], images: [image] });
+  renderGallery();
+  await screen.findByAltText('Portrait');
+  fireEvent.click(screen.getByText('＋ New folder'));
+  const name = screen.getByLabelText('Folder name');
+  expect(name.getAttribute('type')).toBe('text');
+  expect(name.closest('label')?.classList.contains('forge-field')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(screen.getByLabelText('Move Portrait'));
+  expect(
+    screen.getByLabelText('Destination').closest('label')?.classList.contains('forge-field'),
+  ).toBe(true);
+});

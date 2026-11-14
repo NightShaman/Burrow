@@ -227,9 +227,10 @@ export function ForgeGallery({
             >
               <h2>New folder</h2>
               {error && <p role="alert">{error}</p>}
-              <label>
+              <label className="forge-field">
                 Folder name
                 <input
+                  type="text"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   maxLength={200}
@@ -295,7 +296,7 @@ export function ForgeGallery({
             >
               <h2>Move image</h2>
               {error && <p role="alert">{error}</p>}
-              <label>
+              <label className="forge-field">
                 Destination
                 <select
                   value={destination}

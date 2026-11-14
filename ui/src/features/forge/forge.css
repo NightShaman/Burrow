@@ -196,6 +196,7 @@
   min-width: 0;
 }
 .forge-field select,
+.forge-field input[type='text'],
 .forge-field textarea {
   width: 100%;
   border: 1px solid var(--line);
