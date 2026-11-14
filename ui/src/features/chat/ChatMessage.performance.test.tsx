@@ -118,3 +118,52 @@ it('keeps Markdown isolated from changed input actions, invokes the latest callb
   expect(screen.getByText('late.txt')).toBeTruthy();
   expect(markdownRenders).toHaveBeenCalledTimes(1);
 });
+
+it('renders run activity once when Forge delivers an attachment before final prose', () => {
+  const agent = { id: 'a', name: 'Agent', avatar: 'A' } as ComponentProps<
+    typeof ChatTranscript
+  >['parent'];
+  const activity = {
+    runId: 'r',
+    summary: 'Generated',
+    status: 'ok' as const,
+    items: [{ id: 'one', label: 'Forge', status: 'ok' as const }],
+  };
+  render(
+    <ChatTranscript
+      selected={agent}
+      parent={agent}
+      operator={{ name: 'King', avatar: 'K' }}
+      isNewSession={false}
+      isLoading={false}
+      error=""
+      isSending={false}
+      activeRunId=""
+      liveProgress={[]}
+      liveAnswer=""
+      turns={[
+        {
+          id: 'video',
+          role: 'assistant',
+          type: 'message',
+          runId: 'r',
+          content: '',
+          metadata: {
+            attachments: [{ name: 'one.mp4', type: 'video/mp4', artifactPath: 'one.mp4' }],
+            toolActivity: activity,
+          },
+        },
+        {
+          id: 'final',
+          role: 'assistant',
+          type: 'message',
+          runId: 'r',
+          content: 'Done',
+          metadata: { toolActivity: activity },
+        },
+      ]}
+    />,
+  );
+  expect(screen.getAllByText('1 runtime action')).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'Download one.mp4' })).toHaveLength(1);
+});

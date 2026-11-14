@@ -263,3 +263,98 @@ it('keeps projected server legacy failure metadata and recovery on refresh', () 
     reconcileConversationTurns([projected], [turn('assistant', 'old', 'legacy', projected.ts!)]),
   ).toEqual([projected]);
 });
+
+it('does not copy a Forge video onto the final prose in the same run, on repeated refreshes', () => {
+  const video: SessionTurn = {
+    id: 'video',
+    role: 'assistant',
+    runId: 'forge',
+    content: '',
+    metadata: {
+      attachments: [{ name: 'one.mp4', type: 'video/mp4', artifactPath: 'artifacts/one.mp4' }],
+    },
+  };
+  const final: SessionTurn = {
+    id: 'final',
+    role: 'assistant',
+    runId: 'forge',
+    content: 'Your outfit showcase',
+  };
+  const server = [video, final];
+  let cached = [video];
+  for (let index = 0; index < 3; index++) {
+    cached = reconcileConversationTurns(server, cached);
+    expect(cached.filter((item) => item.metadata?.attachments?.length)).toHaveLength(1);
+    expect(cached[1].metadata?.attachments).toBeUndefined();
+  }
+});
+
+it('matches each durable delivery independently even when cache ordering differs', () => {
+  const first: SessionTurn = {
+    id: 'first',
+    runId: 'r',
+    role: 'assistant',
+    content: '',
+    metadata: {
+      attachments: [{ name: 'first.png', type: 'image/png' }],
+    },
+  };
+  const second: SessionTurn = {
+    id: 'second',
+    runId: 'r',
+    role: 'assistant',
+    content: '',
+    metadata: {
+      attachments: [{ name: 'second.png', type: 'image/png' }],
+    },
+  };
+  const result = reconcileConversationTurns(
+    [
+      { ...first, metadata: undefined },
+      { ...second, metadata: undefined },
+    ],
+    [second, first],
+  );
+  expect(result.map((item) => item.metadata?.attachments?.[0].name)).toEqual([
+    'first.png',
+    'second.png',
+  ]);
+});
+
+it('does not transfer metadata between distinct persisted IDs or ambiguous legacy deliveries', () => {
+  const cached: SessionTurn = {
+    id: 'old',
+    runId: 'r',
+    role: 'assistant',
+    content: '',
+    metadata: {
+      attachments: [{ name: 'old.mp4', type: 'video/mp4' }],
+    },
+  };
+  expect(
+    reconcileConversationTurns([{ ...cached, id: 'new', metadata: undefined }], [cached])[0]
+      .metadata,
+  ).toBeUndefined();
+  const legacy = { ...cached, id: undefined };
+  expect(
+    reconcileConversationTurns(
+      [
+        { ...legacy, metadata: undefined },
+        { ...legacy, metadata: undefined },
+      ],
+      [legacy],
+    ).every((item) => !item.metadata?.attachments),
+  ).toBe(true);
+});
+
+it('shows run activity only once after an artifact and final prose', () => {
+  const result = mergeSessionActivities(
+    [
+      { id: 'video', role: 'assistant', runId: 'r', content: '' },
+      { id: 'final', role: 'assistant', runId: 'r', content: 'Done' },
+    ],
+    [{ runId: 'r', summary: '3 runtime actions', items: [] }],
+  );
+  expect(result[0].metadata?.toolActivity).toBeUndefined();
+  expect(result[1].metadata?.toolActivity?.summary).toBe('3 runtime actions');
+});

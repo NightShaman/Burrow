@@ -137,6 +137,10 @@ export const ChatTranscript = memo(function ChatTranscript({
   };
   const runtimeIdentity = userIdentity(runtimeUserMessageMetadata);
   const inputById = new Map(chatInputs.map((input) => [input.id, input]));
+  const activityOwner = new Map<string, SessionTurn>();
+  for (const turn of messages) {
+    if (turn.role === 'assistant' && turn.runId) activityOwner.set(turn.runId, turn);
+  }
   const activityByRun = new Map<string, ToolActivity>();
   for (const turn of turns) {
     const activity = turn.metadata?.toolActivity;
@@ -281,7 +285,8 @@ export const ChatTranscript = memo(function ChatTranscript({
                   }
                   text={textFromChatValue(turn.content)}
                   activity={
-                    turn.role === 'assistant'
+                    turn.role === 'assistant' &&
+                    (!turn.runId || activityOwner.get(turn.runId) === turn)
                       ? (persistedActivity ??
                         (turn.runId === activeRunId
                           ? activeActivity

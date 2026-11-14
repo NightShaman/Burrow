@@ -14,11 +14,20 @@ export function mergeSessionActivities(
   const activityByRun = new Map(
     activities.filter((activity) => activity.runId).map((activity) => [activity.runId, activity]),
   );
+  // Activity belongs to the run, not to every artifact delivery in that run.
+  const activityOwner = new Map<string, SessionTurn>();
+  for (const turn of turns) {
+    if (turn.role === 'assistant' && turn.runId) activityOwner.set(turn.runId, turn);
+  }
   return turns.map((turn) => {
     if (turn.role !== 'assistant' || !turn.runId)
       return { ...turn, content: textFromChatValue(turn.content) };
     const activity = activityByRun.get(turn.runId);
     if (!activity) return { ...turn, content: textFromChatValue(turn.content) };
+    if (activityOwner.get(turn.runId) !== turn) {
+      const { toolActivity: _activity, ...metadata } = turn.metadata ?? {};
+      return { ...turn, content: textFromChatValue(turn.content), metadata };
+    }
     const toolActivity: ToolActivity = {
       runId: activity.runId,
       summary: activity.summary,
@@ -71,16 +80,31 @@ export function reconcileConversationTurns(
       serverTurns.some((server) => server.runId === turn.runId) &&
       !serverTurnKeys.has(`${turn.runId}:${turn.role}`),
   );
-  const cachedTurnsByRunAndRole = new Map(
-    cachedTurns
-      .filter((turn) => turn.runId && turn.role)
-      .map((turn) => [`${turn.runId}:${turn.role}`, turn]),
-  );
+  const matchingCachedTurn = (turn: SessionTurn): SessionTurn | undefined => {
+    // Durable message identity wins. Multiple assistant deliveries can share a run.
+    const exact = turn.id ? cachedTurns.find((cached) => cached.id === turn.id) : undefined;
+    if (exact) return exact;
+    if (!turn.runId || !turn.role) return undefined;
+    const candidates = cachedTurns.filter(
+      (cached) => cached.runId === turn.runId && cached.role === turn.role,
+    );
+    const siblings = serverTurns.filter(
+      (server) => server.runId === turn.runId && server.role === turn.role,
+    );
+    // Legacy/optimistic turns have no persisted id. Only bridge an unambiguous
+    // pair; never borrow metadata from a different durable message.
+    const eligible = candidates.filter((cached) => !cached.id || !turn.id);
+    if (siblings.length === 1 && candidates.length === 1) return eligible[0];
+    const sameContent = eligible.filter(
+      (cached) => textFromChatValue(cached.content) === textFromChatValue(turn.content),
+    );
+    const sameServerContent = siblings.filter(
+      (server) => textFromChatValue(server.content) === textFromChatValue(turn.content),
+    );
+    return sameContent.length === 1 && sameServerContent.length === 1 ? sameContent[0] : undefined;
+  };
   const mergedServerTurns = serverTurns.map((turn) => {
-    const cached =
-      turn.runId && turn.role
-        ? cachedTurnsByRunAndRole.get(`${turn.runId}:${turn.role}`)
-        : undefined;
+    const cached = matchingCachedTurn(turn);
     const serverTerminal = chatTerminalMetadata(turn.metadata);
     const cachedTerminal = chatTerminalMetadata(cached?.metadata);
     const sameOutcome =
