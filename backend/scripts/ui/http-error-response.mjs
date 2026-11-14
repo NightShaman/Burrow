@@ -14,7 +14,11 @@ export function postgresDiagnosticSecrets(config = {}) {
 
 export function httpFailureResponse(error, { authorized = false } = {}) {
   const message = classifyModelFailure(error).message;
-  return { ok: false, error: 'http_request_failed', ...(authorized && message ? { message } : {}) };
+  // Preserve authenticated application error identifiers, never arbitrary prose.
+  let ownMessage = '';
+  try { if (typeof error?.message === 'string') ownMessage = error.message; } catch {}
+  const code = authorized && /^[a-z][a-z0-9_]*$/.test(ownMessage) && message?.startsWith(ownMessage) ? ownMessage : 'http_request_failed';
+  return { ok: false, error: code, ...(authorized && message ? { message } : {}) };
 }
 
 // Runtime OTLP headers are an explicit credential-bearing configuration, not

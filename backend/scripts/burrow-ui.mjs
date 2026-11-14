@@ -1957,7 +1957,7 @@ async function handleRequest(req, res) {
   } catch (error) {
     const status = Number(error?.statusCode) >= 400 && Number(error.statusCode) < 500 ? Number(error.statusCode) : 500;
     const failure = httpFailureResponse(error, { authorized: diagnosticsAuthorized });
-    recordHttpFailure(res, { error: new Error(classifyModelFailure(error).message || 'http_request_failed'), status });
+    recordHttpFailure(res, { error, status });
     return sendJson(res, status, failure);
   }
 }

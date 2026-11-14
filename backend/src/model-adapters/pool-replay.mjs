@@ -1,5 +1,5 @@
 import { chatToolContinuationMessages } from './adapter-primitives.mjs';
-import { isPreparedPoolReplay } from '../native-continuation-preparation.mjs';
+import { isPreparedPoolReplay } from '../pool-replay-attestation.mjs';
 import { normalizeProviderMessages } from '../provider-messages.mjs';
 
 const fail = (reason) => { throw new Error(`provider_pool_replay_${reason}`); };

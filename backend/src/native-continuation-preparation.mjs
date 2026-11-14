@@ -1,3 +1,5 @@
+import { attestPreparation } from './pool-replay-attestation.mjs';
+export { isPreparedPoolReplay } from './pool-replay-attestation.mjs';
 import { compactSearchMatch } from './search-match-receipt.mjs';
 import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
@@ -127,19 +129,6 @@ export function compactContinuationDialogue(messages, { maxChars = 6000, recapTe
   return kept;
 }
 
-// Request-local attestation: only the canonical budget projector may replace an
-// exact transcript with a compacted/steered one. Snapshot values so mutation
-// after preparation cannot authorize a different replay.
-const replayPreparations = new WeakMap();
-const replaySource = ({ baseMessages, toolCalls, toolResults }) => JSON.stringify({ baseMessages, toolCalls, toolResults });
-export function isPreparedPoolReplay(messages, source) {
-  const proof = replayPreparations.get(messages);
-  return Boolean(proof && proof.source === replaySource(source) && proof.messages === JSON.stringify(messages));
-}
-function attestPreparation(result, source) {
-  replayPreparations.set(result.messages, { source: replaySource(source), messages: JSON.stringify(result.messages) });
-  return result;
-}
 
 export function prepareNativeToolContinuation(options = {}) {
   return attestPreparation(prepareContinuation(options), options);
