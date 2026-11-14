@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Agent, SavedProvider } from '../../app/types';
 import './forge.css';
 import './forge-motion.css';
+import { ForgeGallery } from './ForgeGallery';
 import { useForgeMotion } from './useForgeMotion';
 import {
   defaultImageDraft,
@@ -358,6 +359,7 @@ export function Forge({
   const api = owned.api;
   const [mode, setMode] = useState<'image' | 'video' | 'audio' | 'music'>('image');
   const [showRecents, setShowRecents] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
   const [models, setModels] = useState<ForgeModel[]>([]);
   const [catalog, setCatalog] = useState<ForgeCatalog | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -743,10 +745,11 @@ export function Forge({
             <button
               key={item}
               role="tab"
-              tabIndex={!showRecents && mode === item ? 0 : -1}
-              aria-selected={!showRecents && mode === item}
-              className={!showRecents && mode === item ? 'active' : ''}
+              tabIndex={!showGallery && !showRecents && mode === item ? 0 : -1}
+              aria-selected={!showGallery && !showRecents && mode === item}
+              className={!showGallery && !showRecents && mode === item ? 'active' : ''}
               onClick={() => {
+                setShowGallery(false);
                 setMode(item);
                 setShowRecents(false);
               }}
@@ -757,15 +760,35 @@ export function Forge({
           ))}
           <button
             role="tab"
-            aria-selected={showRecents}
-            className={showRecents ? 'active' : ''}
-            onClick={() => setShowRecents(true)}
+            tabIndex={!showGallery && showRecents ? 0 : -1}
+            aria-selected={!showGallery && showRecents}
+            className={!showGallery && showRecents ? 'active' : ''}
+            onClick={() => {
+              setShowGallery(false);
+              setShowRecents(true);
+            }}
           >
             ◷<span>Recents</span>
           </button>
+          <button
+            role="tab"
+            tabIndex={showGallery ? 0 : -1}
+            aria-selected={showGallery}
+            className={showGallery ? 'active' : ''}
+            onClick={() => setShowGallery(true)}
+          >
+            ▧<span>Gallery</span>
+          </button>
         </div>
       </header>
-      <div className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}>
+      {showGallery && (
+        <ForgeGallery
+          renderArtifact={(artifact) => (
+            <ArtifactOutput artifact={artifact} fetchMedia={owned.fetch} />
+          )}
+        />
+      )}
+      <div hidden={showGallery} className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}>
         <canvas className="forge-seam-sparks" aria-hidden="true" />
         <section className="forge-studio" hidden={showRecents}>
           <div className="forge-panel-head">
