@@ -83,7 +83,7 @@ const BURROW_CODES = new Set([
   'native_continuation_preparation_required', 'native_continuation_preparation_invalid',
   'continuation_evidence_preservation_budget_exceeded', 'continuation_evidence_prompt_builder_required',
   'context_preparation_prompt_over_budget', 'context_preparation_uncovered_history',
-  'context_compression_unavailable', 'CONTEXT_BOUNDARY_VIOLATION',
+  'context_compression_unavailable', 'context_compression_failed', 'continuation_summary_invalid', 'CONTEXT_BOUNDARY_VIOLATION',
   'prepared_context_invalid', 'prepared_context_version_invalid', 'prepared_context_source_invalid',
   'prepared_context_turn_context_invalid', 'prepared_context_prepared_invalid',
   'context_engine_retired_use_prepared_context', 'initial_context_preparation_retired_use_prepared_context',
@@ -97,6 +97,7 @@ const BURROW_CODES = new Set([
   'prompt or messages are required',
 ]);
 const BURROW_FIXED_CODE = new Map([
+  ['continuation_summary_invalid', 'context_compression_failed'],
   ['model baseUrl is required', 'model_configuration_invalid'],
   ['model is required', 'model_configuration_invalid'],
   ['fetch implementation is required', 'model_configuration_invalid'],

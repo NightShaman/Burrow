@@ -217,7 +217,7 @@ export async function prepareNativeToolContinuationAsync(options = {}, { adapter
       const result = await adapter.complete({ messages: makeMessages(size), tools: [], toolChoice: 'none', maxTokens, signal, traceLogger });
       signal?.throwIfAborted();
       const text = result?.choice?.text ?? result?.choice?.message?.content ?? result?.choice?.content ?? result?.text;
-      if (result?.ok === false || typeof text !== 'string' || !text.trim() || text.length > maxChars || result?.choice?.toolCalls?.length) throw new Error('continuation_summary_invalid');
+      if (result?.ok === false || typeof text !== 'string' || !text.trim() || result?.choice?.toolCalls?.length) throw new Error('continuation_summary_invalid');
       recap = text.trim();
       offset += size;
     }

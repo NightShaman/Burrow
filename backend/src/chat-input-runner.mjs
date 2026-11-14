@@ -1,3 +1,4 @@
+import { classifyModelFailure } from './model-failure.mjs';
 import { chatResultMetadata } from './chat-result-metadata.mjs';
 import { postgresContinuity } from './postgres-continuity.mjs';
 import { randomUUID } from 'node:crypto';
@@ -102,6 +103,7 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
         traceDir: result.traceDir || null };
     } catch (error) {
       receipt = { ownerId, ownerLockId: job.ownerLockId,
+        result: chatResultMetadata({ ok: false, decision: signal.aborted ? 'cancelled' : 'failed', modelFailure: classifyModelFailure(error, { signal }) }),
         status: lifecycle.stopped ? 'interrupted' : signal.aborted ? 'cancelled' : 'failed',
         error: lifecycle.stopped ? 'service_shutdown' : signal.aborted ? 'chat_input_cancelled' : error?.message === 'chat_input_session_reset' ? error.message : 'agent_turn_failed' };
     }
