@@ -268,6 +268,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const pendingSystemProcess = new Map();
   const pendingSystemConfiguration = new Map();
   const pendingSystemHostDescriptions = new Map();
+  const pendingCodex = new Map();
   const activeCapabilities = new Map();
   const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); capabilities?.dispose?.(); };
   async function serviceCapabilityRequest(message) {
@@ -346,6 +347,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     pendingSystemConfiguration.clear();
     for (const entry of pendingSystemHostDescriptions.values()) { clearTimeout(entry.timer); entry.reject(error); }
     pendingSystemHostDescriptions.clear();
+    for (const entry of pendingCodex.values()) { clearTimeout(entry.timer); entry.reject(error); }
+    pendingCodex.clear();
   };
   const rejectSystemFilesystems = (code = 'remote_native_filesystem_controller_unavailable') => {
     const error = hostError(code);
@@ -489,6 +492,13 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         try { entry.resolve(stripPrivateTelemetryResult(message.result, 'remote_configuration_result_invalid')); }
         catch { entry.reject(hostError('remote_configuration_result_invalid')); }
       }
+      return;
+    }
+    if (message?.type === 'system-controller-codex-result') {
+      if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
+      const entry = pendingCodex.get(message.requestId); if (!entry) return;
+      pendingCodex.delete(message.requestId); clearTimeout(entry.timer);
+      if (message.ok === true) entry.resolve(message.result); else entry.reject(hostError('codex_remote_rpc_failed'));
       return;
     }
     if (message?.type === 'system-controller-host-description-result') {
@@ -670,6 +680,21 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
             pendingSystemConfiguration.delete(requestId);
             clearTimeout(timer);
             reject(hostError('remote_configuration_send_failed'));
+          });
+        });
+      },
+      async codexRpc(request) {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
+        if (admissionsPaused || !systemControllerReady || closing || stopped || !child.connected) throw hostError('codex_controller_unavailable');
+        if (!['codex.open', 'codex.write', 'codex.read', 'codex.close'].includes(request?.method)) throw hostError('codex_method_invalid');
+        const requestId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => { pendingCodex.delete(requestId); reject(hostError('codex_rpc_timeout')); }, 15000);
+          pendingCodex.set(requestId, { resolve, reject, timer });
+          child.send({ type: 'system-controller-codex', protocol: systemCapability, controllerInstanceId, requestId, request }, error => {
+            if (!error || !pendingCodex.has(requestId)) return;
+            pendingCodex.delete(requestId); clearTimeout(timer); reject(hostError('codex_rpc_send_failed'));
           });
         });
       },

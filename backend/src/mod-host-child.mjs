@@ -304,6 +304,14 @@ process.on('message', async (message) => {
     }
     return;
   }
+  if (message?.type === 'system-controller-codex') {
+    if (!validSystemMessage(message, 'system-controller-codex', { operation: false }) || stopping) return;
+    try {
+      const result = await systemController.codexRpc(message.request);
+      send({ type: 'system-controller-codex-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId, ok: true, result }, () => {});
+    } catch { send({ type: 'system-controller-codex-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId, requestId: message.requestId, ok: false }, () => {}); }
+    return;
+  }
   if (message?.type === 'system-controller-describe-host') {
     if (!validSystemMessage(message, 'system-controller-describe-host', { operation: false })
       || typeof message.targetId !== 'string' || !message.targetId || stopping) return;

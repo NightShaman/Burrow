@@ -1,3 +1,4 @@
+import { openRemoteCodexProcess } from './codex-remote-process.mjs';
 import { readSubagentRecord, updateSubagentStatus } from './subagent-store.mjs';
 import { constants } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -68,12 +69,17 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   let result;
   try {
     // Check host routing before touching the target path, credentials or executable.
-    if (resolveProcessExecutionTarget(parentExecutionContext || {}).kind !== 'local') fail('codex_remote_app_server_unavailable');
+    const executionHost = resolveProcessExecutionTarget(parentExecutionContext || {});
+    const remote = executionHost.kind === 'remote';
+    const savedHost = continuation?.executionHost || { kind: 'local' };
+    if (continuation && (savedHost.kind !== executionHost.kind || savedHost.providerId !== executionHost.providerId || savedHost.targetId !== executionHost.targetId)) fail('codex_session_host_changed');
+    const remoteController = parentExecutionContext?.processExecutionController;
+    if (remote && typeof remoteController?.codexRpc !== 'function') fail('codex_remote_app_server_unavailable');
     const boundaries = parentExecutionContext?.executionBoundaries;
     if (boundaries && (!Array.isArray(boundaries.hardBlocks) || boundaries.hardBlocks.some(rule => rule.enabled !== false))) fail('codex_execution_boundaries_unsupported');
     if (!id || !task?.trim() || !dataRoot || !childSessionId) fail('codex_runner_input_required');
     if (target?.kind !== 'filesystem' || !path.isAbsolute(target.root || '')) fail('codex_target_invalid');
-    if (!(await fs.stat(target.root)).isDirectory()) fail('codex_target_invalid');
+    if (!remote && !(await fs.stat(target.root)).isDirectory()) fail('codex_target_invalid');
     if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('codex_owner_invalid');
     const models = parentExecutionContext?.stores?.models;
     if (!models?.get || !models?.auth || !models?.resolveAuth) fail('codex_model_settings_store_required');
@@ -128,12 +134,14 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       }, 200);
       cancellationPoll.unref();
     }
-    const executable = await discoverCodexExecutable();
+    const executable = remote ? null : await discoverCodexExecutable();
     const login = await tokens();
     const policy = normalizeExecutionPolicyInput(executionPolicy);
     if (policy.blockers.length) fail('codex_execution_policy_blocked');
     signal?.throwIfAborted();
+    const remoteProcess = remote ? await openRemoteCodexProcess(remoteController, executionHost.targetId, target.root) : null;
     client = new CodexMinionClient({ executable, cwd: target.root,
+      ...(remoteProcess ? { spawnProcess: () => { queueMicrotask(() => remoteProcess.start()); return remoteProcess; } } : {}),
       refreshAuthTokens: () => tokens(true),
       onActivity: ({ method }) => {
         // Never retain native params, commands, outputs, errors, IDs or unknown notifications.
@@ -166,7 +174,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         ? await client.resumeThread(continuation.threadId, threadParams)
         : await client.startThread({ ...threadParams, ephemeral: false });
       if (!thread?.id || (continuation && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
-      nativeSession = { version: 1, threadId: thread.id, target, modelConfig: { connectionId, model: modelConfig.model,
+      nativeSession = { version: 1, threadId: thread.id, target, executionHost, modelConfig: { connectionId, model: modelConfig.model,
         ...(modelConfig.extra ? { extra: modelConfig.extra } : {}) }, executionPolicy: policy, accountId: login.chatgptAccountId };
       // Persist resume identity before dispatch: never silently create a new thread
       // if the native turn later fails, is cancelled, or Burrow loses its process.
