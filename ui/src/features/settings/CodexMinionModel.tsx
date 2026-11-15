@@ -59,9 +59,10 @@ export function CodexMinionModel({ resourceId }: { resourceId: string }) {
           throw new Error('Invalid model connections response.');
         const eligible = catalog.connections.filter(
           (connection) =>
-            ['openai-responses', 'openai-chat-completions'].includes(connection.apiType) &&
-            connection.auth?.type?.toLowerCase() === 'oauth' &&
-            connection.auth?.provider?.toLowerCase() === 'openai',
+            (connection.apiType === 'openai-lb' && connection.codexEligible === true) ||
+            (['openai-responses', 'openai-chat-completions'].includes(connection.apiType) &&
+              connection.auth?.type?.toLowerCase() === 'oauth' &&
+              connection.auth?.provider?.toLowerCase() === 'openai'),
         );
         setProviders(
           eligible.map((connection) => ({
@@ -168,7 +169,9 @@ export function CodexMinionModel({ resourceId }: { resourceId: string }) {
       {state === 'loading' && <p role="status">Loading Codex model…</p>}
       {state === 'saving' && <p role="status">Saving Codex model…</p>}
       {state === 'idle' && !providers.length && (
-        <p className="settings-help">Connect a direct OpenAI OAuth account in Models.</p>
+        <p className="settings-help">
+          Connect an OpenAI OAuth account or enable an eligible OpenAI pool in Models.
+        </p>
       )}
       {state === 'idle' &&
         providers.length > 0 &&

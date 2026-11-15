@@ -172,7 +172,11 @@ it('shows loading, empty and catalog errors with retry', async () => {
   setup(null, []);
   fireEvent.click(screen.getByRole('button', { name: 'Retry Codex model' }));
   await loaded();
-  expect(screen.getByText('Connect a direct OpenAI OAuth account in Models.')).toBeTruthy();
+  expect(
+    screen.getByText(
+      'Connect an OpenAI OAuth account or enable an eligible OpenAI pool in Models.',
+    ),
+  ).toBeTruthy();
 });
 
 it('ignores a late save after changing agent', async () => {
@@ -229,4 +233,25 @@ it('fails closed on a malformed saved pair and retries settings reads', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Retry Codex model' }));
   await loaded();
   expect(control('Model').value).toBe('a-model');
+});
+
+it('admits only explicitly eligible OpenAI pools and saves the logical pool ID', async () => {
+  setup(null, [
+    account(),
+    account('pool', { apiType: 'openai-lb', codexEligible: true }),
+    account('ineligible', { apiType: 'openai-lb', codexEligible: false }),
+    account('unknown', { apiType: 'openai-lb' }),
+    account('other', { apiType: 'anthropic-lb', codexEligible: true }),
+  ]);
+  mount();
+  await loaded();
+  expect(Array.from(control('Account').options).map((option) => option.value)).toEqual([
+    '',
+    'a',
+    'pool',
+  ]);
+  fireEvent.change(control('Account'), { target: { value: 'pool' } });
+  await screen.findByText('Codex model saved.');
+  expect(control('Model').value).toBe('pool-model');
+  expect(writes()).toEqual([{ codexModel: { connectionId: 'pool', model: 'pool-model' } }]);
 });

@@ -216,6 +216,7 @@ export type ProviderPool = {
 };
 
 export type ModelConnection = {
+  codexEligible?: boolean;
   autoUseExpiringResets?: boolean;
   id: string;
   provider: string;
