@@ -283,6 +283,10 @@ export function subagentVisibilitySummary(record = {}) {
       parentRunId: record.owner?.parentRunId || null,
     },
     ...(record.model ? { model: record.model } : {}),
+    // The profile that governed this child, as captured at admission. Shown so
+    // the agent tree can attribute a child without re-reading live settings.
+    ...(record.minionProfile ? { minionProfile: { id: record.minionProfile.id, name: record.minionProfile.name,
+      harness: record.minionProfile.harness, executionHostId: record.minionProfile.executionHostId } } : {}),
     trace: {
       runId: record.trace?.runId || null,
       traceDir: record.trace?.traceDir || null,

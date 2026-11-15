@@ -32,7 +32,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores, agentRuntime
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [] } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   const context = createExecutionContext({
@@ -57,11 +57,14 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     skillsRoot: agentRuntime?.skillsRoot,
     filesystemBoundaries: agentRuntime?.filesystemBoundaries || runtimeState.filesystemBoundaries,
     executionBoundaries,
-    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeBrainMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0 }),
+    // The enabled profile catalog travels in the live spawn tool schema, so the
+    // model can actually see which reusable minions it may select.
+    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeBrainMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0, minionProfiles }),
     mcpTools,
     mcpConnections,
     protectedValues: new Map(),
     executionEnvironment: agentRuntime?.executionEnvironment || { kind: 'local', workspaceRoot: resolvedWorkingRoot },
+    executionProviders: agentRuntime?.executionProviders || null,
     processExecutionController: agentRuntime?.processExecutionController || null,
     parentRunId,
     traceContext,

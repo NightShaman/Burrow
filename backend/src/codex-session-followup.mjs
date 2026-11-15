@@ -1,3 +1,4 @@
+import { resolveMinionProfileExecutionTarget, minionProfileAction } from './minion-profiles.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { runCodexMinion } from './codex-minion-runner.mjs';
 import { runClaudeMinion } from './claude-minion-runner.mjs';
@@ -16,18 +17,35 @@ export async function runCodexSessionFollowup({ stores, executionContext, agentI
   await authority.append({ sessionId, runId, traceDir, type: 'message', role: 'user', content: message,
     metadata: { kind: `${harness}-minion-followup` } });
   let result;
-  const blocker = harness === 'codex' && !native?.threadId ? 'codex_session_unavailable'
+  // A pinned profile host belongs to this session, not to the agent's current
+  // default profile. Resolve the durable pin without consulting live profiles.
+  const frozenHost = metadata.minionProfile ? native?.executionHost : null;
+  const hostId = metadata.minionProfile?.executionHostId
+    || (frozenHost?.kind === 'remote' ? frozenHost.targetId : frozenHost?.kind === 'local' ? 'local' : null);
+  const host = hostId
+    ? await resolveMinionProfileExecutionTarget({ executionContext, profile: { executionHostId: hostId } }) : null;
+  const followupContext = host?.target ? {
+    ...executionContext, stores: executionContext?.stores,
+    conversationStore: executionContext?.conversationStore,
+    telemetry: executionContext?.telemetry, abortSignal: executionContext?.abortSignal,
+    executionProviders: executionContext?.executionProviders,
+    processExecutionController: host.controller ?? (host.target.kind === 'remote' ? executionContext?.processExecutionController : null),
+    processExecutionRouter: null,
+    processExecutionTarget: host.target,
+    executionEnvironment: { ...host.target },
+  } : executionContext;
+  const blocker = host?.blockers?.[0] || (harness === 'codex' && !native?.threadId ? 'codex_session_unavailable'
     : harness === 'claude' && !native?.sessionId ? 'claude_session_unavailable'
     : native?.state === 'running' ? `${harness}_session_reconciliation_required`
     : attachments.length ? `${harness}_followup_attachments_unsupported`
-    : noCallModel ? `${harness}_model_call_disabled` : null;
+    : noCallModel ? `${harness}_model_call_disabled` : null);
   if (blocker) {
-    result = { ok: false, summary: `${harness === 'claude' ? 'Claude' : 'Codex'} follow-up cannot run in this session.`, blockers: [blocker], warnings: [] };
+    result = { ok: false, summary: minionProfileAction(blocker) || `${harness === 'claude' ? 'Claude' : 'Codex'} follow-up cannot run in this session.`, blockers: [blocker], warnings: [] };
   } else {
     const execute = runner === runCodexMinion && harness === 'claude' ? runClaudeMinion : runner;
     result = await execute({ id: runId, task: message, target: native.target, modelConfig: native.modelConfig || { connectionId: native.connectionId, model: native.model },
       executionPolicy: native.executionPolicy, continuation: native, dataRoot, childSessionId: sessionId,
-      owner: { agentId }, traceDir, signal, parentExecutionContext: executionContext });
+      owner: { agentId }, traceDir, signal, parentExecutionContext: followupContext });
   }
   // Successful native responses are already durably appended by the runner.
   if (!result.ok) await authority.append({ sessionId, runId, traceDir, type: 'message', role: 'assistant',

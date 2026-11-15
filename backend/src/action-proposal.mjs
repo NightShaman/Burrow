@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
+import { minionProfileToolDescription } from './minion-profiles.mjs';
 
 export const ALLOWED_TOOLS = new Set(['mod_agent_tool', 'run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
 
@@ -112,6 +113,7 @@ function normalizeAction(action, index) {
     label: action?.label ? String(action.label).trim().slice(0, 80) : null,
     model: action?.model || action?.modelId ? String(action.model || action.modelId).trim() : null,
     harness: action?.harness ?? null,
+    minionProfileId: action?.minionProfileId ? String(action.minionProfileId).trim() : null,
     modelProfile: action?.modelProfile ? String(action.modelProfile).trim() : null,
     target: action?.target && typeof action.target === 'object' && !Array.isArray(action.target) ? action.target : null,
     includeDisabled: action?.includeDisabled === undefined ? false : action.includeDisabled,
@@ -259,7 +261,7 @@ export function parseActionProposal(text) {
 }
 
 // First-class spawn_subagent is the sole child-work surface.
-export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
+export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false, minionProfiles = [] } = {}) {
   const tools = [
     { type: 'function', function: { name: 'run_evidence_search', description: 'Explicit read-only search of this agent’s recorded historical run proof across sessions. Not current verification, recovery state, or authorization. No automatic injection. Records remain subject to existing evidence retention.', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 }, reason: { type: 'string' } }, required: ['query'] } } },
     ...['brain_search','brain_read','brain_save','brain_update','brain_remove'].map(name => ({ type:'function', function:{ name, description:'Explicit persistent agent-owned saved memory. No TTL or preload. Operator-owned records cannot be mutated by agents. Updates/removals require current revision and operator direction; never recreate removed memories. Search/read before relying on saved facts; provenance is not current verification.', parameters:{type:'object',additionalProperties:false,properties:{query:{type:'string'},cursor:{type:'string'},limit:{type:'integer',minimum:1},id:{type:'string'},title:{type:'string'},content:{type:'string'},sourceRefs:{type:'array',items:{type:'string'}},expectedRevision:{type:'integer',minimum:1},reason:{type:'string'}},required:name==='brain_search'?['query']:name==='brain_save'?['title','content']:name==='brain_update'?['id','expectedRevision','title','content']:name==='brain_remove'?['id','expectedRevision']:['id']}} })),
@@ -471,6 +473,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
           properties: {
             task: { type: 'string' },
             harness: { type: 'string', enum: ['burrow', 'codex', 'claude'], description: 'Optional child execution harness. Omit to use the agent minion default.' },
+            minionProfileId: { type: 'string', description: minionProfileToolDescription(minionProfiles) },
             label: { type: 'string', description: 'Optional short display label for the child in the agent tree (maximum 80 characters). Keep the full instruction in task.' },
             model: { type: 'string', description: 'Optional exact enabled configured model id for this child only. Omit to inherit the parent model.' },
             target: {
@@ -560,7 +563,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'mcp_call') return normalizeNative({ tool, reason: args.reason, provider: args.provider, mcpToolName: args.mcpToolName, mcpArguments: args.mcpArguments });
   if (tool === 'list_skills') return normalizeNative({ tool, reason: args.reason });
   if (tool === 'load_skill') return normalizeNative({ tool, reason: args.reason, skillId: args.skillId });
-  if (tool === 'spawn_subagent') return normalizeNative({ tool, reason: args.reason, task: args.task, label: args.label, harness: args.harness, model: args.model || args.modelId, modelProfile: args.modelProfile, target: args.target });
+  if (tool === 'spawn_subagent') return normalizeNative({ tool, reason: args.reason, task: args.task, label: args.label, harness: args.harness, minionProfileId: args.minionProfileId, model: args.model || args.modelId, modelProfile: args.modelProfile, target: args.target });
   const normalized = normalizeNative({ tool, reason: args.reason });
   if (Object.keys(args).some((key) => key !== 'reason')) normalized.errors.push('tool_arguments_unmapped');
   return normalized;

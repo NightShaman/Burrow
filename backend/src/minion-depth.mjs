@@ -20,6 +20,7 @@ function normalizeSettings(saved) {
     defaultHarness: validHarness(saved?.defaultHarness) ? saved.defaultHarness : DEFAULT_MINION_HARNESS,
     codexModel,
     claudeModel,
+    defaultMinionProfileId: typeof saved?.defaultMinionProfileId === 'string' ? saved.defaultMinionProfileId : null,
   };
 }
 
@@ -38,12 +39,14 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   const hasHarness = object && Object.hasOwn(input, 'defaultHarness');
   const hasCodex = object && Object.hasOwn(input, 'codexModel');
   const hasClaude = object && Object.hasOwn(input, 'claudeModel');
-  if ((!hasDepth && !hasHarness && !hasCodex && !hasClaude) || (hasDepth && !validMaxDepth(input.maxDepth))) {
+  const hasDefaultProfile = object && Object.hasOwn(input, 'defaultMinionProfileId');
+  if ((!hasDepth && !hasHarness && !hasCodex && !hasClaude && !hasDefaultProfile) || (hasDepth && !validMaxDepth(input.maxDepth))) {
     throw Object.assign(new Error('minion_max_depth_invalid'), { statusCode: 400 });
   }
   if (hasHarness && !validHarness(input.defaultHarness)) {
     throw Object.assign(new Error('minion_default_harness_invalid'), { statusCode: 400 });
   }
+  if (hasDefaultProfile && input.defaultMinionProfileId !== null && (typeof input.defaultMinionProfileId !== 'string' || !input.defaultMinionProfileId.trim())) throw Object.assign(new Error('minion_default_profile_invalid'), { statusCode: 400 });
   const codexModel = hasCodex ? normalizeCodexModelSelection(input.codexModel) : null;
   if (codexModel) await validateCodexModelSelection(models, codexModel);
   const claudeModel = hasClaude ? normalizeClaudeModelSelection(input.claudeModel) : null;
@@ -56,6 +59,7 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
     ...(hasHarness ? { defaultHarness: input.defaultHarness } : {}),
     ...(hasCodex ? { codexModel } : {}),
     ...(hasClaude ? { claudeModel } : {}),
+    ...(hasDefaultProfile ? { defaultMinionProfileId: input.defaultMinionProfileId } : {}),
   });
   // The PostgreSQL metadata owner serializes partial updates, including insert.
   if (metadata.atomicUpdate) return normalizeSettings(await metadata.atomicUpdate(key, update));

@@ -8,7 +8,7 @@ export function subagentChildSessionId(id) {
   return `subagent-${compact(id, 'worker')}`.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 140);
 }
 
-export async function startSubagentChildSession({ dataRoot, id, workerProfile, harness = 'burrow', purpose, owner = {}, minionDepth = null, trace = {}, model = null, conversationStore = null } = {}) {
+export async function startSubagentChildSession({ dataRoot, id, workerProfile, harness = 'burrow', purpose, owner = {}, minionDepth = null, trace = {}, model = null, minionProfile = null, conversationStore = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !id) return null;
   const sessionId = subagentChildSessionId(id);
@@ -29,6 +29,7 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, h
       parentRunId: parentRunId || null,
       parentChild: true,
       model: model || null,
+      ...(minionProfile ? { minionProfile } : {}),
     }) });
   await authority.appendTurnIfAbsent({
     sessionId,

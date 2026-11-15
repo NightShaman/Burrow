@@ -585,7 +585,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum display transcript turns per page (1–500; default 200).",
+            "description": "Maximum display transcript turns per page (1\u2013500; default 200).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -1595,7 +1595,7 @@
             "$ref": "#/components/responses/ErrorResponse"
           }
         },
-        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document’s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
+        "description": "List retained active/archived conversations and independent reset documents. Date and session-calendar discovery match retained visible message occurrence days (including compacted generations in the document\u2019s canonical generation window), plus catalog update/reset-creation dates. Unknown message clocks are not inferred. Date-filtered rows include matchedDate in the requested timezone; clients must retain these matches even when the catalog timestamp differs. Search matches identity, names, titles and human-facing summaries, not internal run evidence. Opaque cursors preserve exact catalog ordering and must keep filters unchanged."
       }
     },
     "/api/archive/sessions/{agentId}/{sessionId}": {
@@ -1621,7 +1621,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "Page size (clamped to 1–500, default 100).",
+            "description": "Page size (clamped to 1\u2013500, default 100).",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -3836,7 +3836,7 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum rows in this page (1–500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
+            "description": "Maximum rows in this page (1\u2013500, default 100). Invalid or out-of-range values return 400 archive_limit_invalid.",
             "schema": {
               "type": "integer",
               "minimum": 1,
@@ -4302,7 +4302,7 @@
           "Agents"
         ],
         "summary": "Read bulk agent UI overview",
-        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent’s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
+        "description": "Return registered agents with identities, requested-session/descendant status, context usage, and model selections in one request. The optional sessions map selects each agent\u2019s session. Status uses the same runtime-owned ancestry as /api/agent-status, including metadata-only live descendants and honest orphans. Context inspection is bounded to the requested session plus 12 descendants per agent; contextHydration.truncated reports omitted contexts, not a truncated status tree. Opt in to agent-wide minions with minionScope: agent (session is the default). status.minionScope: agent confirms a successful all-origin scan for that agent; disabled/error entries do not claim coverage. The anchor session and its activity remain independent. Ordinary unrelated chats are not minions; requested child anchors retain depth and appear once. Depth-two orphans without root metadata keep unknown roots. Context hydration remains bounded to the anchor plus 12 distinct minion sessions; session recovery and cancellation stay scoped.",
         "operationId": "getAgentOverview",
         "requestBody": {
           "required": true,
@@ -4910,6 +4910,123 @@
             "$ref": "#/components/responses/ErrorResponse"
           },
           "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/settings/minions": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "List the shared global reusable minion roster",
+        "operationId": "listMinionProfiles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful profile operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MinionProfileListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Create a reusable minion profile",
+        "operationId": "createMinionProfile",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MinionProfileCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful profile operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MinionProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/settings/minions/{id}": {
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Partially update one reusable minion profile",
+        "operationId": "updateMinionProfile",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathId"
+          },
+          {
+            "$ref": "#/components/parameters/AgentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MinionProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful profile operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MinionProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
         }
@@ -7075,7 +7192,7 @@
         ],
         "summary": "Read agent minion settings",
         "operationId": "getAgentMinionSettings",
-        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel and claudeModel selections. Requires an enabled registered agent.",
+        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel and claudeModel selections. Requires an enabled registered agent. defaultMinionProfileId is nullable; omitted values are preserved. A disabled or missing default blocks spawn without fallback.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7094,7 +7211,8 @@
                   "maxDepth": 1,
                   "defaultHarness": "burrow",
                   "codexModel": null,
-                  "claudeModel": null
+                  "claudeModel": null,
+                  "defaultMinionProfileId": null
                 }
               }
             }
@@ -7158,7 +7276,7 @@
         ],
         "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection or anthropic-lb pool/enabled model pair with an eligible OAuth member. Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
+        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection or anthropic-lb pool/enabled model pair with an eligible OAuth member. Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged. defaultMinionProfileId is nullable; omitted values are preserved. A disabled or missing default blocks spawn without fallback.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7193,7 +7311,8 @@
                   "maxDepth": 1,
                   "defaultHarness": "burrow",
                   "codexModel": null,
-                  "claudeModel": null
+                  "claudeModel": null,
+                  "defaultMinionProfileId": null
                 }
               }
             }
@@ -18913,10 +19032,17 @@
           },
           "claudeModel": {
             "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          },
+          "defaultMinionProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
           }
         },
         "additionalProperties": true,
-        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing.",
+        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing. defaultMinionProfileId is nullable; omission preserves the saved default profile.",
         "anyOf": [
           {
             "$ref": "#/components/schemas/AgentMinionDepthUpdate"
@@ -18929,6 +19055,11 @@
           },
           {
             "$ref": "#/components/schemas/AgentMinionClaudeModelUpdate"
+          },
+          {
+            "required": [
+              "defaultMinionProfileId"
+            ]
           }
         ]
       },
@@ -18939,7 +19070,8 @@
           "maxDepth",
           "defaultHarness",
           "codexModel",
-          "claudeModel"
+          "claudeModel",
+          "defaultMinionProfileId"
         ],
         "properties": {
           "ok": {
@@ -18957,6 +19089,13 @@
           },
           "claudeModel": {
             "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          },
+          "defaultMinionProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
           }
         },
         "additionalProperties": false
@@ -19557,7 +19696,7 @@
           "sessionId": {
             "type": "string",
             "default": "default",
-            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -19602,7 +19741,7 @@
           "extraInstructions": {
             "type": "string",
             "default": "",
-            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",
@@ -19752,7 +19891,7 @@
           },
           "sessionId": {
             "type": "string",
-            "description": "Task jobs always use the assigned agent’s default session; prompt jobs retain their selected session."
+            "description": "Task jobs always use the assigned agent\u2019s default session; prompt jobs retain their selected session."
           },
           "enabled": {
             "type": "boolean"
@@ -19794,7 +19933,7 @@
           },
           "extraInstructions": {
             "type": "string",
-            "description": "Optional additional task instructions; task execution reuses the task’s existing instructions and appends only these extras, never a replacement prompt."
+            "description": "Optional additional task instructions; task execution reuses the task\u2019s existing instructions and appends only these extras, never a replacement prompt."
           },
           "scheduleKind": {
             "type": "string",
@@ -20515,6 +20654,173 @@
         },
         "additionalProperties": true,
         "description": "Extensible sanitized model connection catalog entry. Eligibility flags contain no credentials."
+      },
+      "MinionProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "harness",
+          "enabled",
+          "model",
+          "executionHostId",
+          "instructions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "burrow",
+              "codex",
+              "claude"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "executionHostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "instructions": {
+            "type": "string"
+          }
+        },
+        "description": "Reusable global shared profile. AgentId supplies migration/default context only, never roster filtering. Burrow model null inherits; explicit connection/model uses existing executable model resolver. Native models use OAuth/pool validators. Null host inherits, local explicitly selects Core; remote pins resolve through existing provider registry. Instructions are prepended; disabling never kills running sessions."
+      },
+      "MinionProfileCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "harness"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "burrow",
+              "codex",
+              "claude"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "executionHostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "instructions": {
+            "type": "string"
+          }
+        },
+        "description": "Server assigns id (client id ignored). Defaults enabled=true, model=null, executionHostId=null, instructions=\"\"."
+      },
+      "MinionProfileUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "harness": {
+            "type": "string",
+            "enum": [
+              "burrow",
+              "codex",
+              "claude"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "executionHostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "instructions": {
+            "type": "string"
+          }
+        },
+        "description": "Partial atomic update. Omitted fields preserved. Body id must match path. Harness switch without model resets model to null."
+      },
+      "MinionProfileResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "profile"
+        ],
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/MinionProfile"
+          }
+        }
+      },
+      "MinionProfileListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ok",
+          "profiles"
+        ],
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MinionProfile"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {

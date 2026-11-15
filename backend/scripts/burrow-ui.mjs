@@ -249,10 +249,10 @@ const {
   startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi,
   cancelOpenAiOAuthLoginApi, claudeCliCredentialStatus, importClaudeCliCredential,
   agentModelSelection, saveAgentModelSelection, agentMinionModelSelection,
-  saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings,
+  saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, minionProfiles, createMinionProfile, updateMinionProfile,
   chatIdentities, saveChatIdentity, discoverModelConnection, saveModelConnection,
   resolveModelConnectionChatBody,
-} = createModelConnectionService({ modelsStore, metadataStore, resolveAgentRuntime,
+} = createModelConnectionService({ modelsStore, metadataStore, agentsStore: () => postgresApplication.stores.agents, resolveAgentRuntime,
   logger: serverLogger, runtimeRoot: process.env.BURROW_RUNTIME_ROOT || path.dirname(projectRoot), projectRoot });
 const {
   mcpConnections, saveMcpConnection, removeMcpConnection, discoverMcpConnection,
@@ -581,6 +581,7 @@ async function resolveAgentRuntime(agentId = null) {
   return Object.freeze({
     ...resolved,
     executionEnvironment,
+    executionProviders,
     processExecutionController: executionEnvironment.kind === 'remote' ? executionProviders.get(executionEnvironment.providerId) : null,
   });
 }
@@ -1614,7 +1615,7 @@ const skillApi = {
   agentSkills: async (id) => { const runtime = await resolveAgentContext(id); const assignments = await skillStoreCall(store => store.assignments(runtime.agentId)); const catalog = await loadEffectiveSkillCatalog({ workspaceRoot: runtime.workspaceRoot, agentRuntime: runtime, skillStore: postgresApplication.stores.skills }); return { ok: true, ...assignments, effectiveSkills: catalog.skills.map(skillManifest) }; },
   saveAgentSkills: async (id, body) => { const runtime = await resolveAgentContext(id); await skillStoreCall(store => store.replaceAssignments(runtime.agentId, body.skillIds)); return skillApi.agentSkills(runtime.agentId); },
 };
-const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
+const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSettings: async () => ({ ok: true, timezone: await operatorTimezone(postgresApplication.stores.metadata) }), saveTimezoneSettings: (body) => saveOperatorTimezone(postgresApplication.stores.metadata, body), ...skillApi, readJsonBody, sendJson, modelConnections, claudeCliCredentialStatus, importClaudeCliCredential, startOpenAiOAuthLoginApi, openAiOAuthLoginStatus, submitOpenAiOAuthLoginApi, cancelOpenAiOAuthLoginApi, startClaudeCodeLoginApi, claudeCodeLoginStatus, submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi, mcpConnections, discoverMcpConnection, diagnoseMcpConnection, saveMcpConnection, removeMcpConnection, agentMcpTools, saveAgentMcpTools, agentModelSelection, saveAgentModelSelection, agentMinionModelSelection, saveAgentMinionModelSelection, agentMinionSettings, saveAgentMinionSettings, minionProfiles, createMinionProfile, updateMinionProfile, archiveSummaryModelSelection: async (agentId) => ({ ok: true, selection: await archiveSummarySelection((await resolveAgentRuntime(agentId)).agentId) }), saveArchiveSummaryModelSelection, discoverModelConnection, saveModelConnection, removeModelConnection: async (id) => await modelsStore().remove(id), completeSetupOperation: async body => { try { return await completeSetupOperation({ pool: postgresApplication.pool, encryptionKey: modelsStore().key, body }); } catch (error) { return { ok: false, status: error.message === 'setup_operation_conflict' || error.message === 'agent_id_exists' ? 409 : 400, error: error.message }; } }, setupStatus: async () => postgresApplication.stores.setupState.readStatus(), completeSetup: async () => postgresApplication.stores.setupState.completeSetup() });
 const modReferenceImageRoute = createModReferenceImageContentRoute({ store: () => postgresApplication.stores.referenceImages, sendJson });
 const agentReferenceImageRoute = createAgentReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });
 const operatorReferenceImageRoute = createOperatorReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });

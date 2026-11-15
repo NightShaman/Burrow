@@ -8,6 +8,7 @@ import {
   providerPoolModels,
 } from '../../src/model-settings-store.mjs';
 import { readMinionSettings, saveMinionSettings } from '../../src/minion-depth.mjs';
+import { listMinionProfiles as listProfiles, createMinionProfile as createProfile, updateMinionProfile as updateProfile, minionProfileAction as minionProfileActionText } from '../../src/minion-profiles.mjs';
 import { CODEX_SELECTION_ACTIONS } from '../../src/codex-model-selection.mjs';
 import {
   claudeCredentialAuthPayload,
@@ -55,6 +56,7 @@ export function mergeDiscoveredModels(discovered = [], existing = [], normalize 
 export function createModelConnectionService({
   modelsStore,
   metadataStore,
+  agentsStore = null,
   resolveAgentRuntime,
   logger,
   runtimeRoot = null,
@@ -288,6 +290,35 @@ export function createModelConnectionService({
     }
   }
 
+  // agentId supplies migration/default context only; the roster is global.
+  async function minionProfileAgentId(agentId) {
+    const selected = (await resolveAgentRuntime(agentId)).agentId;
+    const registry = typeof agentsStore === 'function' ? agentsStore() : agentsStore;
+    if (registry?.list) {
+      for (const agent of await registry.list({ includeDisabled: true })) {
+        await listProfiles(metadataStore(), agent.id, { agentName: agent.name || agent.id });
+      }
+    }
+    return selected;
+  }
+  async function minionProfileResult(run) {
+    try { return await run(); }
+    catch (error) {
+      const message = String(error?.message || error);
+      const action = minionProfileActionText(message) || CODEX_SELECTION_ACTIONS[message] || null;
+      return { ok: false, status: error?.statusCode || 400, error: message, ...(action ? { message: action } : {}) };
+    }
+  }
+  async function minionProfiles(agentId = null) {
+    return minionProfileResult(async () => listProfiles(metadataStore(), await minionProfileAgentId(agentId)));
+  }
+  async function createMinionProfile(body = {}, agentId = null) {
+    return minionProfileResult(async () => createProfile(metadataStore(), await minionProfileAgentId(agentId), body, { models: modelsStore() }));
+  }
+  async function updateMinionProfile(id, body = {}, agentId = null) {
+    return minionProfileResult(async () => updateProfile(metadataStore(), await minionProfileAgentId(agentId), id, body, { models: modelsStore() }));
+  }
+
   async function chatIdentities() { return { ok: true, ...await modelsStore().identities() }; }
   async function saveChatIdentity(body = {}) {
     try { return { ok: true, ...await modelsStore().saveIdentity(body) }; }
@@ -392,6 +423,9 @@ export function createModelConnectionService({
     saveAgentMinionModelSelection,
     agentMinionSettings,
     saveAgentMinionSettings,
+    minionProfiles,
+    createMinionProfile,
+    updateMinionProfile,
     chatIdentities,
     saveChatIdentity,
     discoverModelConnection,

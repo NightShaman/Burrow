@@ -78,6 +78,7 @@ export function createExecutionContext({
   executionEnvironment = null,
   processExecutionTarget = null,
   processExecutionController = null,
+  executionProviders = null,
   processExecutionRouter = null,
   parentRunId = null,
   traceContext = null,
@@ -132,7 +133,7 @@ export function createExecutionContext({
     parentRunId: parentRunId == null ? null : String(parentRunId),
     traceContext: traceContext && typeof traceContext === 'object' ? { ...traceContext } : null,
   };
-  Object.defineProperties(context, { conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false }, telemetry: { value: telemetry, enumerable: false }, abortSignal: { value: abortSignal, enumerable: false } });
+  Object.defineProperties(context, { executionProviders: { value: executionProviders, enumerable: false }, conversationStore: { value: conversationStore, enumerable: false }, stores: { value: stores, enumerable: false }, telemetry: { value: telemetry, enumerable: false }, abortSignal: { value: abortSignal, enumerable: false } });
   return freeze(context);
 }
 

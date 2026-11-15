@@ -2,6 +2,7 @@ import { runCodexSessionFollowup } from './codex-session-followup.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { operatorPreferenceTurn } from './preference-learning.mjs';
 import { resolveTurnMinionDepth } from './minion-depth.mjs';
+import { listMinionProfiles } from './minion-profiles.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { contextSessionId, withContextHistory } from './model-context-boundary.mjs';
 import { createHash } from 'node:crypto';
@@ -452,7 +453,10 @@ async function runAskChatUnserialized({
     ? { recipientAgentId: incomingAgentMessage.senderAgentId, sessionId: incomingAgentMessage.sourceSessionId }
     : null;
   const minionDepth = await resolveTurnMinionDepth({ metadata: stores?.metadata, conversations: stores?.conversations, agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId });
-  const executionContext = createRuntimeExecutionContext({ minionDepth, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  // Profile discovery must never be able to fail an ordinary turn.
+  const minionProfiles = await listMinionProfiles(stores?.metadata, runtimeState.agentId)
+    .then(result => result.profiles).catch(() => []);
+  const executionContext = createRuntimeExecutionContext({ minionDepth, minionProfiles, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   // Native child sessions never fall through to Burrow planning or tools.
   const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
     agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,
