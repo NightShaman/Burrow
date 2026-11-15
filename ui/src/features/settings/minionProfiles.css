@@ -1,0 +1,20 @@
+/* Keep the native, Settings-styled switch beside its label, outside .field's
+   full-width text input layout. */
+.minion-profile-enabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Match settingsFoundation's themed Settings textarea. */
+.minion-model-settings textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-input);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+}

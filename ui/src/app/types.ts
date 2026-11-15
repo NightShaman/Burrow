@@ -2,6 +2,7 @@ export type Page = 'chat' | 'tasks' | 'archive' | 'brains' | 'forge' | 'settings
 export type SettingsTab =
   | 'general'
   | 'agents'
+  | 'minions'
   | 'skills'
   | 'connections'
   | 'mods'

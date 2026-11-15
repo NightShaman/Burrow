@@ -1,5 +1,4 @@
-import { MinionTypeSettings } from './MinionTypeSettings';
-import { DefaultMinionModel } from './DefaultMinionModel';
+import { MinionProfiles } from './MinionProfiles';
 import { MinionDepthSettings } from './MinionDepthSettings';
 import type { Agent, SavedProvider } from '../../app/types';
 import { SettingSection } from './SettingsPrimitives';
@@ -43,16 +42,11 @@ export function AgentSettings({
   );
   const minion = (
     <SettingSection title="Minion settings">
-      <MinionTypeSettings
-        key={JSON.stringify([selected.id, resourceId, 'type'])}
-        resourceId={resourceId}
-      >
-        <DefaultMinionModel
-          key={JSON.stringify([selected.id, resourceId, 'model'])}
-          resourceId={resourceId}
-          savedProviders={savedProviders}
-        />
-      </MinionTypeSettings>
+      <MinionProfiles
+        key={JSON.stringify([selected.id, resourceId])}
+        agentId={resourceId}
+        defaultOnly
+      />
       <MinionDepthSettings
         key={JSON.stringify([selected.id, resourceId, 'depth'])}
         resourceId={resourceId}

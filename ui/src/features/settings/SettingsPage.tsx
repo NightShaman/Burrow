@@ -1,3 +1,4 @@
+import { MinionProfiles } from './MinionProfiles';
 import './settingsWorkspace.css';
 import './normalizedWorkspace.css';
 import './personalizationWorkspace.css';
@@ -231,7 +232,14 @@ export function Settings({
   const selectedModSettings: ModSettingsContribution | undefined =
     selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ??
     selectedContribution?.settings?.[0];
-  const builtInTabs = ['general', 'agents', 'skills', 'connections', 'mods'] as SettingsTab[];
+  const builtInTabs = [
+    'general',
+    'agents',
+    'minions',
+    'skills',
+    'connections',
+    'mods',
+  ] as SettingsTab[];
   const modSettingsTab = (modId: string, settingId: string) =>
     `mod-settings:${modId}:${settingId}` as SettingsTab;
   // One shared working surface; selection precedes editing without moving its left edge.
@@ -615,6 +623,7 @@ export function Settings({
             key="configuration"
             className="settings-blank-column settings-prototype-configuration"
           >
+            {tab === 'minions' && <MinionProfiles />}
             {tab === 'connections' && connectionSection === 'opentelemetry' && (
               <OpenTelemetrySettings overflowTarget={overflowColumn} />
             )}

@@ -248,7 +248,7 @@ describe('Per-agent minion depth', () => {
       vi
         .mocked(api)
         .mock.calls.filter(([path]) => path === '/api/agents/agent%2Fname/minion-settings'),
-    ).toHaveLength(4);
+    ).toHaveLength(2);
   });
 });
 
