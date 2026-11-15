@@ -7158,7 +7158,7 @@
         ],
         "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection/enabled model pair (no load balancers). Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
+        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection or anthropic-lb pool/enabled model pair with an eligible OAuth member. Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -20422,7 +20422,7 @@
         "additionalProperties": false
       },
       "ClaudeMinionModelSelection": {
-        "description": "Complete direct Anthropic OAuth connection and enabled model pair. Null clears only the independent per-agent Claude selection; no parent/Burrow/Codex/load-balancer fallback. Clearing does not change defaultHarness.",
+        "description": "Complete direct Anthropic OAuth connection or enabled anthropic-lb pool and enabled model pair. Null clears only the independent per-agent Claude selection; no parent/Burrow/Codex fallback. Clearing does not change defaultHarness.",
         "anyOf": [
           {
             "$ref": "#/components/schemas/ClaudeMinionModelPair"
@@ -20510,7 +20510,7 @@
           "claudeEligible": {
             "type": "boolean",
             "readOnly": true,
-            "description": "Claude configuration eligibility: enabled !== false, apiType anthropic-messages, auth.type oauth, and case-insensitive auth.provider anthropic or claude. Direct connections only; Anthropic load balancers are ineligible. Does not guarantee any enabled model: additionally require an exact model ID with selected !== false. Independent of Codex eligibility and transient quota/cooldown; not a guarantee of CLI execution or credential readiness."
+            "description": "Claude configuration eligibility: enabled !== false, apiType anthropic-messages, auth.type oauth, and case-insensitive auth.provider anthropic or claude. Also eligible: enabled anthropic-lb load balancers with pool.enabled and a structurally eligible direct OAuth member sharing an enabled model. Does not guarantee any enabled model: additionally require an exact model ID with selected !== false. Independent of Codex eligibility and transient quota/cooldown; not a guarantee of CLI execution or credential readiness."
           }
         },
         "additionalProperties": true,

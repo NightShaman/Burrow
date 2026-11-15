@@ -1,3 +1,5 @@
+import { createClaudePoolRouting } from './claude-pool-routing.mjs';
+import { createClaudeCheckpoint, claudeHandoffContext } from './claude-native-checkpoint.mjs';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -94,6 +96,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
   executionPolicy = parentExecutionContext?.executionPolicy, continuation = null } = {}) {
   const cancellation = new AbortController();
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
+  let poolEngine, route, resolvedConnectionId, actualModel = null, checkpoint, history = [];
   let child, client, poll, killTimer, spawned = false, nativeSession, store, authority, recorded = false;
   let writes = Promise.resolve(), persistenceFailed = false, sequence = 0, pendingWrites = 0, result, lastActivity = 0, initSeen = false;
   const secrets = new Set();
@@ -177,15 +180,33 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
       await check(); poll = setInterval(() => { void check(); }, 200); poll.unref();
     }
     signal.throwIfAborted();
-    const auth = await models.auth(selected.connectionId); collect(auth);
+    resolvedConnectionId = selected.connectionId;
+    if ((await models.get(selected.connectionId))?.apiType === 'anthropic-lb') {
+      poolEngine = await createClaudePoolRouting(models, selected.connectionId, selected.model, parentExecutionContext);
+      try {
+        route = await poolEngine.select({ threadKey: childSessionId, model: selected.model,
+          preferredMemberId: saved?.resolvedConnectionId,
+          requiredMemberId: saved && !saved.portableHistory ? saved.resolvedConnectionId : null });
+      } catch (error) {
+        if (error.message === 'provider_pool_no_eligible_members') fail('provider_pool_no_eligible_members');
+        if (error.message === 'provider_pool_continuation_owner_unavailable') fail('claude_continuation_effects_ambiguous');
+        throw error;
+      }
+      resolvedConnectionId = route.memberId;
+    }
+    const handoff = saved && resolvedConnectionId !== (saved.resolvedConnectionId || saved.connectionId);
+    if (handoff && (!saved.portableHistory || !Array.isArray(saved.preparedHistory))) fail('claude_continuation_effects_ambiguous');
+    history = saved?.preparedHistory || [];
+    checkpoint = createClaudeCheckpoint(task);
+    const auth = await models.auth(resolvedConnectionId); collect(auth);
     if (auth?.type !== 'oauth' || !['anthropic', 'claude'].includes(String(auth.provider || '').toLowerCase())) fail('claude_anthropic_oauth_required');
-    const resolved = await models.resolveAuth(selected.connectionId, { signal }); collect(resolved);
-    collect(await models.auth(selected.connectionId));
+    const resolved = await models.resolveAuth(resolvedConnectionId, { signal }); collect(resolved);
+    collect(await models.auth(resolvedConnectionId));
     if (typeof resolved?.token !== 'string' || !resolved.token) fail('claude_anthropic_oauth_required');
     const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--allowedTools', 'Bash,Edit,Write,Read,Glob,Grep,NotebookEdit', '--permission-prompts', 'none', '--model', selected.model,
-      ...(saved?.sessionId ? ['--resume', saved.sessionId] : [])];
+      ...(saved?.sessionId && !handoff ? ['--resume', saved.sessionId] : [])];
     const executable = remote ? null : await discoverClaudeExecutable();
-    await save({ sessionId: saved?.sessionId || null, connectionId: selected.connectionId, model: selected.model,
+    await save({ sessionId: handoff ? null : saved?.sessionId || null, resolvedConnectionId, portableHistory: false, connectionId: selected.connectionId, model: selected.model,
       modelConfig: selected, target, executionPolicy: policy, executionHost: host, state: 'running' });
     await append('Claude Code starting.');
     signal.throwIfAborted();
@@ -196,6 +217,8 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
       : spawn(executable, args, { cwd: target.root, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'], env });
     spawned = true;
     client = processClient(child, event => {
+      checkpoint.observe(event);
+      if (event.type === 'assistant' && typeof event.message?.model === 'string') actualModel = event.message.model;
       // Persist init on arrival, not just on a successful final result.
       if ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') {
         if ((!initSeen || event.type === 'result') && typeof event.session_id === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(event.session_id) && ![...secrets].some(secret => event.session_id.includes(secret))) { initSeen = true; enqueue(() => save({ sessionId: event.session_id })); }
@@ -215,7 +238,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     if (signal.aborted) abort();
     else {
       child.start?.();
-      child.stdin.end(`${JSON.stringify({ type: 'user', message: { role: 'user', content: `Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` } })}\n`);
+      child.stdin.end(`${JSON.stringify({ type: 'user', message: { role: 'user', content: `${handoff ? claudeHandoffContext(history) : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` } })}\n`);
     }
     // Polling also bounds a broken transport/process after cancellation or parser
     // failure, without mistaking a result event for process termination.
@@ -229,10 +252,19 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     signal.throwIfAborted();
     const text = redact(client.finish());
     await append(text, false);
-    await save({ state: 'completed' });
+    const projection = checkpoint.finish({ success: true, closed: client.closed, redact });
+    history = [...history, ...projection.messages];
+    const bounded = JSON.stringify(history).length <= 1_000_000;
+    await save({ state: 'completed', actualModel, portableHistory: projection.portable && bounded && (!saved || saved.portableHistory === true),
+      preparedHistory: bounded ? history : [], checkpointFailure: projection.reason || (bounded ? null : 'oversized_history') });
     result = { ...base, ok: true, summary: text, blockers: [], warnings: [], sideEffectsApplied: null };
   } catch (error) {
     // Only our fixed runner codes escape. Never forward provider/OS/store errors.
+    if (poolEngine && route && !signal.aborted && error?.[RUNNER_ERROR] === 'claude_native_result_failed') {
+      // Native print mode does not expose trustworthy HTTP status. Account only
+      // a generic native failure; never invent auth/quota classifications.
+      try { await poolEngine.cooldown(resolvedConnectionId, 'claude_native_result_failed'); } catch { /* Original failure remains terminal. */ }
+    }
     const code = persistenceFailed ? 'claude_session_persistence_failed' : signal.aborted ? 'claude_cancelled'
       : error?.[RUNNER_ERROR] || 'claude_native_run_failed';
     result = { ...base, ok: false, summary: signal.aborted ? 'Claude minion cancelled.' : 'Claude minion unavailable or failed.',
@@ -258,5 +290,5 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     }
     if (cleanupUnconfirmed) result = { ...base, ok: false, summary: 'Claude process cleanup could not be confirmed.', blockers: ['claude_cleanup_failed'], warnings: [], sideEffectsApplied: null };
   }
-  return { ...result, model: { requested: modelConfig?.model || null, actual: null, connectionId: modelConfig?.connectionId || null }, spawned, cancelled: signal.aborted };
+  return { ...result, model: { requested: modelConfig?.model || null, actual: actualModel, connectionId: modelConfig?.connectionId || null, resolvedConnectionId: resolvedConnectionId || null }, spawned, cancelled: signal.aborted };
 }

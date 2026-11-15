@@ -430,7 +430,7 @@ export async function executeSpawnSubagentTool({
   let childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
   if (['codex','claude'].includes(harness) && childResult.model) {
     childModelSelection = { ...childModelSelection, requestedModel: childModelConfig.model,
-      resolvedModel: childResult.model.actual, resolvedConnectionId: childResult.model.connectionId,
+      resolvedModel: childResult.model.actual, resolvedConnectionId: childResult.model.resolvedConnectionId || childResult.model.connectionId,
       logicalConnectionId: childModelConfig.connectionId };
   }
   // Dispatch/process cancellation can lose the IPC terminal payload. Recover

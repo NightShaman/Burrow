@@ -1,4 +1,4 @@
-import { claudeDirectEligible } from './claude-model-selection.mjs';
+import { claudeDirectEligible, claudePoolEligible } from './claude-model-selection.mjs';
 import { ProviderPoolEngine } from './provider-pool-engine.mjs';
 import { createProviderUsageService } from './provider-usage-service.mjs';
 
@@ -24,7 +24,7 @@ export async function codexPoolSnapshot(store, connectionId, model) {
 // Configuration eligibility deliberately ignores transient usage/cooldown state.
 export function withCodexEligibility(connections) {
   return connections.map(connection => ({ ...connection,
-    claudeEligible: claudeDirectEligible(connection),
+    claudeEligible: claudeDirectEligible(connection) || claudePoolEligible(connection, connections),
     codexEligible: codexDirectEligible(connection)
     || Boolean(connection.apiType === 'openai-lb' && connection.enabled !== false && connection.pool?.enabled
       && (connection.pool.memberConnectionIds || []).some(id => {

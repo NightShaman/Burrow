@@ -4,7 +4,7 @@ export const CLAUDE_SELECTION_ACTIONS = Object.freeze({
   claude_model_selection_required: 'Choose a Claude model and Anthropic OAuth account in Minion settings.',
   claude_model_selection_invalid: 'Supply claudeModel as null or a complete connectionId and model pair.',
   claude_connection_not_found: 'Choose an existing Anthropic OAuth connection in Minion settings.',
-  claude_anthropic_oauth_required: 'Choose an enabled direct Anthropic OAuth account in Minion settings; load balancers and API keys are not supported.',
+  claude_anthropic_oauth_required: 'Choose an enabled Anthropic OAuth account or Anthropic pool with an eligible OAuth member in Minion settings; API keys are not supported.',
   claude_model_not_enabled: 'Enable the model on the selected Anthropic OAuth connection, or choose another model in Minion settings.',
   claude_model_override_unsupported: 'Choose the Claude model through Minion settings before spawning.',
   claude_model_settings_store_required: 'Restore the model settings store before spawning Claude.',
@@ -27,6 +27,15 @@ export const claudeDirectEligible = connection => Boolean(connection
   && connection.auth?.type === 'oauth'
   && ['anthropic', 'claude'].includes(String(connection.auth.provider || '').toLowerCase()));
 
+export const claudeSupportsModel = (connection, model) => (connection?.models || [])
+  .some(item => item.id === model && item.selected !== false);
+
+export const claudePoolEligible = (connection, members, model = null) => Boolean(connection
+  && connection.apiType === 'anthropic-lb' && connection.enabled !== false && connection.pool?.enabled
+  && members.some(member => (connection.pool.memberConnectionIds || []).includes(member?.id)
+    && claudeDirectEligible(member) && (model ? claudeSupportsModel(connection, model) && claudeSupportsModel(member, model)
+      : (member.models || []).some(item => item.selected !== false && claudeSupportsModel(connection, item.id)))));
+
 // Secret-free configuration validation; credential resolution/refresh remains
 // the native runner's responsibility. Transient quota/cooldown is not consulted.
 export async function validateClaudeModelSelection(models, selection) {
@@ -35,7 +44,12 @@ export async function validateClaudeModelSelection(models, selection) {
   if (!models?.get) fail('claude_model_settings_store_required');
   const connection = await models.get(normalized.connectionId);
   if (!connection) fail('claude_connection_not_found');
-  if (!claudeDirectEligible(connection)) fail('claude_anthropic_oauth_required');
+  if (!claudeDirectEligible(connection)) {
+    const members = connection.apiType === 'anthropic-lb' && connection.pool?.enabled && connection.enabled !== false
+      ? await Promise.all((connection.pool.memberConnectionIds || []).map(id => models.get(id))) : [];
+    if (!claudePoolEligible(connection, members)) fail('claude_anthropic_oauth_required');
+    if (!claudePoolEligible(connection, members, normalized.model)) fail('claude_model_not_enabled');
+  }
   if (!(connection.models || []).some(model => model.id === normalized.model && model.selected !== false)) {
     fail('claude_model_not_enabled');
   }
