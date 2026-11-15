@@ -140,3 +140,12 @@ Each attempt pins the account, exact credit and expiry. Confirmed `nothing_to_re
 
 Checked **12 November 2026**: Accounts and reset-credit freshness use a server response-time anchor plus elapsed browser time, not the PC wall clock. A wall-clock change does not make cached usage fresh or stale. Without a valid server clock anchor the account state can be **Unknown**; missing usage and actual rate limits remain separate states. Reset controls still require valid current credits and explicit confirmation.
 
+
+## Codex Minion models
+
+Codex Minions use a separate saved connection/model pair under the agent's Minions settings, not parent/Burrow Minion inheritance. Direct OpenAI OAuth and eligible enabled OpenAI pools are supported. Each selected pool model needs an enabled direct OpenAI OAuth member with that model enabled. A catalog's `codexEligible` flag is structural eligibility, not live quota. Native tool-bearing Codex history cannot automatically move to another account. See [Codex Minions](../concepts/agents-minions.md#native-codex-minions) before relying on pool failover.
+
+## Account usage refresh and stale results
+
+Accounts offers an explicit refresh with visible loading/failure state. A previous usage snapshot can remain displayed as stale after a refresh fails; it is not fresh quota evidence. Anthropic OAuth usage requests coordinate through PostgreSQL across callers sharing the same origin/credential. A manual force refresh shares an already-completed concurrent attempt and cannot bypass provider retry cooldown. Provider Retry-After is respected; otherwise bounded backoff applies. Profile/tier metadata has a separate longer cache and is not forcibly refreshed with every usage request. Missing coordination fails visibly rather than presenting unknown usage as zero.
+

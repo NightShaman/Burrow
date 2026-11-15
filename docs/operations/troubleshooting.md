@@ -296,3 +296,16 @@ Checked **9 November 2026**: **Couldn't restore your workspace** means the boots
 Checked **14 November 2026**: model failures retain a sanitized actual diagnostic message separately from the structured origin/code/retry decision. Runtime-internal and unknown failures can carry this message too; wording alone does not classify a failure or authorize retry. Inspect the terminal result and run receipt, not just a generic failed indicator. Invalid native continuation summaries use `context_compression_failed`; the former summary-character rejection is removed, but real request/context budget checks remain.
 
 Authenticated settings, skill-source, Forge, reference-image and final HTTP failure responses can include sanitized `message` alongside their stable `error` code/status. Public/pre-authentication and webhook failures intentionally remain generic. Ordinary tool activity may carry safe error detail; MCP activity uses only its dedicated sanitized diagnostic field, never arbitrary output, while mod/skill raw payloads remain excluded. This is not a guarantee that every historical error or every service response contains recoverable detail. Errors already stripped from old records cannot be reconstructed.
+
+
+## Codex Minion setup or continuation fails
+
+- `codex_model_selection_required`: save the separate Codex connection/model pair in Minions settings; parent/Burrow model inheritance does not apply.
+- `codex_pool_ineligible`: check the logical OpenAI pool, enabled OAuth members and exact model selections. Configuration eligibility is separate from fresh available quota.
+- `codex_remote_app_server_unavailable` or executable errors: verify the compatible Node Goblin gateway and CLI on the assigned execution host. No local fallback is attempted.
+- `codex_session_host_changed`: return to the saved execution host; moving a native thread is not supported.
+- `codex_pool_replay_unavailable`: tool-bearing/incomplete native history cannot safely cross accounts. Restore the required account or explicitly reconcile the work before any new attempt.
+- `codex_execution_boundaries_unsupported`: the native adapter cannot enforce configured Burrow hard-block rules. Do not disable safeguards merely to make dispatch succeed; choose a suitable harness or resolve the design deliberately.
+
+A native final answer is a report, not promoted tool evidence or independent verification. Inspect actual changes and possible effects before retrying failed work. Stale running state or uncertain process cleanup requires explicit reconciliation.
+

@@ -34,7 +34,7 @@ The native `spawn_subagent` tool requires:
 - `target.kind`: `filesystem`
 - `target.root`: an absolute path to an existing directory
 
-Optional fields include a short `label` and an exact configured `model` ID. When omitted, the runtime uses the agent's configured Minion model selection if present, otherwise the parent selection. An explicit model ID resolves on the parent's connection. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
+Optional fields include a short `label`, `harness` (`burrow` or `codex`), and an exact configured `model` ID. For Burrow Minions, omitted model uses the agent's configured Minion model selection if present, otherwise the parent selection; an explicit model resolves on the parent's connection. Codex selection is separate, as described below. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
 
 ```json
 {
@@ -63,7 +63,7 @@ At a leaf, `spawn_subagent` is absent from the tool surface and the executor ind
 
 Child ancestry and its spawn-time budget persist. Reopening a child does not turn it into a root; historical direct children without a marker remain depth 1 with budget 1. The current agent setting can tighten the effective spawning budget, but raising it does not enlarge a child's saved lineage budget.
 
-### What a minion receives
+### What a Burrow minion receives
 
 A child starts with a purpose-built prompt containing its task and working directory. It runs its own model/tool loop and does not receive the full parent conversation as a cloned transcript. Its standard tool surface includes filesystem, shell and Git tools; nested spawning is available only while the depth budget permits it. It excludes the server-owned Forge dispatcher.
 
@@ -92,11 +92,29 @@ stateDiagram-v2
 
 These are the contract's allowed statuses; they do not imply that every dispatcher implements a timeout policy. The current local process runner has no overall task-deadline timer; its cancellation grace timer only forces cleanup after an abort.
 
-The child must call `finish_subagent` with `status` and `summary`. Optional structured verification distinguishes `passed`, `failed`, `failed_expected`, and `not_run`. Ordinary prose is not a terminal completion signal. `finish_subagent` must be the sole call in its batch; mixed terminal/action batches are rejected without executing their requested actions. Repeated unchanged tool calls can stop with `subagent_repeated_no_progress`. If the child stops calling tools without finishing, the runtime asks once for a structured final report; failure to provide it becomes a failed result.
+A Burrow child must call `finish_subagent` with `status` and `summary`. Optional structured verification distinguishes `passed`, `failed`, `failed_expected`, and `not_run`. Ordinary prose is not a terminal completion signal. `finish_subagent` must be the sole call in its batch; mixed terminal/action batches are rejected without executing their requested actions. Repeated unchanged tool calls can stop with `subagent_repeated_no_progress`. If the child stops calling tools without finishing, the runtime asks once for a structured final report; failure to provide it becomes a failed result.
 
 The parent receives bounded evidence, a summary, resolved target, lineage, and receipt references. Changed files, artifacts, memory writes, and all-run consequences are now aggregated even when older tool receipts leave the retained window; `omittedToolResults` reports omitted receipts. `sideEffectsApplied` is true for observed mutations, false for known non-mutating outcomes, or null when effects are uncertain. Large raw outputs belong to trace artifacts. Inspect actual receipts when side effects matter.
 
 Identical structural spawn requests within the same parent lineage can reuse an existing record. This is mechanical deduplication, not semantic task matching. The identity includes the requested model, resolved model and connection, and model profile, as well as parent lineage, target and normalized task. A guarded claim resumes an existing queued admission with its original child identity after an interrupted setup. Existing running and terminal records are reused without another dispatch. A running record may represent active or interrupted work; `subagent_running_dispatch_state_uncertain` requires reconciliation of that exact child receipt, not a blind retry. Cancellation during admission prevents dispatch. Inspect `reused` and the resolved-model receipt.
+
+## Native Codex minions
+
+Choose **Burrow Minion** or **Codex Minion** in the agent's Minions settings. The saved default remains `burrow`; an explicit `spawn_subagent.harness` (`burrow` or `codex`) overrides it for that child without changing settings. The receipt and child session retain the actual harness.
+
+Codex has its own saved connection/model pair. Select an enabled model on a direct OpenAI OAuth connection or an eligible enabled OpenAI load balancer with enabled OAuth members supporting that model. API-key connections and other providers are not supported. Codex does not inherit the parent/Burrow Minion model; an explicit spawn `model` must match the saved Codex selection. Catalog eligibility is not proof of available quota or successful authentication.
+
+Provision the Codex CLI on the selected execution host, or use an absolute executable `BURROW_CODEX_EXECUTABLE` override. Node Goblin's optional `--with-codex` install/update provisions the CLI on a remote host. Current compatible Node Goblin supports the private interactive app-server transport; unavailable transport fails instead of falling back to Burrow's local host. The target root must exist on that selected host.
+
+A Codex child uses its native app-server workflow, not Burrow's normal tool loop. Text follow-ups in that child retain the saved host and native session routing. Attachments, no-model turns and unsupported native requests fail explicitly. A host change, missing native history or unresolved running/cleanup state requires reconciliation; do not start replacement work blindly.
+
+Native activity and a sanitized final Markdown report are visible in Burrow, but native tool commands/results are not promoted into Burrow's normal evidence receipts. A completed turn is not independent verification; side effects may be unknown. No native grandchildren or Burrow tool bridge are claimed.
+
+Configured execution-boundary hard blocks are unsupported by this adapter and prevent dispatch. Read-only policy uses native read-only mode; mutation-enabled policy uses native full-access mode. The working directory is context, not a filesystem cage, and commit permission is an instruction rather than command-level enforcement. Native configuration, hooks and subprocess behavior remain the execution host's responsibility.
+
+### Codex pool continuation
+
+Pools retain their logical connection separately from the actual serving account/model. Same-account continuation resumes the native thread. A different account/member starts a fresh thread on the same host only with a complete portable native checkpoint. Current checkpoints can include terminal command results and file-change diffs, including failed attempts with possible effects; historical actions are context, not calls to execute again. Unknown items, unresolved effects, incomplete or oversized history remain account-bound. Missing required owners fail with `codex_pool_replay_unavailable`, not blind replay. At most one eligible alternate attempt is allowed after cleanup and authoritative effect reconciliation. Transport loss, cancellation, unresolved effects and partial assistant output alone do not authorize retry. A failed completed-turn history export retains a pending checkpoint; same-owner continuation must repair that export before new work or report `codex_checkpoint_repair_required`. These native checkpoints are not independently verified Burrow tool receipts.
 
 ## Peer agent messages
 
@@ -181,3 +199,4 @@ Failed, cancelled and incomplete peer partials remain visible and attributed but
 ## Group recipient parsing
 
 Checked **12 November 2026**: An `@` mention begins at the start of text or after whitespace. Escapes and inline/fenced Markdown code are literal. Matching is case-insensitive and prefers the longest registered name or ID, including supported Unicode name characters. A nonempty explicit `agentIds` list is authoritative; prose mentions do not silently replace it. Without explicit recipients, an unknown mention is rejected; no explicit recipients and no recognized mentions broadcasts to the existing participants.
+

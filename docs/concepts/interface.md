@@ -441,3 +441,11 @@ Checked **13 November 2026**: Chat still polls runtime activity and queued input
 A retained completed/failed run summary is not live activity. After its transcript refresh succeeds for the current conversation generation, an identical terminal summary does not trigger another transcript reload on every poll. Failed or discarded refreshes remain retryable, and changed summaries or a new generation require reconciliation again. Active work, pending Forge deliveries and child-session reads continue their existing refresh behavior. These contracts were checked in source and regression-test definitions, not by running the application.
 
 
+
+
+## Native Codex child controls and Forge references
+
+Current Minions settings expose a default **Minion Type**, with separate Burrow and Codex model selections. An existing child's **Codex Minion** badge describes its saved harness, not the current default. Codex child chat supports text follow-ups; attachment upload/paste/drop, steering and parent-model controls are unavailable where native continuation does not support them. Do not interpret a disabled control as successful submission.
+
+Forge gallery/preview actions include **Copy reference** for eligible PNG/JPEG/GIF/WebP artifacts up to 20 MiB. It copies an exact `[forge:jobId:artifactId]` reference for reuse, not image bytes. **Attach to conversation** uses the current session and reports success/failure independently. **Use as video reference** is shown only for eligible artifacts and a video model advertising reference support; model reference limits include portraits and selected artifacts. These actions do not themselves start a new generation.
+

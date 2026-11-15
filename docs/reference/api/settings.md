@@ -51,11 +51,19 @@ Members must exist and belong to the matching provider family. OpenAI pools acce
 
 ## Minion Depth
 
-`GET /api/agents/{agentId}/minion-settings` returns `{ "ok": true, "maxDepth": 1 }` when unset. `PUT` requires `{ "maxDepth": 0 }`, `{ "maxDepth": 1 }` or `{ "maxDepth": 2 }` and returns the saved value with `ok: true`. Settings are durable and isolated per agent, independently of `/minion-model-selection`.
+`GET /api/agents/{agentId}/minion-settings` returns `{ "ok": true, "maxDepth": 1, "defaultHarness": "burrow", "codexModel": null }` when unset. `PUT` accepts a nonempty subset of:
 
-Zero disables spawning; one permits direct children only; two also permits grandchildren. Root depth is zero. Leaves lack the spawn tool and runtime execution independently enforces the ceiling. No extra fan-out or per-spawn depth setting exists. The current setting can tighten a resumed child's saved budget; it does not rewrite ancestry. See [agents and minions](../../concepts/agents-minions.md#minion-depth).
+- `maxDepth`: integer 0–2.
+- `defaultHarness`: `burrow` or `codex`.
+- `codexModel`: `null` to clear, or a complete `{ "connectionId": "...", "model": "..." }` pair.
 
-Missing/null/string/boolean/fractional/out-of-range `maxDepth` returns **400 `minion_max_depth_invalid`** without changing settings; omission is not reset-to-default. Malformed JSON returns `invalid_json`. Normal authorization and enabled-agent requirements apply: unknown agent gives `agent_not_found` (404), disabled agent `agent_disabled` (409).
+Omitted values remain unchanged; invalid combined updates write nothing. Both model-pair strings must be nonempty; unknown nested fields are rejected. The response contains the complete saved settings. These settings are durable and isolated per agent. The separate `/minion-model-selection` endpoint configures Burrow Minions only, not Codex.
+
+Zero depth disables spawning; one permits direct children; two also permits grandchildren. Leaves lack Burrow's spawn tool, and runtime independently enforces the ceiling. The current setting can tighten a resumed child's saved budget without rewriting ancestry. Codex native grandchildren are not implemented.
+
+Codex selection accepts direct OpenAI OAuth or eligible OpenAI pools, with the selected model enabled on an eligible OAuth member and the pool. The connection catalog's `codexEligible` flag is configuration eligibility, not live quota/authentication proof, and exact-model validation still applies. Pool selections save the pool ID. Missing selection fails with `codex_model_selection_required`; invalid pairs, missing connections, unsupported auth, ineligible pools and disabled models return actionable stable codes. Clearing the pair does not change the default harness.
+
+Invalid depth/harness values return `minion_max_depth_invalid` / `minion_default_harness_invalid`; an empty update also fails. Malformed JSON returns `invalid_json`. Normal authorization and enabled-agent requirements remain. See [agents and minions](../../concepts/agents-minions.md#native-codex-minions).
 
 ## OpenTelemetry destinations
 
@@ -194,3 +202,4 @@ Checked **9 November 2026**: `GET /api/settings/ui-preferences` returns `{ "valu
 Allowed keys are `hc.theme`, `hc.selectedAgentId`, `hc.leftCollapsed`, `hc.rightCollapsed`, `hc.leftSplit`, `hc.rightSplit`, `hc.leftTopPanel`, `hc.leftBottomPanel`, `hc.rightTopPanel`, `hc.rightBottomPanel`, `hc.leftRailLayout`, `hc.rightRailLayout`, `hc.leftSinglePanel`, `hc.rightSinglePanel`, `hc.rightPanelDefaultsVersion`, `hc.agentRailPreferences`, `hc.groupChatTabs`, `hc.settingsUtilityPanelOpen`, and `hc.accountStatusOrder`.
 
 Unknown keys, unknown top-level fields, malformed bodies, nonboolean `seedOnly`, and values other than string/null return `400 invalid_ui_preferences` without mutation. The home server owns one operator-wide `settings_meta` record named `ui_preferences`, under the existing authentication boundary. This is not per-user or selected-node storage. Credentials, drafts and caches are excluded. See [workspace restoration](../../concepts/interface.md#workspace-preference-synchronization).
+

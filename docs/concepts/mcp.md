@@ -100,3 +100,8 @@ The immutable links below record earlier public evidence. Current contracts were
 ## Complete enabled-provider discovery
 
 Checked **12 November 2026**: MCP discovery examines all enabled provider connections instead of silently stopping after the first 50. Availability and per-agent grants still apply; discovering a connection or tool does not authorize its invocation.
+
+## Per-connection TLS verification
+
+Current HTTP MCP connections expose **Verify TLS certificate**, enabled by default. The saved `verifyTls` boolean is connection-scoped; missing values mean true. Stdio transports ignore it. Discovery, diagnosis and invocation use the same saved policy. Turning it off permits certificate impersonation for that server; prefer fixing its certificate/trust configuration rather than disabling verification. This documentation describes the setting, not authorization to change it. It does not disable TLS checks globally for Burrow or unrelated MCP connections.
+
