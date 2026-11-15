@@ -73,7 +73,7 @@ export type RuntimeAgent = {
   } | null;
 };
 
-export type MinionHarness = 'burrow' | 'codex';
+export type MinionHarness = 'burrow' | 'codex' | 'claude';
 
 /** Runtime-owned lineage; a child keeps its spawn-time depth budget. */
 export type MinionAncestry = {
@@ -217,6 +217,8 @@ export type ProviderPool = {
 
 export type ModelConnection = {
   codexEligible?: boolean;
+  claudeEligible?: boolean;
+  enabled?: boolean;
   autoUseExpiringResets?: boolean;
   id: string;
   provider: string;

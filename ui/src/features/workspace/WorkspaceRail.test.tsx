@@ -670,6 +670,7 @@ it.each(['regular', 'compact'] as const)(
             subagents: [
               agent.subagents[0],
               { ...agent.subagents[0], id: 'codex', name: 'Code worker', harness: 'codex' },
+              { ...agent.subagents[0], id: 'claude', name: 'Claude worker', harness: 'claude' },
             ],
           },
         ]}
@@ -683,6 +684,9 @@ it.each(['regular', 'compact'] as const)(
     );
     expect(screen.getByText('Burrow Minion · Working')).toBeTruthy();
     expect(screen.getByText('Codex Minion · Working')).toBeTruthy();
+    expect(screen.getByText('Claude Minion · Working')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Claude worker' }));
+    expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'claude');
     fireEvent.click(screen.getByRole('button', { name: 'Select Code worker' }));
     expect(onSelectSubagent).toHaveBeenCalledWith('smatchet', 'codex');
   },

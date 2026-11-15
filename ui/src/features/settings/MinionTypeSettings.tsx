@@ -3,12 +3,17 @@ import { api, type MinionHarness } from '../../app/api';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field } from './SettingsPrimitives';
 import { CodexMinionModel } from './CodexMinionModel';
+import { ClaudeMinionModel } from './ClaudeMinionModel';
 
 function responseHarness(value: unknown, legacy = false): MinionHarness {
   const result = value as { ok?: unknown; defaultHarness?: unknown } | null;
   if (result?.ok !== true) throw new Error('Invalid minion type response.');
   if (legacy && result.defaultHarness === undefined) return 'burrow';
-  if (result.defaultHarness !== 'burrow' && result.defaultHarness !== 'codex')
+  if (
+    result.defaultHarness !== 'burrow' &&
+    result.defaultHarness !== 'codex' &&
+    result.defaultHarness !== 'claude'
+  )
     throw new Error('Invalid minion type response.');
   return result.defaultHarness;
 }
@@ -119,7 +124,7 @@ export function MinionTypeSettings({
           onChange={(event) => {
             const next = event.target.value as MinionHarness;
             const token = owner.current;
-            // Changing type may remove the Burrow model editor. Protect its failed drafts first.
+            // Changing type may remove the current model editor. Protect its failed drafts first.
             navigate(() => {
               if (owner.current !== token) return;
               setValue(next);
@@ -129,6 +134,7 @@ export function MinionTypeSettings({
         >
           <option value="burrow">Burrow Minion</option>
           <option value="codex">Codex Minion</option>
+          <option value="claude">Claude Minion</option>
         </select>
       </Field>
       {state === 'loading' && <p role="status">Loading default minion type…</p>}
@@ -157,7 +163,11 @@ export function MinionTypeSettings({
           </fieldset>
         ) : (
           <fieldset className="minion-model-settings" disabled={state === 'saving'}>
-            <CodexMinionModel resourceId={resourceId} />
+            {baseline === 'claude' ? (
+              <ClaudeMinionModel resourceId={resourceId} />
+            ) : (
+              <CodexMinionModel resourceId={resourceId} />
+            )}
           </fieldset>
         ))}
     </>

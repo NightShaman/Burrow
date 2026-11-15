@@ -919,7 +919,7 @@ it('passes the current agent registry through to saved A2A sender avatars', () =
   ).toBe('/portraits/hatchet.png');
 });
 
-describe('Codex minion text-only follow-ups', () => {
+describe.each(['codex', 'claude'] as const)('%s minion text-only follow-ups', (harness) => {
   const child = {
     id: 'codex-child',
     name: 'Codex child',
@@ -928,14 +928,18 @@ describe('Codex minion text-only follow-ups', () => {
     context: null,
     stream: 'codex-child',
     depth: 1,
-    harness: 'codex' as const,
+    harness,
   };
   const image = new File(['image'], 'image.png', { type: 'image/png' });
 
   it('hides the file picker and blocks image paste/drop while allowing text send', () => {
     const { container, props, onSend } = renderChat({ selected: child, draft: 'Follow up' });
     expect(container.querySelector('input[type="file"]')).toBeNull();
-    expect(screen.getByPlaceholderText('Message Codex minion (text only)…')).toBeTruthy();
+    expect(
+      screen.getByPlaceholderText(
+        `Message ${harness === 'claude' ? 'Claude' : 'Codex'} minion (text only)…`,
+      ),
+    ).toBeTruthy();
     const textarea = screen.getByRole('textbox', { name: 'Message' });
     fireEvent.paste(textarea, { clipboardData: { files: [image] } });
     const drop = new Event('drop', { bubbles: true, cancelable: true });
