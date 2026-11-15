@@ -16,22 +16,36 @@ export function poolThreadKey(options = {}) {
 }
 
 export function evaluatePoolUsage(result, { family, model = '', now = Date.now(), staleMs = USAGE_STALE_MS } = {}) {
-  if (!result?.ok || result.error || result.lastError || !result.usage) return { eligible: false, reason: 'usage_missing' };
+  // Usage telemetry is advisory unless it carries positive exhaustion evidence.
+  // A failed refresh may still carry the last successful sample; keep its real
+  // timestamp and use it for quota walls, while allowing unknown telemetry.
+  if (!result?.usage) return { eligible: true, reason: 'usage_missing', weight: 1, advisory: true };
   const fetched = time(result.fetchedAt);
-  if (!Number.isFinite(fetched) || now - fetched >= staleMs || fetched > now + 60_000) return { eligible: false, reason: 'usage_stale' };
+  const stale = !Number.isFinite(fetched) || now - fetched >= staleMs || fetched > now + 60_000;
   const usage = result.usage;
-  const metadata = usage.tierMetadata;
-  const capacity = Number(metadata?.capacity ?? metadata?.capacityMultiplier ?? metadata?.weight ?? metadata?.multiplier);
-  if (!metadata || metadata.known === false || metadata.supported === false || !CAPACITIES[family]?.includes(capacity)) {
-    return { eligible: false, reason: 'tier_unknown', tier: metadata?.tier || metadata?.planType || usage.planType || null };
-  }
   const windows = (usage.windows || []).filter((window) => {
     if (family !== 'anthropic') return !window.scope || window.scope === model;
     if (window.key === 'seven_day_sonnet') return /sonnet/i.test(model);
     if (window.key === 'seven_day_opus') return /opus/i.test(model);
     return window.key === 'five_hour' || window.key === 'seven_day' || window.key === 'seven_day_oauth_apps';
   });
-  if (!windows.length || windows.some((window) => window.usedPercent == null || !Number.isFinite(Number(window.usedPercent)))) return { eligible: false, reason: 'usage_missing' };
+  const exhaustedWindows = windows.filter(window => Number.isFinite(Number(window.usedPercent)) && Number(window.usedPercent) >= 100);
+  const resetTimes = windows.map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
+  const blockingResets = exhaustedWindows.map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
+  // Fresh samples are authoritative. A stale successful sample remains
+  // authoritative until each exhausted window resets; absent reset evidence
+  // requires a successful refresh, rather than treating expiry as recovery.
+  const unresolvedExhaustion = exhaustedWindows.some(window => !Number.isFinite(time(window.resetAt)) || time(window.resetAt) > now);
+  const authoritativeExhaustion = unresolvedExhaustion || (usage.blocked === true && (!stale || !exhaustedWindows.length));
+  if (stale) return { eligible: !authoritativeExhaustion, reason: authoritativeExhaustion ? 'quota_exhausted' : 'usage_stale', exhausted: Boolean(authoritativeExhaustion), pressure: false, weight: 1, advisory: true, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null, resetAt: resetTimes.length ? Math.min(...resetTimes) : null };
+  const metadata = usage.tierMetadata;
+  const capacity = Number(metadata?.capacity ?? metadata?.capacityMultiplier ?? metadata?.weight ?? metadata?.multiplier);
+  if (!metadata || metadata.known === false || metadata.supported === false || !CAPACITIES[family]?.includes(capacity)) {
+    return { eligible: !authoritativeExhaustion, reason: authoritativeExhaustion ? 'quota_exhausted' : 'tier_unknown', tier: metadata?.tier || metadata?.planType || usage.planType || null, weight: 1, advisory: true, exhausted: Boolean(authoritativeExhaustion), blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+  }
+  if (!windows.length || windows.some((window) => window.usedPercent == null || !Number.isFinite(Number(window.usedPercent)))) {
+    return { eligible: !authoritativeExhaustion, reason: authoritativeExhaustion ? 'quota_exhausted' : 'usage_missing', weight: 1, advisory: true, exhausted: Boolean(authoritativeExhaustion), blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+  }
   // Pressure and independent exhaustion are intentionally separate predicates.
   const exhausted = Boolean(usage.blocked) || windows.some((window) => Number(window.usedPercent) >= 100);
   // Only provider-declared five-hour windows qualify. A weekly/unknown primary
@@ -40,11 +54,11 @@ export function evaluatePoolUsage(result, { family, model = '', now = Date.now()
     (window.key === 'five_hour' && !(Number(window.windowSeconds) > 0))) && Number(window.usedPercent) >= 95;
   const pressure = windows.some(atHeadroom);
   const used = Math.max(...windows.map((window) => Number(window.usedPercent)));
-  const resets = windows.map((window) => time(window.resetAt)).filter((reset) => Number.isFinite(reset) && reset > now);
+  const resets = resetTimes;
   const weeklyResets = family === 'openai' ? windows.filter(window => Number(window.windowSeconds) === 604_800).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now) : [];
-  const blockingResets = windows.filter(window => Number(window.usedPercent) >= 100 || atHeadroom(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
+  const pressureResets = windows.filter(window => Number(window.usedPercent) >= 100 || atHeadroom(window)).map(window => time(window.resetAt)).filter(reset => Number.isFinite(reset) && reset > now);
   return { eligible: !exhausted && !pressure, reason: exhausted ? 'quota_exhausted' : pressure ? 'quota_pressure' : null,
-    exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), ...(family === 'openai' ? { weeklyResetAt: weeklyResets.length ? Math.min(...weeklyResets) : null } : {}), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: blockingResets.length ? Math.max(...blockingResets) : null };
+    exhausted, pressure, capacity, remainingPercent: Math.max(0, 100 - used), weight: capacity * Math.max(0, 1 - used / 100), ...(family === 'openai' ? { weeklyResetAt: weeklyResets.length ? Math.min(...weeklyResets) : null } : {}), resetAt: resets.length ? Math.min(...resets) : null, blockedUntil: pressureResets.length ? Math.max(...pressureResets) : null };
 }
 
 // All known constraints for one account must expire; the first account to
@@ -84,7 +98,7 @@ export class ProviderPoolEngine {
         const method = family === 'anthropic' ? 'anthropicOauthUsage' : 'openaiOauthUsage';
         const usage = await this.usageService?.[method]?.({ connectionId: id });
         return { id, ...evaluatePoolUsage(usage, { family, model, now: this.clock() }) };
-      } catch { return { id, eligible: false, reason: 'usage_missing' }; }
+      } catch { return { id, ...evaluatePoolUsage(null, { family, model, now: this.clock() }) }; }
     }));
     const client = await this.db.connect();
     try {
