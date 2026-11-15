@@ -20,7 +20,13 @@ export async function discoverCodexExecutable(env = process.env) {
   if (override && !path.isAbsolute(override)) fail('codex_executable_override_must_be_absolute');
   const candidates = override ? [override] : String(env.PATH || '').split(path.delimiter)
     .filter((dir) => path.isAbsolute(dir)).map((dir) => path.join(dir, 'codex'));
-  if (!override) candidates.push(fileURLToPath(new URL('../node_modules/.bin/codex', import.meta.url)));
+  if (!override) {
+    if (env.BURROW_RUNTIME_ROOT && path.isAbsolute(env.BURROW_RUNTIME_ROOT)) {
+      candidates.push(path.join(env.BURROW_RUNTIME_ROOT, 'integrations', 'codex', 'node_modules', '.bin', 'codex'));
+    }
+    candidates.push(fileURLToPath(new URL('../runtime/integrations/codex/node_modules/.bin/codex', import.meta.url)));
+    candidates.push(fileURLToPath(new URL('../node_modules/.bin/codex', import.meta.url)));
+  }
   for (const candidate of candidates) {
     try {
       if (!(await fs.stat(candidate)).isFile()) continue;

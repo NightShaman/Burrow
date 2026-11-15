@@ -23,5 +23,5 @@ export async function coldBackupPolicy(root, runCommand) {
 }
 export function restoreInventory(text) {
   const env = parseEnvironment(text);
-  return Object.entries(env).filter(([key, value]) => path.isAbsolute(value) || /POSTGRES|DATABASE_URL/.test(key)).map(([key, value]) => ({ key, absolutePath: path.isAbsolute(value) ? value : undefined, databaseIdentity: /POSTGRES|DATABASE_URL/.test(key), requiresMapping: !['BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_CLAUDE_BIN'].includes(key) }));
+  return Object.entries(env).filter(([key, value]) => path.isAbsolute(value) || /POSTGRES|DATABASE_URL/.test(key)).map(([key, value]) => ({ key, absolutePath: path.isAbsolute(value) ? value : undefined, databaseIdentity: /POSTGRES|DATABASE_URL/.test(key), requiresMapping: !['BURROW_RUNTIME_ROOT', 'BURROW_WORKSPACE_ROOT', 'BURROW_CACHE_ROOT', 'BURROW_CLAUDE_BIN', 'BURROW_CODEX_EXECUTABLE'].includes(key) }));
 }

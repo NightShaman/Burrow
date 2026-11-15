@@ -8,5 +8,10 @@
     "packageName": "@anthropic-ai/claude-code",
     "version": "2.1.283",
     "executable": "claude"
+  },
+  "codex": {
+    "packageName": "@openai/codex",
+    "version": "latest",
+    "executable": "codex"
   }
 }

@@ -101,7 +101,7 @@ async function archiveEntries(archive, runTar) {
 async function validateRestoredTree(root) {
   const rootStat = await fs.lstat(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('unsafe restore root');
-  const controls = new Set([MANIFEST, 'burrow.env', 'integrations', 'integrations/mcporter', 'integrations/claude-code']);
+  const controls = new Set([MANIFEST, 'burrow.env', 'integrations', 'integrations/mcporter', 'integrations/claude-code', 'integrations/codex']);
   const inside = (target) => target === root || target.startsWith(`${root}${path.sep}`);
   const walk = async (current) => {
     const stat = await fs.lstat(current);
@@ -191,6 +191,7 @@ const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_RUNTIME_ROOT: (root) => root,
   BURROW_WORKSPACE_ROOT: (root) => path.join(root, 'workspace'),
   BURROW_CACHE_ROOT: (root) => path.join(root, 'cache'),
+  BURROW_CODEX_EXECUTABLE: (root) => path.join(root, 'integrations', 'codex', 'node_modules', '.bin', 'codex'),
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
 });
 
@@ -213,8 +214,9 @@ async function installRestoredIntegrations(installRoot, runCommand = execFileAsy
   const backend = await exists(path.join(installRoot, 'app/backend/package.json')) ? 'app/backend' : 'app';
   const manifest = JSON.parse(await fs.readFile(path.join(installRoot, backend, 'scripts/runtime-integrations.json'), 'utf8'));
   const integrations = Object.entries(manifest).map(([id, spec]) => {
+    const supportedVersion = spec?.version === 'latest' && id === 'codex';
     if (!/^[a-z0-9-]+$/.test(id) || !spec || !/^(?:@[a-z0-9-]+\/)?[a-z0-9.-]+$/.test(spec.packageName) ||
-        !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(spec.version) || !/^[a-z0-9-]+$/.test(spec.executable)) {
+        (!supportedVersion && !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(spec.version)) || !/^[a-z0-9-]+$/.test(spec.executable)) {
       throw new Error('invalid pinned release integration manifest');
     }
     return { id, packageName: spec.packageName, version: spec.version, executable: spec.executable };

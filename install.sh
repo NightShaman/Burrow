@@ -479,13 +479,15 @@ fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
   # These are runtime-owned integrations, not application dependencies. Stage
   # them before activation so a failed install cannot leave a partial runtime.
-  mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code"
+  mkdir -p "$STAGING/integrations/mcporter" "$STAGING/integrations/claude-code" "$STAGING/integrations/codex"
   update_log "staging backend runtime dependencies..."
   verbose_log "running backend npm ci (production dependencies only)"
   (cd "$STAGING/backend" && npm ci --omit=dev --no-audit --no-fund --loglevel=error)
   INTEGRATION_MANIFEST="$STAGING/backend/scripts/runtime-integrations.json"
   MCPORTER_VERSION=$(node -e 'process.stdout.write(require(process.argv[1])["mcporter"].version)' "$INTEGRATION_MANIFEST")
   CLAUDE_CODE_VERSION=$(node -e 'process.stdout.write(require(process.argv[1])["claude-code"].version)' "$INTEGRATION_MANIFEST")
+  CODEX_PACKAGE=$(node -e 'process.stdout.write(require(process.argv[1]).codex.packageName)' "$INTEGRATION_MANIFEST")
+  CODEX_VERSION=$(node -e 'process.stdout.write(require(process.argv[1]).codex.version)' "$INTEGRATION_MANIFEST")
   update_log "staging MCP integration..."
   verbose_log "installing pinned mcporter integration $MCPORTER_VERSION"
   npm install --prefix "$STAGING/integrations/mcporter" --omit=dev --no-package-lock --no-save --no-audit --no-fund --loglevel=error "mcporter@$MCPORTER_VERSION"
@@ -504,6 +506,11 @@ PACKAGE
   # successful install, needlessly blocking activation of an otherwise valid
   # Burrow payload. The runtime invokes Claude only when that integration is
   # actually used.
+  update_log "staging Codex integration..."
+  verbose_log "installing Codex integration $CODEX_PACKAGE@$CODEX_VERSION"
+  npm install --prefix "$STAGING/integrations/codex" --omit=dev --no-package-lock --no-audit --no-fund --loglevel=error "$CODEX_PACKAGE@$CODEX_VERSION"
+  CODEX_EXECUTABLE="$STAGING/integrations/codex/node_modules/.bin/codex"
+  [ -x "$CODEX_EXECUTABLE" ] || { echo "Burrow install: staged Codex integration does not provide executable codex." >&2; exit 1; }
 fi
 if [ ! -f "$ENV_FILE" ]; then
   umask 077
@@ -514,6 +521,7 @@ BURROW_RUNTIME_ROOT=$INSTALL_DIR
 BURROW_WORKSPACE_ROOT=$INSTALL_DIR/workspace
 BURROW_CACHE_ROOT=$INSTALL_DIR/cache
 BURROW_CLAUDE_BIN=$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude
+BURROW_CODEX_EXECUTABLE=$INSTALL_DIR/integrations/codex/node_modules/.bin/codex
 # 32-byte AES-256 key for encrypted model/provider settings. Keep this file private.
 BURROW_SETTINGS_KEY=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')
 BURROW_UI_HOST=127.0.0.1
@@ -542,6 +550,7 @@ set_env_value BURROW_RUNTIME_ROOT "$INSTALL_DIR"
 set_env_value BURROW_WORKSPACE_ROOT "$INSTALL_DIR/workspace"
 set_env_value BURROW_CACHE_ROOT "$INSTALL_DIR/cache"
 set_env_value BURROW_CLAUDE_BIN "$INSTALL_DIR/integrations/claude-code/node_modules/.bin/claude"
+set_env_value BURROW_CODEX_EXECUTABLE "$INSTALL_DIR/integrations/codex/node_modules/.bin/codex"
 # Persist the selected update channel once. Existing operator configuration wins;
 # fresh installs and legacy installs inherit the repository that supplied this run.
 if [ -z "$(env_setting BURROW_UPDATE_REPOSITORY)" ]; then
@@ -590,7 +599,7 @@ mv -f "$WRAPPER_TMP" "$INSTALL_DIR/bin/burrow"
 if ! mv "$STAGING" "$INSTALL_DIR/app"; then [ ! -d "$PREVIOUS" ] || mv "$PREVIOUS" "$INSTALL_DIR/app"; echo "Burrow install: could not activate new app payload." >&2; exit 1; fi
 if [ "$INSTALL_DEPS" -eq 1 ]; then
   mkdir -p "$PREVIOUS/integrations"
-  for integration in mcporter claude-code; do
+  for integration in mcporter claude-code codex; do
     [ ! -d "$INSTALL_DIR/integrations/$integration" ] || mv "$INSTALL_DIR/integrations/$integration" "$PREVIOUS/integrations/$integration"
     mv "$INSTALL_DIR/app/integrations/$integration" "$INSTALL_DIR/integrations/$integration"
   done
