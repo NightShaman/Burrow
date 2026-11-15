@@ -146,7 +146,8 @@ function normalizeModelSelection(model = null) {
   const requestedProfile = compactString(model.requestedProfile) || null;
   const resolvedProfile = compactString(model.resolvedProfile) || null;
   const resolvedModel = compactString(model.resolvedModel) || null;
-  return requestedModel || requestedProfile || resolvedProfile || resolvedModel ? { requestedModel, resolvedConnectionId, requestedProfile, resolvedProfile, resolvedModel } : null;
+  return requestedModel || requestedProfile || resolvedProfile || resolvedModel ? { requestedModel, resolvedConnectionId, requestedProfile, resolvedProfile, resolvedModel,
+    ...(Object.hasOwn(model, 'logicalConnectionId') ? { logicalConnectionId: compactString(model.logicalConnectionId) || null } : {}) } : null;
 }
 
 function normalizeActivity(activity = null) {

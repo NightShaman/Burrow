@@ -1,3 +1,4 @@
+import { createCodexPoolRouting } from './codex-pool-routing.mjs';
 import { openRemoteCodexProcess } from './codex-remote-process.mjs';
 import { readSubagentRecord, updateSubagentStatus } from './subagent-store.mjs';
 import { constants } from 'node:fs';
@@ -41,7 +42,7 @@ export async function discoverCodexExecutable(env = process.env) {
 /** Server-only adapter. Admission, session initialization and terminal receipts remain parent-owned. */
 export async function runCodexMinion({ id, task, target, dataRoot, childSessionId, owner = {},
   modelConfig, traceDir = null, parentExecutionContext = null,
-  signal = parentExecutionContext?.abortSignal, executionPolicy = null, continuation = null } = {}) {
+  signal = parentExecutionContext?.abortSignal, executionPolicy = null, continuation = null, poolRecovery = null } = {}) {
   const cancellation = new AbortController();
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
   let cancellationPoll;
@@ -55,6 +56,17 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   let persistenceFailed = false;
   let nativeSession;
   let conversationStore;
+  let poolEngine = poolRecovery?.engine;
+  let route;
+  let connectionId;
+  let toolObserved = false;
+  let outputObserved = false;
+  let preparedHistory = continuation?.preparedHistory || [];
+  let retry;
+  let providerReason;
+  let retryNotBefore;
+  let refreshFailed = false;
+  let actualModel = null;
   const saveNative = async (patch) => {
     nativeSession = { ...nativeSession, ...patch };
     await conversationStore.updateMetadata({ agentId: owner.agentId, sessionId: childSessionId,
@@ -90,12 +102,19 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('codex_owner_invalid');
     const models = parentExecutionContext?.stores?.models;
     if (!models?.get || !models?.auth || !models?.resolveAuth) fail('codex_model_settings_store_required');
-    const connectionId = modelConfig?.connectionId;
+    const logicalConnectionId = modelConfig?.connectionId;
+    connectionId = logicalConnectionId;
     if (!connectionId || !modelConfig?.model) fail('codex_model_selection_required');
     const connection = await models.get(connectionId);
     if (!connection) fail('codex_connection_not_found');
-    if (isProviderPool(connection) || !['openai-responses', 'openai-chat-completions'].includes(connection.apiType)) fail('codex_openai_oauth_required');
-    if (!(connection.models || []).some((model) => model.id === modelConfig.model && model.selected !== false)) fail('codex_model_not_enabled');
+    if (isProviderPool(connection)) {
+      poolEngine ||= await createCodexPoolRouting(models, logicalConnectionId, modelConfig.model, parentExecutionContext);
+      route = await poolEngine.select({ threadKey: childSessionId, model: modelConfig.model,
+        exclude: poolRecovery?.exclude || [], preferredMemberId: continuation?.resolvedConnectionId,
+        requiredMemberId: continuation && !continuation.portableHistory ? continuation.resolvedConnectionId : null });
+      connectionId = route.memberId;
+    } else if (!['openai-responses', 'openai-chat-completions'].includes(connection.apiType)) fail('codex_openai_oauth_required');
+    if (!isProviderPool(connection) && !(connection.models || []).some((model) => model.id === modelConfig.model && model.selected !== false)) fail('codex_model_not_enabled');
     conversationStore = parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations;
     authority = conversationAuthority({ store: conversationStore, agentId: owner.agentId });
     if (!conversationStore.updateMetadata) fail('codex_session_metadata_required');
@@ -144,14 +163,32 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     }
     const executable = remote ? null : await discoverCodexExecutable();
     const login = await tokens();
+    const handoff = continuation && (poolRecovery?.replay || continuation.accountId !== login.chatgptAccountId
+      || (continuation.resolvedConnectionId && continuation.resolvedConnectionId !== connectionId));
+    if (handoff && (!poolEngine || continuation.state !== 'ready' || !continuation.portableHistory
+      || !Array.isArray(continuation.preparedHistory) || !continuation.preparedHistory.length)) {
+      fail(poolEngine ? 'codex_pool_replay_unavailable' : 'codex_session_account_changed');
+    }
     const policy = normalizeExecutionPolicyInput(executionPolicy);
     if (policy.blockers.length) fail('codex_execution_policy_blocked');
     signal?.throwIfAborted();
     const remoteProcess = remote ? await openRemoteCodexProcess(remoteController, executionHost.targetId, target.root) : null;
     client = new CodexMinionClient({ executable, cwd: target.root,
       ...(remoteProcess ? { spawnProcess: () => { queueMicrotask(() => remoteProcess.start()); return remoteProcess; } } : {}),
-      refreshAuthTokens: () => tokens(true),
-      onActivity: ({ method }) => {
+      refreshAuthTokens: async () => {
+        try {
+          const fresh = await tokens(true);
+          if (fresh.chatgptAccountId !== login.chatgptAccountId) fail('codex_session_account_changed');
+          return fresh;
+        }
+        catch (error) { refreshFailed = true; throw error; }
+      },
+      onActivity: ({ method, params }) => {
+        if (['item/started', 'item/completed'].includes(method)
+          && !['agentMessage', 'userMessage', 'reasoning'].includes(params?.item?.type)) toolObserved = true;
+        if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta'
+          || (['item/started', 'item/completed'].includes(method) && params?.item?.type === 'agentMessage')) outputObserved = true;
+        if (method === 'model/rerouted' && typeof params?.toModel === 'string') actualModel = params.toModel;
         // Never retain native params, commands, outputs, errors, IDs or unknown notifications.
         const label = { 'turn/started': 'Codex turn started.', 'item/started': 'Codex item started.',
           'item/completed': 'Codex item completed.', 'turn/completed': 'Codex turn completed.' }[method];
@@ -177,34 +214,63 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       await client.login(login);
       const threadParams = { cwd: target.root, model: modelConfig.model,
         approvalPolicy: 'never', sandbox: policy.mayMutate ? 'danger-full-access' : 'read-only' };
-      if (continuation && continuation.accountId !== login.chatgptAccountId) fail('codex_session_account_changed');
-      const { thread } = continuation
+      const threadResult = continuation && !handoff
         ? await client.resumeThread(continuation.threadId, threadParams)
         : await client.startThread({ ...threadParams, ephemeral: false });
-      if (!thread?.id || (continuation && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
-      nativeSession = { version: 1, threadId: thread.id, target, executionHost, modelConfig: { connectionId, model: modelConfig.model,
+      const { thread } = threadResult;
+      actualModel = threadResult.model || null;
+      if (!thread?.id || (continuation && !handoff && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
+      nativeSession = { version: 1, threadId: thread.id, target, executionHost, resolvedConnectionId: connectionId, modelConfig: { connectionId: logicalConnectionId, model: modelConfig.model,
         ...(modelConfig.extra ? { extra: modelConfig.extra } : {}) }, executionPolicy: policy, accountId: login.chatgptAccountId };
       // Persist resume identity before dispatch: never silently create a new thread
       // if the native turn later fails, is cancelled, or Burrow loses its process.
-      await saveNative({ state: 'running', runId: id });
+      await saveNative({ state: 'running', runId: id, portableHistory: false });
       signal?.throwIfAborted();
       dispatched = true;
       const turn = await client.startTurn({ threadId: thread.id,
         ...(modelConfig.extra?.reasoning?.effort ? { effort: modelConfig.extra.reasoning.effort } : {}),
-        input: [{ type: 'text', text: `Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` }] }, { signal });
+        input: [{ type: 'text', text: `${handoff || poolRecovery?.replay ? `Prior completed conversation (context only; continue with the new request):\n${JSON.stringify(preparedHistory)}\n\n` : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` }] }, { signal });
       const final = turn.items.filter((item) => item.type === 'agentMessage' && item.phase === 'final_answer');
       const summary = redact((final.length ? final.map((item) => item.text).join('\n') : turn.text).trim());
       if (!summary) fail('codex_final_response_missing');
       await writes;
       if (persistenceFailed) fail('codex_transcript_write_failed');
       await append(summary);
-      await saveNative({ state: 'ready' });
+      const portableHistory = !toolObserved && (!continuation || continuation.portableHistory === true);
+      preparedHistory = portableHistory ? [...preparedHistory, { role: 'user', content: redact(task) },
+        ...turn.items.filter(item => item.type === 'agentMessage').map(item => ({ role: 'assistant', content: redact(item.text) }))] : [];
+      const boundedHistory = JSON.stringify(preparedHistory).length <= 1_000_000;
+      if (poolEngine && route.substitute && (handoff || poolRecovery?.replay || route.rebalanceReason)) {
+        const promoted = await poolEngine.promote({ threadKey: childSessionId, memberId: connectionId, previousOwnerId: route.ownerId });
+        if (promoted) route = { ...route, ownerId: connectionId, substitute: false };
+      }
+      await saveNative({ state: 'ready', actualModel, portableHistory: portableHistory && boundedHistory,
+        preparedHistory: boundedHistory ? preparedHistory : [] });
       result = { ...base, ok: true, summary, blockers: [],
         warnings: ['codex_native_tool_evidence_not_promoted'], sideEffectsApplied: null };
     } finally { signal?.removeEventListener('abort', abort); }
   } catch (error) {
-    const code = signal?.aborted ? 'codex_cancelled' : error?.runnerCode || 'codex_native_run_failed';
-    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : CODEX_SELECTION_ACTIONS[code] || 'Codex minion unavailable or failed.',
+    retryNotBefore = error?.retryNotBefore;
+    if (refreshFailed && !error?.status) error = Object.assign(new Error('codex_oauth_refresh_failed'), { status: 401, providerReason: 'authentication_refresh_failed' });
+    providerReason = error?.providerReason || poolRecovery?.providerReason;
+    if (poolEngine && route && !signal.aborted && ([401, 403, 429].includes(error?.status) || (Number.isInteger(error?.status) && error.status >= 500 && error.status <= 599))) {
+      try {
+        const knownReset = route.diagnostics?.find(row => row.id === connectionId)?.blockedUntil;
+        const health = await poolEngine.cooldown(connectionId, `http_${error.status}`,
+          Math.max(60_000, (knownReset || 0) - Date.now(), (retryNotBefore || 0) - Date.now()));
+        const until = new Date(health?.cooldown_until).getTime();
+        if (Number.isFinite(until)) retryNotBefore = Math.max(retryNotBefore || 0, until);
+        // A failed turn may already have executed actions. Only tool-free,
+        // complete prepared history can cross an account boundary.
+        if (!poolRecovery && !toolObserved && !outputObserved && (!continuation || (continuation.state === 'ready' && continuation.portableHistory))) {
+          retry = { engine: poolEngine, exclude: [...(poolRecovery?.exclude || []), connectionId], replay: true, providerReason };
+        }
+      } catch { /* Preserve the original sanitized provider failure. */ }
+    }
+    const replayBlocked = poolEngine && ((toolObserved && Boolean(providerReason))
+      || error?.message === 'provider_pool_continuation_owner_unavailable');
+    const code = signal?.aborted ? 'codex_cancelled' : replayBlocked ? 'codex_pool_replay_unavailable' : error?.runnerCode || (['provider_pool_no_eligible_members', 'provider_pool_disabled'].includes(error?.message) ? error.message : 'codex_native_run_failed');
+    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : CODEX_SELECTION_ACTIONS[code] || (providerReason ? `Codex provider rejected the request (${providerReason}). Check account access or quota and retry.` : 'Codex minion unavailable or failed.'),
       blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
   } finally {
     clearInterval(cancellationPoll);
@@ -221,5 +287,19 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         blockers: ['codex_cleanup_failed'], warnings: [], sideEffectsApplied: dispatched ? null : false };
     }
   }
-  return { ...result, spawned: nativeStarted, cancelled: signal.aborted };
+  if (poolRecovery?.originalResult && !route) {
+    result = { ...poolRecovery.originalResult, warnings: [...(poolRecovery.originalResult.warnings || []), 'codex_pool_alternate_unavailable'] };
+  }
+  if (retry && result.blockers?.[0] !== 'codex_cleanup_failed') {
+    return runCodexMinion({ id, task, target, dataRoot, childSessionId, owner, modelConfig, traceDir,
+      parentExecutionContext, signal, executionPolicy, continuation, poolRecovery: { ...retry, originalResult: { ...result,
+        model: { requested: modelConfig.model, actual: actualModel, connectionId },
+        providerPool: { logicalConnectionId: modelConfig.connectionId, memberId: connectionId, ownerId: route.ownerId, substitute: route.substitute } } } });
+  }
+  return { ...result, ...(route ? { providerPool: { logicalConnectionId: modelConfig.connectionId,
+    memberId: connectionId, ownerId: route.ownerId, substitute: route.substitute } } : {}),
+    model: poolRecovery?.originalResult && !route ? poolRecovery.originalResult.model
+      : { requested: modelConfig?.model || null, actual: actualModel, connectionId: connectionId || null },
+    ...(providerReason ? { providerReason } : {}), ...(retryNotBefore ? { retryNotBefore } : {}),
+    spawned: nativeStarted || Boolean(poolRecovery?.originalResult), cancelled: signal.aborted };
 }

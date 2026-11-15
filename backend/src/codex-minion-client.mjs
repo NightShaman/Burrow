@@ -2,6 +2,22 @@ import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 
 const failure = (code, message) => Object.assign(new Error(message), { code });
+// Only structured protocol classifications cross the error boundary. Never echo messages/data.
+export function codexProviderFailure(error) {
+  const info = error?.codexErrorInfo;
+  const known = { usageLimitExceeded: [429, 'quota_exhausted'], rateLimitExceeded: [429, 'rate_limited'],
+    unauthorized: [401, 'authentication_failed'], serverOverloaded: [503, 'provider_overloaded'],
+    internalServerError: [500, 'provider_failure'] };
+  let pair = typeof info === 'string' ? known[info] : null;
+  if (!pair && info && typeof info === 'object') {
+    for (const key of ['httpConnectionFailed', 'responseStreamConnectionFailed', 'responseStreamDisconnected', 'responseTooManyFailedAttempts']) {
+      const status = info[key]?.httpStatusCode;
+      if ([401, 403, 429].includes(status) || (Number.isInteger(status) && status >= 500 && status <= 599)) pair = [status, `http_${status}`];
+    }
+  }
+  return pair ? { status: pair[0], providerReason: pair[1] } : {};
+}
+const providerError = (code, message, error) => Object.assign(failure(code, message), codexProviderFailure(error));
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -200,7 +216,7 @@ export class CodexMinionClient {
       clearTimeout(done.timer);
       this.pending.delete(message.id);
       // Do not expose server error messages/data (which may echo auth params).
-      if (message.error) done.reject(failure('RPC_ERROR', 'Codex request rejected'));
+      if (message.error) done.reject(providerError('RPC_ERROR', 'Codex request rejected', message.error?.data || message.error));
       else if ('result' in message) done.resolve(message.result);
       else done.reject(failure('PROTOCOL_ERROR', 'Invalid Codex response'));
       return;
@@ -219,16 +235,15 @@ export class CodexMinionClient {
     if (turnId !== active.turnId) return;
     if (method === 'item/completed' && params.item?.id) active.items.set(params.item.id, params.item);
     if (method === 'error' && params.willRetry !== true) {
-      active.done.reject(failure('TURN_ERROR', 'Codex turn reported an error'));
-      this.fail(failure('TURN_ERROR', 'Codex turn reported an error'));
+      this.fail(providerError('TURN_ERROR', 'Codex turn reported an error', params.error));
     }
     if (method !== 'turn/completed') return;
     if (params.turn.status === 'completed') {
       const items = [...active.items.values()];
       active.done.resolve({ threadId: active.threadId, turnId: active.turnId,
         status: 'completed', items, text: items.filter((item) => item.type === 'agentMessage').map((item) => item.text).join('\n') });
-    } else active.done.reject(failure(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
-      params.turn.status === 'interrupted' ? 'Codex turn cancelled' : 'Codex turn failed'));
+    } else active.done.reject(providerError(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
+      params.turn.status === 'interrupted' ? 'Codex turn cancelled' : 'Codex turn failed', params.turn.error));
   }
   async serverRequest(message) {
     const { id, method, params } = message;

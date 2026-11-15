@@ -377,7 +377,7 @@ export async function executeSpawnSubagentTool({
   const childId = admittedId;
   const childSession = admittedSessionId;
   const childTrace = admittedTraceDir;
-  const childModelSelection = queued.model || modelSelection;
+  let childModelSelection = queued.model || modelSelection;
   const childTarget = queued.scope?.target || target;
   const childTask = queued.purpose || task;
   const childOwner = queued.owner;
@@ -423,6 +423,11 @@ export async function executeSpawnSubagentTool({
     childRun.cancelled = Boolean(childRun.result?.cancelled);
   }
   let childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
+  if (harness === 'codex' && childResult.model) {
+    childModelSelection = { ...childModelSelection, requestedModel: childModelConfig.model,
+      resolvedModel: childResult.model.actual, resolvedConnectionId: childResult.model.connectionId,
+      logicalConnectionId: childModelConfig.connectionId };
+  }
   // Dispatch/process cancellation can lose the IPC terminal payload. Recover
   // only persisted tool outcomes, and disclose every delivery budget omission.
   if (!childResult.evidence?.length && (!childRun.ok || !childResult.ok || abortSignal?.aborted)) {

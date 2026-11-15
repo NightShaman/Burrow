@@ -1,3 +1,4 @@
+import { withCodexEligibility } from './codex-pool-routing.mjs';
 import { PostgresProviderPoolMetrics } from './postgres-provider-pool-metrics.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { randomUUID } from 'node:crypto';
@@ -127,7 +128,7 @@ export class PostgresModelSettingsStore {
     });
   }
   selectSql(where = '') { return `SELECT c.*, c.pool_json::text AS pool_json, c.accepted_input_json::text AS accepted_input_json, c.models_json::text AS models_json, legacy.id AS secret_id, auth.id AS auth_secret_id, p.value_json::text AS auth_preview_json FROM model_connections c LEFT JOIN model_connection_secrets legacy ON legacy.connection_id=c.id AND legacy.name='${API_KEY}' LEFT JOIN model_connection_secrets auth ON auth.connection_id=c.id AND auth.name='${AUTH}' LEFT JOIN model_auth_previews p ON p.connection_id=c.id ${where}`; }
-  async list({ agentId = null } = {}) { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return Promise.all(r.rows.map(async row => { const connection = publicConnection(row); if (agentId) { const native = await this.pool.query('SELECT model_id FROM model_catalog WHERE connection_id=$1 AND available', [row.id]); const ids = new Set(native.rows.map(x => x.model_id)); connection.models = connection.models.filter(x => ids.has(x.id)); } return connection; })); }
+  async list({ agentId = null } = {}) { const r = await this.pool.query(`${this.selectSql()} ORDER BY c.updated_at DESC`); return withCodexEligibility(await Promise.all(r.rows.map(async row => { const connection = publicConnection(row); if (agentId) { const native = await this.pool.query('SELECT model_id FROM model_catalog WHERE connection_id=$1 AND available', [row.id]); const ids = new Set(native.rows.map(x => x.model_id)); connection.models = connection.models.filter(x => ids.has(x.id)); } return connection; }))); }
   async get(id) { const r = await this.pool.query(`${this.selectSql('WHERE c.id=$1')}`, [id]); return publicConnection(r.rows[0]); }
   async secret(id, name) { const r = await this.pool.query('SELECT * FROM model_connection_secrets WHERE connection_id=$1 AND name=$2', [id, name]); return r.rows[0] ? decrypt(this.key, r.rows[0]) : null; }
   async apiKey(id) { return this.secret(id, API_KEY); }
