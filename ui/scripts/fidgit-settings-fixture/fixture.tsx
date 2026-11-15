@@ -498,6 +498,8 @@ window.fetch = (async (input, init) => {
     };
   else if (path.match(/\/api\/agents\/[^/]+$/))
     data = { agent: agents.find((agent) => agent.id === decodeURIComponent(path.split('/')[3])) };
+  else if (path === '/api/settings/minions' || path.startsWith('/api/settings/minions?'))
+    data = { ok: true, profiles: [] };
   else if (path.endsWith('/minion-settings')) {
     const settings = (minionSettings[path] ??= { maxDepth: 1, defaultHarness: 'burrow' });
     if (method === 'PUT') {

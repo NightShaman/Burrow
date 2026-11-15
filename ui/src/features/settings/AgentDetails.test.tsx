@@ -10,7 +10,7 @@ import { optimizeAvatar } from '../../app/avatar';
 vi.mock('../../app/api', () => ({ api: vi.fn() }));
 vi.mock('./AgentReferencePhoto', () => ({ AgentReferencePhoto: () => null }));
 vi.mock('../../app/avatar', () => ({ optimizeAvatar: vi.fn() }));
-vi.mock('./DefaultMinionModel', () => ({ DefaultMinionModel: () => null }));
+vi.mock('./MinionProfiles', () => ({ MinionProfiles: () => null }));
 vi.mock('./MinionTypeSettings', () => ({ MinionTypeSettings: () => null }));
 vi.mock('./MinionDepthSettings', () => ({ MinionDepthSettings: () => null }));
 const agent = {
