@@ -255,6 +255,7 @@ function sourceOf(message = {}) {
   if (message.role === 'system' || message.role === 'developer') return 'stable-context';
   const rendered = renderedContent(message.content);
   if (/^# prior-conversation-summary\b/u.test(rendered)) return 'compaction-summary';
+  if (/^# task\b/u.test(rendered) || /^# current-message\b/u.test(rendered)) return 'current-task';
   if (/^# exchange-evidence\b/u.test(rendered)) return 'exchange-evidence';
   if (/\b(?:Executed (?:chat )?tool|Mutation is|required|Repair attempt|verification is still missing|bounded chat tool loop has ended)\b/iu.test(rendered)) return 'synthesized-followup';
   return message.role === 'assistant' ? 'raw-transcript-assistant' : message.role === 'user' ? 'raw-transcript-user' : 'provider-message';
