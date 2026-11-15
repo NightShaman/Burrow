@@ -55,11 +55,13 @@ const writes = () =>
     .filter(([, init]) => init?.method === 'PUT')
     .map(([, init]) => JSON.parse(String(init?.body)));
 
-it('offers only catalog-eligible enabled direct Anthropic OAuth accounts and selected models', async () => {
+it('offers only catalog-eligible enabled Anthropic OAuth accounts and pools and selected models', async () => {
   setup({ connectionId: 'a', model: 'a-model' }, [
     account(),
     account('b', { auth: { type: 'oauth', provider: 'CLAUDE' } }),
-    account('pool', { apiType: 'anthropic-lb' }),
+    account('pool', { apiType: 'anthropic-lb', auth: undefined }),
+    account('disabled-pool', { apiType: 'anthropic-lb', enabled: false }),
+    account('ineligible-pool', { apiType: 'anthropic-lb', claudeEligible: false }),
     account('openai', { apiType: 'openai-responses' }),
     account('key', { auth: { type: 'api_key', provider: 'anthropic' } }),
     account('other', { auth: { type: 'oauth', provider: 'openai' } }),
@@ -76,6 +78,7 @@ it('offers only catalog-eligible enabled direct Anthropic OAuth accounts and sel
     '',
     'a',
     'b',
+    'pool',
   ]);
   expect(Array.from(control('Model').options).map((option) => option.value)).toEqual([
     '',
@@ -263,4 +266,13 @@ it('preserves independent Claude and Codex models when switching harnesses and c
     { claudeModel: null },
     { defaultHarness: 'codex' },
   ]);
+});
+
+it('saves an eligible Anthropic pool with its selected model', async () => {
+  setup(null, [account('pool', { apiType: 'anthropic-lb', auth: undefined })]);
+  mount();
+  await loaded();
+  fireEvent.change(control('Account'), { target: { value: 'pool' } });
+  await screen.findByText('Claude model saved.');
+  expect(writes()).toEqual([{ claudeModel: { connectionId: 'pool', model: 'pool-model' } }]);
 });

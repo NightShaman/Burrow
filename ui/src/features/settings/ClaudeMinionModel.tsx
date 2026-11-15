@@ -61,9 +61,10 @@ export function ClaudeMinionModel({ resourceId }: { resourceId: string }) {
           (connection) =>
             connection.claudeEligible === true &&
             connection.enabled !== false &&
-            connection.apiType === 'anthropic-messages' &&
-            connection.auth?.type === 'oauth' &&
-            ['anthropic', 'claude'].includes(connection.auth?.provider?.toLowerCase() ?? ''),
+            (connection.apiType === 'anthropic-lb' ||
+              (connection.apiType === 'anthropic-messages' &&
+                connection.auth?.type === 'oauth' &&
+                ['anthropic', 'claude'].includes(connection.auth?.provider?.toLowerCase() ?? ''))),
         );
         setProviders(
           eligible.map((connection) => ({
