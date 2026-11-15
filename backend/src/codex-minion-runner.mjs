@@ -1,3 +1,4 @@
+import { projectCodexCheckpoint, codexHandoffContext, codexObservedEvidence } from './codex-native-checkpoint.mjs';
 import { createCodexPoolRouting } from './codex-pool-routing.mjs';
 import { openRemoteCodexProcess } from './codex-remote-process.mjs';
 import { readSubagentRecord, updateSubagentStatus } from './subagent-store.mjs';
@@ -63,6 +64,8 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   let outputObserved = false;
   let preparedHistory = continuation?.preparedHistory || [];
   let retry;
+  let recoveryContinuation;
+  let checkpointFailure;
   let providerReason;
   let retryNotBefore;
   let refreshFailed = false;
@@ -165,7 +168,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const login = await tokens();
     const handoff = continuation && (poolRecovery?.replay || continuation.accountId !== login.chatgptAccountId
       || (continuation.resolvedConnectionId && continuation.resolvedConnectionId !== connectionId));
-    if (handoff && (!poolEngine || continuation.state !== 'ready' || !continuation.portableHistory
+    if (handoff && (!poolEngine || !['ready', 'failed'].includes(continuation.state) || !continuation.portableHistory
       || !Array.isArray(continuation.preparedHistory) || !continuation.preparedHistory.length)) {
       fail(poolEngine ? 'codex_pool_replay_unavailable' : 'codex_session_account_changed');
     }
@@ -189,7 +192,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta'
           || (['item/started', 'item/completed'].includes(method) && params?.item?.type === 'agentMessage')) outputObserved = true;
         if (method === 'model/rerouted' && typeof params?.toModel === 'string') actualModel = params.toModel;
-        // Never retain native params, commands, outputs, errors, IDs or unknown notifications.
+        // Public activity is labels only; private checkpoint metadata is projected separately.
         const label = { 'turn/started': 'Codex turn started.', 'item/started': 'Codex item started.',
           'item/completed': 'Codex item completed.', 'turn/completed': 'Codex turn completed.' }[method];
         if (label) writes = writes.then(async () => {
@@ -220,36 +223,75 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       const { thread } = threadResult;
       actualModel = threadResult.model || null;
       if (!thread?.id || (continuation && !handoff && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
-      nativeSession = { version: 1, threadId: thread.id, target, executionHost, resolvedConnectionId: connectionId, modelConfig: { connectionId: logicalConnectionId, model: modelConfig.model,
+      // Repair a completed turn's missing export before accepting new work. Never
+      // resubmit that turn: its workspace effects may already have happened.
+      if (continuation?.pendingCheckpoint) {
+        const pending = continuation.pendingCheckpoint;
+        try {
+          const savedTurn = await client.readTurn(thread.id, pending.turnId);
+          const projection = projectCodexCheckpoint(savedTurn, { threadId: thread.id,
+            task: pending.task, observed: pending.observed, redact });
+          if (!projection.portable) fail('codex_checkpoint_repair_required');
+          preparedHistory = [...preparedHistory.slice(0, pending.historyLength), projection.checkpoint];
+          if (JSON.stringify(preparedHistory).length > 1_000_000) fail('codex_checkpoint_repair_required');
+          continuation = { ...continuation, preparedHistory, portableHistory: pending.priorPortable,
+            pendingCheckpoint: null, checkpointFailure: null };
+          nativeSession = { ...continuation };
+          await saveNative({ preparedHistory, portableHistory: pending.priorPortable,
+            pendingCheckpoint: null, checkpointFailure: null });
+        } catch { fail('codex_checkpoint_repair_required'); }
+      }
+      nativeSession = { version: 2, threadId: thread.id, target, executionHost, resolvedConnectionId: connectionId, modelConfig: { connectionId: logicalConnectionId, model: modelConfig.model,
         ...(modelConfig.extra ? { extra: modelConfig.extra } : {}) }, executionPolicy: policy, accountId: login.chatgptAccountId };
       // Persist resume identity before dispatch: never silently create a new thread
       // if the native turn later fails, is cancelled, or Burrow loses its process.
-      await saveNative({ state: 'running', runId: id, portableHistory: false });
+      await saveNative({ state: 'running', runId: id, portableHistory: false, preparedHistory });
       signal?.throwIfAborted();
       dispatched = true;
       const turn = await client.startTurn({ threadId: thread.id,
         ...(modelConfig.extra?.reasoning?.effort ? { effort: modelConfig.extra.reasoning.effort } : {}),
-        input: [{ type: 'text', text: `${handoff || poolRecovery?.replay ? `Prior completed conversation (context only; continue with the new request):\n${JSON.stringify(preparedHistory)}\n\n` : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}` }] }, { signal });
+        input: [{ type: 'text', text: `${handoff || poolRecovery?.replay ? codexHandoffContext(preparedHistory) : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${poolRecovery?.reconciled ? 'Continue the unfinished work in the last checkpoint. Completed actions must not be repeated.' : task}` }] }, { signal });
       const final = turn.items.filter((item) => item.type === 'agentMessage' && item.phase === 'final_answer');
       const summary = redact((final.length ? final.map((item) => item.text).join('\n') : turn.text).trim());
       if (!summary) fail('codex_final_response_missing');
       await writes;
       if (persistenceFailed) fail('codex_transcript_write_failed');
       await append(summary);
-      const portableHistory = !toolObserved && (!continuation || continuation.portableHistory === true);
-      preparedHistory = portableHistory ? [...preparedHistory, { role: 'user', content: redact(task) },
-        ...turn.items.filter(item => item.type === 'agentMessage').map(item => ({ role: 'assistant', content: redact(item.text) }))] : [];
+      let portableHistory = !continuation || continuation.portableHistory === true;
+      let checkpoint;
+      {
+        await saveNative({ completedActionEvidence: codexObservedEvidence(turn.observed,
+          { threadId: thread.id, task, redact }) });
+        try {
+          const nativeTurn = await client.readTurn(thread.id, turn.turnId);
+          const projection = projectCodexCheckpoint(nativeTurn, { threadId: thread.id, task,
+            observed: turn.observed, redact });
+          portableHistory &&= projection.portable;
+          checkpoint = projection.checkpoint;
+          checkpointFailure = projection.reason;
+        } catch { portableHistory = false; checkpointFailure = 'native_history_unavailable'; }
+      }
+      const pendingCheckpoint = checkpointFailure === 'native_history_unavailable' ? { turnId: turn.turnId,
+        task: redact(task), observed: JSON.parse(redact(JSON.stringify(turn.observed || []))),
+        historyLength: preparedHistory.length, priorPortable: !continuation || continuation.portableHistory === true } : null;
+      preparedHistory = [...preparedHistory, ...(checkpoint ? [checkpoint] : [{ role: 'user', content: redact(task) },
+        ...turn.items.filter(item => item.type === 'agentMessage').map(item => ({ role: 'assistant', content: redact(item.text) }))])];
       const boundedHistory = JSON.stringify(preparedHistory).length <= 1_000_000;
       if (poolEngine && route.substitute && (handoff || poolRecovery?.replay || route.rebalanceReason)) {
         const promoted = await poolEngine.promote({ threadKey: childSessionId, memberId: connectionId, previousOwnerId: route.ownerId });
         if (promoted) route = { ...route, ownerId: connectionId, substitute: false };
       }
       await saveNative({ state: 'ready', actualModel, portableHistory: portableHistory && boundedHistory,
-        preparedHistory: boundedHistory ? preparedHistory : [] });
+        pendingCheckpoint, preparedHistory: boundedHistory ? preparedHistory : [], checkpointFailure: checkpointFailure || null });
       result = { ...base, ok: true, summary, blockers: [],
-        warnings: ['codex_native_tool_evidence_not_promoted'], sideEffectsApplied: null };
+        warnings: ['codex_native_tool_evidence_not_promoted', ...(portableHistory && boundedHistory ? [] : ['codex_checkpoint_not_portable'])], sideEffectsApplied: null };
     } finally { signal?.removeEventListener('abort', abort); }
   } catch (error) {
+    if (nativeSession && error.nativeTurn) {
+      try { await saveNative({ completedActionEvidence: codexObservedEvidence(error.nativeTurn.observed,
+        { threadId: nativeSession.threadId, task, redact }) }); }
+      catch { persistenceFailed = true; }
+    }
     retryNotBefore = error?.retryNotBefore;
     if (refreshFailed && !error?.status) error = Object.assign(new Error('codex_oauth_refresh_failed'), { status: 401, providerReason: 'authentication_refresh_failed' });
     providerReason = error?.providerReason || poolRecovery?.providerReason;
@@ -260,9 +302,24 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
           Math.max(60_000, (knownReset || 0) - Date.now(), (retryNotBefore || 0) - Date.now()));
         const until = new Date(health?.cooldown_until).getTime();
         if (Number.isFinite(until)) retryNotBefore = Math.max(retryNotBefore || 0, until);
-        // A failed turn may already have executed actions. Only tool-free,
-        // complete prepared history can cross an account boundary.
-        if (!poolRecovery && !toolObserved && !outputObserved && (!continuation || (continuation.state === 'ready' && continuation.portableHistory))) {
+        // Only a terminal authoritative turn can reconcile effects after exhaustion.
+        // A transport loss, missing result, or still-running action remains blocked.
+        if (error.nativeTurn?.turnId && client && !client.closed && !persistenceFailed) {
+          try {
+            const turn = await client.readTurn(nativeSession.threadId, error.nativeTurn.turnId);
+            const projection = projectCodexCheckpoint(turn, { threadId: nativeSession.threadId,
+              task, observed: error.nativeTurn.observed, redact });
+            const history = [...preparedHistory, projection.checkpoint];
+            if (projection.portable && (toolObserved || !outputObserved) && (!continuation || continuation.portableHistory)
+                && JSON.stringify(history).length <= 1_000_000) {
+              preparedHistory = history;
+              await saveNative({ state: 'failed', portableHistory: true, preparedHistory, reconciled: true });
+              recoveryContinuation = { ...nativeSession };
+              if (!poolRecovery) retry = { engine: poolEngine, exclude: [connectionId], replay: true, reconciled: true, providerReason };
+            } else checkpointFailure = projection.reason || 'incomplete_prior_history';
+          } catch { checkpointFailure = 'native_history_unavailable'; }
+        }
+        if (!poolRecovery && !error.nativeTurn?.turnId && !persistenceFailed && !toolObserved && !outputObserved && (!continuation || (continuation.state === 'ready' && continuation.portableHistory))) {
           retry = { engine: poolEngine, exclude: [...(poolRecovery?.exclude || []), connectionId], replay: true, providerReason };
         }
       } catch { /* Preserve the original sanitized provider failure. */ }
@@ -275,7 +332,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   } finally {
     clearInterval(cancellationPoll);
     if (nativeSession && !result?.ok) {
-      try { await saveNative({ state: signal.aborted ? 'interrupted' : 'failed' }); }
+      try { await saveNative({ state: signal.aborted ? 'interrupted' : 'failed', ...(checkpointFailure ? { checkpointFailure } : {}) }); }
       catch { /* Original failure stays sanitized; stale running state fails closed. */ }
     }
     await writes;
@@ -292,7 +349,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   }
   if (retry && result.blockers?.[0] !== 'codex_cleanup_failed') {
     return runCodexMinion({ id, task, target, dataRoot, childSessionId, owner, modelConfig, traceDir,
-      parentExecutionContext, signal, executionPolicy, continuation, poolRecovery: { ...retry, originalResult: { ...result,
+      parentExecutionContext, signal, executionPolicy, continuation: recoveryContinuation || continuation, poolRecovery: { ...retry, originalResult: { ...result,
         model: { requested: modelConfig.model, actual: actualModel, connectionId },
         providerPool: { logicalConnectionId: modelConfig.connectionId, memberId: connectionId, ownerId: route.ownerId, substitute: route.substitute } } } });
   }

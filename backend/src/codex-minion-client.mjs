@@ -113,13 +113,56 @@ export class CodexMinionClient {
     return this.request('thread/resume', { ...params, threadId });
   }
 
+  async readThread(threadId) {
+    this.assertReady();
+    return this.request('thread/read', { threadId, includeTurns: false });
+  }
+
+  async readTurn(threadId, turnId) {
+    const { thread } = await this.readThread(threadId);
+    if (thread?.id !== threadId) throw failure('PROTOCOL_ERROR', 'Invalid checkpoint thread');
+    let turn = thread.turns?.find(item => item.id === turnId);
+    if (!turn) {
+      let cursor;
+      const seen = new Set();
+      do {
+        const page = await this.request('thread/turns/list', { threadId, cursor, limit: 100, itemsView: 'notLoaded' });
+        if (!Array.isArray(page.data)) throw failure('PROTOCOL_ERROR', 'Invalid checkpoint turns');
+        turn = page.data.find(item => item.id === turnId);
+        cursor = page.nextCursor;
+        if (cursor && seen.has(cursor)) throw failure('PROTOCOL_ERROR', 'Repeated checkpoint cursor');
+        seen.add(cursor);
+        if (seen.size > 100) throw failure('PROTOCOL_ERROR', 'Checkpoint exceeds limit');
+      } while (!turn && cursor);
+    }
+    // Metadata/legacy responses may omit itemsView; never infer complete history
+    // from inline items. Export authoritative persisted items on every read.
+    if (turn) {
+      const items = [];
+      let cursor;
+      const seen = new Set();
+      do {
+        const page = await this.request('thread/items/list', { threadId, turnId, cursor, limit: 100, sortDirection: 'asc' });
+        if (!Array.isArray(page.data)) throw failure('PROTOCOL_ERROR', 'Invalid checkpoint items');
+        if (page.data.some(entry => entry.turnId !== turnId || !entry.item)) throw failure('PROTOCOL_ERROR', 'Invalid checkpoint item owner');
+        items.push(...page.data.map(entry => entry.item));
+        cursor = page.nextCursor;
+        if (cursor && seen.has(cursor)) throw failure('PROTOCOL_ERROR', 'Repeated checkpoint cursor');
+        seen.add(cursor);
+        if (seen.size > 100 || JSON.stringify(items).length > 1_000_000) throw failure('PROTOCOL_ERROR', 'Checkpoint exceeds limit');
+      } while (cursor);
+      turn = { ...turn, items, itemsView: 'full' };
+    }
+    return turn;
+  }
+
   /** Resolves only on turn/completed; only one active turn per client. */
   async startTurn(params, { signal } = {}) {
     this.assertReady();
     if (this.active) throw failure('TURN_ACTIVE', 'A Codex turn is already active');
     if (!params?.threadId) throw new TypeError('threadId is required');
     if (signal?.aborted) throw failure('ABORTED', 'Codex turn cancelled');
-    const active = { threadId: params.threadId, done: deferred(), items: new Map(), early: [] };
+    const active = { threadId: params.threadId, done: deferred(), items: new Map(), observed: new Map(), early: [] };
     this.active = active;
     const abort = () => { void this.interrupt().catch(() => {}); };
     signal?.addEventListener('abort', abort, { once: true });
@@ -138,6 +181,7 @@ export class CodexMinionClient {
     } catch (error) {
       // A start RPC failure leaves server state uncertain; do not reuse it.
       if (!active.turnId) this.fail(error);
+      error.nativeTurn = { threadId: active.threadId, turnId: active.turnId, observed: [...active.observed.values()] };
       throw error;
     } finally {
       clearTimeout(timer);
@@ -233,15 +277,16 @@ export class CodexMinionClient {
     if (!active || params.threadId !== active.threadId) return;
     const turnId = params.turnId ?? params.turn?.id;
     if (turnId !== active.turnId) return;
+    if (['item/started', 'item/completed'].includes(method) && params.item?.id) active.observed.set(params.item.id, params.item);
     if (method === 'item/completed' && params.item?.id) active.items.set(params.item.id, params.item);
     if (method === 'error' && params.willRetry !== true) {
-      this.fail(providerError('TURN_ERROR', 'Codex turn reported an error', params.error));
+      active.done.reject(providerError('TURN_ERROR', 'Codex turn reported an error', params.error));
     }
     if (method !== 'turn/completed') return;
     if (params.turn.status === 'completed') {
       const items = [...active.items.values()];
       active.done.resolve({ threadId: active.threadId, turnId: active.turnId,
-        status: 'completed', items, text: items.filter((item) => item.type === 'agentMessage').map((item) => item.text).join('\n') });
+        status: 'completed', items, observed: [...active.observed.values()], text: items.filter((item) => item.type === 'agentMessage').map((item) => item.text).join('\n') });
     } else active.done.reject(providerError(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
       params.turn.status === 'interrupted' ? 'Codex turn cancelled' : 'Codex turn failed', params.turn.error));
   }

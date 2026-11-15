@@ -9,7 +9,7 @@ export const CODEX_SELECTION_ACTIONS = Object.freeze({
   codex_connection_not_found: 'Choose an existing OpenAI OAuth connection in Minion settings.',
   codex_openai_oauth_required: 'Choose a direct OpenAI OAuth account in Minion settings, or an enabled OpenAI load balancer with eligible OAuth members.',
   codex_pool_ineligible: 'Enable an OpenAI load balancer with at least one enabled OpenAI OAuth member supporting this model, then select it in Minion settings.',
-  codex_pool_replay_unavailable: 'The saved native turn contains tool actions or incomplete history. Restore its original account to continue safely; automatic replay is blocked.',
+  codex_pool_replay_unavailable: 'The native action checkpoint is incomplete or contains an unresolved action. Reconcile the original workspace and native session before retrying; automatic account handoff is blocked.',
   provider_pool_no_eligible_members: 'All eligible Codex pool accounts are unavailable or cooling down. Retry after their quota or cooldown resets.',
   codex_model_not_enabled: 'Enable the model on the selected OpenAI OAuth connection, or choose another model in Minion settings.',
   codex_model_override_unsupported: 'Choose the Codex model through Minion settings before spawning.',

@@ -12,7 +12,18 @@ export async function openRemoteCodexProcess(controller, targetId, cwd) {
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
   let closed = false;
   const finish = result => { if (closed) return; closed = true; child.stdout.end(); child.stderr.end(); child.emit('close', result?.exitCode ?? null, result?.signal ?? null); };
-  child.stdin = new Writable({ write(data, encoding, callback) { rpc('write', { data: data.toString('utf8') }).then(() => callback(), () => callback(new Error('codex_remote_write_failed'))); },
+  child.stdin = new Writable({ write(data, encoding, callback) {
+    // Gateway frames are bounded to 128 KiB; a checkpoint JSONL request may be larger.
+    void (async () => {
+      let text = data.toString('utf8');
+      while (text.length) {
+        let end = Math.min(text.length, 16 * 1024);
+        if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+        await rpc('write', { data: text.slice(0, end) });
+        text = text.slice(end);
+      }
+    })().then(() => callback(), () => callback(new Error('codex_remote_write_failed')));
+  },
     final(callback) { rpc('close').then(() => { callback(); }, () => { callback(new Error('codex_remote_close_failed')); }); } });
   child.kill = signal => { void rpc('close', { signal }).then(() => {}, () => child.emit('error', new Error('codex_remote_close_failed'))); return true; };
   child.start = () => { void (async () => {
