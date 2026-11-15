@@ -25,7 +25,6 @@ export function useChatComposers({
   agents,
   sessionId = '',
   selectedAgentId,
-  activeRunId,
   sessions,
   refreshSessions,
   selectSession,
@@ -192,8 +191,9 @@ export function useChatComposers({
     setSessionError('');
   }, []);
   const createSession = useCallback(async () => {
-    if (!selectedAgentId || mutationRef.current || isCreatingSession || activeRunId) {
-      setSessionError('A session cannot be created while the current run is active.');
+    if (mutationRef.current || isCreatingSession) return;
+    if (!selectedAgentId) {
+      setSessionError('Select an agent before creating a session.');
       return;
     }
     const targetSessionId = sessionName.trim();
@@ -246,7 +246,6 @@ export function useChatComposers({
     }
   }, [
     scope,
-    activeRunId,
     clearError,
     isCreatingSession,
     refreshSessions,

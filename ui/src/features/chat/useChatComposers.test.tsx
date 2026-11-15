@@ -52,6 +52,32 @@ describe('useChatComposers', () => {
     expect(result.current.session.isOpen).toBe(false);
   });
 
+  it('creates a new session while the current session has an active run', async () => {
+    const { result, options } = renderComposers({ activeRunId: 'running-original-session' });
+    act(() => {
+      result.current.session.open();
+      result.current.session.setName('parallel');
+    });
+    await act(() => result.current.session.create());
+
+    expect(apiMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(apiMock.mock.calls[0][1]!.body as string)).toMatchObject({
+      agentId: 'smatchet',
+      sessionId: 'parallel',
+    });
+    expect(options.selectSession).toHaveBeenCalledWith('parallel');
+    expect(result.current.session.error).toBe('');
+    expect(options.activeRunId).toBe('running-original-session');
+  });
+
+  it('reports a missing agent without blaming an active run', async () => {
+    const { result } = renderComposers({ selectedAgentId: '' });
+    act(() => result.current.session.setName('planning'));
+    await act(() => result.current.session.create());
+    expect(apiMock).not.toHaveBeenCalled();
+    expect(result.current.session.error).toBe('Select an agent before creating a session.');
+  });
+
   it.each(['agent', 'session'])('discards late create after %s navigation', async (navigation) => {
     let resolve!: (value: unknown) => void;
     apiMock.mockReturnValueOnce(
