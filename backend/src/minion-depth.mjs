@@ -1,20 +1,25 @@
 import { normalizeCodexModelSelection, validateCodexModelSelection } from './codex-model-selection.mjs';
 
+import { normalizeClaudeModelSelection, validateClaudeModelSelection } from './claude-model-selection.mjs';
+
 export const DEFAULT_MINION_DEPTH = 1;
 export const MAX_MINION_DEPTH = 2;
 export const DEFAULT_MINION_HARNESS = 'burrow';
 
 function validHarness(value) {
-  return value === 'burrow' || value === 'codex';
+  return value === 'burrow' || value === 'codex' || value === 'claude';
 }
 
 function normalizeSettings(saved) {
   let codexModel = null;
+  let claudeModel = null;
   try { codexModel = normalizeCodexModelSelection(saved?.codexModel ?? null); } catch {}
+  try { claudeModel = normalizeClaudeModelSelection(saved?.claudeModel ?? null); } catch {}
   return {
     maxDepth: validMaxDepth(saved?.maxDepth) ? saved.maxDepth : DEFAULT_MINION_DEPTH,
     defaultHarness: validHarness(saved?.defaultHarness) ? saved.defaultHarness : DEFAULT_MINION_HARNESS,
     codexModel,
+    claudeModel,
   };
 }
 
@@ -32,7 +37,8 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   const hasDepth = object && Object.hasOwn(input, 'maxDepth');
   const hasHarness = object && Object.hasOwn(input, 'defaultHarness');
   const hasCodex = object && Object.hasOwn(input, 'codexModel');
-  if ((!hasDepth && !hasHarness && !hasCodex) || (hasDepth && !validMaxDepth(input.maxDepth))) {
+  const hasClaude = object && Object.hasOwn(input, 'claudeModel');
+  if ((!hasDepth && !hasHarness && !hasCodex && !hasClaude) || (hasDepth && !validMaxDepth(input.maxDepth))) {
     throw Object.assign(new Error('minion_max_depth_invalid'), { statusCode: 400 });
   }
   if (hasHarness && !validHarness(input.defaultHarness)) {
@@ -40,6 +46,8 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   }
   const codexModel = hasCodex ? normalizeCodexModelSelection(input.codexModel) : null;
   if (codexModel) await validateCodexModelSelection(models, codexModel);
+  const claudeModel = hasClaude ? normalizeClaudeModelSelection(input.claudeModel) : null;
+  if (claudeModel) await validateClaudeModelSelection(models, claudeModel);
   const key = `minion_settings:${agentId}`;
   const update = saved => ({
     ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}),
@@ -47,6 +55,7 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
     ...(hasDepth ? { maxDepth: input.maxDepth } : {}),
     ...(hasHarness ? { defaultHarness: input.defaultHarness } : {}),
     ...(hasCodex ? { codexModel } : {}),
+    ...(hasClaude ? { claudeModel } : {}),
   });
   // The PostgreSQL metadata owner serializes partial updates, including insert.
   if (metadata.atomicUpdate) return normalizeSettings(await metadata.atomicUpdate(key, update));

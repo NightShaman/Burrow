@@ -333,7 +333,7 @@ function childProof(records = [], runId) {
     const visible = subagentVisibilitySummary(record);
     const verification = childVerification(record);
     return {
-      id: visible.id, status: visible.status, phase: visible.phase, purpose: visible.purpose,
+      id: visible.id, harness: visible.harness, status: visible.status, phase: visible.phase, purpose: visible.purpose,
       label: visible.label, createdAt: visible.createdAt, completedAt: visible.final ? visible.updatedAt : null,
       model: visible.model || null, result: visible.result, verification, trace: visible.trace,
     };

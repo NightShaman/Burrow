@@ -2182,7 +2182,14 @@
         "parameters": [],
         "responses": {
           "200": {
-            "$ref": "#/components/responses/SettingsResponse"
+            "description": "Sanitized connections with minion configuration eligibility flags.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelConnectionListResponse"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/ErrorResponse"
@@ -2190,7 +2197,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Read the sanitized model catalog, including independent codexEligible and claudeEligible configuration flags on every connection. Eligibility does not guarantee an enabled model; select an exact model ID with selected !== false. Quota/cooldown do not affect configuration eligibility."
       },
       "post": {
         "tags": [
@@ -7067,7 +7075,7 @@
         ],
         "summary": "Read agent minion settings",
         "operationId": "getAgentMinionSettings",
-        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel selection. Requires an enabled registered agent.",
+        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel and claudeModel selections. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7075,7 +7083,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null.",
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null, claudeModel null.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7085,7 +7093,8 @@
                   "ok": true,
                   "maxDepth": 1,
                   "defaultHarness": "burrow",
-                  "codexModel": null
+                  "codexModel": null,
+                  "claudeModel": null
                 }
               }
             }
@@ -7149,7 +7158,7 @@
         ],
         "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel. Omitted fields retain saved values; codexModel is a complete direct OpenAI OAuth connection/enabled model pair, or null to clear. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
+        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection/enabled model pair (no load balancers). Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7165,14 +7174,15 @@
               "example": {
                 "maxDepth": 1,
                 "defaultHarness": "burrow",
-                "codexModel": null
+                "codexModel": null,
+                "claudeModel": null
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null.",
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null, claudeModel null.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7182,7 +7192,8 @@
                   "ok": true,
                   "maxDepth": 1,
                   "defaultHarness": "burrow",
-                  "codexModel": null
+                  "codexModel": null,
+                  "claudeModel": null
                 }
               }
             }
@@ -18899,10 +18910,13 @@
           },
           "codexModel": {
             "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
           }
         },
         "additionalProperties": true,
-        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel. Omitted fields retain saved values. codexModel is a complete connection/model pair or null to clear; unknown top-level fields are ignored.",
+        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing.",
         "anyOf": [
           {
             "$ref": "#/components/schemas/AgentMinionDepthUpdate"
@@ -18912,6 +18926,9 @@
           },
           {
             "$ref": "#/components/schemas/AgentMinionCodexModelUpdate"
+          },
+          {
+            "$ref": "#/components/schemas/AgentMinionClaudeModelUpdate"
           }
         ]
       },
@@ -18921,7 +18938,8 @@
           "ok",
           "maxDepth",
           "defaultHarness",
-          "codexModel"
+          "codexModel",
+          "claudeModel"
         ],
         "properties": {
           "ok": {
@@ -18936,6 +18954,9 @@
           },
           "codexModel": {
             "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
           }
         },
         "additionalProperties": false
@@ -20302,7 +20323,8 @@
         "type": "string",
         "enum": [
           "burrow",
-          "codex"
+          "codex",
+          "claude"
         ],
         "default": "burrow",
         "description": "Default harness for new minions. Legacy or unset settings use burrow."
@@ -20321,6 +20343,9 @@
           },
           "codexModel": {
             "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
           }
         },
         "additionalProperties": true
@@ -20339,6 +20364,9 @@
           },
           "codexModel": {
             "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
           }
         },
         "additionalProperties": true
@@ -20368,6 +20396,9 @@
           },
           "codexModel": {
             "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
           }
         },
         "additionalProperties": true
@@ -20389,6 +20420,101 @@
           }
         },
         "additionalProperties": false
+      },
+      "ClaudeMinionModelSelection": {
+        "description": "Complete direct Anthropic OAuth connection and enabled model pair. Null clears only the independent per-agent Claude selection; no parent/Burrow/Codex/load-balancer fallback. Clearing does not change defaultHarness.",
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ClaudeMinionModelPair"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ClaudeMinionModelPair": {
+        "type": "object",
+        "required": [
+          "connectionId",
+          "model"
+        ],
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonempty after trimming; surrounding whitespace is trimmed when saved."
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Nonempty after trimming; surrounding whitespace is trimmed when saved."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentMinionClaudeModelUpdate": {
+        "type": "object",
+        "required": [
+          "claudeModel"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ModelConnectionListResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "connections"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelConnectionCatalogEntry"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ModelConnectionCatalogEntry": {
+        "type": "object",
+        "required": [
+          "codexEligible",
+          "claudeEligible"
+        ],
+        "properties": {
+          "codexEligible": {
+            "type": "boolean",
+            "readOnly": true,
+            "description": "Codex configuration eligibility: enabled direct OpenAI OAuth connection using openai-responses or openai-chat-completions, or an enabled OpenAI pool with an eligible member and a shared enabled model. Independent of Claude eligibility and transient quota/cooldown."
+          },
+          "claudeEligible": {
+            "type": "boolean",
+            "readOnly": true,
+            "description": "Claude configuration eligibility: enabled !== false, apiType anthropic-messages, auth.type oauth, and case-insensitive auth.provider anthropic or claude. Direct connections only; Anthropic load balancers are ineligible. Does not guarantee any enabled model: additionally require an exact model ID with selected !== false. Independent of Codex eligibility and transient quota/cooldown; not a guarantee of CLI execution or credential readiness."
+          }
+        },
+        "additionalProperties": true,
+        "description": "Extensible sanitized model connection catalog entry. Eligibility flags contain no credentials."
       }
     },
     "securitySchemes": {

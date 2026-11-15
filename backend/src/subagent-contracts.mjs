@@ -129,7 +129,7 @@ function normalizeSpawnRequest(spawnRequest = null) {
     parentConversationId: compactString(spawnRequest.parentConversationId) || null,
     parentRunId: compactString(spawnRequest.parentRunId) || null,
     targetRoot: compactString(spawnRequest.targetRoot) || null,
-    harness: spawnRequest.harness === 'codex' ? 'codex' : 'burrow',
+    harness: ['codex','claude'].includes(spawnRequest.harness) ? spawnRequest.harness : 'burrow',
     capability: compactString(spawnRequest.capability) || null,
     model: compactString(spawnRequest.model) || null,
     resolvedModel: compactString(spawnRequest.resolvedModel) || null,
@@ -238,7 +238,7 @@ export function createSubagentContract({
   const contract = {
     contractVersion: SUBAGENT_CONTRACT_VERSION,
     kind: SUBAGENT_KIND,
-    harness: harness === 'codex' ? 'codex' : 'burrow',
+    harness: ['codex','claude'].includes(harness) ? harness : 'burrow',
     id: subagentId(id),
     owner: normalizeOwner(owner),
     ...(minionDepth ? { minionDepth: normalizeMinionDepth(minionDepth) } : {}),

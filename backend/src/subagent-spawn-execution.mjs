@@ -1,3 +1,4 @@
+import { CLAUDE_SELECTION_ACTIONS, validateClaudeModelSelection } from './claude-model-selection.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import { CODEX_SELECTION_ACTIONS, validateCodexModelSelection } from './codex-model-selection.mjs';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
@@ -23,6 +24,8 @@ function compactText(value, maxChars) {
   return text.length > maxChars ? `${text.slice(0, maxChars)}
 [${text.length - maxChars} chars omitted]` : text;
 }
+
+const NATIVE_SELECTION_ACTIONS = Object.freeze({ ...CODEX_SELECTION_ACTIONS, ...CLAUDE_SELECTION_ACTIONS });
 
 const SALVAGED_EVIDENCE_BUDGET = 36_000;
 const SALVAGED_EVIDENCE_SINGLE_TEXT = 4_000;
@@ -219,22 +222,23 @@ export async function executeSpawnSubagentTool({
   const blockers = [];
   const settings = await readMinionSettings(executionContext?.stores?.metadata, executionContext?.agentId);
   const harness = args.harness ?? settings.defaultHarness;
-  if (!['burrow', 'codex'].includes(harness)) blockers.push('subagent_harness_invalid');
+  if (!['burrow', 'codex', 'claude'].includes(harness)) blockers.push('subagent_harness_invalid');
   if (!task) blockers.push('subagent_task_required');
   if (!dataRoot) blockers.push('subagent_data_root_required');
-  if (harness !== 'codex' && !modelConfig) blockers.push('subagent_model_config_required');
+  if (!['codex','claude'].includes(harness) && !modelConfig) blockers.push('subagent_model_config_required');
 
   const requestedModel = compactString(args.model || args.modelId || args.model_id) || null;
-  let childModelConfig = harness === 'codex' ? null : modelConfig;
-  if (harness === 'codex') {
+  let childModelConfig = ['codex','claude'].includes(harness) ? null : modelConfig;
+  if (harness === 'codex' || harness === 'claude') {
+    const validate = harness === 'claude' ? validateClaudeModelSelection : validateCodexModelSelection;
     try {
-      childModelConfig = await validateCodexModelSelection(executionContext?.stores?.models, settings.codexModel);
+      childModelConfig = await validate(executionContext?.stores?.models, settings[`${harness}Model`]);
       if (requestedModel && requestedModel !== childModelConfig.model) {
         childModelConfig = null;
-        blockers.push('codex_model_override_unsupported');
+        blockers.push(`${harness}_model_override_unsupported`);
       }
     } catch (error) {
-      blockers.push(error?.statusCode === 400 ? error.message : 'codex_model_selection_unavailable');
+      blockers.push(error?.statusCode === 400 ? error.message : `${harness}_model_selection_unavailable`);
     }
   } else if (modelConfig?.resolveChildModel) {
     try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel || 'default'}`); }
@@ -281,8 +285,8 @@ export async function executeSpawnSubagentTool({
       availableModels: Array.isArray(modelConfig?.availableModels) ? modelConfig.availableModels.map((item) => item.id) : [],
       resolvedModelProfile: modelSelection.resolvedProfile,
       resolvedModel: modelSelection.resolvedModel,
-      ...(harness === 'codex' && blockers.some(code => CODEX_SELECTION_ACTIONS[code])
-        ? { summary: blockers.map(code => CODEX_SELECTION_ACTIONS[code]).filter(Boolean).join(' ') } : {}),
+      ...(['codex', 'claude'].includes(harness) && blockers.some(code => NATIVE_SELECTION_ACTIONS[code])
+        ? { summary: blockers.map(code => NATIVE_SELECTION_ACTIONS[code]).filter(Boolean).join(' ') } : {}),
       blockers,
       warnings: [],
       evidence: [],
@@ -399,11 +403,12 @@ export async function executeSpawnSubagentTool({
   let childRun;
   try {
     abortSignal?.throwIfAborted();
-    if (harness !== 'codex' && remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
+    if (!['codex','claude'].includes(harness) && remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
     // Load the composed worker only at dispatch: it depends on proposal-execution.
-    const runCodexChild = harness === 'codex'
+    const nativeHarness = ['codex','claude'].includes(harness);
+    const runCodexChild = nativeHarness
       ? (await import('./subagent-worker-runner.mjs')).runSpawnSubagentChild : null;
-    childRun = harness === 'codex'
+    childRun = nativeHarness
       ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await runCodexChild({ harness, id: childId, task: childTask, target: childTarget, dataRoot, childSessionId: childSession, owner: childOwner, minionDepth: childDepth, modelConfig: childModelConfig, traceDir: childTrace, executionPolicy, parentExecutionContext: childParentExecutionContext, signal: abortSignal }) }
       : remoteExecution || childRunner
       ? { ok: true, spawned: true, exitCode: 0, durationMs: null, result: await childRunner({ id: childId, task: childTask, target: childTarget, dataRoot, childSessionId: childSession, owner: childOwner, minionDepth: childDepth, modelConfig: childModelConfig, traceDir: childTrace, executionPolicy, parentExecutionContext: childParentExecutionContext, signal: abortSignal }) }
@@ -418,12 +423,12 @@ export async function executeSpawnSubagentTool({
       result: { ok: false, summary: 'Minion child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
     };
   }
-  if (harness === 'codex') {
+  if (['codex','claude'].includes(harness)) {
     childRun.spawned = Boolean(childRun.result?.spawned);
     childRun.cancelled = Boolean(childRun.result?.cancelled);
   }
   let childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
-  if (harness === 'codex' && childResult.model) {
+  if (['codex','claude'].includes(harness) && childResult.model) {
     childModelSelection = { ...childModelSelection, requestedModel: childModelConfig.model,
       resolvedModel: childResult.model.actual, resolvedConnectionId: childResult.model.connectionId,
       logicalConnectionId: childModelConfig.connectionId };
