@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type MinionHarness } from '../../app/api';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field } from './SettingsPrimitives';
+import { CodexMinionModel } from './CodexMinionModel';
 
 function responseHarness(value: unknown, legacy = false): MinionHarness {
   const result = value as { ok?: unknown; defaultHarness?: unknown } | null;
@@ -155,9 +156,9 @@ export function MinionTypeSettings({
             {children}
           </fieldset>
         ) : (
-          <p className="settings-description">
-            Codex uses its own model configuration. Burrow minion model settings are preserved.
-          </p>
+          <fieldset className="minion-model-settings" disabled={state === 'saving'}>
+            <CodexMinionModel resourceId={resourceId} />
+          </fieldset>
         ))}
     </>
   );
