@@ -8,6 +8,7 @@ import {
   providerPoolModels,
 } from '../../src/model-settings-store.mjs';
 import { readMinionSettings, saveMinionSettings } from '../../src/minion-depth.mjs';
+import { CODEX_SELECTION_ACTIONS } from '../../src/codex-model-selection.mjs';
 import {
   claudeCredentialAuthPayload,
   detectClaudeCliCredential,
@@ -277,7 +278,14 @@ export function createModelConnectionService({
 
   async function saveAgentMinionSettings(agentId, body = {}) {
     const runtime = await resolveAgentRuntime(agentId);
-    return { ok: true, ...await saveMinionSettingsImpl(metadataStore(), runtime.agentId, body) };
+    try {
+      return { ok: true, ...await saveMinionSettingsImpl(metadataStore(), runtime.agentId, body, { models: modelsStore() }) };
+    } catch (error) {
+      if (error?.statusCode === 400 && CODEX_SELECTION_ACTIONS[error.message]) {
+        return { ok: false, status: 400, error: error.message, message: CODEX_SELECTION_ACTIONS[error.message] };
+      }
+      throw error;
+    }
   }
 
   async function chatIdentities() { return { ok: true, ...await modelsStore().identities() }; }

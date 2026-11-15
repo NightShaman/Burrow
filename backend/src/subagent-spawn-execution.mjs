@@ -1,4 +1,5 @@
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
+import { CODEX_SELECTION_ACTIONS, validateCodexModelSelection } from './codex-model-selection.mjs';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { canSpawnMinion, nextMinionDepth, resolveTurnMinionDepth, readMinionSettings } from './minion-depth.mjs';
@@ -221,11 +222,21 @@ export async function executeSpawnSubagentTool({
   if (!['burrow', 'codex'].includes(harness)) blockers.push('subagent_harness_invalid');
   if (!task) blockers.push('subagent_task_required');
   if (!dataRoot) blockers.push('subagent_data_root_required');
-  if (!modelConfig) blockers.push('subagent_model_config_required');
+  if (harness !== 'codex' && !modelConfig) blockers.push('subagent_model_config_required');
 
   const requestedModel = compactString(args.model || args.modelId || args.model_id) || null;
-  let childModelConfig = modelConfig;
-  if (modelConfig?.resolveChildModel) {
+  let childModelConfig = harness === 'codex' ? null : modelConfig;
+  if (harness === 'codex') {
+    try {
+      childModelConfig = await validateCodexModelSelection(executionContext?.stores?.models, settings.codexModel);
+      if (requestedModel && requestedModel !== childModelConfig.model) {
+        childModelConfig = null;
+        blockers.push('codex_model_override_unsupported');
+      }
+    } catch (error) {
+      blockers.push(error?.statusCode === 400 ? error.message : 'codex_model_selection_unavailable');
+    }
+  } else if (modelConfig?.resolveChildModel) {
     try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel || 'default'}`); }
   } else if (requestedModel) blockers.push(`subagent_model_unavailable:${requestedModel}`);
   const requestedModelProfile = compactString(args.modelProfile || args.model_profile || args.profile) || null;
@@ -270,6 +281,8 @@ export async function executeSpawnSubagentTool({
       availableModels: Array.isArray(modelConfig?.availableModels) ? modelConfig.availableModels.map((item) => item.id) : [],
       resolvedModelProfile: modelSelection.resolvedProfile,
       resolvedModel: modelSelection.resolvedModel,
+      ...(harness === 'codex' && blockers.some(code => CODEX_SELECTION_ACTIONS[code])
+        ? { summary: blockers.map(code => CODEX_SELECTION_ACTIONS[code]).filter(Boolean).join(' ') } : {}),
       blockers,
       warnings: [],
       evidence: [],

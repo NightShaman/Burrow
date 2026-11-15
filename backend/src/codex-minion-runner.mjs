@@ -9,6 +9,7 @@ import { conversationAuthority } from './conversation-authority.mjs';
 import { resolveProcessExecutionTarget } from './process-execution-router.mjs';
 import { refreshOpenAiOAuth, openaiOAuthIdentity } from './openai-oauth-login.mjs';
 import { isProviderPool } from './provider-pool-settings.mjs';
+import { CODEX_SELECTION_ACTIONS } from './codex-model-selection.mjs';
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
 
 const refreshes = new WeakMap();
@@ -92,7 +93,8 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const connectionId = modelConfig?.connectionId;
     if (!connectionId || !modelConfig?.model) fail('codex_model_selection_required');
     const connection = await models.get(connectionId);
-    if (!connection || isProviderPool(connection) || !['openai-responses', 'openai-chat-completions'].includes(connection.apiType)) fail('codex_openai_oauth_required');
+    if (!connection) fail('codex_connection_not_found');
+    if (isProviderPool(connection) || !['openai-responses', 'openai-chat-completions'].includes(connection.apiType)) fail('codex_openai_oauth_required');
     if (!(connection.models || []).some((model) => model.id === modelConfig.model && model.selected !== false)) fail('codex_model_not_enabled');
     conversationStore = parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations;
     authority = conversationAuthority({ store: conversationStore, agentId: owner.agentId });
@@ -101,7 +103,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const tokens = async (force = false) => {
       signal?.throwIfAborted();
       const prior = await models.auth(connectionId);
-      if (prior?.type !== 'oauth' || !/openai/i.test(prior.provider || connection.provider)) fail('codex_openai_oauth_required');
+      if (prior?.type !== 'oauth' || String(prior.provider || '').toLowerCase() !== 'openai') fail('codex_openai_oauth_required');
       for (const value of [prior.accessToken, prior.refreshToken, prior.idToken]) if (value) secrets.add(value);
       if (force) {
         if (!models.persistAuth) fail('codex_oauth_refresh_unavailable');
@@ -110,7 +112,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         if (!pending.has(connectionId)) {
           const refresh = (async () => {
             const current = await models.auth(connectionId);
-            if (current?.type !== 'oauth') fail('codex_openai_oauth_required');
+            if (current?.type !== 'oauth' || String(current.provider || '').toLowerCase() !== 'openai') fail('codex_openai_oauth_required');
             const fresh = await refreshOpenAiOAuth(current, { signal: AbortSignal.timeout(8_000) });
             await models.persistAuth(connectionId, fresh, undefined, current.refreshToken, current);
           })();
@@ -202,7 +204,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     } finally { signal?.removeEventListener('abort', abort); }
   } catch (error) {
     const code = signal?.aborted ? 'codex_cancelled' : error?.runnerCode || 'codex_native_run_failed';
-    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : 'Codex minion unavailable or failed.',
+    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : CODEX_SELECTION_ACTIONS[code] || 'Codex minion unavailable or failed.',
       blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
   } finally {
     clearInterval(cancellationPoll);

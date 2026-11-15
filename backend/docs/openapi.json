@@ -7067,7 +7067,7 @@
         ],
         "summary": "Read agent minion settings",
         "operationId": "getAgentMinionSettings",
-        "description": "Read per-agent maxDepth (integer 0–2, default 1) and defaultHarness (burrow or codex, default burrow). Independent of minion model selection. Requires an enabled registered agent.",
+        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel selection. Requires an enabled registered agent.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7075,7 +7075,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Durable agent minion settings; defaults to maxDepth 1 and defaultHarness burrow when unset.",
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7084,7 +7084,8 @@
                 "example": {
                   "ok": true,
                   "maxDepth": 1,
-                  "defaultHarness": "burrow"
+                  "defaultHarness": "burrow",
+                  "codexModel": null
                 }
               }
             }
@@ -7148,7 +7149,7 @@
         ],
         "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist maxDepth, defaultHarness, or both for this agent only. Omitted fields retain saved values. maxDepth must be a JSON integer 0, 1 or 2; defaultHarness must be burrow or codex. Invalid updates are rejected without changing saved settings. Model selection and saved child lineage are unchanged.",
+        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel. Omitted fields retain saved values; codexModel is a complete direct OpenAI OAuth connection/enabled model pair, or null to clear. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7163,14 +7164,15 @@
               },
               "example": {
                 "maxDepth": 1,
-                "defaultHarness": "burrow"
+                "defaultHarness": "burrow",
+                "codexModel": null
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Durable agent minion settings; defaults to maxDepth 1 and defaultHarness burrow when unset.",
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7179,13 +7181,14 @@
                 "example": {
                   "ok": true,
                   "maxDepth": 1,
-                  "defaultHarness": "burrow"
+                  "defaultHarness": "burrow",
+                  "codexModel": null
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid maxDepth, defaultHarness, empty update, or malformed JSON. Saved settings are unchanged.",
+            "description": "Invalid depth, harness, Codex connection/model, empty update, or malformed JSON. Saved settings are unchanged.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7211,6 +7214,30 @@
                       "ok": false,
                       "status": 400,
                       "error": "minion_default_harness_invalid"
+                    }
+                  },
+                  "codex_model_selection_invalid": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_model_selection_invalid"
+                    }
+                  },
+                  "codex_connection_not_found": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_connection_not_found"
+                    }
+                  },
+                  "codex_openai_oauth_required": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_openai_oauth_required"
+                    }
+                  },
+                  "codex_model_not_enabled": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_model_not_enabled"
                     }
                   }
                 }
@@ -18869,16 +18896,22 @@
           },
           "defaultHarness": {
             "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
           }
         },
         "additionalProperties": true,
-        "description": "Provide maxDepth, defaultHarness, or both. Omitted fields retain their saved value (defaults: maxDepth 1, defaultHarness burrow). Unknown fields are ignored; an update with neither supported field is invalid.",
+        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel. Omitted fields retain saved values. codexModel is a complete connection/model pair or null to clear; unknown top-level fields are ignored.",
         "anyOf": [
           {
             "$ref": "#/components/schemas/AgentMinionDepthUpdate"
           },
           {
             "$ref": "#/components/schemas/AgentMinionHarnessUpdate"
+          },
+          {
+            "$ref": "#/components/schemas/AgentMinionCodexModelUpdate"
           }
         ]
       },
@@ -18887,7 +18920,8 @@
         "required": [
           "ok",
           "maxDepth",
-          "defaultHarness"
+          "defaultHarness",
+          "codexModel"
         ],
         "properties": {
           "ok": {
@@ -18899,6 +18933,9 @@
           },
           "defaultHarness": {
             "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
           }
         },
         "additionalProperties": false
@@ -20281,6 +20318,9 @@
           },
           "defaultHarness": {
             "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
           }
         },
         "additionalProperties": true
@@ -20296,9 +20336,59 @@
           },
           "defaultHarness": {
             "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
           }
         },
         "additionalProperties": true
+      },
+      "CodexMinionModelSelection": {
+        "description": "Complete direct OpenAI OAuth connection and enabled model pair. Null clears the independent per-agent Codex selection; no parent/Burrow/LB fallback.",
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/CodexMinionModelPair"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "AgentMinionCodexModelUpdate": {
+        "type": "object",
+        "required": [
+          "codexModel"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          }
+        },
+        "additionalProperties": true
+      },
+      "CodexMinionModelPair": {
+        "type": "object",
+        "required": [
+          "connectionId",
+          "model"
+        ],
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
