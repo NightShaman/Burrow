@@ -1,3 +1,4 @@
+import { minionOverrideEnabled } from './minion-depth.mjs';
 import { randomUUID } from 'node:crypto';
 import { normalizeCodexModelSelection, validateCodexModelSelection } from './codex-model-selection.mjs';
 import { normalizeClaudeModelSelection, validateClaudeModelSelection } from './claude-model-selection.mjs';
@@ -129,49 +130,77 @@ function legacyProfileRows(agentId, legacy, agentName = agentId) {
   return rows;
 }
 
-/** Append each encountered agent's old roster/settings once into the shared roster.
- * The per-agent marker lives in the same serialized row as the imported ids.
- * Never deduplicate by model/name: ids and agent defaults retain their identity.
- */
+/** Reconcile only provenance-backed generated identities; never names. Archive
+ * before hiding so interrupted writes cannot discard operator edits. */
 export async function migrateLegacyMinionProfiles(metadata, agentId, { agentName = agentId } = {}) {
   if (!metadata?.get) return { migrated: false, profiles: [] };
   const existing = await metadata.get(MINION_PROFILES_KEY);
-  if (!text(agentId) || existing?.importedAgents?.[agentId]) return { migrated: false, profiles: readProfiles(existing) };
+  if (!text(agentId)) return { migrated: false, profiles: readProfiles(existing) };
+  let legacy = await metadata.get(settingsKey(agentId));
   const oldRoster = await metadata.get(legacyProfilesKey(agentId));
-  const hasRoster = Array.isArray(oldRoster?.profiles);
-  const legacy = await metadata.get(settingsKey(agentId));
-  // A per-agent roster already migrated the legacy settings. Import it verbatim,
-  // even when empty, instead of recreating removed or edited legacy profiles.
-  const rows = hasRoster ? readProfiles(oldRoster) : legacyProfileRows(agentId, legacy, agentName);
-  const append = saved => {
+  const generatedIds = new Set(MINION_PROFILE_HARNESSES.map(h => legacyMinionProfileId(agentId, h)));
+  const proven = existing?.importedAgents?.[agentId] || Array.isArray(oldRoster?.profiles);
+  const imported = proven ? readProfiles(existing).filter(p => generatedIds.has(p.id)) : [];
+  const oldRows = readProfiles(oldRoster);
+  const archived = readProfiles({ profiles: legacy?.legacyProfiles });
+  const generated = existing?.reconciledAgents?.[agentId] ? [] :
+    (Array.isArray(oldRoster?.profiles) ? oldRows.filter(p => generatedIds.has(p.id))
+      : existing?.importedAgents?.[agentId] ? [] : legacyProfileRows(agentId, legacy, agentName));
+  let local = new Map([...generated, ...imported, ...archived].map(p => [p.id, p]));
+  const custom = existing?.reconciledAgents?.[agentId] ? [] : oldRows.filter(p => !generatedIds.has(p.id));
+  const reconcile = saved => {
     const profiles = Array.isArray(saved?.profiles) ? saved.profiles : [];
-    const ids = new Set(profiles.map(row => row?.id));
-    return { ...(saved || {}), profiles: [...profiles, ...rows.filter(row => !ids.has(row.id))],
-      importedAgents: { ...(saved?.importedAgents || {}), [agentId]: true } };
+    const ids = new Set(profiles.map(p => p?.id));
+    return { ...(saved || {}), profiles: [...profiles.filter(p => !imported.some(i => i.id === p?.id)), ...custom.filter(p => !ids.has(p.id))],
+      importedAgents: { ...(saved?.importedAgents || {}), [agentId]: true },
+      reconciledAgents: { ...(saved?.reconciledAgents || {}), [agentId]: true } };
   };
-  let committed, migrated = false;
-  if (typeof metadata.atomicUpdate !== 'function' && typeof metadata.set !== 'function') {
-    return { migrated: false, profiles: readProfiles(append(existing)) };
-  }
-  try {
-    committed = await mutate(metadata, MINION_PROFILES_KEY, saved => {
-      if (saved?.importedAgents?.[agentId]) return saved;
-      migrated = true;
-      return append(saved);
-    });
-  } catch { return { migrated: false, profiles: readProfiles(append(existing)) }; }
-  if (migrated && !hasRoster && rows.length && !Object.hasOwn(legacy || {}, 'defaultMinionProfileId')) {
-    const preferred = rows.find(row => row.harness === legacy?.defaultHarness) || rows[0];
+  let saved = reconcile(existing);
+  if (!existing?.reconciledAgents?.[agentId] && (metadata.atomicUpdate || metadata.set)) {
     try {
-      await mutate(metadata, settingsKey(agentId), prior => (Object.hasOwn(prior || {}, 'defaultMinionProfileId')
-        ? prior : { ...(prior || {}), defaultMinionProfileId: preferred.id }));
-    } catch { /* imported profiles remain readable; legacy default remains valid */ }
+      // Archive first. Keep existing explicit null/default choices authoritative.
+      if (legacy || local.size) {
+        legacy = await mutate(metadata, settingsKey(agentId), prior => {
+          // The pre-lock snapshot is only an import source. Current archived
+          // rows win, including concurrent repairs and newly archived siblings.
+          const current = new Map([...generated, ...imported,
+            ...readProfiles({ profiles: prior?.legacyProfiles })].map(p => [p.id, p]));
+          return { ...(prior || {}),
+            ...(current.size ? { legacyProfiles: [...current.values()] } : {}),
+            ...(prior && !Object.hasOwn(prior, 'overrideEnabled') ? { overrideEnabled: minionOverrideEnabled(prior) } : {}),
+            ...(!Object.hasOwn(prior || {}, 'defaultMinionProfileId') && current.size ? {
+              defaultMinionProfileId: [...current.values()].find(p => p.harness === prior?.defaultHarness)?.id || [...current.keys()][0] } : {}) };
+        });
+        local = new Map(readProfiles({ profiles: legacy?.legacyProfiles }).map(p => [p.id, p]));
+      }
+      saved = await mutate(metadata, MINION_PROFILES_KEY, reconcile);
+    } catch { /* read-only view still resolves deterministically */ }
   }
-  return { migrated, profiles: readProfiles(committed) };
+  const enabled = minionOverrideEnabled(legacy);
+  const globalProfiles = readProfiles(saved);
+  const patches = enabled ? legacy?.profileOverrides || {} : {};
+  const profiles = globalProfiles.map(p => {
+    try { return { ...normalizeMinionProfile({ ...p, ...patches[p.id], id: p.id }), enabled: p.enabled && patches[p.id]?.enabled !== false }; }
+    catch { return p; }
+  });
+  if (enabled) profiles.push(...[...local.values()].filter(p => !profiles.some(g => g.id === p.id)));
+  return { migrated: !existing?.reconciledAgents?.[agentId], profiles };
 }
 
 export async function listMinionProfiles(metadata, agentId, options = {}) {
   return { ok: true, profiles: (await migrateLegacyMinionProfiles(metadata, agentId, options)).profiles };
+}
+
+export async function validateMinionProfileOverrides(metadata, patches, models) {
+  if (!patches || typeof patches !== 'object' || Array.isArray(patches)) fail('minion_profile_overrides_invalid');
+  const profiles = readProfiles(await metadata.get(MINION_PROFILES_KEY));
+  for (const [id, patch] of Object.entries(patches)) {
+    assertKnownFields(patch);
+    if (Object.hasOwn(patch, 'id')) fail('minion_profile_field_unknown');
+    const prior = profiles.find(p => p.id === id);
+    if (!prior) fail('minion_profile_not_found', 404);
+    await validateMinionProfile(normalizeMinionProfile({ ...prior, ...patch, id }), models);
+  }
 }
 
 /** Reject unknown fields so a mistyped UI key can never silently do nothing. */
@@ -206,8 +235,25 @@ export async function createMinionProfile(metadata, agentId, input, { models } =
  */
 export async function updateMinionProfile(metadata, agentId, id, patch, { models } = {}) {
   assertKnownFields(patch);
-  await migrateLegacyMinionProfiles(metadata, agentId);
+  if (!readProfiles(await metadata.get(MINION_PROFILES_KEY)).some(p => p.id === id)) {
+    const state = await metadata.get(MINION_PROFILES_KEY);
+    if (!state?.importedAgents?.[agentId] && !state?.reconciledAgents?.[agentId]) await migrateLegacyMinionProfiles(metadata, agentId);
+  }
   let updated;
+  const agentSettings = agentId ? await metadata.get(settingsKey(agentId)) : null;
+  if (agentSettings?.legacyProfiles?.some(p => p.id === id)) {
+    await mutate(metadata, settingsKey(agentId), async saved => {
+      const prior = saved?.legacyProfiles?.find(p => p.id === id);
+      if (!prior) fail('minion_profile_not_found', 404);
+      if (Object.hasOwn(patch, 'id') && patch.id !== id) fail('minion_profile_id_mismatch');
+      const merged = { ...prior, ...patch, id };
+      if (patch.harness && patch.harness !== prior.harness && !Object.hasOwn(patch, 'model')) merged.model = null;
+      updated = normalizeMinionProfile(merged);
+      await validateMinionProfile(updated, models);
+      return { ...saved, legacyProfiles: saved.legacyProfiles.map(p => p.id === id ? updated : p) };
+    });
+    return { ok: true, profile: updated };
+  }
   // Merge against the current row *inside* the metadata owner's lock. Merging
   // outside it loses concurrent partial changes even when the final set is locked.
   await mutate(metadata, profilesKey(agentId), async value => {

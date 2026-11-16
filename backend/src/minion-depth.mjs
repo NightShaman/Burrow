@@ -28,9 +28,26 @@ function validMaxDepth(value) {
   return Number.isInteger(value) && value >= 0 && value <= MAX_MINION_DEPTH;
 }
 
+export const MINION_GLOBAL_SETTINGS_KEY = 'minion_settings';
+const settingsKey = agentId => agentId ? `minion_settings:${agentId}` : MINION_GLOBAL_SETTINGS_KEY;
+export function minionOverrideEnabled(saved) {
+  return typeof saved?.overrideEnabled === 'boolean' ? saved.overrideEnabled
+    : Boolean(saved && Object.keys(saved).some(key => ['maxDepth', 'defaultHarness', 'codexModel', 'claudeModel', 'defaultMinionProfileId'].includes(key)));
+}
+
+/** Saved editor state and resolved runtime state share one resolution path. */
+export async function readMinionSettingsState(metadata, agentId = null) {
+  const global = normalizeSettings(await metadata?.get?.(MINION_GLOBAL_SETTINGS_KEY));
+  if (!agentId) return global;
+  const saved = await metadata?.get?.(settingsKey(agentId));
+  const overrideEnabled = minionOverrideEnabled(saved);
+  const stored = normalizeSettings(saved);
+  return { ...stored, overrideEnabled, profileOverrides: saved?.profileOverrides || {},
+    effective: overrideEnabled ? stored : global };
+}
 export async function readMinionSettings(metadata, agentId) {
-  const saved = agentId && metadata?.get ? await metadata.get(`minion_settings:${agentId}`) : null;
-  return normalizeSettings(saved);
+  const state = await readMinionSettingsState(metadata, agentId);
+  return state.effective || state;
 }
 
 export async function saveMinionSettings(metadata, agentId, input = {}, { models } = {}) {
@@ -40,7 +57,10 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   const hasCodex = object && Object.hasOwn(input, 'codexModel');
   const hasClaude = object && Object.hasOwn(input, 'claudeModel');
   const hasDefaultProfile = object && Object.hasOwn(input, 'defaultMinionProfileId');
-  if ((!hasDepth && !hasHarness && !hasCodex && !hasClaude && !hasDefaultProfile) || (hasDepth && !validMaxDepth(input.maxDepth))) {
+  const hasOverride = object && Object.hasOwn(input, 'overrideEnabled');
+  const hasProfiles = object && Object.hasOwn(input, 'profileOverrides');
+  if ((hasOverride && (!agentId || typeof input.overrideEnabled !== 'boolean')) || (hasProfiles && !agentId)) throw Object.assign(new Error('minion_override_invalid'), { statusCode: 400 });
+  if ((!hasDepth && !hasHarness && !hasCodex && !hasClaude && !hasDefaultProfile && !hasOverride && !hasProfiles) || (hasDepth && !validMaxDepth(input.maxDepth))) {
     throw Object.assign(new Error('minion_max_depth_invalid'), { statusCode: 400 });
   }
   if (hasHarness && !validHarness(input.defaultHarness)) {
@@ -51,19 +71,35 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   if (codexModel) await validateCodexModelSelection(models, codexModel);
   const claudeModel = hasClaude ? normalizeClaudeModelSelection(input.claudeModel) : null;
   if (claudeModel) await validateClaudeModelSelection(models, claudeModel);
-  const key = `minion_settings:${agentId}`;
-  const update = saved => ({
-    ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}),
-    ...normalizeSettings(saved),
-    ...(hasDepth ? { maxDepth: input.maxDepth } : {}),
-    ...(hasHarness ? { defaultHarness: input.defaultHarness } : {}),
-    ...(hasCodex ? { codexModel } : {}),
-    ...(hasClaude ? { claudeModel } : {}),
-    ...(hasDefaultProfile ? { defaultMinionProfileId: input.defaultMinionProfileId } : {}),
-  });
+  if (hasProfiles) {
+    const { validateMinionProfileOverrides } = await import('./minion-profiles.mjs');
+    await validateMinionProfileOverrides(metadata, input.profileOverrides, models);
+  }
+  const key = settingsKey(agentId);
+  // First customization starts from global defaults, not hard-coded blanks.
+  // Toggle-only off does not seed: first enabling can still inherit newer globals.
+  const update = saved => {
+    const hasSavedDefaults = saved && ['maxDepth', 'defaultHarness', 'codexModel', 'claudeModel', 'defaultMinionProfileId'].some(k => Object.hasOwn(saved, k));
+    const firstCustomization = agentId && !hasSavedDefaults && !(hasOverride && !input.overrideEnabled);
+    const writeDefaults = firstCustomization || hasDepth || hasHarness || hasCodex || hasClaude || hasDefaultProfile || (!agentId && !saved);
+    const merge = seed => ({
+      ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}),
+      ...(writeDefaults ? seed : {}),
+      ...(agentId ? { overrideEnabled: hasOverride ? input.overrideEnabled : (saved ? minionOverrideEnabled(saved) : true) } : {}),
+      ...(hasProfiles ? { profileOverrides: structuredClone(input.profileOverrides) } : {}),
+      ...(hasDepth ? { maxDepth: input.maxDepth } : {}),
+      ...(hasHarness ? { defaultHarness: input.defaultHarness } : {}),
+      ...(hasCodex ? { codexModel } : {}),
+      ...(hasClaude ? { claudeModel } : {}),
+      ...(hasDefaultProfile ? { defaultMinionProfileId: input.defaultMinionProfileId } : {}),
+    });
+    return firstCustomization
+      ? metadata.get(MINION_GLOBAL_SETTINGS_KEY).then(global => merge(normalizeSettings(global)))
+      : merge(normalizeSettings(saved));
+  };
   // The PostgreSQL metadata owner serializes partial updates, including insert.
   if (metadata.atomicUpdate) return normalizeSettings(await metadata.atomicUpdate(key, update));
-  const settings = update(await metadata.get(key));
+  const settings = await update(await metadata.get(key));
   await metadata.set(key, settings);
   return normalizeSettings(settings);
 }

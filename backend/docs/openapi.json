@@ -4944,7 +4944,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Shared specialist roster under Agents Global. Optional agentId returns effective per-agent overrides and retained legacy specialists; omission returns only global specialists. Defaults do not filter enabled specialists."
       },
       "post": {
         "tags": [
@@ -4984,7 +4985,8 @@
           "404": {
             "$ref": "#/components/responses/ErrorResponse"
           }
-        }
+        },
+        "description": "Shared specialist roster under Agents Global. Optional agentId returns effective per-agent overrides and retained legacy specialists; omission returns only global specialists. Defaults do not filter enabled specialists."
       }
     },
     "/api/settings/minions/{id}": {
@@ -7192,7 +7194,7 @@
         ],
         "summary": "Read agent minion settings",
         "operationId": "getAgentMinionSettings",
-        "description": "Read per-agent maxDepth, defaultHarness, and independent codexModel and claudeModel selections. Requires an enabled registered agent. defaultMinionProfileId is nullable; omitted values are preserved. A disabled or missing default blocks spawn without fallback.",
+        "description": "Saved agent editor values with overrideEnabled, profileOverrides and effective runtime defaults. False inherits global; toggle-only PUT preserves stored values.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7212,7 +7214,16 @@
                   "defaultHarness": "burrow",
                   "codexModel": null,
                   "claudeModel": null,
-                  "defaultMinionProfileId": null
+                  "defaultMinionProfileId": null,
+                  "overrideEnabled": false,
+                  "profileOverrides": {},
+                  "effective": {
+                    "maxDepth": 1,
+                    "defaultHarness": "burrow",
+                    "codexModel": null,
+                    "claudeModel": null,
+                    "defaultMinionProfileId": null
+                  }
                 }
               }
             }
@@ -7276,7 +7287,7 @@
         ],
         "summary": "Save agent minion settings",
         "operationId": "updateAgentMinionSettings",
-        "description": "Persist any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel. Omitted fields retain saved values without revalidation. codexModel selects an eligible OpenAI OAuth connection/enabled model pair; claudeModel independently selects an enabled direct Anthropic OAuth connection or anthropic-lb pool/enabled model pair with an eligible OAuth member. Either is nullable to clear only that selection, without changing the harness. Invalid combined updates write nothing. Burrow minion/parent model selections and saved child lineage remain unchanged. defaultMinionProfileId is nullable; omitted values are preserved. A disabled or missing default blocks spawn without fallback.",
+        "description": "Saved agent editor values with overrideEnabled, profileOverrides and effective runtime defaults. False inherits global; toggle-only PUT preserves stored values.",
         "parameters": [
           {
             "$ref": "#/components/parameters/PathAgentId"
@@ -7312,7 +7323,16 @@
                   "defaultHarness": "burrow",
                   "codexModel": null,
                   "claudeModel": null,
-                  "defaultMinionProfileId": null
+                  "defaultMinionProfileId": null,
+                  "overrideEnabled": false,
+                  "profileOverrides": {},
+                  "effective": {
+                    "maxDepth": 1,
+                    "defaultHarness": "burrow",
+                    "codexModel": null,
+                    "claudeModel": null,
+                    "defaultMinionProfileId": null
+                  }
                 }
               }
             }
@@ -9433,6 +9453,239 @@
             }
           }
         ]
+      }
+    },
+    "/api/settings/minion-settings": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read global minion defaults",
+        "operationId": "getGlobalMinionSettings",
+        "description": "Agents Global defaults inherited by agents with overrideEnabled false; partial writes preserve omitted settings.",
+        "responses": {
+          "200": {
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null, claudeModel null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalMinionSettingsResponse"
+                },
+                "example": {
+                  "ok": true,
+                  "maxDepth": 1,
+                  "defaultHarness": "burrow",
+                  "codexModel": null,
+                  "claudeModel": null,
+                  "defaultMinionProfileId": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Normal UI/API authentication is required when enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered agent has this ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_not_found": {
+                    "value": {
+                      "ok": false,
+                      "status": 404,
+                      "error": "agent_not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The registered agent is disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_disabled": {
+                    "value": {
+                      "ok": false,
+                      "status": 409,
+                      "error": "agent_disabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Update global minion defaults",
+        "operationId": "updateGlobalMinionSettings",
+        "description": "Agents Global defaults inherited by agents with overrideEnabled false; partial writes preserve omitted settings.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalMinionSettingsUpdate"
+              },
+              "example": {
+                "maxDepth": 1,
+                "defaultHarness": "burrow",
+                "codexModel": null,
+                "claudeModel": null
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durable minion settings; defaults: maxDepth 1, defaultHarness burrow, codexModel null, claudeModel null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalMinionSettingsResponse"
+                },
+                "example": {
+                  "ok": true,
+                  "maxDepth": 1,
+                  "defaultHarness": "burrow",
+                  "codexModel": null,
+                  "claudeModel": null,
+                  "defaultMinionProfileId": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid depth, harness, Codex connection/model, empty update, or malformed JSON. Saved settings are unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "minion_max_depth_invalid": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "minion_max_depth_invalid"
+                    }
+                  },
+                  "invalid_json": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "invalid_json"
+                    }
+                  },
+                  "minion_default_harness_invalid": {
+                    "value": {
+                      "ok": false,
+                      "status": 400,
+                      "error": "minion_default_harness_invalid"
+                    }
+                  },
+                  "codex_model_selection_invalid": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_model_selection_invalid"
+                    }
+                  },
+                  "codex_connection_not_found": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_connection_not_found"
+                    }
+                  },
+                  "codex_openai_oauth_required": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_openai_oauth_required"
+                    }
+                  },
+                  "codex_model_not_enabled": {
+                    "value": {
+                      "ok": false,
+                      "error": "codex_model_not_enabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Normal UI/API authentication is required when enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No registered agent has this ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_not_found": {
+                    "value": {
+                      "ok": false,
+                      "status": 404,
+                      "error": "agent_not_found"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The registered agent is disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "agent_disabled": {
+                    "value": {
+                      "ok": false,
+                      "status": 409,
+                      "error": "agent_disabled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
       }
     }
   },
@@ -19039,27 +19292,174 @@
               "null"
             ],
             "minLength": 1
+          },
+          "overrideEnabled": {
+            "type": "boolean",
+            "description": "False inherits global without deleting saved values."
+          },
+          "profileOverrides": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "harness": {
+                  "type": "string",
+                  "enum": [
+                    "burrow",
+                    "codex",
+                    "claude"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "$ref": "#/components/schemas/CodexMinionModelSelection"
+                },
+                "executionHostId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "instructions": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
           }
         },
         "additionalProperties": true,
         "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing. defaultMinionProfileId is nullable; omission preserves the saved default profile.",
         "anyOf": [
           {
-            "$ref": "#/components/schemas/AgentMinionDepthUpdate"
+            "type": "object",
+            "required": [
+              "maxDepth"
+            ],
+            "properties": {
+              "maxDepth": {
+                "$ref": "#/components/schemas/MinionMaxDepth"
+              }
+            },
+            "additionalProperties": true
           },
           {
-            "$ref": "#/components/schemas/AgentMinionHarnessUpdate"
+            "type": "object",
+            "required": [
+              "defaultHarness"
+            ],
+            "properties": {
+              "defaultHarness": {
+                "$ref": "#/components/schemas/MinionDefaultHarness"
+              }
+            },
+            "additionalProperties": true
           },
           {
-            "$ref": "#/components/schemas/AgentMinionCodexModelUpdate"
+            "type": "object",
+            "required": [
+              "codexModel"
+            ],
+            "properties": {
+              "codexModel": {
+                "$ref": "#/components/schemas/CodexMinionModelSelection"
+              }
+            },
+            "additionalProperties": true
           },
           {
-            "$ref": "#/components/schemas/AgentMinionClaudeModelUpdate"
+            "type": "object",
+            "required": [
+              "claudeModel"
+            ],
+            "properties": {
+              "claudeModel": {
+                "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+              }
+            },
+            "additionalProperties": true
           },
           {
+            "type": "object",
             "required": [
               "defaultMinionProfileId"
-            ]
+            ],
+            "properties": {
+              "defaultMinionProfileId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "overrideEnabled"
+            ],
+            "properties": {
+              "overrideEnabled": {
+                "type": "boolean",
+                "description": "False inherits global without deleting saved values."
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "profileOverrides"
+            ],
+            "properties": {
+              "profileOverrides": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "burrow",
+                        "codex",
+                        "claude"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "$ref": "#/components/schemas/CodexMinionModelSelection"
+                    },
+                    "executionHostId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1
+                    },
+                    "instructions": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": true
           }
         ]
       },
@@ -19071,7 +19471,10 @@
           "defaultHarness",
           "codexModel",
           "claudeModel",
-          "defaultMinionProfileId"
+          "defaultMinionProfileId",
+          "overrideEnabled",
+          "profileOverrides",
+          "effective"
         ],
         "properties": {
           "ok": {
@@ -19096,6 +19499,50 @@
               "null"
             ],
             "minLength": 1
+          },
+          "overrideEnabled": {
+            "type": "boolean",
+            "description": "False inherits global without deleting saved values."
+          },
+          "profileOverrides": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "harness": {
+                  "type": "string",
+                  "enum": [
+                    "burrow",
+                    "codex",
+                    "claude"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "$ref": "#/components/schemas/CodexMinionModelSelection"
+                },
+                "executionHostId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1
+                },
+                "instructions": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "effective": {
+            "$ref": "#/components/schemas/EffectiveMinionSettings"
           }
         },
         "additionalProperties": false
@@ -20821,6 +21268,181 @@
             }
           }
         }
+      },
+      "GlobalMinionSettingsUpdate": {
+        "type": "object",
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          },
+          "defaultMinionProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        },
+        "additionalProperties": true,
+        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing. defaultMinionProfileId is nullable; omission preserves the saved default profile.",
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "maxDepth"
+            ],
+            "properties": {
+              "maxDepth": {
+                "$ref": "#/components/schemas/MinionMaxDepth"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "defaultHarness"
+            ],
+            "properties": {
+              "defaultHarness": {
+                "$ref": "#/components/schemas/MinionDefaultHarness"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "codexModel"
+            ],
+            "properties": {
+              "codexModel": {
+                "$ref": "#/components/schemas/CodexMinionModelSelection"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "claudeModel"
+            ],
+            "properties": {
+              "claudeModel": {
+                "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "defaultMinionProfileId"
+            ],
+            "properties": {
+              "defaultMinionProfileId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            },
+            "additionalProperties": true
+          }
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "overrideEnabled"
+              ]
+            },
+            {
+              "required": [
+                "profileOverrides"
+              ]
+            }
+          ]
+        }
+      },
+      "GlobalMinionSettingsResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "maxDepth",
+          "defaultHarness",
+          "codexModel",
+          "claudeModel",
+          "defaultMinionProfileId"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          },
+          "defaultMinionProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "EffectiveMinionSettings": {
+        "type": "object",
+        "required": [
+          "maxDepth",
+          "defaultHarness",
+          "codexModel",
+          "claudeModel",
+          "defaultMinionProfileId"
+        ],
+        "properties": {
+          "maxDepth": {
+            "$ref": "#/components/schemas/MinionMaxDepth"
+          },
+          "defaultHarness": {
+            "$ref": "#/components/schemas/MinionDefaultHarness"
+          },
+          "codexModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection"
+          },
+          "claudeModel": {
+            "$ref": "#/components/schemas/ClaudeMinionModelSelection"
+          },
+          "defaultMinionProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
