@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createAnthropicResetService } from './anthropic-reset-service.mjs';
 import { isProviderPool } from './provider-pool-settings.mjs';
 import { createOpenAiResetCreditsService, stableResetAccount } from './openai-reset-credits-service.mjs';
 
@@ -65,9 +66,10 @@ function anthropicConnectionCandidate(connection = {}) {
     const connections = await store.list();
     const candidates = requestedId ? connections.filter((connection) => connection.id === requestedId) : connections.filter(anthropicConnectionCandidate);
     for (const connection of candidates) {
-      if (!anthropicConnectionCandidate(connection)) continue;
-      const auth = await store.resolveAuth(connection.id);
+      if (isProviderPool(connection) || connection.pool || !anthropicConnectionCandidate(connection)) continue;
+      const auth = await store.resolveAuth(connection.id, {fetchImpl, nowMs:clock()});
       if (String(auth?.type || '').toLowerCase() !== 'oauth') continue;
+      if (auth.provider && !/anthropic|claude/i.test(auth.provider)) continue;
       const token = authSecretToken(auth);
       const origin = originFromUrl(connection.baseUrl || 'https://api.anthropic.com') || 'https://api.anthropic.com';
       if (token) return { origin, token, connectionId: connection.id, provider: connection.provider || 'Anthropic', expiresAt: auth.expiresAt || null };
@@ -297,6 +299,12 @@ function anthropicConnectionCandidate(connection = {}) {
             const data = await response.json();
             if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('malformed'), { malformed:true });
             const usage = sanitizeAnthropicUsage(data);
+            const authoritativeIneligible = data.cedar_ember?.eligible === false && data.cedar_ember?.ineligible_reason !== 'unavailable';
+            if (usage.fullResets || authoritativeIneligible) {
+              state.fullResetInventory = { value:usage.fullResets || {availableCount:0,nearestExpiresAt:null}, fetchedAt:new Date(clock()).toISOString() };
+              state.fullResetInventoryMissing = false;
+            } else state.fullResetInventoryMissing = true;
+            usage.fullResets = state.fullResetInventory?.value || null;
             now = clock();
             // Profile has an independent, longer cache and retry schedule; refresh never forces it.
             if (!state.profile || now >= state.profile.expiresAtMs) {
@@ -324,7 +332,10 @@ function anthropicConnectionCandidate(connection = {}) {
         const sampleAgeMs = age();
         const ok = Boolean(state.lastSuccess && !state.lastError);
         const retryAfterMs = Math.max(0, (state.retryAtMs || 0) - now);
-        const result = { ok, status:ok ? 200 : state.lastError?.status || 503, error:ok ? null : state.lastError?.error || 'anthropic_oauth_usage_unavailable', source:'anthropic-oauth', endpoint:'/api/oauth/usage', connectionId:source.connectionId, provider:source.provider, usage:state.lastSuccess?.usage || null, fetchedAt:state.lastSuccess?.fetchedAt || null, cached, cacheTtlMs:ok ? Math.max(0, ANTHROPIC_USAGE_CACHE_MS - sampleAgeMs) : 0, serverTime:new Date(now).toISOString(), sampleAgeMs, stale:sampleAgeMs === null || sampleAgeMs >= ANTHROPIC_USAGE_CACHE_MS, lastSuccess:state.lastSuccess || null, lastError:state.lastError || null, retryAt:retryAfterMs ? new Date(state.retryAtMs).toISOString() : null, retryAfterMs, refreshing:false };
+        const inventoryAge = state.fullResetInventory ? Math.max(0, now - Date.parse(state.fullResetInventory.fetchedAt)) : null;
+        const inventoryFreshness = { fetchedAt:state.fullResetInventory?.fetchedAt || null, sampleAgeMs:inventoryAge, stale:Boolean(state.lastError || state.fullResetInventoryMissing || inventoryAge === null || inventoryAge >= ANTHROPIC_USAGE_CACHE_MS) };
+        const retainedUsage = state.lastSuccess ? {...state.lastSuccess.usage, fullResets:state.fullResetInventory?.value || state.lastSuccess.usage.fullResets, fullResetsFreshness:inventoryFreshness} : null;
+        const result = { ok, status:ok ? 200 : state.lastError?.status || 503, error:ok ? null : state.lastError?.error || 'anthropic_oauth_usage_unavailable', source:'anthropic-oauth', endpoint:'/api/oauth/usage', connectionId:source.connectionId, provider:source.provider, usage:retainedUsage, fetchedAt:state.lastSuccess?.fetchedAt || null, cached, cacheTtlMs:ok ? Math.max(0, ANTHROPIC_USAGE_CACHE_MS - sampleAgeMs) : 0, serverTime:new Date(now).toISOString(), sampleAgeMs, stale:sampleAgeMs === null || sampleAgeMs >= ANTHROPIC_USAGE_CACHE_MS, lastSuccess:state.lastSuccess ? {...state.lastSuccess,usage:retainedUsage} : null, lastError:state.lastError || null, retryAt:retryAfterMs ? new Date(state.retryAtMs).toISOString() : null, retryAfterMs, refreshing:false };
         return {state,result};
       });
     } catch { return { ...empty('anthropic_oauth_coordination_unavailable', 503), connectionId:source.connectionId, provider:source.provider }; }
@@ -384,5 +395,10 @@ function anthropicConnectionCandidate(connection = {}) {
     }
     return results;
   }
-  return { anthropicOauthUsage, openaiOauthUsage, pollExpiringResets, ...resets };
+  const anthropicResets = createAnthropicResetService({resolveSource:resolveAnthropicUsageSource,fetchImpl,resetStore,summarize:sanitizeAnthropicFullResets,clock,timeoutMs, invalidateInventory:async source => {
+    if (!anthropicCoordinationStore) return;
+    const key = createHash('sha256').update(JSON.stringify([source.origin,source.token])).digest('hex');
+    await anthropicCoordinationStore.run(key, async state => { state.fullResetInventoryMissing = true; return {state,result:null}; });
+  }});
+  return { anthropicOauthUsage, openaiOauthUsage, pollExpiringResets, ...resets, ...anthropicResets };
 }

@@ -1,8 +1,20 @@
 import { validTraceRunId } from '../../src/trace-summary.mjs';
 
-export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, providerPoolMetrics, anthropicOauthUsage, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
+export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, providerPoolMetrics, anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
   return async function handleObservabilityRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/anthropic/oauth/usage') { const result = await anthropicOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
+    if (req.method === 'GET' && url.pathname === '/api/models/anthropic/reset-inventory') {
+      const result = await anthropicResetInventory({ connectionId: url.searchParams.get('connectionId') || '' });
+      sendJson(res, result.ok ? 200 : (result.status || 500), result); return true;
+    }
+    if (req.method === 'POST' && url.pathname === '/api/models/anthropic/reset-activation') {
+      const body = await readJsonBody(req);
+      if (!body || typeof body !== 'object' || Array.isArray(body) || body.confirmed !== true) {
+        sendJson(res, 400, { ok: false, error: 'anthropic_full_reset_confirmation_required' }); return true;
+      }
+      const result = await activateAnthropicFullReset({ connectionId: body.connectionId, requestId: body.requestId, confirmed: body.confirmed });
+      sendJson(res, result.ok ? 200 : (result.status || 500), result); return true;
+    }
     if (req.method === 'GET' && url.pathname === '/api/openai/oauth/usage') { const result = await openaiOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/openai/oauth/reset-credits') {
       const result = await openaiResetCredits({ connectionId: url.searchParams.get('connectionId') });

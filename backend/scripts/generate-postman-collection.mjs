@@ -135,6 +135,8 @@ const collection = {
       req('Replace agent skills', 'PUT', '/api/agents/{{agentId}}/skills', { body: { skillIds: ['{{skillId}}'] } }),
     ]),
     folder('Settings / Model Connections', [
+      req('Read Anthropic reset inventory (manual dialog only)', 'GET', '/api/models/anthropic/reset-inventory', { query: [['connectionId', '{{connectionId}}', 'OAuth model connection ID']] }),
+      req('Activate Anthropic Full reset (after explicit confirmation only)', 'POST', '/api/models/anthropic/reset-activation', { body: { connectionId: '{{connectionId}}', requestId: 'manual-reset-request-1', confirmed: true }, description: 'Manual destructive provider action. Send only after explicit confirmation. Never automatically retry with a new request ID; ambiguous outcomes must not be retried.' }),
       req('List model connections', 'GET', '/api/settings/model-connections'),
       req('Discover models', 'POST', '/api/settings/model-connections/discover', { body: { id: '{{connectionId}}', provider: 'Anthropic', apiType: 'anthropic-messages', baseUrl: 'https://api.anthropic.com' } }),
       req('Save model connection', 'POST', '/api/settings/model-connections', { body: { provider: 'Anthropic Claude Code', apiType: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', auth: { type: 'oauth', token: 'access-token', refreshToken: 'refresh-token', expiresAt: 1800000000000 }, models: [{ id: 'claude-sonnet-4-6', selected: true }] } }),

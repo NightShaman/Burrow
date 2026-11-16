@@ -9440,11 +9440,11 @@
           "404": {
             "description": "Invalid request, unavailable owner, or missing gallery image/folder"
           },
-          "503": {
-            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
-          },
           "409": {
             "description": "Original Archive receipt missing"
+          },
+          "503": {
+            "description": "Invalid request, unavailable owner, or missing gallery image/folder"
           }
         },
         "parameters": [
@@ -9702,6 +9702,75 @@
           },
           "500": {
             "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/models/anthropic/reset-inventory": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Read Anthropic Full reset inventory",
+        "description": "Manual confirmation-dialog fetch only. Does not consume resets; do not poll. Requires Boss authorization.",
+        "operationId": "getAnthropicResetInventory",
+        "parameters": [
+          {
+            "name": "connectionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/AnthropicResetInventoryResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
+    },
+    "/api/models/anthropic/reset-activation": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Activate an Anthropic Full reset",
+        "description": "Manual provider action. Call only after explicit Boss confirmation. Never automatically retry with a new request ID; ambiguous outcomes are not safe to retry. Requires Boss authorization.",
+        "operationId": "activateAnthropicFullReset",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/AnthropicResetActivation"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/AnthropicResetActivationResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "409": {
+            "$ref": "#/components/responses/AnthropicResetActivationResponse"
+          },
+          "503": {
+            "$ref": "#/components/responses/AnthropicResetActivationResponse"
+          },
+          "502": {
+            "$ref": "#/components/responses/AnthropicResetActivationResponse"
           }
         }
       }
@@ -10326,6 +10395,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ScheduledJobPatch"
+            }
+          }
+        }
+      },
+      "AnthropicResetActivation": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnthropicResetActivationRequest"
             }
           }
         }
@@ -11038,6 +11117,26 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ScheduledJobTriggerResponse"
+            }
+          }
+        }
+      },
+      "AnthropicResetInventoryResponse": {
+        "description": "Fresh authoritative inventory or sanitized error.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnthropicResetInventoryResponse"
+            }
+          }
+        }
+      },
+      "AnthropicResetActivationResponse": {
+        "description": "Activation outcome; inspect code and ambiguous because HTTP status is advisory.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AnthropicResetActivationResponse"
             }
           }
         }
@@ -21594,6 +21693,116 @@
           }
         },
         "additionalProperties": false
+      },
+      "AnthropicResetInventoryResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "fullResets": {
+            "$ref": "#/components/schemas/AnthropicFullResetInventory"
+          },
+          "fetchedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "AnthropicFullResetInventory": {
+        "type": "object",
+        "required": [
+          "availableCount",
+          "nearestExpiresAt"
+        ],
+        "properties": {
+          "availableCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nearestExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AnthropicResetActivationRequest": {
+        "type": "object",
+        "required": [
+          "connectionId",
+          "requestId",
+          "confirmed"
+        ],
+        "properties": {
+          "connectionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "requestId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "description": "Client-generated request identifier. Do not use a new ID to retry an ambiguous activation."
+          },
+          "confirmed": {
+            "type": "boolean",
+            "const": true,
+            "description": "Must be true after explicit Boss confirmation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AnthropicResetActivationResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "reset",
+              "already_used",
+              "not_limited",
+              "cooldown",
+              "ineligible",
+              "unavailable"
+            ]
+          },
+          "connectionId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "ambiguous": {
+            "type": "boolean"
+          },
+          "outcomeRecorded": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
       }
     },
     "securitySchemes": {
