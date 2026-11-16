@@ -45,7 +45,9 @@ describe('Default minion provider autosave', () => {
               defaultHarness: 'burrow',
               codexModel: null,
               claudeModel: null,
-              defaultMinionProfileId: null,
+              burrowModel: null,
+              codexEnabled: false,
+              claudeEnabled: false,
               overrideEnabled: true,
               profileOverrides: {},
               effective: {
@@ -53,7 +55,9 @@ describe('Default minion provider autosave', () => {
                 defaultHarness: 'burrow',
                 codexModel: null,
                 claudeModel: null,
-                defaultMinionProfileId: null,
+                burrowModel: null,
+                codexEnabled: false,
+                claudeEnabled: false,
               },
             },
     );
@@ -88,15 +92,15 @@ describe('Default minion provider autosave', () => {
     return { ...rendered, overflow };
   }
 
-  it('loads the default profile control once using encoded resource identity', async () => {
+  it('loads simple defaults once using encoded resource identity', async () => {
     const { unmount, overflow } = mountDetailsWithOverflow();
     try {
-      await screen.findByLabelText('Default minion profile');
-      expect(screen.getAllByLabelText('Default minion profile')).toHaveLength(1);
+      await screen.findByLabelText('Burrow provider');
+      expect(screen.getAllByLabelText('Burrow provider')).toHaveLength(1);
       expect(
         vi
           .mocked(api)
-          .mock.calls.some(([path]) => path === '/api/settings/minions?agentId=agent%2Fname'),
+          .mock.calls.some(([path]) => path === '/api/agents/agent%2Fname/minion-settings'),
       ).toBe(true);
       expect(screen.getByRole('button', { name: 'Save minion defaults' })).toBeTruthy();
     } finally {
@@ -105,12 +109,12 @@ describe('Default minion provider autosave', () => {
     }
   });
 
-  it('places saved agent defaults in the third column', async () => {
+  it('keeps Burrow defaults in the main column and native defaults in the third column', async () => {
     const { container, unmount, overflow } = mountDetailsWithOverflow();
     try {
-      const profileSelect = await screen.findByLabelText('Default minion profile');
-      expect(container.contains(profileSelect)).toBe(false);
-      expect(overflow.contains(profileSelect)).toBe(true);
+      const profileSelect = await screen.findByLabelText('Burrow provider');
+      expect(container.contains(profileSelect)).toBe(true);
+      expect(overflow.contains(screen.getByLabelText('Codex Enabled'))).toBe(true);
     } finally {
       unmount();
       overflow.remove();

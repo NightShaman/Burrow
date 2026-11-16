@@ -4,21 +4,21 @@ import { api, type ModelConnection } from '../../app/api';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 import { ProviderModelFields } from './ProviderModelFields';
-import { MinionProfiles, minionProviders, type MinionProfile } from './MinionProfiles';
+import { minionProviders } from './minionProviders';
 
-type Selection = MinionProfile['model'];
+type Selection = { connectionId: string; model: string } | null;
 type Defaults = {
   maxDepth: number;
-  defaultHarness: MinionProfile['harness'];
+  defaultHarness: 'burrow' | 'codex' | 'claude';
+  burrowModel: Selection;
+  codexEnabled: boolean;
+  claudeEnabled: boolean;
   codexModel: Selection;
   claudeModel: Selection;
-  defaultMinionProfileId: string | null;
 };
-type Overrides = Record<string, Partial<Omit<MinionProfile, 'id'>>>;
 type Settings = Defaults & {
   ok: boolean;
   overrideEnabled?: boolean;
-  profileOverrides?: Overrides;
   effective?: Defaults;
 };
 const fields = [
@@ -26,7 +26,9 @@ const fields = [
   'defaultHarness',
   'codexModel',
   'claudeModel',
-  'defaultMinionProfileId',
+  'burrowModel',
+  'codexEnabled',
+  'claudeEnabled',
 ] as const;
 function canonical(value: unknown): string | undefined {
   return JSON.stringify(value, (_, item) =>
@@ -44,20 +46,16 @@ function validate(result: Settings, agent: boolean) {
     d &&
     [0, 1, 2].includes(d.maxDepth) &&
     ['burrow', 'codex', 'claude'].includes(d.defaultHarness) &&
-    (d.defaultMinionProfileId === null || typeof d.defaultMinionProfileId === 'string') &&
-    [d.codexModel, d.claudeModel].every(
+    typeof d.codexEnabled === 'boolean' &&
+    typeof d.claudeEnabled === 'boolean' &&
+    [d.burrowModel, d.codexModel, d.claudeModel].every(
       (m) => m === null || (m && typeof m.connectionId === 'string' && typeof m.model === 'string'),
     );
   if (
     !result ||
     !result.ok ||
     !defaults(result) ||
-    (agent &&
-      (typeof result.overrideEnabled !== 'boolean' ||
-        !result.profileOverrides ||
-        typeof result.profileOverrides !== 'object' ||
-        Array.isArray(result.profileOverrides) ||
-        !defaults(result.effective)))
+    (agent && (typeof result.overrideEnabled !== 'boolean' || !defaults(result.effective)))
   )
     throw new Error('Invalid minion settings response.');
   return result;
@@ -71,19 +69,16 @@ export function MinionSettings({
 }) {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
-  const [profiles, setProfiles] = useState<MinionProfile[]>([]);
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [revision, setRevision] = useState(0);
   const owner = useRef<object | null>(null);
   const saving = useRef(false);
   const navigate = useUnsavedNavigation();
   const path = agentId
     ? `/api/agents/${encodeURIComponent(agentId)}/minion-settings`
     : '/api/settings/minion-settings';
-  const rosterPath = `/api/settings/minions${agentId ? `?agentId=${encodeURIComponent(agentId)}` : ''}`;
   useEffect(() => {
     const token = {};
     owner.current = token;
@@ -95,10 +90,6 @@ export function MinionSettings({
     saving.current = false;
     void (async () => {
       try {
-        // Roster reads reconcile legacy settings before reading the saved default.
-        const roster = await api<{ ok: boolean; profiles: MinionProfile[] }>(rosterPath, {
-          signal: controller.signal,
-        });
         const [settings, catalog] = await Promise.all([
           api<Settings>(path, { signal: controller.signal }),
           api<{ connections: ModelConnection[] }>('/api/settings/model-connections', {
@@ -106,12 +97,11 @@ export function MinionSettings({
           }),
         ]);
         validate(settings, !!agentId);
-        if (!roster.ok || !Array.isArray(roster.profiles) || !Array.isArray(catalog.connections))
+        if (!Array.isArray(catalog.connections))
           throw new Error('Invalid minion catalog response.');
         if (owner.current !== token) return;
         setSaved(settings);
         setDraft(settings);
-        setProfiles(roster.profiles);
         setConnections(catalog.connections);
       } catch (e) {
         if (owner.current === token) setError(String(e));
@@ -121,7 +111,7 @@ export function MinionSettings({
       owner.current = null;
       controller.abort();
     };
-  }, [path, rosterPath, agentId, retry]);
+  }, [path, agentId, retry]);
   const patch = Object.fromEntries(
     fields
       .filter((key) => canonical(draft?.[key]) !== canonical(saved?.[key]))
@@ -172,19 +162,14 @@ export function MinionSettings({
   }
   const valid =
     !draft ||
-    (['codex', 'claude'] as const).every((h) => {
-      if (
-        !(`${h}Model` in patch) &&
-        !('defaultHarness' in patch && draft.defaultHarness === h && !draft.defaultMinionProfileId)
-      )
-        return true;
+    (['burrow', 'codex', 'claude'] as const).every((h) => {
+      if (!(`${h}Model` in patch)) return true;
       const model = draft[`${h}Model`];
       return (
-        (!model && draft.defaultHarness !== h) ||
-        (!!model &&
-          minionProviders(connections, h).some(
-            (p) => p.id === model.connectionId && p.models.includes(model.model),
-          ))
+        !model ||
+        minionProviders(connections, h).some(
+          (p) => p.id === model.connectionId && p.models.includes(model.model),
+        )
       );
     });
   const save = async () => !dirty || (valid && (await write(patch)));
@@ -200,6 +185,39 @@ export function MinionSettings({
   const change = (body: Partial<Defaults>) => setDraft((d) => (d ? { ...d, ...body } : d));
   const enabled = !agentId || saved?.overrideEnabled === true;
   const shown = enabled ? draft : saved?.effective;
+  const nativeEditor = (
+    <fieldset disabled={busy || !enabled} className="minion-model-settings">
+      {(['codex', 'claude'] as const).map((h) => {
+        const label = h === 'codex' ? 'Codex' : 'Claude';
+        return (
+          <div key={h}>
+            <h3>{label} defaults</h3>
+            <label className="minion-default-enabled">
+              <input
+                type="checkbox"
+                checked={shown?.[`${h}Enabled`] ?? false}
+                onChange={(e) => change({ [`${h}Enabled`]: e.target.checked })}
+              />
+              {label} Enabled
+            </label>
+            <ProviderModelFields
+              providers={minionProviders(connections, h)}
+              connectionId={shown?.[`${h}Model`]?.connectionId}
+              model={shown?.[`${h}Model`]?.model}
+              providerLabel={`${label} provider`}
+              modelLabel={`${label} model`}
+              inheritLabel="No native model configured"
+              onChange={(connectionId, model) =>
+                change({
+                  [`${h}Model`]: connectionId ? { connectionId, model: model ?? '' } : null,
+                })
+              }
+            />
+          </div>
+        );
+      })}
+    </fieldset>
+  );
   const defaultEditor = (
     <fieldset disabled={busy || !enabled} className="minion-model-settings">
       <Field label="Maximum minion depth">
@@ -222,52 +240,21 @@ export function MinionSettings({
           <option value="claude">Claude</option>
         </select>
       </Field>
-      {(['codex', 'claude'] as const).map((h) => (
-        <ProviderModelFields
-          key={h}
-          providers={minionProviders(connections, h)}
-          connectionId={shown?.[`${h}Model`]?.connectionId}
-          model={shown?.[`${h}Model`]?.model}
-          providerLabel={`${h === 'codex' ? 'Codex' : 'Claude'} provider`}
-          modelLabel={`${h === 'codex' ? 'Codex' : 'Claude'} model`}
-          inheritLabel="No native model configured"
-          onChange={(connectionId, model) =>
-            change({
-              [`${h}Model`]: connectionId ? { connectionId, model: model ?? '' } : null,
-            })
-          }
-        />
-      ))}
-      <Field label="Default minion profile">
-        <select
-          value={shown?.defaultMinionProfileId ?? ''}
-          onChange={(e) => change({ defaultMinionProfileId: e.target.value || null })}
-        >
-          <option value="">Use default minion type</option>
-          {shown?.defaultMinionProfileId &&
-            !profiles.some((p) => p.id === shown.defaultMinionProfileId) && (
-              <option value={shown.defaultMinionProfileId}>
-                Missing profile · {shown.defaultMinionProfileId}
-              </option>
-            )}
-          {profiles.map((p) => (
-            <option
-              key={p.id}
-              value={p.id}
-              disabled={!p.enabled && p.id !== shown?.defaultMinionProfileId}
-            >
-              {p.name}
-              {p.enabled ? '' : ' (disabled)'}
-            </option>
-          ))}
-        </select>
-      </Field>
-      {shown?.defaultMinionProfileId &&
-        !profiles.some((p) => p.id === shown.defaultMinionProfileId && p.enabled) && (
-          <p role="alert">Default profile is missing or disabled. Spawning is blocked.</p>
-        )}
+      <h3>Burrow defaults</h3>
+      <ProviderModelFields
+        providers={minionProviders(connections, 'burrow')}
+        connectionId={shown?.burrowModel?.connectionId}
+        model={shown?.burrowModel?.model}
+        providerLabel="Burrow provider"
+        modelLabel="Burrow model"
+        inheritLabel="Inherit parent turn model"
+        onChange={(connectionId, model) =>
+          change({ burrowModel: connectionId ? { connectionId, model: model ?? '' } : null })
+        }
+      />
+      {!overflowTarget && nativeEditor}
       {!valid && enabled && (
-        <p role="alert">Choose an enabled eligible native model before saving.</p>
+        <p role="alert">Choose an enabled eligible provider and model before saving.</p>
       )}
       <button
         type="button"
@@ -292,7 +279,7 @@ export function MinionSettings({
         {saved && draft && (
           <>
             {agentId && (
-              <label className="minion-profile-enabled">
+              <label className="minion-default-enabled">
                 <input
                   type="checkbox"
                   checked={saved.overrideEnabled}
@@ -300,22 +287,7 @@ export function MinionSettings({
                   onChange={(e) => {
                     const next = e.target.checked;
                     navigate(() => {
-                      void (async () => {
-                        if (await write({ overrideEnabled: next })) {
-                          setRevision((n) => n + 1);
-                          const token = owner.current;
-                          try {
-                            const roster = await api<{ ok: boolean; profiles: MinionProfile[] }>(
-                              rosterPath,
-                            );
-                            if (!roster.ok || !Array.isArray(roster.profiles))
-                              throw new Error('Invalid effective minion roster response.');
-                            if (owner.current === token) setProfiles(roster.profiles);
-                          } catch (e) {
-                            if (owner.current === token) setError(String(e));
-                          }
-                        }
-                      })();
+                      void write({ overrideEnabled: next });
                     });
                   }}
                 />
@@ -323,50 +295,17 @@ export function MinionSettings({
               </label>
             )}
             {agentId && !enabled && (
-              <p>Inheriting global defaults and specialists. Saved overrides are preserved.</p>
+              <p>Inheriting global defaults. Saved overrides are preserved.</p>
             )}
-            {enabled && agentId && overflowTarget
-              ? createPortal(defaultEditor, overflowTarget)
-              : defaultEditor}
+            {defaultEditor}
+            {overflowTarget &&
+              createPortal(
+                <SettingSection title="Native minion defaults">{nativeEditor}</SettingSection>,
+                overflowTarget,
+              )}
           </>
         )}
       </SettingSection>
-      {saved && enabled && (
-        <MinionProfiles
-          key={`${path}:${revision}`}
-          agentId={agentId}
-          overflowTarget={overflowTarget}
-          profileOverrides={saved.profileOverrides}
-          onProfilesChanged={setProfiles}
-          onSaveOverride={
-            agentId
-              ? async (id, body) => {
-                  const token = owner.current;
-                  const result = await write({
-                    profileOverrides: {
-                      ...saved.profileOverrides,
-                      [id]: { ...saved.profileOverrides?.[id], ...body },
-                    },
-                  });
-                  if (result && owner.current === token)
-                    setProfiles((items) =>
-                      items.map((p) =>
-                        p.id === id
-                          ? {
-                              ...p,
-                              ...body,
-                              id: p.id,
-                              enabled: p.enabled && (body.enabled ?? p.enabled),
-                            }
-                          : p,
-                      ),
-                    );
-                  return result;
-                }
-              : undefined
-          }
-        />
-      )}
     </>
   );
 }

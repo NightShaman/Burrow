@@ -1,7 +1,8 @@
 import './minionProfiles.css';
 import { useEffect, useRef, useState } from 'react';
 import { api, type ModelConnection } from '../../app/api';
-import type { SavedProvider } from '../../app/types';
+import { minionProviders } from './minionProviders';
+export { minionProviders } from './minionProviders';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 import { ProviderModelFields } from './ProviderModelFields';
@@ -46,35 +47,6 @@ const empty = (): MinionProfile => ({
   executionHostId: null,
   instructions: '',
 });
-export function minionProviders(
-  connections: ModelConnection[],
-  harness: MinionProfile['harness'],
-): SavedProvider[] {
-  return connections
-    .filter(
-      (c) =>
-        c.enabled !== false &&
-        (harness === 'burrow' ||
-          (harness === 'codex'
-            ? (c.apiType === 'openai-lb' && c.codexEligible === true) ||
-              (['openai-responses', 'openai-chat-completions'].includes(c.apiType) &&
-                c.auth?.type?.toLowerCase() === 'oauth' &&
-                c.auth?.provider?.toLowerCase() === 'openai')
-            : (c.apiType === 'anthropic-lb' && c.claudeEligible === true) ||
-              (c.apiType === 'anthropic-messages' &&
-                c.auth?.type?.toLowerCase() === 'oauth' &&
-                ['anthropic', 'claude'].includes(c.auth?.provider?.toLowerCase() ?? '')))),
-    )
-    .map((c) => ({
-      id: c.id,
-      provider: c.provider,
-      apiType: c.apiType,
-      url: c.baseUrl,
-      apiKey: '',
-      models: c.models.filter((m) => m.selected !== false).map((m) => m.id),
-      modelLabels: Object.fromEntries(c.models.map((m) => [m.id, m.displayName ?? m.id])),
-    }));
-}
 export function MinionProfiles({
   agentId,
   defaultOnly = false,

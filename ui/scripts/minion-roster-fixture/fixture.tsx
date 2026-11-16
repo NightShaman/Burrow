@@ -12,7 +12,9 @@ const defaults = {
   defaultHarness: 'burrow',
   codexModel: { connectionId: 'openai', model: 'gpt-5.3-codex' },
   claudeModel: { connectionId: 'anthropic', model: 'claude-sonnet-4-6' },
-  defaultMinionProfileId: null,
+  burrowModel: null,
+  codexEnabled: true,
+  claudeEnabled: false,
 };
 let settings = {
   ok: true,
@@ -22,35 +24,6 @@ let settings = {
   effective: defaults,
 };
 (window as any).fixtureRequests = [];
-const profiles = [
-  {
-    id: 'research',
-    name: 'Research scout',
-    harness: 'burrow',
-    enabled: true,
-    model: null,
-    executionHostId: null,
-    instructions: 'Investigate independently. Cite direct evidence and report concise findings.',
-  },
-  {
-    id: 'codex',
-    name: 'Implementation specialist',
-    harness: 'codex',
-    enabled: true,
-    model: { connectionId: 'openai', model: 'gpt-5.3-codex' },
-    executionHostId: 'workstation',
-    instructions: 'Make focused changes and run targeted verification.',
-  },
-  {
-    id: 'claude',
-    name: 'Design reviewer',
-    harness: 'claude',
-    enabled: false,
-    model: { connectionId: 'anthropic', model: 'claude-sonnet-4-6' },
-    executionHostId: null,
-    instructions: '',
-  },
-];
 window.fetch = async (input, options) => {
   const path = String(input);
   (window as any).fixtureRequests.push({
@@ -59,6 +32,9 @@ window.fetch = async (input, options) => {
     body: options?.body,
   });
   if (path.endsWith('/minion-settings')) {
+    if (mode === 'loading') await new Promise(() => {});
+    if (mode === 'error')
+      return Response.json({ error: 'Settings temporarily unavailable' }, { status: 503 });
     if (options?.method === 'PUT') {
       if (mode === 'pending') await new Promise(() => {});
       if (mode === 'save-error')
@@ -73,21 +49,6 @@ window.fetch = async (input, options) => {
       agent: { id: 'fixture', name: 'Fixture agent', enabled: true },
     });
 
-  if (path.startsWith('/api/settings/minions')) {
-    if (mode === 'loading') await new Promise(() => {});
-    if (mode === 'error')
-      return Response.json({ error: 'Roster service temporarily unavailable' }, { status: 503 });
-    if (options?.method === 'PUT' || options?.method === 'POST') {
-      await new Promise((r) => setTimeout(r, mode === 'pending' ? 60000 : 300));
-      if (mode === 'save-error')
-        return Response.json({ error: 'Profile update rejected; please retry.' }, { status: 503 });
-      return Response.json({
-        ok: true,
-        profile: { ...JSON.parse(String(options.body)), id: path.split('/').pop() },
-      });
-    }
-    return Response.json({ ok: true, profiles });
-  }
   if (path === '/api/settings/model-connections')
     return Response.json({
       connections: [
