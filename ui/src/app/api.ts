@@ -169,7 +169,11 @@ export type RuntimeModel = {
 };
 
 export type AnthropicUsageWindow = { key: string; usedPercent: number; resetAt?: string | null };
-export type AnthropicUsage = { windows: AnthropicUsageWindow[] };
+export type AnthropicFullResets = { availableCount: number; nearestExpiresAt: string | null };
+export type AnthropicUsage = {
+  windows: AnthropicUsageWindow[];
+  fullResets?: AnthropicFullResets | null;
+};
 export type OpenAiUsageWindow = {
   key: string;
   label: string;

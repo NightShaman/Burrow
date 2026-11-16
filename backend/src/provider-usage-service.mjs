@@ -114,6 +114,26 @@ function anthropicConnectionCandidate(connection = {}) {
     };
   }
 
+  function sanitizeAnthropicFullResets(raw) {
+    if (!raw || raw.eligible !== true || !Array.isArray(raw.grants)) return null;
+    let availableCount = 0, nearestExpiresAt = null;
+    const now = clock();
+    for (const grant of raw.grants) {
+      if (!grant || !Array.isArray(grant.clears)) return null;
+      // type:"full" also describes Fable grants. Scope, not marketing labels, distinguishes them.
+      if (!grant.clears.includes('five_hour') || !grant.clears.includes('seven_day')) continue;
+      const starts = Date.parse(grant.starts_at), ends = Date.parse(grant.ends_at);
+      if (!Number.isSafeInteger(grant.resets_left) || grant.resets_left < 0 ||
+          typeof grant.paused !== 'boolean' || !Number.isFinite(starts) || !Number.isFinite(ends) || ends <= starts) return null;
+      if (grant.paused || grant.resets_left === 0 || starts > now || ends <= now) continue;
+      availableCount += grant.resets_left;
+      if (!Number.isSafeInteger(availableCount)) return null;
+      const expiry = new Date(ends).toISOString();
+      if (!nearestExpiresAt || expiry < nearestExpiresAt) nearestExpiresAt = expiry;
+    }
+    return { availableCount, nearestExpiresAt };
+  }
+
   function sanitizeAnthropicUsage(data = {}) {
     const windows = ['five_hour', 'seven_day', 'seven_day_sonnet', 'seven_day_opus', 'seven_day_oauth_apps']
       .map((key) => sanitizeAnthropicUsageWindow(key, data?.[key]))
@@ -121,6 +141,7 @@ function anthropicConnectionCandidate(connection = {}) {
     const extra = data?.extra_usage && typeof data.extra_usage === 'object' ? data.extra_usage : null;
     return {
       windows,
+      fullResets: sanitizeAnthropicFullResets(data.cedar_ember),
       exhausted: exhaustedFromWindows(windows),
       extraUsage: extra ? {
         isEnabled: Boolean(extra.is_enabled ?? extra.isEnabled),
@@ -268,7 +289,10 @@ function anthropicConnectionCandidate(connection = {}) {
           cached = false;
           let response;
           try {
-            response = await fetchImpl(`${source.origin}/api/oauth/usage`, { headers:{ accept:'application/json', authorization:`Bearer ${source.token}`, 'anthropic-beta':'oauth-2025-04-20' }, signal:AbortSignal.timeout(10_000) });
+            response = await fetchImpl(`${source.origin}/api/oauth/usage?cedar_ember=1`, { headers:{ accept:'application/json', authorization:`Bearer ${source.token}`, 'anthropic-beta':'oauth-2025-04-20', 'user-agent':'claude-cli/2.1.325 (external, cli)' }, signal:AbortSignal.timeout(10_000) });
+            if (response.status === 400 || response.status === 403) {
+              response = await fetchImpl(`${source.origin}/api/oauth/usage`, { headers:{ accept:'application/json', authorization:`Bearer ${source.token}`, 'anthropic-beta':'oauth-2025-04-20' }, signal:AbortSignal.timeout(10_000) });
+            }
             if (!response.ok) throw Object.assign(new Error('upstream'), { status:response.status });
             const data = await response.json();
             if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('malformed'), { malformed:true });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import {
   api,
   type AnthropicUsage,
+  type AnthropicFullResets,
   type OpenAiUsage,
   type OpenAiAccountStatus,
 } from '../../app/api';
@@ -26,6 +27,7 @@ export type AccountUsageCard = {
   state: 'loading' | 'ready' | 'error';
   bars: UsageBar[];
   accountStatus?: OpenAiAccountStatus;
+  fullResets?: AnthropicFullResets | null;
   clock?: ServerClock | null;
   error?: string;
   sample?: { ageMs: number; receivedAt: number } | null;
@@ -171,6 +173,7 @@ function anthropicCard(base: AccountUsageCard, result: AnthropicUsageResponse): 
   return {
     ...base,
     clock,
+    fullResets: failed ? null : (usage?.fullResets ?? null),
     state: failed ? 'error' : 'ready',
     bars: usage ? anthropicBars(usage) : 'lastSuccess' in result ? [] : base.bars,
     sample:
@@ -287,6 +290,7 @@ export function useAccountUsage(
               } else {
                 // A network failure cannot renew a sample or a cooldown.
                 next.rateLimited = false;
+                next.fullResets = null;
               }
             }
           }
@@ -374,6 +378,46 @@ function UsageMeter({
       <small className="account-reset-time" aria-hidden={!bar.resetAt}>
         {bar.resetAt ? (now === null ? '—' : formatResetIn(bar.resetAt, now)) : '\u00a0'}
       </small>
+    </div>
+  );
+}
+
+export function AnthropicResetInventory({
+  inventory,
+  now,
+}: {
+  inventory?: AnthropicFullResets | null;
+  now: number | null;
+}) {
+  if (
+    !inventory ||
+    !Number.isSafeInteger(inventory.availableCount) ||
+    inventory.availableCount < 0 ||
+    (inventory.nearestExpiresAt !== null &&
+      !Number.isFinite(Date.parse(inventory.nearestExpiresAt)))
+  )
+    return null;
+  const expiry = inventory.nearestExpiresAt;
+  const expired = expiry !== null && now !== null && Date.parse(expiry) <= now;
+  return (
+    <div className="account-resets">
+      <div className="account-resets-row">
+        <span
+          className="account-resets-summary"
+          title={expiry ? `Earliest expiry: ${new Date(expiry).toLocaleString()}` : undefined}
+        >
+          <span>
+            {expired ? 'Full resets awaiting refresh' : `${inventory.availableCount} full resets`}
+          </span>
+          {!expired && inventory.availableCount > 0 && (
+            <small>
+              {expiry
+                ? `expires ${now === null ? '—' : formatResetIn(expiry, now)}`
+                : 'expiry unknown'}
+            </small>
+          )}
+        </span>
+      </div>
     </div>
   );
 }
@@ -489,6 +533,12 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
                     />
                   ))}
                 </div>
+              )}
+              {card.vendor === 'Anthropic' && (
+                <AnthropicResetInventory
+                  inventory={card.fullResets}
+                  now={serverNow(card.clock, now)}
+                />
               )}
               {card.vendor === 'OpenAI' && (
                 <OpenAiResets
