@@ -213,7 +213,13 @@ function run(command, args, { cwd, timeoutMs = 20_000, killAfterMs = 1_000, maxS
       terminate();
     }, Math.max(1, Number(timeoutMs) || 20_000));
     if (signal?.aborted) onAbort();
-    child.stdout.on('data', (chunk) => { appendTail(stdoutState, chunk, captureLimit); });
+    // stdout is protocol data, not a diagnostic tail. Preserve it in full for
+    // discovery, ordinary tool JSON, and full-content results alike.
+    child.stdout.on('data', (chunk) => {
+      stdoutState.chunks.push(chunk);
+      stdoutState.originalBytes += chunk.length;
+      stdoutState.capturedBytes += chunk.length;
+    });
     child.stderr.on('data', (chunk) => { appendTail(stderrState, chunk, captureLimit); });
     child.once('error', (error) => finish(() => reject(signal?.aborted ? signal.reason : error)));
     child.once('close', (code) => finish(() => {
@@ -358,7 +364,7 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
         ? [fileURLToPath(new URL('./mcporter-content-launcher.mjs', import.meta.url)), runtime.binary, configPath, toolName, JSON.stringify(toolArguments), connection.lifecycle || 'ephemeral']
         : ['call', `connection.${toolName}`, '--config', configPath, '--args', JSON.stringify(toolArguments), '--output', 'json'];
       signal?.throwIfAborted();
-      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, env: runtime.env, signal, timeoutMs: 30_000, ...(preserveContentResults ? { maxStreamCaptureBytes: 32 * 1024 * 1024 } : {}), protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
+      output = await runCommand(command, args, { cwd: runtime.runtimeRoot, env: runtime.env, signal, timeoutMs: 30_000, protectedValues: [apiKey, ...Object.values(environmentVariables || {}), ...Object.values(headers || {})] });
     } catch (error) {
       // mcporter deliberately exits non-zero for a valid MCP `{ isError:
       // true }` result, while writing that result to stdout. Parse it before
@@ -368,8 +374,6 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       output = error.stdout;
     }
     signal?.throwIfAborted();
-    // Never turn a truncated image JSON tail into model-visible plain text.
-    if (preserveContentResults && /^\[\d+ earlier bytes omitted\]/.test(output)) throw new Error('mcp_response_too_large');
     try {
       const parsed = JSON.parse(output);
       const structuredFailure = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.isError === true || parsed.error || parsed.ok === false || parsed.success === false);
