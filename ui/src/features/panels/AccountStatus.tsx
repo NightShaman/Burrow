@@ -417,11 +417,7 @@ function UsageMeter({
 export function AnthropicResetInventory({
   inventory,
   now,
-  freshness,
-  inventoryAgeMs,
 }: {
-  freshness?: AnthropicUsage['fullResetsFreshness'];
-  inventoryAgeMs?: number;
   inventory?: AnthropicFullResets | null;
   now: number | null;
 }) {
@@ -441,19 +437,6 @@ export function AnthropicResetInventory({
       title={expiry ? `Earliest expiry: ${new Date(expiry).toLocaleString()}` : undefined}
     >
       <span>{expired ? 'Full resets awaiting refresh' : `${inventory.availableCount} Full`}</span>
-      {freshness && (
-        <small
-          title={
-            freshness.fetchedAt
-              ? `Inventory checked ${new Date(freshness.fetchedAt).toLocaleString()}`
-              : 'Inventory check time unknown'
-          }
-        >
-          {freshness.stale || inventoryAgeMs === undefined || inventoryAgeMs >= 30_000
-            ? 'Inventory stale'
-            : 'Inventory fresh'}
-        </small>
-      )}
       {!expired && inventory.availableCount > 0 && (
         <small>
           {expiry ? `expires ${now === null ? '—' : formatResetIn(expiry, now)}` : 'expiry unknown'}
@@ -582,13 +565,6 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
                   onUsageRefresh={() => setRevision((value) => value + 1)}
                 >
                   <AnthropicResetInventory
-                    freshness={card.fullResetsFreshness}
-                    inventoryAgeMs={
-                      card.fullResetsFreshness?.sampleAgeMs == null
-                        ? undefined
-                        : card.fullResetsFreshness.sampleAgeMs +
-                          Math.max(0, now - (card.inventoryReceivedAt ?? now))
-                    }
                     inventory={card.fullResets}
                     now={serverNow(card.clock, now)}
                   />

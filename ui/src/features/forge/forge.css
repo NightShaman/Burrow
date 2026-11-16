@@ -761,3 +761,35 @@
   width: 100%;
   height: 100%;
 }
+
+.forge-schematic {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  color: var(--accent);
+}
+.forge-etch-lines {
+  opacity: 0.24;
+  stroke-width: 1;
+}
+.forge-etch-energy {
+  opacity: 0.65;
+  stroke-dasharray: 24 650;
+  stroke-dashoffset: 0;
+}
+.forge-schematic-live .forge-etch-energy {
+  animation: forge-etch-flow 14s linear infinite;
+}
+@keyframes forge-etch-flow {
+  to {
+    stroke-dashoffset: -1348;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .forge-schematic-live .forge-etch-energy {
+    animation: none;
+  }
+}

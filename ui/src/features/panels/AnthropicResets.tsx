@@ -148,7 +148,7 @@ export function AnthropicResets({
           disabled={busy || locked}
           onClick={() => void activate()}
         >
-          {busy ? 'Checking / using' : 'Use Full reset'}
+          {busy ? 'Checking / using' : 'Use reset'}
         </button>
       </div>
       {(message || locked) && (

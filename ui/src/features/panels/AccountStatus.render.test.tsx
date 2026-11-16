@@ -168,6 +168,6 @@ it('keeps only the Anthropic subtitle while retaining OpenAI reset controls', as
   await waitFor(() => expect(screen.getAllByText('Unknown')).toHaveLength(2));
   expect(container.querySelectorAll('.account-top small')).toHaveLength(1);
   expect(container.querySelector('.account-top small')?.textContent).toBe('Anthropic');
-  expect(screen.getByRole('button', { name: 'Use reset' })).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: 'Use reset' })).toHaveLength(2);
   expect(container.querySelectorAll('.account-stack > .account-card')).toHaveLength(2);
 });

@@ -72,5 +72,40 @@ it('carries inventory through the existing Anthropic usage fetch only', async ()
   expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
     '/api/anthropic/oauth/usage?connectionId=inventory-integration',
   ]);
-  expect(screen.getByRole('button', { name: 'Use Full reset' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Use reset' })).toBeTruthy();
+});
+
+it('uses the OpenAI earliest-expiry hover without inventory freshness text or hover', async () => {
+  const expiry = '2030-01-01T01:00:00Z';
+  vi.mocked(api).mockResolvedValue({
+    usage: {
+      windows: [],
+      fullResets: { availableCount: 3, nearestExpiresAt: expiry },
+      fullResetsFreshness: { fetchedAt: '2030-01-01T00:00:00Z', sampleAgeMs: 180000, stale: true },
+    },
+  });
+  const { container } = render(
+    <ConfirmProvider>
+      <AccountStatus
+        providers={[
+          {
+            id: 'parity',
+            provider: 'Anthropic',
+            apiType: 'anthropic-messages',
+            url: '',
+            apiKey: '',
+            models: [],
+            oauthConfigured: true,
+          },
+        ]}
+      />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('3 Full')).toBeTruthy());
+  expect(container.querySelector('.account-resets-summary')?.getAttribute('title')).toBe(
+    `Earliest expiry: ${new Date(expiry).toLocaleString()}`,
+  );
+  expect(container.textContent).not.toMatch(/Inventory (fresh|stale)/);
+  expect(container.querySelector('[title^="Inventory"]')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Use reset' })).toBeTruthy();
 });

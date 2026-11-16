@@ -29,7 +29,7 @@ function setup(id = `anthropic-${++sequence}`) {
   return { ...view, refresh, id };
 }
 async function confirm() {
-  fireEvent.click(screen.getByRole('button', { name: 'Use Full reset' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Use reset' }));
   await screen.findByRole('alertdialog');
   expect(posts()).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: 'Consume one Full reset' }));
@@ -38,7 +38,7 @@ it('fetches only manually and cancellation never posts', async () => {
   vi.mocked(api).mockResolvedValue(inventory);
   setup();
   expect(api).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Use Full reset' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Use reset' }));
   await screen.findByRole('alertdialog');
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
