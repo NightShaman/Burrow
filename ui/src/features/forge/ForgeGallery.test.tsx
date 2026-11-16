@@ -174,3 +174,91 @@ it('passes video media through the shared renderer and allows moving and deletin
   expect(screen.getByLabelText('Move Outfit.mp4')).toBeTruthy();
   expect(screen.getByLabelText('Delete Outfit.mp4')).toBeTruthy();
 });
+
+const batchImages = [
+  image,
+  { ...image, artifactId: 'second', artifact: { ...image.artifact, name: 'Landscape' } },
+];
+const batchFolders = [{ id: 'folder', name: 'Saved', parentId: null }];
+
+it('selects with checkboxes, cancels without writes and clears selection on navigation', async () => {
+  api.mockResolvedValue({ folders: batchFolders, images: batchImages });
+  renderGallery();
+  await screen.findByAltText('Portrait');
+  expect(screen.getByRole('button', { name: 'Move selected' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select Portrait' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select Landscape' }));
+  expect(screen.getByText('2 selected')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Move selected' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(api.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
+  expect(screen.getByText('2 selected')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Saved/ }));
+  expect(screen.getByText('0 selected')).toBeTruthy();
+});
+
+it('moves a selection, retains only failed items and retries without replaying successes', async () => {
+  let fail = true;
+  api.mockImplementation(async (path, init) => {
+    if (!init?.method) return { folders: batchFolders, images: batchImages };
+    if (path.endsWith('/second') && fail) throw Error('offline');
+    return { ok: true };
+  });
+  renderGallery();
+  await screen.findByAltText('Portrait');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select Portrait' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select Landscape' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Move selected' }));
+  fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'folder' } });
+  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  await screen.findByText(
+    '1 moved; 1 could not be moved. Retry will move only the remaining items.',
+  );
+  expect(screen.queryByAltText('Portrait')).toBeNull();
+  expect(screen.getByAltText('Landscape')).toBeTruthy();
+  expect(screen.getByText('1 selected')).toBeTruthy();
+  fail = false;
+  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.queryByAltText('Landscape')).toBeNull();
+  const writes = api.mock.calls.filter(([, init]) => init?.method === 'PUT');
+  expect(writes.map(([path]) => path)).toEqual([
+    '/api/forge/gallery/images/job/art',
+    '/api/forge/gallery/images/job/second',
+    '/api/forge/gallery/images/job/second',
+  ]);
+  expect(writes.every(([, init]) => JSON.parse(init.body).folderId === 'folder')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: /Saved/ }));
+  await screen.findByAltText('Portrait');
+  expect(screen.getByAltText('Landscape')).toBeTruthy();
+});
+
+it('locks batch controls while pending and supports moving back to the gallery root', async () => {
+  let resolve!: (value: unknown) => void;
+  api.mockImplementation(async (_path, init) => {
+    if (!init?.method)
+      return {
+        folders: batchFolders,
+        images: batchImages.map((item) => ({ ...item, folderId: 'folder' })),
+      };
+    return new Promise((done) => {
+      resolve = done;
+    });
+  });
+  renderGallery();
+  await screen.findByText('Saved');
+  fireEvent.click(screen.getByRole('button', { name: /Saved/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select Portrait' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Move selected' }));
+  fireEvent.change(screen.getByLabelText('Destination'), { target: { value: '' } });
+  fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
+  expect(screen.getByRole('button', { name: 'Moving…' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByLabelText('Destination').hasAttribute('disabled')).toBe(true);
+  resolve({ ok: true });
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(api).toHaveBeenCalledWith(
+    '/api/forge/gallery/images/job/art',
+    expect.objectContaining({ method: 'PUT', body: JSON.stringify({ folderId: null }) }),
+  );
+});

@@ -67,7 +67,14 @@ export function ForgeGallery({
   const [current, setCurrent] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [moving, setMoving] = useState<Picture | null>(null);
+  const [moving, setMoving] = useState<Picture[] | null>(null);
+  const [batchMove, setBatchMove] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const navigate = (folderId: string | null) => {
+    if (busy) return;
+    setCurrent(folderId);
+    setSelected([]);
+  };
   const [destination, setDestination] = useState('');
   const ancestors: Folder[] = [];
   let cursor = current;
@@ -93,7 +100,7 @@ export function ForgeGallery({
       <header className="forge-gallery-toolbar">
         <nav aria-label="Gallery folders">
           <button
-            onClick={() => setCurrent(null)}
+            onClick={() => navigate(null)}
             aria-current={current === null ? 'page' : undefined}
           >
             Gallery
@@ -102,7 +109,7 @@ export function ForgeGallery({
             <span key={folder.id}>
               <span aria-hidden="true"> / </span>
               <button
-                onClick={() => setCurrent(folder.id)}
+                onClick={() => navigate(folder.id)}
                 aria-current={folder.id === current ? 'page' : undefined}
               >
                 {folder.name}
@@ -120,6 +127,23 @@ export function ForgeGallery({
           ＋ New folder
         </button>
       </header>
+      <div className="forge-gallery-selection" aria-label="Gallery selection">
+        <span role="status">{selected.length} selected</span>
+        <button
+          disabled={loading || busy || !selected.length}
+          onClick={() => {
+            setMoving(visible.filter((picture) => selected.includes(picture.id)));
+            setBatchMove(true);
+            setDestination(current ?? '');
+            setError('');
+          }}
+        >
+          Move selected
+        </button>
+        <button disabled={busy || !selected.length} onClick={() => setSelected([])}>
+          Clear selection
+        </button>
+      </div>
       {error && !creating && !moving && (
         <p role="alert">
           {error}{' '}
@@ -144,7 +168,7 @@ export function ForgeGallery({
                   <button
                     className="forge-gallery-folder"
                     key={folder.id}
-                    onClick={() => setCurrent(folder.id)}
+                    onClick={() => navigate(folder.id)}
                   >
                     <span aria-hidden="true">▱</span>
                     <strong>{folder.name}</strong>
@@ -161,7 +185,25 @@ export function ForgeGallery({
             )}
             <div className="forge-gallery-pictures">
               {visible.map((picture) => (
-                <article className="forge-gallery-picture" key={picture.id}>
+                <article
+                  className={`forge-gallery-picture${selected.includes(picture.id) ? ' is-selected' : ''}`}
+                  key={picture.id}
+                >
+                  <label className="forge-gallery-select">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${picture.name}`}
+                      checked={selected.includes(picture.id)}
+                      disabled={busy}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setSelected((ids) =>
+                          checked ? [...ids, picture.id] : ids.filter((id) => id !== picture.id),
+                        );
+                      }}
+                    />
+                    Select
+                  </label>
                   <div className="forge-gallery-media">{picture.media}</div>
                   <footer>
                     <span title={picture.name}>{picture.name}</span>
@@ -169,7 +211,9 @@ export function ForgeGallery({
                       disabled={busy}
                       aria-label={`Move ${picture.name}`}
                       onClick={() => {
-                        setMoving(picture);
+                        setMoving([picture]);
+                        setBatchMove(false);
+                        setError('');
                         setDestination(current ?? '');
                       }}
                     >
@@ -196,6 +240,7 @@ export function ForgeGallery({
                             `/api/forge/gallery/images/${encodeURIComponent(picture.jobId)}/${encodeURIComponent(picture.artifactId)}`,
                             { method: 'DELETE' },
                           );
+                          setSelected((ids) => ids.filter((id) => id !== picture.id));
                           setCatalog((data) => ({
                             ...data,
                             images: data.images.filter(
@@ -298,7 +343,7 @@ export function ForgeGallery({
             className="forge-gallery-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label="Move image"
+            aria-label={batchMove ? 'Move selected' : 'Move image'}
             onClose={() => {
               if (!busy) {
                 setMoving(null);
@@ -312,32 +357,48 @@ export function ForgeGallery({
                 if (busy) return;
                 setBusy(true);
                 setError('');
-                try {
-                  await owned.api(
-                    `/api/forge/gallery/images/${encodeURIComponent(moving.jobId)}/${encodeURIComponent(moving.artifactId)}`,
-                    { method: 'PUT', body: JSON.stringify({ folderId: destination || null }) },
-                  );
-                  setCatalog((data) => ({
-                    ...data,
-                    images: data.images.map((image) =>
-                      `${image.jobId}:${image.artifactId}` === moving.id
-                        ? { ...image, folderId: destination || null }
-                        : image,
+                const results = await Promise.allSettled(
+                  moving.map((picture) =>
+                    owned.api(
+                      `/api/forge/gallery/images/${encodeURIComponent(picture.jobId)}/${encodeURIComponent(picture.artifactId)}`,
+                      { method: 'PUT', body: JSON.stringify({ folderId: destination || null }) },
                     ),
-                  }));
+                  ),
+                );
+                const succeeded = new Set(
+                  moving
+                    .filter((_, index) => results[index].status === 'fulfilled')
+                    .map((picture) => picture.id),
+                );
+                const failed = moving.filter((picture) => !succeeded.has(picture.id));
+                setCatalog((data) => ({
+                  ...data,
+                  images: data.images.map((image) =>
+                    succeeded.has(`${image.jobId}:${image.artifactId}`)
+                      ? { ...image, folderId: destination || null }
+                      : image,
+                  ),
+                }));
+                setSelected((ids) => ids.filter((id) => !succeeded.has(id)));
+                if (failed.length) {
+                  setMoving(failed);
+                  setError(
+                    batchMove
+                      ? `${succeeded.size} moved; ${failed.length} could not be moved. Retry will move only the remaining items.`
+                      : 'Could not move the image. Please try again.',
+                  );
+                } else {
                   setMoving(null);
-                } catch {
-                  setError('Could not move the image. Please try again.');
-                } finally {
-                  setBusy(false);
                 }
+                setBusy(false);
               }}
             >
-              <h2>Move image</h2>
+              <h2>{batchMove ? `Move ${moving.length} selected items` : 'Move image'}</h2>
               {error && <p role="alert">{error}</p>}
               <label className="forge-field">
                 Destination
                 <select
+                  disabled={busy}
                   value={destination}
                   onChange={(event) => setDestination(event.target.value)}
                 >
@@ -360,7 +421,9 @@ export function ForgeGallery({
                 >
                   Cancel
                 </button>
-                <button disabled={busy}>Move image</button>
+                <button disabled={busy}>
+                  {busy ? 'Moving…' : batchMove ? 'Move selected' : 'Move image'}
+                </button>
               </div>
             </form>
           </AccessibleModal>
