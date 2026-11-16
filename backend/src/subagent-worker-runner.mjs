@@ -1,4 +1,3 @@
-import { listMinionProfiles } from './minion-profiles.mjs';
 import { runCodexMinion } from './codex-minion-runner.mjs';
 import { runClaudeMinion } from './claude-minion-runner.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
@@ -642,7 +641,7 @@ async function runRegisteredSpawnSubagentChild({
       provenance: { source: 'spawn-subagent-child', reason: cancelled ? 'model_cancelled' : reason } });
     return result;
   };
-  const minionProfiles = await listMinionProfiles(parentExecutionContext?.stores?.metadata, owner?.agentId).then(result => result.profiles).catch(() => []);
+  const minionProfiles = [];
   const messages = normalizeProviderMessages([{ role: 'system', content: 'Internal subagent task. This isolated child request is not parent conversation history.' }, { role: 'user', content: prompt }]);
   await progress?.({ type: 'subagent-progress', phase: 'model-request', id });
   await recordLiveActivity({ kind: 'model', phase: 'model-request', label: 'Waiting for model response', model: modelConfig?.model || null }, 'model_request');

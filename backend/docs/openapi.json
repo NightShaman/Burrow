@@ -7222,8 +7222,14 @@
                     "defaultHarness": "burrow",
                     "codexModel": null,
                     "claudeModel": null,
-                    "defaultMinionProfileId": null
-                  }
+                    "defaultMinionProfileId": null,
+                    "burrowModel": null,
+                    "codexEnabled": false,
+                    "claudeEnabled": false
+                  },
+                  "burrowModel": null,
+                  "codexEnabled": false,
+                  "claudeEnabled": false
                 }
               }
             }
@@ -7331,8 +7337,14 @@
                     "defaultHarness": "burrow",
                     "codexModel": null,
                     "claudeModel": null,
-                    "defaultMinionProfileId": null
-                  }
+                    "defaultMinionProfileId": null,
+                    "burrowModel": null,
+                    "codexEnabled": false,
+                    "claudeEnabled": false
+                  },
+                  "burrowModel": null,
+                  "codexEnabled": false,
+                  "claudeEnabled": false
                 }
               }
             }
@@ -9477,7 +9489,10 @@
                   "defaultHarness": "burrow",
                   "codexModel": null,
                   "claudeModel": null,
-                  "defaultMinionProfileId": null
+                  "defaultMinionProfileId": null,
+                  "burrowModel": null,
+                  "codexEnabled": false,
+                  "claudeEnabled": false
                 }
               }
             }
@@ -9572,7 +9587,10 @@
                   "defaultHarness": "burrow",
                   "codexModel": null,
                   "claudeModel": null,
-                  "defaultMinionProfileId": null
+                  "defaultMinionProfileId": null,
+                  "burrowModel": null,
+                  "codexEnabled": false,
+                  "claudeEnabled": false
                 }
               }
             }
@@ -19333,10 +19351,20 @@
               },
               "additionalProperties": false
             }
+          },
+          "burrowModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection",
+            "description": "Nullable Burrow model override; null inherits parent model."
+          },
+          "codexEnabled": {
+            "type": "boolean"
+          },
+          "claudeEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": true,
-        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing. defaultMinionProfileId is nullable; omission preserves the saved default profile.",
+        "description": "Partial simple minion settings update. Omitted values are retained. Native enable flags are independent of defaultHarness. Legacy profile fields are compatibility-only and do not select normal dispatch defaults.",
         "anyOf": [
           {
             "type": "object",
@@ -19460,6 +19488,43 @@
               }
             },
             "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "burrowModel"
+            ],
+            "properties": {
+              "burrowModel": {
+                "$ref": "#/components/schemas/CodexMinionModelSelection",
+                "description": "Nullable Burrow model override; null inherits parent model."
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "codexEnabled"
+            ],
+            "properties": {
+              "codexEnabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "claudeEnabled"
+            ],
+            "properties": {
+              "claudeEnabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
           }
         ]
       },
@@ -19474,7 +19539,10 @@
           "defaultMinionProfileId",
           "overrideEnabled",
           "profileOverrides",
-          "effective"
+          "effective",
+          "burrowModel",
+          "codexEnabled",
+          "claudeEnabled"
         ],
         "properties": {
           "ok": {
@@ -19543,6 +19611,16 @@
           },
           "effective": {
             "$ref": "#/components/schemas/EffectiveMinionSettings"
+          },
+          "burrowModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection",
+            "description": "Nullable Burrow model override; null inherits parent model."
+          },
+          "codexEnabled": {
+            "type": "boolean"
+          },
+          "claudeEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -21290,10 +21368,20 @@
               "null"
             ],
             "minLength": 1
+          },
+          "burrowModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection",
+            "description": "Nullable Burrow model override; null inherits parent model."
+          },
+          "codexEnabled": {
+            "type": "boolean"
+          },
+          "claudeEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": true,
-        "description": "Provide any nonempty subset of maxDepth, defaultHarness, codexModel, claudeModel, including either model selection alone. Omitted fields retain saved values without revalidation. Each model selection is an independent complete connection/model pair or null to clear; unknown top-level fields are ignored. Invalid combined updates write nothing. defaultMinionProfileId is nullable; omission preserves the saved default profile.",
+        "description": "Partial simple minion settings update. Omitted values are retained. Native enable flags are independent of defaultHarness. Legacy profile fields are compatibility-only and do not select normal dispatch defaults.",
         "anyOf": [
           {
             "type": "object",
@@ -21358,6 +21446,43 @@
               }
             },
             "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "burrowModel"
+            ],
+            "properties": {
+              "burrowModel": {
+                "$ref": "#/components/schemas/CodexMinionModelSelection",
+                "description": "Nullable Burrow model override; null inherits parent model."
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "codexEnabled"
+            ],
+            "properties": {
+              "codexEnabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "required": [
+              "claudeEnabled"
+            ],
+            "properties": {
+              "claudeEnabled": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
           }
         ],
         "not": {
@@ -21383,7 +21508,10 @@
           "defaultHarness",
           "codexModel",
           "claudeModel",
-          "defaultMinionProfileId"
+          "defaultMinionProfileId",
+          "burrowModel",
+          "codexEnabled",
+          "claudeEnabled"
         ],
         "properties": {
           "ok": {
@@ -21408,6 +21536,16 @@
               "null"
             ],
             "minLength": 1
+          },
+          "burrowModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection",
+            "description": "Nullable Burrow model override; null inherits parent model."
+          },
+          "codexEnabled": {
+            "type": "boolean"
+          },
+          "claudeEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -21419,7 +21557,10 @@
           "defaultHarness",
           "codexModel",
           "claudeModel",
-          "defaultMinionProfileId"
+          "defaultMinionProfileId",
+          "burrowModel",
+          "codexEnabled",
+          "claudeEnabled"
         ],
         "properties": {
           "maxDepth": {
@@ -21440,6 +21581,16 @@
               "null"
             ],
             "minLength": 1
+          },
+          "burrowModel": {
+            "$ref": "#/components/schemas/CodexMinionModelSelection",
+            "description": "Nullable Burrow model override; null inherits parent model."
+          },
+          "codexEnabled": {
+            "type": "boolean"
+          },
+          "claudeEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

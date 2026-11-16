@@ -226,23 +226,28 @@ export async function executeSpawnSubagentTool({
   }
   const task = compactString(args.task || args.purpose || args.reason);
   const blockers = [];
-  const profileSet = await listMinionProfiles(executionContext?.stores?.metadata, executionContext?.agentId);
+  // Compatibility profiles are read only for an explicit legacy request.
+  const profileSet = args.minionProfileId
+    ? await listMinionProfiles(executionContext?.stores?.metadata, executionContext?.agentId)
+    : { profiles: [] };
   const settings = await readMinionSettings(executionContext?.stores?.metadata, executionContext?.agentId);
-  // An explicit profile wins; otherwise the agent default applies unless this
-  // call named an explicit harness. Unknown/disabled selections never fall back.
+  // Only an explicit legacy profile request selects a profile. Stored profile
+  // defaults must not override the simple effective settings.
   const selection = selectMinionProfile({
     profiles: profileSet.profiles,
-    settings,
+    settings: {},
     requestedProfileId: args.minionProfileId,
     requestedHarness: args.harness,
   });
   const profile = selection.profile;
   blockers.push(...selection.blockers);
   const harness = profile?.harness ?? args.harness ?? settings.defaultHarness;
+  if (['codex', 'claude'].includes(harness) && !settings[`${harness}Enabled`]) blockers.push(`${harness}_minions_disabled`);
+  const burrowSelection = profile?.model ?? settings.burrowModel;
   if (!['burrow', 'codex', 'claude'].includes(harness)) blockers.push('subagent_harness_invalid');
   if (!task) blockers.push('subagent_task_required');
   if (!dataRoot) blockers.push('subagent_data_root_required');
-  if (!['codex','claude'].includes(harness) && !modelConfig && !profile?.model) blockers.push('subagent_model_config_required');
+  if (!['codex','claude'].includes(harness) && !modelConfig && !burrowSelection) blockers.push('subagent_model_config_required');
 
   // A profile may pin an execution host. Resolve it before target validation so
   // the target is proven on the host that will actually run the child.
@@ -277,11 +282,11 @@ export async function executeSpawnSubagentTool({
     } catch (error) {
       blockers.push(error?.statusCode === 400 ? error.message : `${harness}_model_selection_unavailable`);
     }
-  } else if (harness === 'burrow' && profile?.model && !selection.blockers.length) {
+  } else if (harness === 'burrow' && burrowSelection && !selection.blockers.length) {
     try {
-      await validateBurrowProfileModel(executionContext?.stores?.models, profile.model);
+      await validateBurrowProfileModel(executionContext?.stores?.models, burrowSelection);
       childModelConfig = await resolveModelConfig({ stores: executionContext?.stores,
-        modelConnectionId: profile.model.connectionId, model: profile.model.model, abortSignal });
+        modelConnectionId: burrowSelection.connectionId, model: burrowSelection.model, abortSignal });
       if (requestedModel && requestedModel !== childModelConfig.model) {
         childModelConfig = null;
         blockers.push('burrow_model_override_unsupported');
@@ -290,7 +295,7 @@ export async function executeSpawnSubagentTool({
       childModelConfig = null;
       blockers.push(error?.message || 'burrow_model_selection_unavailable');
     }
-  } else if (modelConfig?.resolveChildModel) {
+  } else if (requestedModel && modelConfig?.resolveChildModel) {
     try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel || 'default'}`); }
   } else if (requestedModel) blockers.push(`subagent_model_unavailable:${requestedModel}`);
   const requestedModelProfile = compactString(args.modelProfile || args.model_profile || args.profile) || null;
