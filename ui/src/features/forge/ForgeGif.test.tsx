@@ -58,6 +58,7 @@ function setup(initialModels = models, initialSelections = {}) {
       <Forge selectedAgentId="a" sessionId="s" />
     </ConfirmProvider>,
   );
+  fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
   return (nextModels: typeof models) => {
     catalogModels = nextModels;
   };

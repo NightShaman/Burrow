@@ -109,6 +109,7 @@ function setup({
       <Forge selectedAgentId="smatchet" sessionId="s" />
     </ConfirmProvider>,
   );
+  fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
   return () => {
     catalog = { ...catalog, agentReferenceImages: [], operatorReferenceImage: null as any };
   };

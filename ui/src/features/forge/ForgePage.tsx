@@ -360,6 +360,7 @@ export function Forge({
   const owned = useOwnedApi();
   const api = owned.api;
   const [mode, setMode] = useState<'image' | 'video' | 'audio' | 'music'>('image');
+  const [showHome, setShowHome] = useState(true);
   const [showRecents, setShowRecents] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [models, setModels] = useState<ForgeModel[]>([]);
@@ -527,6 +528,7 @@ export function Forge({
         ? artifactReferences
         : [...artifactReferences, { jobId: job.id, artifactId: artifact.id }],
     });
+    setShowHome(false);
     setMode('video');
     setShowGallery(false);
     setShowRecents(false);
@@ -799,8 +801,12 @@ export function Forge({
     <main ref={machineRef} className="forge-page forge-machine">
       <header className="forge-heading">
         <div>
-          <h1>The Phantasm Forge</h1>
-          <p>Manufacture sights, sounds, and moving lies.</p>
+          {!showHome && (
+            <>
+              <h1>The Phantasm Forge</h1>
+              <p>Manufacture sights, sounds, and moving lies.</p>
+            </>
+          )}
         </div>
         <div
           className="forge-modes"
@@ -808,15 +814,29 @@ export function Forge({
           aria-label="Forge modes"
           onKeyDown={(event) => rovingKeys(event, '[role="tab"]')}
         >
+          <button
+            role="tab"
+            tabIndex={showHome ? 0 : -1}
+            aria-selected={showHome}
+            className={showHome ? 'active' : ''}
+            onClick={() => {
+              setShowHome(true);
+              setShowGallery(false);
+              setShowRecents(false);
+            }}
+          >
+            ✦<span>Home</span>
+          </button>
           {(['image', 'video', 'audio', 'music'] as const).map((item) => (
             <button
               key={item}
               role="tab"
-              tabIndex={!showGallery && !showRecents && mode === item ? 0 : -1}
-              aria-selected={!showGallery && !showRecents && mode === item}
-              className={!showGallery && !showRecents && mode === item ? 'active' : ''}
+              tabIndex={!showHome && !showGallery && !showRecents && mode === item ? 0 : -1}
+              aria-selected={!showHome && !showGallery && !showRecents && mode === item}
+              className={!showHome && !showGallery && !showRecents && mode === item ? 'active' : ''}
               onClick={() => {
                 setShowGallery(false);
+                setShowHome(false);
                 setMode(item);
                 setShowRecents(false);
               }}
@@ -832,6 +852,7 @@ export function Forge({
             className={!showGallery && showRecents ? 'active' : ''}
             onClick={() => {
               setShowGallery(false);
+              setShowHome(false);
               setShowRecents(true);
             }}
           >
@@ -842,7 +863,10 @@ export function Forge({
             tabIndex={showGallery ? 0 : -1}
             aria-selected={showGallery}
             className={showGallery ? 'active' : ''}
-            onClick={() => setShowGallery(true)}
+            onClick={() => {
+              setShowHome(false);
+              setShowGallery(true);
+            }}
           >
             ▧<span>Gallery</span>
           </button>
@@ -870,447 +894,479 @@ export function Forge({
           />
         </>
       )}
-      <div hidden={showGallery} className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}>
-        <canvas className="forge-seam-sparks" aria-hidden="true" />
-        <section className="forge-studio" hidden={showRecents}>
-          <div className="forge-panel-head">
-            <div>
-              <span className="eyebrow">CREATE</span>
-              <h2>{modeLabels[mode]} generation</h2>
-            </div>
-            <span className="forge-badge">
-              {availableModels.length} model{availableModels.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          <div className="forge-model-selectors">
-            <label className="forge-field">
-              <span>Provider</span>
-              <select
-                aria-label="Forge provider"
-                value={selectedProvider}
-                onChange={(event) => {
-                  const model = availableModels.find(
-                    (item) => item.connectionId === event.target.value,
-                  );
-                  if (model) void saveSelection(modelKey(model));
-                }}
-                disabled={loading || selectionSaving || !providers.length}
-              >
-                {selectedProvider &&
-                  !providers.some((provider) => provider.id === selectedProvider) && (
-                    <option value={selectedProvider}>
-                      {savedProviders.find((provider) => provider.id === selectedProvider)
-                        ?.provider ?? selectedProvider}{' '}
-                      (unavailable)
-                    </option>
-                  )}
-                {providers.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {provider.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="forge-field">
-              <span>Model</span>
-              <select
-                aria-label="Forge model"
-                value={selectedModel}
-                onChange={(event) => void saveSelection(event.target.value)}
-                disabled={loading || selectionSaving || !providerModels.length}
-              >
-                {savedSelection && !selectedAvailable && (
-                  <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>
-                )}
-                {providerModels.map((model) => (
-                  <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {savedUnavailableReason && (
-            <p className="forge-error" role="alert">
-              Saved model unavailable: {savedUnavailableReason}
-            </p>
-          )}
-          {selectionSaving && <p role="status">Saving model selection…</p>}
-          {selectionError && (
-            <p className="forge-error" role="alert">
-              {selectionError}
-            </p>
-          )}
-          {imageCapability && imageCapability.outputFormats.length > 0 && (
-            <ForgeImageOptions
-              draft={imageDraft}
-              formats={imageCapability.outputFormats}
-              sizes={imageCapability.sizes}
-              disabled={loading || selectionSaving || busy}
-              onChange={(draft) => setImageState({ scope: imageScope, draft })}
-            />
-          )}
-          {referenceAvailable && (portraits.length > 0 || catalog?.operatorReferenceImage) && (
-            <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
-              <legend>Reference photos</legend>
-              <div className="forge-reference-options">
-                {portraits.map((portrait) => (
-                  <label key={portrait.agentId}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Use ${portrait.agentName || portrait.agentId} reference photo`}
-                      checked={referenceAgentIds.includes(portrait.agentId)}
-                      disabled={
-                        mode === 'video' &&
-                        referenceCount >= videoReferenceLimit &&
-                        !referenceAgentIds.includes(portrait.agentId)
-                      }
-                      onChange={(event) =>
-                        setReferenceState({
-                          scope: referenceScope,
-                          agentIds: event.target.checked
-                            ? [...referenceAgentIds, portrait.agentId]
-                            : referenceAgentIds.filter((id) => id !== portrait.agentId),
-                          operator: useOperatorReferenceImage,
-                        })
-                      }
-                    />
-                    <span>{portrait.agentName || portrait.agentId}</span>
-                  </label>
-                ))}
-                {catalog?.operatorReferenceImage && (
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label="Use operator reference photo"
-                      checked={useOperatorReferenceImage}
-                      disabled={
-                        mode === 'video' &&
-                        referenceCount >= videoReferenceLimit &&
-                        !useOperatorReferenceImage
-                      }
-                      onChange={(event) =>
-                        setReferenceState({
-                          scope: referenceScope,
-                          agentIds: referenceAgentIds,
-                          operator: event.target.checked,
-                        })
-                      }
-                    />
-                    <span>Operator</span>
-                  </label>
-                )}
-              </div>
-            </fieldset>
-          )}
-          {mode === 'video' && artifactReferencesAvailable && (
-            <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
-              <legend>Forge image references</legend>
-              {artifactReferences.length > 0 && (
-                <ul className="forge-artifact-references">
-                  {artifactReferences.map((reference) => {
-                    const artifact = jobs
-                      .find((job) => job.id === reference.jobId)
-                      ?.artifacts.find((item) => item.id === reference.artifactId);
-                    return (
-                      <li key={JSON.stringify(reference)}>
-                        <span>{artifact?.name}</span>
-                        <button
-                          type="button"
-                          className="forge-reference-action"
-                          aria-label={`Remove ${artifact?.name} reference`}
-                          onClick={() =>
-                            setArtifactReferenceState({
-                              scope: videoReferenceScope,
-                              references: artifactReferences.filter((item) => item !== reference),
-                            })
-                          }
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <button
-                type="button"
-                className="forge-reference-action"
-                disabled={referenceCount >= videoReferenceLimit}
-                onClick={() => {
-                  setShowRecents(true);
-                  setError('');
-                  setNotice('');
-                }}
-              >
-                Add Forge image
-              </button>
-            </fieldset>
-          )}
-          {referenceError && (
-            <p className="forge-error" role="alert">
-              {referenceError}
-            </p>
-          )}
-          <label className="forge-field forge-prompt">
-            <span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span>
-            <textarea
-              aria-label={
-                mode === 'audio' ? 'Script' : mode === 'music' ? 'Musical direction' : 'Prompt'
-              }
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={
-                mode === 'audio'
-                  ? 'Enter the words to speak…'
-                  : mode === 'music'
-                    ? 'Describe the music to create…'
-                    : `Describe the ${mode} to manufacture…`
-              }
-            />
-            <small>
-              {mode === 'audio'
-                ? 'Verbatim script'
-                : mode === 'music'
-                  ? 'Style, mood, tempo, and arrangement guidance'
-                  : 'Prompt'}
-            </small>
+      {showHome && (
+        <section className="forge-home" aria-label="Forge Home">
+          <img
+            className="forge-home-emblem"
+            src="/forge.png"
+            alt="Steampunk fortress crest surrounding a luminous violet crystal"
+            width={1254}
+            height={1254}
+          />
+          <h1 className="forge-home-title">The Forge Awaits</h1>
+          <label className="forge-home-effects">
+            <input
+              type="checkbox"
+              checked={motion.enabled}
+              onChange={(event) => motion.setEnabled(event.target.checked)}
+            />{' '}
+            Forge effects
           </label>
-          {mode === 'music' && (
-            <label className="forge-field forge-prompt">
-              <span>
-                Lyrics <em>(optional)</em>
-              </span>
-              <textarea
-                aria-label="Lyrics"
-                value={lyrics}
-                onChange={(event) => setLyrics(event.target.value)}
-                placeholder="Add words for the song…"
-              />
-              <small>Lyrics are supplied as guidance and are not guaranteed verbatim.</small>
-            </label>
-          )}
-          <div
-            className="forge-pressure"
-            aria-label="Theatrical pressure gauge, not generation progress"
-          >
-            <div className="forge-pressure-head">
-              <span>CONTAINMENT PRESSURE</span>
-              <strong data-forge-meter-state>OFFLINE</strong>
-            </div>
-            <div className="forge-meter-track" aria-hidden="true">
-              <i className="forge-meter-needle" />
-            </div>
-            <div className="forge-meter-labels" aria-hidden="true">
-              <span>WITHIN SPEC</span>
-              <span>PROBABLY FINE</span>
-            </div>
-            <small>Pressure is theatrical. Job status isn't.</small>
-          </div>
-          <div className="forge-motion-control">
-            <label>
-              <input
-                type="checkbox"
-                checked={motion.enabled}
-                onChange={(event) => motion.setEnabled(event.target.checked)}
-              />
-              Forge effects
-            </label>
-            <small>Turn off motion without stopping generation.</small>
-          </div>
-          <div className="forge-actions">
-            {(mode !== 'music' || availableModels.length > 0) && (
-              <button
-                className="forge-primary"
-                type="button"
-                onClick={() => void submit()}
-                disabled={
-                  loading ||
-                  selectionSaving ||
-                  busy ||
-                  !selectedAvailable ||
-                  !prompt.trim() ||
-                  !!imageError ||
-                  !!referenceError
-                }
-              >
-                {busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}
-              </button>
-            )}
-            {notice && (
-              <span className="forge-notice" role="status">
-                {notice}
-              </span>
-            )}
-          </div>
-          {error && (
-            <p className="forge-error" role="alert">
-              {error}
-            </p>
-          )}
-          {!loading && !availableModels.length && (
-            <div className="forge-empty">
-              <strong>
-                {mode === 'video'
-                  ? 'Video generation is unavailable'
-                  : mode === 'music'
-                    ? 'No music model configured'
-                    : `No ${modeLabels[mode].toLowerCase()} models available`}
-              </strong>
-              <span>
-                {modeUnavailableReason ??
-                  (mode === 'video'
-                    ? 'Configure a compatible video model connection to use this mode.'
-                    : mode === 'music'
-                      ? 'Music generation is not configured.'
-                      : 'Configure a compatible model connection to use this mode.')}
-              </span>
-            </div>
-          )}
-          <div className="forge-heat-seam" aria-hidden="true" />
         </section>
-        <section className="forge-preview" aria-label="Creation viewer">
-          <div className="forge-panel-head">
-            <div>
-              <span className="eyebrow">OUTPUT</span>
-              <h2>{selectedJob ? jobLabel(selectedJob) : 'Preview'}</h2>
-            </div>
-            {selectedJob && (
-              <div className="forge-output-actions">
-                <span className={`forge-status ${selectedJob.status}`}>{selectedJob.status}</span>
-                {selectedJob.status !== 'queued' && selectedJob.status !== 'running' && (
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={deleting}
-                    onClick={() => void deleteJob(selectedJob)}
-                  >
-                    {deleting ? 'Deleting…' : 'Delete creation'}
-                  </button>
-                )}
+      )}
+      {!showHome && (
+        <div
+          hidden={showGallery}
+          className={`forge-grid${showRecents ? ' forge-recents-grid' : ''}`}
+        >
+          <canvas className="forge-seam-sparks" aria-hidden="true" />
+          <section className="forge-studio" hidden={showRecents}>
+            <div className="forge-panel-head">
+              <div>
+                <span className="eyebrow">CREATE</span>
+                <h2>{modeLabels[mode]} generation</h2>
               </div>
-            )}
-          </div>
-          {showRecents && (
-            <div className="forge-recent-details">
-              {error && (
-                <p role="alert" className="forge-error">
-                  {error}
-                </p>
-              )}
-              {notice && <p role="status">{notice}</p>}
-              {selectedJob && (
-                <>
-                  <p>{selectedJob.prompt}</p>
-                  <small>
-                    {selectedJob.modelId} · {new Date(selectedJob.createdAt).toLocaleString()}
-                  </small>
-                </>
-              )}
+              <span className="forge-badge">
+                {availableModels.length} model{availableModels.length === 1 ? '' : 's'}
+              </span>
             </div>
-          )}
-          <div className="forge-viewer-body">
-            <div className="forge-output-content">
-              {selectedJob?.artifacts?.length ? (
-                <div className="forge-artifacts">
-                  {selectedJob.artifacts.map((artifact) => (
-                    <article className="forge-artifact" key={artifact.id}>
-                      <ArtifactOutput
-                        key={JSON.stringify([
-                          artifact.id,
-                          artifact.previewUrl,
-                          artifact.downloadUrl,
-                        ])}
-                        fetchMedia={owned.fetch}
-                        artifact={artifact}
-                      />
-                      <footer>
-                        <strong>{artifact.name}</strong>
-                        {renderMediaActions(selectedJob.id, artifact)}
-                      </footer>
-                    </article>
+            <div className="forge-model-selectors">
+              <label className="forge-field">
+                <span>Provider</span>
+                <select
+                  aria-label="Forge provider"
+                  value={selectedProvider}
+                  onChange={(event) => {
+                    const model = availableModels.find(
+                      (item) => item.connectionId === event.target.value,
+                    );
+                    if (model) void saveSelection(modelKey(model));
+                  }}
+                  disabled={loading || selectionSaving || !providers.length}
+                >
+                  {selectedProvider &&
+                    !providers.some((provider) => provider.id === selectedProvider) && (
+                      <option value={selectedProvider}>
+                        {savedProviders.find((provider) => provider.id === selectedProvider)
+                          ?.provider ?? selectedProvider}{' '}
+                        (unavailable)
+                      </option>
+                    )}
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.label}
+                    </option>
                   ))}
-                </div>
-              ) : (
-                <div className="forge-placeholder">
-                  <span aria-hidden="true">✦</span>
-                  <strong>
-                    {selectedJob
-                      ? selectedJob.status === 'failed'
-                        ? 'Generation failed'
-                        : selectedJob.status === 'interrupted'
-                          ? 'Generation interrupted'
-                          : selectedJob.status === 'succeeded'
-                            ? 'No artifact available'
-                            : 'Preparing your artifact…'
-                      : 'Your creation will appear here'}
-                  </strong>
-                  {selectedJob?.status === 'failed' ? (
-                    <FailureDetails job={selectedJob} />
-                  ) : (
-                    <small>
-                      {selectedJob?.error ??
-                        'Forge uses the full workspace for the work, and keeps the result close at hand.'}
-                    </small>
+                </select>
+              </label>
+              <label className="forge-field">
+                <span>Model</span>
+                <select
+                  aria-label="Forge model"
+                  value={selectedModel}
+                  onChange={(event) => void saveSelection(event.target.value)}
+                  disabled={loading || selectionSaving || !providerModels.length}
+                >
+                  {savedSelection && !selectedAvailable && (
+                    <option value={selectedModel}>{savedSelection.modelId} (unavailable)</option>
+                  )}
+                  {providerModels.map((model) => (
+                    <option key={`${model.connectionId}:${model.modelId}`} value={modelKey(model)}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {savedUnavailableReason && (
+              <p className="forge-error" role="alert">
+                Saved model unavailable: {savedUnavailableReason}
+              </p>
+            )}
+            {selectionSaving && <p role="status">Saving model selection…</p>}
+            {selectionError && (
+              <p className="forge-error" role="alert">
+                {selectionError}
+              </p>
+            )}
+            {imageCapability && imageCapability.outputFormats.length > 0 && (
+              <ForgeImageOptions
+                draft={imageDraft}
+                formats={imageCapability.outputFormats}
+                sizes={imageCapability.sizes}
+                disabled={loading || selectionSaving || busy}
+                onChange={(draft) => setImageState({ scope: imageScope, draft })}
+              />
+            )}
+            {referenceAvailable && (portraits.length > 0 || catalog?.operatorReferenceImage) && (
+              <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
+                <legend>Reference photos</legend>
+                <div className="forge-reference-options">
+                  {portraits.map((portrait) => (
+                    <label key={portrait.agentId}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Use ${portrait.agentName || portrait.agentId} reference photo`}
+                        checked={referenceAgentIds.includes(portrait.agentId)}
+                        disabled={
+                          mode === 'video' &&
+                          referenceCount >= videoReferenceLimit &&
+                          !referenceAgentIds.includes(portrait.agentId)
+                        }
+                        onChange={(event) =>
+                          setReferenceState({
+                            scope: referenceScope,
+                            agentIds: event.target.checked
+                              ? [...referenceAgentIds, portrait.agentId]
+                              : referenceAgentIds.filter((id) => id !== portrait.agentId),
+                            operator: useOperatorReferenceImage,
+                          })
+                        }
+                      />
+                      <span>{portrait.agentName || portrait.agentId}</span>
+                    </label>
+                  ))}
+                  {catalog?.operatorReferenceImage && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label="Use operator reference photo"
+                        checked={useOperatorReferenceImage}
+                        disabled={
+                          mode === 'video' &&
+                          referenceCount >= videoReferenceLimit &&
+                          !useOperatorReferenceImage
+                        }
+                        onChange={(event) =>
+                          setReferenceState({
+                            scope: referenceScope,
+                            agentIds: referenceAgentIds,
+                            operator: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>Operator</span>
+                    </label>
                   )}
                 </div>
-              )}
-            </div>
-            <canvas className="forge-blast" aria-hidden="true" />
-          </div>
-          <div className="forge-fastener" aria-hidden="true" />
-          <div className="forge-flying-bolt" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M9 7l10 11-3 3L6 10z" fill="#7d858c" stroke="#252b32" />
-              <path d="M1 6l5-5 7 3 1 7-5 5-7-3z" fill="#adb0af" stroke="#3d4449" />
-              <path d="M5 5l4 4" stroke="#343c43" strokeWidth="2" />
-              <path d="M11 13l4-3m-1 6 4-3m-1 6 4-3" stroke="#323940" />
-            </svg>
-          </div>
-        </section>
-        <section className="forge-history">
-          <div className="forge-panel-head">
-            <div>
-              <span className="eyebrow">HISTORY</span>
-              <h2>{showRecents ? `Last 24 hours (${recentJobs.length})` : 'Recent creations'}</h2>
-            </div>
-            <button type="button" disabled={loading || selectionSaving} onClick={() => void load()}>
-              Refresh
-            </button>
-          </div>
-          {recentJobs.length ? (
-            <div
-              className="forge-jobs"
-              role="region"
-              aria-label="Recent creations list"
-              tabIndex={0}
-            >
-              {recentJobs.map((job) => (
+              </fieldset>
+            )}
+            {mode === 'video' && artifactReferencesAvailable && (
+              <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
+                <legend>Forge image references</legend>
+                {artifactReferences.length > 0 && (
+                  <ul className="forge-artifact-references">
+                    {artifactReferences.map((reference) => {
+                      const artifact = jobs
+                        .find((job) => job.id === reference.jobId)
+                        ?.artifacts.find((item) => item.id === reference.artifactId);
+                      return (
+                        <li key={JSON.stringify(reference)}>
+                          <span>{artifact?.name}</span>
+                          <button
+                            type="button"
+                            className="forge-reference-action"
+                            aria-label={`Remove ${artifact?.name} reference`}
+                            onClick={() =>
+                              setArtifactReferenceState({
+                                scope: videoReferenceScope,
+                                references: artifactReferences.filter((item) => item !== reference),
+                              })
+                            }
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
                 <button
                   type="button"
-                  key={job.id}
-                  className={selectedJob?.id === job.id ? 'selected' : ''}
-                  onClick={() => setSelectedJobId(job.id)}
-                  aria-label={`${jobLabel(job)} ${job.status}: ${job.prompt}`}
+                  className="forge-reference-action"
+                  disabled={referenceCount >= videoReferenceLimit}
+                  onClick={() => {
+                    setShowHome(false);
+                    setShowRecents(true);
+                    setError('');
+                    setNotice('');
+                  }}
                 >
-                  <span className={`forge-status ${job.status}`}>{job.status}</span>
-                  <strong>{showRecents ? `${jobLabel(job)} · ${job.modelId}` : job.modelId}</strong>
-                  <span title={job.prompt}>{job.prompt}</span>
-                  <time>{new Date(job.createdAt).toLocaleString()}</time>
+                  Add Forge image
                 </button>
-              ))}
+              </fieldset>
+            )}
+            {referenceError && (
+              <p className="forge-error" role="alert">
+                {referenceError}
+              </p>
+            )}
+            <label className="forge-field forge-prompt">
+              <span>{mode === 'music' ? 'Musical direction' : 'Prompt'}</span>
+              <textarea
+                aria-label={
+                  mode === 'audio' ? 'Script' : mode === 'music' ? 'Musical direction' : 'Prompt'
+                }
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={
+                  mode === 'audio'
+                    ? 'Enter the words to speak…'
+                    : mode === 'music'
+                      ? 'Describe the music to create…'
+                      : `Describe the ${mode} to manufacture…`
+                }
+              />
+              <small>
+                {mode === 'audio'
+                  ? 'Verbatim script'
+                  : mode === 'music'
+                    ? 'Style, mood, tempo, and arrangement guidance'
+                    : 'Prompt'}
+              </small>
+            </label>
+            {mode === 'music' && (
+              <label className="forge-field forge-prompt">
+                <span>
+                  Lyrics <em>(optional)</em>
+                </span>
+                <textarea
+                  aria-label="Lyrics"
+                  value={lyrics}
+                  onChange={(event) => setLyrics(event.target.value)}
+                  placeholder="Add words for the song…"
+                />
+                <small>Lyrics are supplied as guidance and are not guaranteed verbatim.</small>
+              </label>
+            )}
+            <div
+              className="forge-pressure"
+              aria-label="Theatrical pressure gauge, not generation progress"
+            >
+              <div className="forge-pressure-head">
+                <span>CONTAINMENT PRESSURE</span>
+                <strong data-forge-meter-state>OFFLINE</strong>
+              </div>
+              <div className="forge-meter-track" aria-hidden="true">
+                <i className="forge-meter-needle" />
+              </div>
+              <div className="forge-meter-labels" aria-hidden="true">
+                <span>WITHIN SPEC</span>
+                <span>PROBABLY FINE</span>
+              </div>
+              <small>Pressure is theatrical. Job status isn't.</small>
             </div>
-          ) : (
-            <p className="forge-muted">
-              {loading
-                ? 'Loading creations…'
-                : showRecents
-                  ? 'No creations in the last 24 hours.'
-                  : `No recent ${modeLabels[mode].toLowerCase()} creations.`}
-            </p>
-          )}
-        </section>
-      </div>
+            <div className="forge-motion-control">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={motion.enabled}
+                  onChange={(event) => motion.setEnabled(event.target.checked)}
+                />
+                Forge effects
+              </label>
+              <small>Turn off motion without stopping generation.</small>
+            </div>
+            <div className="forge-actions">
+              {(mode !== 'music' || availableModels.length > 0) && (
+                <button
+                  className="forge-primary"
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={
+                    loading ||
+                    selectionSaving ||
+                    busy ||
+                    !selectedAvailable ||
+                    !prompt.trim() ||
+                    !!imageError ||
+                    !!referenceError
+                  }
+                >
+                  {busy ? 'Starting…' : `Generate ${modeLabels[mode]}`}
+                </button>
+              )}
+              {notice && (
+                <span className="forge-notice" role="status">
+                  {notice}
+                </span>
+              )}
+            </div>
+            {error && (
+              <p className="forge-error" role="alert">
+                {error}
+              </p>
+            )}
+            {!loading && !availableModels.length && (
+              <div className="forge-empty">
+                <strong>
+                  {mode === 'video'
+                    ? 'Video generation is unavailable'
+                    : mode === 'music'
+                      ? 'No music model configured'
+                      : `No ${modeLabels[mode].toLowerCase()} models available`}
+                </strong>
+                <span>
+                  {modeUnavailableReason ??
+                    (mode === 'video'
+                      ? 'Configure a compatible video model connection to use this mode.'
+                      : mode === 'music'
+                        ? 'Music generation is not configured.'
+                        : 'Configure a compatible model connection to use this mode.')}
+                </span>
+              </div>
+            )}
+            <div className="forge-heat-seam" aria-hidden="true" />
+          </section>
+          <section className="forge-preview" aria-label="Creation viewer">
+            <div className="forge-panel-head">
+              <div>
+                <span className="eyebrow">OUTPUT</span>
+                <h2>{selectedJob ? jobLabel(selectedJob) : 'Preview'}</h2>
+              </div>
+              {selectedJob && (
+                <div className="forge-output-actions">
+                  <span className={`forge-status ${selectedJob.status}`}>{selectedJob.status}</span>
+                  {selectedJob.status !== 'queued' && selectedJob.status !== 'running' && (
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={deleting}
+                      onClick={() => void deleteJob(selectedJob)}
+                    >
+                      {deleting ? 'Deleting…' : 'Delete creation'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {showRecents && (
+              <div className="forge-recent-details">
+                {error && (
+                  <p role="alert" className="forge-error">
+                    {error}
+                  </p>
+                )}
+                {notice && <p role="status">{notice}</p>}
+                {selectedJob && (
+                  <>
+                    <p>{selectedJob.prompt}</p>
+                    <small>
+                      {selectedJob.modelId} · {new Date(selectedJob.createdAt).toLocaleString()}
+                    </small>
+                  </>
+                )}
+              </div>
+            )}
+            <div className="forge-viewer-body">
+              <div className="forge-output-content">
+                {selectedJob?.artifacts?.length ? (
+                  <div className="forge-artifacts">
+                    {selectedJob.artifacts.map((artifact) => (
+                      <article className="forge-artifact" key={artifact.id}>
+                        <ArtifactOutput
+                          key={JSON.stringify([
+                            artifact.id,
+                            artifact.previewUrl,
+                            artifact.downloadUrl,
+                          ])}
+                          fetchMedia={owned.fetch}
+                          artifact={artifact}
+                        />
+                        <footer>
+                          <strong>{artifact.name}</strong>
+                          {renderMediaActions(selectedJob.id, artifact)}
+                        </footer>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="forge-placeholder">
+                    <span aria-hidden="true">✦</span>
+                    <strong>
+                      {selectedJob
+                        ? selectedJob.status === 'failed'
+                          ? 'Generation failed'
+                          : selectedJob.status === 'interrupted'
+                            ? 'Generation interrupted'
+                            : selectedJob.status === 'succeeded'
+                              ? 'No artifact available'
+                              : 'Preparing your artifact…'
+                        : 'Your creation will appear here'}
+                    </strong>
+                    {selectedJob?.status === 'failed' ? (
+                      <FailureDetails job={selectedJob} />
+                    ) : (
+                      <small>
+                        {selectedJob?.error ??
+                          'Forge uses the full workspace for the work, and keeps the result close at hand.'}
+                      </small>
+                    )}
+                  </div>
+                )}
+              </div>
+              <canvas className="forge-blast" aria-hidden="true" />
+            </div>
+            <div className="forge-fastener" aria-hidden="true" />
+            <div className="forge-flying-bolt" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M9 7l10 11-3 3L6 10z" fill="#7d858c" stroke="#252b32" />
+                <path d="M1 6l5-5 7 3 1 7-5 5-7-3z" fill="#adb0af" stroke="#3d4449" />
+                <path d="M5 5l4 4" stroke="#343c43" strokeWidth="2" />
+                <path d="M11 13l4-3m-1 6 4-3m-1 6 4-3" stroke="#323940" />
+              </svg>
+            </div>
+          </section>
+          <section className="forge-history">
+            <div className="forge-panel-head">
+              <div>
+                <span className="eyebrow">HISTORY</span>
+                <h2>{showRecents ? `Last 24 hours (${recentJobs.length})` : 'Recent creations'}</h2>
+              </div>
+              <button
+                type="button"
+                disabled={loading || selectionSaving}
+                onClick={() => void load()}
+              >
+                Refresh
+              </button>
+            </div>
+            {recentJobs.length ? (
+              <div
+                className="forge-jobs"
+                role="region"
+                aria-label="Recent creations list"
+                tabIndex={0}
+              >
+                {recentJobs.map((job) => (
+                  <button
+                    type="button"
+                    key={job.id}
+                    className={selectedJob?.id === job.id ? 'selected' : ''}
+                    onClick={() => setSelectedJobId(job.id)}
+                    aria-label={`${jobLabel(job)} ${job.status}: ${job.prompt}`}
+                  >
+                    <span className={`forge-status ${job.status}`}>{job.status}</span>
+                    <strong>
+                      {showRecents ? `${jobLabel(job)} · ${job.modelId}` : job.modelId}
+                    </strong>
+                    <span title={job.prompt}>{job.prompt}</span>
+                    <time>{new Date(job.createdAt).toLocaleString()}</time>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="forge-muted">
+                {loading
+                  ? 'Loading creations…'
+                  : showRecents
+                    ? 'No creations in the last 24 hours.'
+                    : `No recent ${modeLabels[mode].toLowerCase()} creations.`}
+              </p>
+            )}
+          </section>
+        </div>
+      )}
     </main>
   );
 }

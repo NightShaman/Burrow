@@ -128,6 +128,7 @@ async function setup({
       <Forge selectedAgentId="smatchet" sessionId={sessionId} />
     </ConfirmProvider>,
   );
+  fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
   await waitFor(() =>
     expect(screen.getByLabelText('Forge model').hasAttribute('disabled')).toBe(false),
   );

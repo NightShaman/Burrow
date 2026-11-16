@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'Metal Mania';
+  src: url('/fonts/metal-mania.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 .forge-page {
   height: 100%;
   min-height: 0;
@@ -654,4 +662,66 @@
 .forge-reference-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Home is intentionally free of job content and media requests. */
+.forge-home {
+  flex: 1;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 16px 64px;
+}
+.forge-home-emblem {
+  display: block;
+  width: min(560px, 78vw);
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  margin-bottom: 20px;
+  animation: forge-home-pulse 6s ease-in-out infinite;
+}
+.forge-home-effects {
+  margin-top: 30px;
+  color: var(--muted);
+  font-size: 12px;
+}
+@keyframes forge-home-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.025);
+    filter: brightness(1.08);
+  }
+}
+.forge-motion-reduced .forge-home-emblem,
+.forge-motion-paused .forge-home-emblem {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .forge-home-emblem {
+    animation: none !important;
+  }
+}
+
+/* Let the Forge emblem stand alone on its landing page. */
+.workspace:has(.forge-home) > .workspace-watermark {
+  display: none;
+}
+
+.forge-home-title {
+  margin: 0;
+  color: var(--accent);
+  font-family: 'Metal Mania', fantasy;
+  font-size: clamp(28px, 3.5vw, 44px);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }

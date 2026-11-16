@@ -1,8 +1,15 @@
 import { ConfirmProvider } from '../../app/ConfirmDialog';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render as renderUI, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../app/types';
 import { composeMusicPrompt, Forge } from './ForgePage';
+
+// Existing flow tests deliberately enter Image; Home has separate landing coverage.
+const render = (ui: React.ReactNode) => {
+  const view = renderUI(ui);
+  fireEvent.click(screen.getByRole('tab', { name: /Image/ }));
+  return view;
+};
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchApiMock = vi.hoisted(() => vi.fn());
