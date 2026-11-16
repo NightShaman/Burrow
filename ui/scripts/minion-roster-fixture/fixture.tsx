@@ -15,6 +15,8 @@ const defaults = {
   burrowModel: null,
   codexEnabled: true,
   claudeEnabled: false,
+  geminiEnabled: false,
+  geminiModel: null,
 };
 let settings = {
   ok: true,
@@ -52,6 +54,14 @@ window.fetch = async (input, options) => {
   if (path === '/api/settings/model-connections')
     return Response.json({
       connections: [
+        {
+          id: 'google',
+          provider: 'Google native',
+          apiType: 'google-generative-language',
+          geminiEligible: true,
+          enabled: true,
+          models: [{ id: 'gemini-latest', displayName: 'Gemini Latest', selected: true }],
+        },
         {
           id: 'openai',
           provider: 'OpenAI team pool',

@@ -467,7 +467,9 @@ function MinionList({
                       ? 'Codex Minion'
                       : minion.harness === 'claude'
                         ? 'Claude Minion'
-                        : 'Burrow Minion'}{' '}
+                        : minion.harness === 'gemini'
+                          ? 'Gemini Minion'
+                          : 'Burrow Minion'}{' '}
                     · {minion.retained ? 'Last seen · ' : ''}
                     {minion.activity}
                   </small>

@@ -2,22 +2,24 @@ import type { ModelConnection } from '../../app/api';
 import type { SavedProvider } from '../../app/types';
 export function minionProviders(
   connections: ModelConnection[],
-  harness: 'burrow' | 'codex' | 'claude',
+  harness: 'burrow' | 'codex' | 'claude' | 'gemini',
 ): SavedProvider[] {
   return connections
     .filter(
       (c) =>
         c.enabled !== false &&
         (harness === 'burrow' ||
-          (harness === 'codex'
-            ? (c.apiType === 'openai-lb' && c.codexEligible === true) ||
-              (['openai-responses', 'openai-chat-completions'].includes(c.apiType) &&
-                c.auth?.type?.toLowerCase() === 'oauth' &&
-                c.auth?.provider?.toLowerCase() === 'openai')
-            : (c.apiType === 'anthropic-lb' && c.claudeEligible === true) ||
-              (c.apiType === 'anthropic-messages' &&
-                c.auth?.type?.toLowerCase() === 'oauth' &&
-                ['anthropic', 'claude'].includes(c.auth?.provider?.toLowerCase() ?? '')))),
+          (harness === 'gemini'
+            ? c.apiType === 'google-generative-language' && c.geminiEligible === true
+            : harness === 'codex'
+              ? (c.apiType === 'openai-lb' && c.codexEligible === true) ||
+                (['openai-responses', 'openai-chat-completions'].includes(c.apiType) &&
+                  c.auth?.type?.toLowerCase() === 'oauth' &&
+                  c.auth?.provider?.toLowerCase() === 'openai')
+              : (c.apiType === 'anthropic-lb' && c.claudeEligible === true) ||
+                (c.apiType === 'anthropic-messages' &&
+                  c.auth?.type?.toLowerCase() === 'oauth' &&
+                  ['anthropic', 'claude'].includes(c.auth?.provider?.toLowerCase() ?? '')))),
     )
     .map((c) => ({
       id: c.id,

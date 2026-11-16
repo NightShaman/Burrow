@@ -98,7 +98,9 @@ export function Chat({
         ? 'Codex'
         : selected.harness === 'claude'
           ? 'Claude'
-          : undefined
+          : selected.harness === 'gemini'
+            ? 'Gemini'
+            : undefined
       : undefined;
   // Show the owning conversation, not the child's stream id or the agent's
   // last selected chat. Nested minions share their recorded root session.

@@ -13,8 +13,10 @@ type Defaults = {
   burrowModel: Selection;
   codexEnabled: boolean;
   claudeEnabled: boolean;
+  geminiEnabled: boolean;
   codexModel: Selection;
   claudeModel: Selection;
+  geminiModel: Selection;
 };
 type Settings = Defaults & {
   ok: boolean;
@@ -25,9 +27,11 @@ const fields = [
   'maxDepth',
   'codexModel',
   'claudeModel',
+  'geminiModel',
   'burrowModel',
   'codexEnabled',
   'claudeEnabled',
+  'geminiEnabled',
 ] as const;
 function canonical(value: unknown): string | undefined {
   return JSON.stringify(value, (_, item) =>
@@ -47,7 +51,8 @@ function validate(result: Settings, agent: boolean) {
     ['burrow', 'codex', 'claude'].includes(d.defaultHarness) &&
     typeof d.codexEnabled === 'boolean' &&
     typeof d.claudeEnabled === 'boolean' &&
-    [d.burrowModel, d.codexModel, d.claudeModel].every(
+    typeof d.geminiEnabled === 'boolean' &&
+    [d.burrowModel, d.codexModel, d.claudeModel, d.geminiModel].every(
       (m) => m === null || (m && typeof m.connectionId === 'string' && typeof m.model === 'string'),
     );
   if (
@@ -161,7 +166,7 @@ export function MinionSettings({
   }
   const valid =
     !draft ||
-    (['burrow', 'codex', 'claude'] as const).every((h) => {
+    (['burrow', 'codex', 'claude', 'gemini'] as const).every((h) => {
       if (!(`${h}Model` in patch)) return true;
       const model = draft[`${h}Model`];
       return (
@@ -186,8 +191,8 @@ export function MinionSettings({
   const shown = enabled ? draft : saved?.effective;
   const nativeEditor = (
     <fieldset disabled={busy || !enabled} className="minion-model-settings">
-      {(['codex', 'claude'] as const).map((h) => {
-        const label = h === 'codex' ? 'Codex' : 'Claude';
+      {(['codex', 'claude', 'gemini'] as const).map((h) => {
+        const label = h === 'codex' ? 'Codex' : h === 'claude' ? 'Claude' : 'Gemini';
         return (
           <div key={h}>
             <h3>{label} defaults</h3>

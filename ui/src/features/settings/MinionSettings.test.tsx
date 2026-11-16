@@ -15,8 +15,10 @@ const defaults = {
   burrowModel: null,
   codexEnabled: false,
   claudeEnabled: false,
+  geminiEnabled: false,
   codexModel: null,
   claudeModel: null,
+  geminiModel: null,
 };
 function setup(overrideEnabled = false) {
   let settings = {
@@ -173,4 +175,44 @@ it('uses the existing depth slider range and never offers or writes a default ha
       expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
     );
   }
+});
+
+it('saves Gemini toggles without changing models and preserves native Latest IDs and null clears', async () => {
+  setup(true);
+  const original = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    if (String(path).includes('model-connections'))
+      return {
+        connections: [
+          {
+            id: 'google',
+            provider: 'Google native',
+            apiType: 'google-generative-language',
+            enabled: true,
+            geminiEligible: true,
+            models: [{ id: 'gemini-latest', displayName: 'Gemini Latest' }],
+          },
+        ],
+      } as never;
+    return original(path, init);
+  });
+  render(<MinionSettings agentId="agent" />);
+  await screen.findByLabelText('Gemini Enabled');
+  fireEvent.click(screen.getByLabelText('Gemini Enabled'));
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await waitFor(() => expect(body()).toEqual({ geminiEnabled: true }));
+  await waitFor(() =>
+    expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
+  );
+  fireEvent.change(screen.getByLabelText('Gemini provider'), { target: { value: 'google' } });
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await waitFor(() =>
+    expect(body(1)).toEqual({ geminiModel: { connectionId: 'google', model: 'gemini-latest' } }),
+  );
+  await waitFor(() =>
+    expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
+  );
+  fireEvent.change(screen.getByLabelText('Gemini provider'), { target: { value: '' } });
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await waitFor(() => expect(body(2)).toEqual({ geminiModel: null }));
 });
