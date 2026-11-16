@@ -1,3 +1,4 @@
+import { ForgeConstellation } from './ForgeConstellation';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { rovingKeys } from '../../app/keyboardWidgets';
 import { useOwnedApi } from '../../app/useOwnedApi';
@@ -896,20 +897,8 @@ export function Forge({
       )}
       {showHome && (
         <section className="forge-home" aria-label="Forge Home">
-          <div className="forge-home-atmosphere" aria-hidden="true">
-            <div className="forge-home-haze" />
-            {Array.from({ length: 16 }, (_, index) => (
-              <span
-                key={index}
-                className="forge-home-ember"
-                style={{
-                  left: `${12 + ((index * 37) % 77)}%`,
-                  animationDelay: `${-index * 1.7}s`,
-                  animationDuration: `${12 + (index % 5) * 3}s`,
-                }}
-              />
-            ))}
-          </div>
+          <div className="forge-home-atmosphere" aria-hidden="true" />
+          <ForgeConstellation enabled={motion.enabled} />
           <img
             className="forge-home-emblem"
             src="/forge.png"

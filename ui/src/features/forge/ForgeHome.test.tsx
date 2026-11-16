@@ -59,7 +59,8 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(document.querySelector('.forge-home-atmosphere')?.getAttribute('aria-hidden')).toBe(
     'true',
   );
-  expect(document.querySelectorAll('.forge-home-ember')).toHaveLength(16);
+  expect(document.querySelector('.forge-home-constellation')).not.toBeNull();
+  expect(document.querySelectorAll('.forge-home-ember')).toHaveLength(0);
   expect(crest.getAttribute('src')).toBe('/forge.png');
   expect(crest.getAttribute('width')).toBe('1254');
   expect(crest.getAttribute('height')).toBe('1254');
