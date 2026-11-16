@@ -1,6 +1,7 @@
 /** Display preferences only. Never include credentials, drafts, or conversation caches. */
 export const uiPreferenceKeys = [
   'hc.theme',
+  'hc.forgeEffects',
   'hc.selectedAgentId',
   'hc.leftCollapsed',
   'hc.rightCollapsed',

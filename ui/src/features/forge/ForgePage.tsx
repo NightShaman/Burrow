@@ -913,15 +913,6 @@ export function Forge({
             width={1254}
             height={1254}
           />
-          <h1 className="forge-home-title">The Forge Awaits</h1>
-          <label className="forge-home-effects">
-            <input
-              type="checkbox"
-              checked={motion.enabled}
-              onChange={(event) => motion.setEnabled(event.target.checked)}
-            />{' '}
-            Forge effects
-          </label>
         </section>
       )}
       {!showHome && (
@@ -1165,17 +1156,6 @@ export function Forge({
                 <span>PROBABLY FINE</span>
               </div>
               <small>Pressure is theatrical. Job status isn't.</small>
-            </div>
-            <div className="forge-motion-control">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={motion.enabled}
-                  onChange={(event) => motion.setEnabled(event.target.checked)}
-                />
-                Forge effects
-              </label>
-              <small>Turn off motion without stopping generation.</small>
             </div>
             <div className="forge-actions">
               {(mode !== 'music' || availableModels.length > 0) && (

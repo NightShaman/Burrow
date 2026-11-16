@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
+import { usePersistedForgeEffects } from '../../app/usePersistedLayout';
 import { createForgeEffects } from './forgeEffects';
 import { ForgeMotion } from './forgeMotion';
 import type { MotionJob } from './forgeMotion';
@@ -10,7 +11,7 @@ export function useForgeMotion(
   submittedId: string,
   ready: () => boolean,
 ) {
-  const [enabled, setEnabled] = useState(true);
+  const [enabled, setEnabled] = usePersistedForgeEffects();
   const [systemReduced, setSystemReduced] = useState(
     () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
   );

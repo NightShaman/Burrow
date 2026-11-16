@@ -74,12 +74,11 @@ it('defaults to Home without mounting private job previews or history', async ()
       .getByText('Manufacture sights, sounds, and moving lies.')
       .parentElement?.getAttribute('aria-hidden'),
   ).toBe('true');
-  expect(screen.getByRole('heading', { name: 'The Forge Awaits', level: 1 })).toBeTruthy();
+  expect(screen.queryByText('The Forge Awaits')).toBeNull();
   expect(screen.queryByText('Give an idea its form.')).toBeNull();
   expect(screen.queryByText('Make something extraordinary.')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Image' })).toBeNull();
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Forge effects' }));
-  expect(document.querySelector('.forge-motion-reduced')).not.toBeNull();
+  expect(screen.queryByRole('checkbox', { name: 'Forge effects' })).toBeNull();
 });
 it.each(['Image', 'Video', 'Speech', 'Music'])(
   'opens the existing %s creation flow from Home',

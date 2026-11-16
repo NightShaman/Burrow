@@ -49,6 +49,12 @@ it('offers Halloween separately from Midnight and persists the selected palette 
   render(<Parent />);
   await screen.findByDisplayValue('Test');
   fireEvent.click(screen.getByRole('button', { name: 'Personalization' }));
+  const effects = screen.getByRole('checkbox', { name: 'Forge effects' }) as HTMLInputElement;
+  expect(effects.checked).toBe(true);
+  fireEvent.click(effects);
+  await waitFor(() =>
+    expect(JSON.parse(localStorage.getItem('hc.forgeEffects') ?? '{}').value).toBe(false),
+  );
   const midnight = screen.getByRole('button', { name: /^Midnight/ });
   const violetGrove = screen.getByRole('button', { name: /^Violet Grove/ });
   expect(violetGrove.getAttribute('aria-pressed')).toBe('false');

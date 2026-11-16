@@ -223,3 +223,14 @@ export function listenResize(move: (event: globalThis.PointerEvent) => void) {
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', stop);
 }
+
+export function usePersistedForgeEffects() {
+  return useStoredState('hc.forgeEffects', true, isBoolean, (raw) => {
+    try {
+      const value = JSON.parse(raw);
+      return typeof value === 'boolean' ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}

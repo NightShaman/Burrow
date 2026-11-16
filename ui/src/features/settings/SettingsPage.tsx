@@ -1,3 +1,4 @@
+import { usePersistedForgeEffects } from '../../app/usePersistedLayout';
 import { MinionSettings } from './MinionSettings';
 import './settingsWorkspace.css';
 import './normalizedWorkspace.css';
@@ -122,6 +123,7 @@ export function Settings({
   ) => void;
   previewFirstRun?: boolean;
 }) {
+  const [forgeEffects, setForgeEffects] = usePersistedForgeEffects();
   const navigate = useUnsavedNavigation();
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentGlobal, setAgentGlobal] = useState(false);
@@ -334,6 +336,14 @@ export function Settings({
                 ))}
               </div>
             </fieldset>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={forgeEffects}
+                onChange={(event) => setForgeEffects(event.target.checked)}
+              />
+              Forge effects
+            </label>
           </SettingSection>
           <BrowserTabSettings />
         </div>

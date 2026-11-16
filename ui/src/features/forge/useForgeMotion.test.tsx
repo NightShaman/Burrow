@@ -57,6 +57,7 @@ function advance(ms: number) {
   });
 }
 beforeEach(() => {
+  localStorage.clear();
   frames = new Map();
   index = 0;
   now = 0;
