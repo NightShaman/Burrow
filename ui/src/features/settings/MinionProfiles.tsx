@@ -5,7 +5,7 @@ import type { SavedProvider } from '../../app/types';
 import { useUnsavedChanges, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { Field, SettingSection } from './SettingsPrimitives';
 import { ProviderModelFields } from './ProviderModelFields';
-import { SettingsEntitySelector } from './SettingsEntitySelector';
+import { createPortal } from 'react-dom';
 
 export type MinionProfile = {
   id: string;
@@ -78,10 +78,20 @@ export function minionProviders(
 export function MinionProfiles({
   agentId,
   defaultOnly = false,
+  overflowTarget,
+  profileOverrides,
+  onSaveOverride,
+  onProfilesChanged,
 }: {
   agentId?: string;
   defaultOnly?: boolean;
+  onProfilesChanged?: (profiles: MinionProfile[]) => void;
+  overflowTarget?: HTMLElement | null;
+  profileOverrides?: Record<string, Partial<Omit<MinionProfile, 'id'>>>;
+  onSaveOverride?: (id: string, patch: Partial<Omit<MinionProfile, 'id'>>) => Promise<boolean>;
 }) {
+  const [legacyIds, setLegacyIds] = useState<string[]>([]);
+  const [globallyDisabled, setGloballyDisabled] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<MinionProfile[]>([]);
   const [connections, setConnections] = useState<ModelConnection[]>([]);
   const [draft, setDraft] = useState<MinionProfile | null>(null);
@@ -154,8 +164,10 @@ export function MinionProfiles({
   const busy = useRef(false);
   const navigate = useUnsavedNavigation();
   const contextQuery = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
-  const path = `/api/settings/minions${contextQuery}`;
-  const settingsPath = `/api/agents/${encodeURIComponent(agentId ?? '')}/minion-settings`;
+  const path = `/api/settings/minions${onSaveOverride ? '' : contextQuery}`;
+  const settingsPath = agentId
+    ? `/api/agents/${encodeURIComponent(agentId)}/minion-settings`
+    : '/api/settings/minion-settings';
   useEffect(() => {
     const token = {};
     owner.current = token;
@@ -173,6 +185,21 @@ export function MinionProfiles({
         });
         if (!roster.ok || !Array.isArray(roster.profiles) || !roster.profiles.every(isProfile))
           throw new Error('Invalid minion roster response.');
+        const effective = onSaveOverride
+          ? await api<{ ok: boolean; profiles: MinionProfile[] }>(
+              `/api/settings/minions${contextQuery}`,
+              { signal: controller.signal },
+            )
+          : roster;
+        if (
+          !effective.ok ||
+          !Array.isArray(effective.profiles) ||
+          !effective.profiles.every(isProfile)
+        )
+          throw new Error('Invalid effective minion roster response.');
+        const legacy = effective.profiles.filter(
+          (p) => !roster.profiles.some((shared) => shared.id === p.id),
+        );
         const [settings, catalog] = await Promise.all([
           defaultOnly
             ? api<{ ok: boolean; defaultMinionProfileId?: string | null }>(settingsPath, {
@@ -188,12 +215,23 @@ export function MinionProfiles({
         if (owner.current !== token) return;
         if (!settings.ok || !Array.isArray(catalog.connections))
           throw new Error('Invalid minion settings response.');
-        setProfiles(roster.profiles);
+        setGloballyDisabled(roster.profiles.filter((p) => !p.enabled).map((p) => p.id));
+        setLegacyIds(legacy.map((p) => p.id));
+        const items = [
+          ...roster.profiles.map((p) => ({
+            ...p,
+            ...profileOverrides?.[p.id],
+            id: p.id,
+            enabled: p.enabled && (profileOverrides?.[p.id]?.enabled ?? p.enabled),
+          })),
+          ...legacy,
+        ];
+        setProfiles(items);
         setConnections(catalog.connections);
         setDefaultId(settings.defaultMinionProfileId ?? null);
         setSavedDefault(settings.defaultMinionProfileId ?? null);
-        setDraft(roster.profiles[0] ?? null);
-        setBaseline(roster.profiles[0] ?? null);
+        setDraft(items[0] ?? null);
+        setBaseline(items[0] ?? null);
         setState('idle');
       } catch (e) {
         if (owner.current === token) {
@@ -242,6 +280,20 @@ export function MinionProfiles({
         setSavedDefault(result.defaultMinionProfileId);
       } else if (draft) {
         const { id, ...body } = draft;
+        if (onSaveOverride && !legacyIds.includes(id)) {
+          const patch = Object.fromEntries(
+            Object.entries(body).filter(
+              ([key, value]) =>
+                JSON.stringify(value) !== JSON.stringify(baseline?.[key as keyof MinionProfile]),
+            ),
+          );
+          if (!(await onSaveOverride(id, patch))) return false;
+          if (owner.current !== token) return false;
+          setProfiles((items) => items.map((p) => (p.id === id ? draft : p)));
+          setBaseline(draft);
+          onProfilesChanged?.(profiles.map((p) => (p.id === id ? draft : p)));
+          return true;
+        }
         const result = await api<{ ok: boolean; profile: MinionProfile }>(
           `/api/settings/minions${id ? `/${encodeURIComponent(id)}` : ''}${contextQuery}`,
           {
@@ -267,6 +319,11 @@ export function MinionProfiles({
         if (owner.current !== token) return false;
         setProfiles((items) =>
           id ? items.map((p) => (p.id === id ? result.profile : p)) : [...items, result.profile],
+        );
+        onProfilesChanged?.(
+          id
+            ? profiles.map((p) => (p.id === id ? result.profile : p))
+            : [...profiles, result.profile],
         );
         setDraft(result.profile);
         setBaseline(result.profile);
@@ -294,6 +351,119 @@ export function MinionProfiles({
   });
   const change = (patch: Partial<MinionProfile>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const selectedDefault = profiles.find((p) => p.id === defaultId);
+  function renderEditor() {
+    const content = (
+      <SettingSection title={onSaveOverride ? 'Specialist override' : 'Specialist profile'}>
+        {draft && (
+          <fieldset disabled={state !== 'idle'} className="minion-model-settings">
+            <Field label="Name">
+              <input value={draft.name} onChange={(e) => change({ name: e.target.value })} />
+            </Field>
+            <label className="minion-profile-enabled">
+              <input
+                type="checkbox"
+                checked={draft.enabled}
+                disabled={!!onSaveOverride && globallyDisabled.includes(draft.id)}
+                onChange={(e) => change({ enabled: e.target.checked })}
+              />
+              Enabled
+            </label>
+            <Field label="Harness">
+              <select
+                value={draft.harness}
+                onChange={(e) =>
+                  change({ harness: e.target.value as MinionProfile['harness'], model: null })
+                }
+              >
+                <option value="burrow">Burrow</option>
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+            </Field>
+            <ProviderModelFields
+              providers={providers}
+              connectionId={draft.model?.connectionId}
+              model={draft.model?.model}
+              inheritLabel={
+                draft.harness === 'burrow'
+                  ? 'Inherit caller model'
+                  : 'Choose eligible account or pool'
+              }
+              onChange={(connectionId, model) =>
+                change({ model: connectionId ? { connectionId, model: model ?? '' } : null })
+              }
+            />
+            {draft.harness !== 'burrow' && !valid && (
+              <p className="settings-help">
+                Native minions require an enabled eligible model or pool.
+              </p>
+            )}
+            <Field label="Execution host">
+              <select
+                value={draft.executionHostId ?? ''}
+                onChange={(e) => change({ executionHostId: e.target.value || null })}
+              >
+                <option value="">Inherit caller execution context</option>
+                <option value="local">Core / local (explicit)</option>
+                {draft.executionHostId &&
+                  draft.executionHostId !== 'local' &&
+                  !hosts.some((h) => h.id === draft.executionHostId) && (
+                    <option value={draft.executionHostId}>
+                      {draft.executionHostId} — unavailable
+                    </option>
+                  )}
+                {hosts
+                  .filter((h) => h.id !== 'local')
+                  .map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.id} — {h.connected ? 'Connected' : 'Disconnected'}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            {hostLoading && <p role="status">Loading execution hosts…</p>}
+            {hostError && (
+              <>
+                <p role="alert">{hostError}</p>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setHostRetry((n) => n + 1)}
+                >
+                  Retry execution hosts
+                </button>
+              </>
+            )}
+            {draft.executionHostId &&
+              draft.executionHostId !== 'local' &&
+              !hostLoading &&
+              !hostError &&
+              !hosts.some((h) => h.id === draft.executionHostId && h.connected) && (
+                <p role="alert" className="settings-help">
+                  The pinned host is unavailable. Spawning is blocked until it reconnects or you
+                  choose another host.
+                </p>
+              )}
+            <Field label="Standing instructions">
+              <textarea
+                value={draft.instructions}
+                onChange={(e) => change({ instructions: e.target.value })}
+              />
+            </Field>
+          </fieldset>
+        )}
+        <button
+          type="button"
+          className="primary"
+          disabled={state !== 'idle' || !dirty || (!defaultOnly && !valid)}
+          onClick={() => void save()}
+        >
+          {state === 'saving' ? 'Saving…' : defaultOnly ? 'Save default minion' : 'Save minion'}
+        </button>
+      </SettingSection>
+    );
+    return overflowTarget ? createPortal(content, overflowTarget) : content;
+  }
   return (
     <SettingSection title={defaultOnly ? 'Default minion' : 'Minions'}>
       {state === 'loading' && <p role="status">Loading minions…</p>}
@@ -339,26 +509,30 @@ export function MinionProfiles({
           ) : (
             <>
               <p className="settings-help">
-                Shared across agents. Changes apply to future minions. Choose each agent’s default
-                in Agent settings.
+                {onSaveOverride
+                  ? 'Saved specialist overrides apply only to this agent. Globally disabled specialists remain disabled.'
+                  : 'Named specialists are shared across agents. All enabled specialists remain available, regardless of the default.'}
               </p>
-              <SettingsEntitySelector
-                items={profiles.map((p) => ({
-                  id: p.id,
-                  label: `${p.name}${p.enabled ? '' : ' (disabled)'}`,
-                }))}
-                selectedId={draft?.id ?? ''}
-                label="Minion profiles"
-                noun="minion"
-                onSelect={(id) =>
-                  navigate(() => {
-                    const p = profiles.find((p) => p.id === id) ?? null;
-                    setDraft(p);
-                    setBaseline(p);
-                    setError('');
-                  })
-                }
-                action={
+              <nav className="minion-profile-list" aria-label="Minion profiles">
+                {profiles.map((p) => (
+                  <button
+                    type="button"
+                    key={p.id}
+                    className={draft?.id === p.id ? 'active' : ''}
+                    aria-pressed={draft?.id === p.id}
+                    onClick={() =>
+                      navigate(() => {
+                        setDraft(p);
+                        setBaseline(p);
+                        setError('');
+                      })
+                    }
+                  >
+                    {p.name}
+                    {p.enabled ? '' : ' (disabled)'}
+                  </button>
+                ))}
+                {!onSaveOverride && (
                   <button
                     type="button"
                     className="secondary"
@@ -373,116 +547,22 @@ export function MinionProfiles({
                   >
                     Add minion
                   </button>
-                }
-              />
+                )}
+              </nav>
               {!draft && <p>No minion profiles. Add one to get started.</p>}
-              {draft && (
-                <fieldset disabled={state !== 'idle'} className="minion-model-settings">
-                  <Field label="Name">
-                    <input value={draft.name} onChange={(e) => change({ name: e.target.value })} />
-                  </Field>
-                  <label className="minion-profile-enabled">
-                    <input
-                      type="checkbox"
-                      checked={draft.enabled}
-                      onChange={(e) => change({ enabled: e.target.checked })}
-                    />
-                    Enabled
-                  </label>
-                  <Field label="Harness">
-                    <select
-                      value={draft.harness}
-                      onChange={(e) =>
-                        change({ harness: e.target.value as MinionProfile['harness'], model: null })
-                      }
-                    >
-                      <option value="burrow">Burrow</option>
-                      <option value="codex">Codex</option>
-                      <option value="claude">Claude</option>
-                    </select>
-                  </Field>
-                  <ProviderModelFields
-                    providers={providers}
-                    connectionId={draft.model?.connectionId}
-                    model={draft.model?.model}
-                    inheritLabel={
-                      draft.harness === 'burrow'
-                        ? 'Inherit caller model'
-                        : 'Choose eligible account or pool'
-                    }
-                    onChange={(connectionId, model) =>
-                      change({ model: connectionId ? { connectionId, model: model ?? '' } : null })
-                    }
-                  />
-                  {draft.harness !== 'burrow' && !valid && (
-                    <p className="settings-help">
-                      Native minions require an enabled eligible model or pool.
-                    </p>
-                  )}
-                  <Field label="Execution host">
-                    <select
-                      value={draft.executionHostId ?? ''}
-                      onChange={(e) => change({ executionHostId: e.target.value || null })}
-                    >
-                      <option value="">Inherit caller execution context</option>
-                      <option value="local">Core / local (explicit)</option>
-                      {draft.executionHostId &&
-                        draft.executionHostId !== 'local' &&
-                        !hosts.some((h) => h.id === draft.executionHostId) && (
-                          <option value={draft.executionHostId}>
-                            {draft.executionHostId} — unavailable
-                          </option>
-                        )}
-                      {hosts
-                        .filter((h) => h.id !== 'local')
-                        .map((h) => (
-                          <option key={h.id} value={h.id}>
-                            {h.id} — {h.connected ? 'Connected' : 'Disconnected'}
-                          </option>
-                        ))}
-                    </select>
-                  </Field>
-                  {hostLoading && <p role="status">Loading execution hosts…</p>}
-                  {hostError && (
-                    <>
-                      <p role="alert">{hostError}</p>
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => setHostRetry((n) => n + 1)}
-                      >
-                        Retry execution hosts
-                      </button>
-                    </>
-                  )}
-                  {draft.executionHostId &&
-                    draft.executionHostId !== 'local' &&
-                    !hostLoading &&
-                    !hostError &&
-                    !hosts.some((h) => h.id === draft.executionHostId && h.connected) && (
-                      <p role="alert" className="settings-help">
-                        The pinned host is unavailable. Spawning is blocked until it reconnects or
-                        you choose another host.
-                      </p>
-                    )}
-                  <Field label="Standing instructions">
-                    <textarea
-                      value={draft.instructions}
-                      onChange={(e) => change({ instructions: e.target.value })}
-                    />
-                  </Field>
-                </fieldset>
-              )}
+              {renderEditor()}
             </>
           )}
-          <button
-            type="button"
-            className="primary"
-            disabled={state !== 'idle' || !dirty || (!defaultOnly && !valid)}
-            onClick={() => void save()}
-          >
-            {state === 'saving' ? 'Saving…' : defaultOnly ? 'Save default minion' : 'Save minion'}
-          </button>
+          {defaultOnly && (
+            <button
+              type="button"
+              className="primary"
+              disabled={state !== 'idle' || !dirty || (!defaultOnly && !valid)}
+              onClick={() => void save()}
+            >
+              {state === 'saving' ? 'Saving…' : defaultOnly ? 'Save default minion' : 'Save minion'}
+            </button>
+          )}
         </>
       )}
     </SettingSection>

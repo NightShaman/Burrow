@@ -37,7 +37,25 @@ describe('Default minion provider autosave', () => {
     vi.mocked(api).mockImplementation(async (path) =>
       String(path).startsWith('/api/settings/minions?')
         ? { ok: true, profiles: [] }
-        : { ok: true, maxDepth: 1, defaultMinionProfileId: null },
+        : String(path).includes('model-connections')
+          ? { connections: [] }
+          : {
+              ok: true,
+              maxDepth: 1,
+              defaultHarness: 'burrow',
+              codexModel: null,
+              claudeModel: null,
+              defaultMinionProfileId: null,
+              overrideEnabled: true,
+              profileOverrides: {},
+              effective: {
+                maxDepth: 1,
+                defaultHarness: 'burrow',
+                codexModel: null,
+                claudeModel: null,
+                defaultMinionProfileId: null,
+              },
+            },
     );
     const overflow = document.createElement('div');
     document.body.append(overflow);
@@ -62,7 +80,7 @@ describe('Default minion provider autosave', () => {
           selected={agent}
           savedProviders={providers}
           onAgentsChanged={vi.fn()}
-          section="details"
+          section="minions"
           overflowTarget={overflow}
         />
       </ConfirmProvider>,
@@ -80,20 +98,19 @@ describe('Default minion provider autosave', () => {
           .mocked(api)
           .mock.calls.some(([path]) => path === '/api/settings/minions?agentId=agent%2Fname'),
       ).toBe(true);
-      expect(screen.getByRole('button', { name: 'Save default minion' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Save minion defaults' })).toBeTruthy();
     } finally {
       unmount();
       overflow.remove();
     }
   });
 
-  it('keeps minion controls in primary, not supporting content', async () => {
+  it('places saved agent defaults in the third column', async () => {
     const { container, unmount, overflow } = mountDetailsWithOverflow();
     try {
       const profileSelect = await screen.findByLabelText('Default minion profile');
-      expect(container.contains(profileSelect)).toBe(true);
-      expect(overflow.contains(profileSelect)).toBe(false);
-      expect(overflow.childElementCount).toBe(0);
+      expect(container.contains(profileSelect)).toBe(false);
+      expect(overflow.contains(profileSelect)).toBe(true);
     } finally {
       unmount();
       overflow.remove();

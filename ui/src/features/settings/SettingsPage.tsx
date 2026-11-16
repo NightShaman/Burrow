@@ -1,4 +1,4 @@
-import { MinionProfiles } from './MinionProfiles';
+import { MinionSettings } from './MinionSettings';
 import './settingsWorkspace.css';
 import './normalizedWorkspace.css';
 import './personalizationWorkspace.css';
@@ -125,10 +125,11 @@ export function Settings({
   const navigate = useUnsavedNavigation();
   const [settingsAgentId, setSettingsAgentId] = useState(selected.id);
   const [agentGlobal, setAgentGlobal] = useState(false);
-  const [globalSection, setGlobalSection] = useState<'global-documents' | 'execution-boundaries'>(
-    'global-documents',
-  );
+  const [globalSection, setGlobalSection] = useState<
+    'global-documents' | 'execution-boundaries' | 'minions'
+  >('global-documents');
   const [agentSection, setAgentSection] = useState<
+    | 'minions'
     | 'details'
     | 'profile-documents'
     | 'mcp-tools'
@@ -232,14 +233,7 @@ export function Settings({
   const selectedModSettings: ModSettingsContribution | undefined =
     selectedContribution?.settings?.find((item) => item.id === nativeSettingMatch?.[2]) ??
     selectedContribution?.settings?.[0];
-  const builtInTabs = [
-    'general',
-    'agents',
-    'minions',
-    'skills',
-    'connections',
-    'mods',
-  ] as SettingsTab[];
+  const builtInTabs = ['general', 'agents', 'skills', 'connections', 'mods'] as SettingsTab[];
   const modSettingsTab = (modId: string, settingId: string) =>
     `mod-settings:${modId}:${settingId}` as SettingsTab;
   // One shared working surface; selection precedes editing without moving its left edge.
@@ -259,7 +253,7 @@ export function Settings({
     if (tab === 'skills') return skillsSection === 'installed' ? 'inventory' : 'single';
     if (tab === 'mods') return modsSection === 'automatic-checks' ? 'single' : 'inventory';
     if (tab === 'agents') {
-      if (agentGlobal && globalSection !== 'global-documents') return 'inventory';
+      if (agentGlobal && globalSection === 'execution-boundaries') return 'inventory';
       if (!agentGlobal && (agents.length === 0 || agentSection === 'skills')) return 'single';
       if (
         (agentGlobal && globalSection === 'global-documents') ||
@@ -488,6 +482,7 @@ export function Settings({
                 [
                   ['global-documents', 'Global documents'],
                   ['execution-boundaries', 'Execution boundaries'],
+                  ['minions', 'Minions'],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -512,6 +507,7 @@ export function Settings({
               {(
                 [
                   ['details', 'Agent details'],
+                  ['minions', 'Minions'],
                   ['profile-documents', 'Profile documents'],
                   ['mcp-tools', 'MCP tools'],
                   ['cron-jobs', 'Cron jobs'],
@@ -623,7 +619,6 @@ export function Settings({
             key="configuration"
             className="settings-blank-column settings-prototype-configuration"
           >
-            {tab === 'minions' && <MinionProfiles />}
             {tab === 'connections' && connectionSection === 'opentelemetry' && (
               <OpenTelemetrySettings overflowTarget={overflowColumn} />
             )}
@@ -673,7 +668,9 @@ export function Settings({
 
             {tab === 'agents' &&
               (agentGlobal ? (
-                globalSection === 'global-documents' ? (
+                globalSection === 'minions' ? (
+                  <MinionSettings key="global-minions" overflowTarget={overflowColumn} />
+                ) : globalSection === 'global-documents' ? (
                   <GlobalProfileDocuments overflowTarget={overflowColumn} />
                 ) : (
                   <ExecutionBoundaries overflowTarget={overflowColumn} />

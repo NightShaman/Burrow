@@ -1,9 +1,27 @@
+import { ConfirmProvider } from '../../src/app/ConfirmDialog';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../src/app.css';
 import { Settings } from '../../src/features/settings/SettingsPage';
 import { UnsavedChangesProvider } from '../../src/app/UnsavedChanges';
-const mode = new URLSearchParams(location.search).get('state');
+const params = new URLSearchParams(location.search);
+const mode = params.get('state');
+const scope = params.get('scope');
+const defaults = {
+  maxDepth: 1,
+  defaultHarness: 'burrow',
+  codexModel: { connectionId: 'openai', model: 'gpt-5.3-codex' },
+  claudeModel: { connectionId: 'anthropic', model: 'claude-sonnet-4-6' },
+  defaultMinionProfileId: null,
+};
+let settings = {
+  ok: true,
+  ...defaults,
+  overrideEnabled: mode !== 'inherit',
+  profileOverrides: {},
+  effective: defaults,
+};
+(window as any).fixtureRequests = [];
 const profiles = [
   {
     id: 'research',
@@ -35,6 +53,26 @@ const profiles = [
 ];
 window.fetch = async (input, options) => {
   const path = String(input);
+  (window as any).fixtureRequests.push({
+    path,
+    method: options?.method || 'GET',
+    body: options?.body,
+  });
+  if (path.endsWith('/minion-settings')) {
+    if (options?.method === 'PUT') {
+      if (mode === 'pending') await new Promise(() => {});
+      if (mode === 'save-error')
+        return Response.json({ error: 'Settings update rejected; please retry.' }, { status: 503 });
+      settings = { ...settings, ...JSON.parse(String(options.body)) };
+    }
+    return Response.json(settings);
+  }
+  if (path === '/api/agents/fixture')
+    return Response.json({
+      ok: true,
+      agent: { id: 'fixture', name: 'Fixture agent', enabled: true },
+    });
+
   if (path.startsWith('/api/settings/minions')) {
     if (mode === 'loading') await new Promise(() => {});
     if (mode === 'error')
@@ -85,12 +123,12 @@ window.fetch = async (input, options) => {
 };
 const noop = () => {};
 function Fixture() {
-  const [tab, setTab] = React.useState('minions');
+  const [tab, setTab] = React.useState(scope === 'agent' ? 'agents' : 'minions');
   const props: any = {
     tab,
     setTab,
-    agents: [{ id: 'fixture', name: 'Fixture agent', enabled: true }],
-    selected: { id: 'fixture', name: 'Fixture agent', enabled: true },
+    agents: [{ id: 'fixture', name: 'Fixture agent', avatar: '', enabled: true }],
+    selected: { id: 'fixture', name: 'Fixture agent', avatar: '', enabled: true },
     savedProviders: [],
     onModelConnectionsChanged: async () => {},
     onAgentsChanged: async () => {},
@@ -109,11 +147,13 @@ function Fixture() {
       props['set' + side[0].toUpperCase() + side.slice(1) + slot + 'Panel'] = noop;
     }
   return (
-    <UnsavedChangesProvider>
-      <main className="settings-mode" style={{ height: '100vh' }}>
-        <Settings {...props} />
-      </main>
-    </UnsavedChangesProvider>
+    <ConfirmProvider>
+      <UnsavedChangesProvider>
+        <main className="settings-mode" style={{ height: '100vh' }}>
+          <Settings {...props} />
+        </main>
+      </UnsavedChangesProvider>
+    </ConfirmProvider>
   );
 }
 createRoot(document.getElementById('root')!).render(<Fixture />);
