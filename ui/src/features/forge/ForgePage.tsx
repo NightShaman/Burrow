@@ -799,7 +799,16 @@ export function Forge({
     </>
   );
   return (
-    <main ref={machineRef} className="forge-page forge-machine">
+    <main
+      ref={machineRef}
+      className={`forge-page forge-machine${showHome ? ' forge-home-active' : ''}`}
+    >
+      {showHome && (
+        <>
+          <div className="forge-home-atmosphere" aria-hidden="true" />
+          <ForgeConstellation enabled={motion.enabled} />
+        </>
+      )}
       <header className="forge-heading">
         <div
           className="forge-heading-copy"
@@ -897,8 +906,6 @@ export function Forge({
       )}
       {showHome && (
         <section className="forge-home" aria-label="Forge Home">
-          <div className="forge-home-atmosphere" aria-hidden="true" />
-          <ForgeConstellation enabled={motion.enabled} />
           <img
             className="forge-home-emblem"
             src="/forge.png"

@@ -727,7 +727,7 @@
 }
 
 /* Atmosphere belongs to Home only; decorative layers never intercept controls. */
-.forge-home {
+.forge-home-active {
   position: relative;
   isolation: isolate;
   overflow: hidden;
