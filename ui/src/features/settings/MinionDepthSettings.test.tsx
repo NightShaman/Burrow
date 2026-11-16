@@ -207,9 +207,9 @@ describe('Per-agent minion depth', () => {
           return new Promise((resolve) => {
             release = resolve;
           });
-        return { ok: true, maxDepth: 0 };
+        return settings(0);
       }
-      return { selection: null };
+      return { connections: [] };
     });
     const agent: Agent = {
       id: 'target-a::agent',
@@ -232,17 +232,32 @@ describe('Per-agent minion depth', () => {
           selected={selected}
           savedProviders={[]}
           onAgentsChanged={vi.fn()}
-          section="details"
+          section="minions"
         />
       </ConfirmProvider>
     );
+    const settings = (maxDepth: number) => {
+      const defaults = {
+        maxDepth,
+        defaultHarness: 'burrow',
+        burrowModel: null,
+        codexModel: null,
+        claudeModel: null,
+        geminiModel: null,
+        codexEnabled: false,
+        claudeEnabled: false,
+        geminiEnabled: false,
+      };
+      return { ok: true, ...defaults, overrideEnabled: true, effective: defaults };
+    };
     const { rerender } = render(form(agent));
-    expect(
-      screen.getByRole('heading', { name: 'Minion settings' }).parentElement?.contains(slider()),
-    ).toBe(true);
+    await waitFor(() => expect(release).toBeTypeOf('function'));
     rerender(form({ ...agent, id: 'target-b::agent' }));
     await ready();
-    await act(async () => release({ ok: true, maxDepth: 2 }));
+    expect(
+      screen.getByRole('heading', { name: 'Minion defaults' }).parentElement?.contains(slider()),
+    ).toBe(true);
+    await act(async () => release(settings(2)));
     expect(slider().value).toBe('0');
     expect(
       vi

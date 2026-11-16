@@ -45,9 +45,11 @@ describe('Default minion provider autosave', () => {
               defaultHarness: 'burrow',
               codexModel: null,
               claudeModel: null,
+              geminiModel: null,
               burrowModel: null,
               codexEnabled: false,
               claudeEnabled: false,
+              geminiEnabled: false,
               overrideEnabled: true,
               profileOverrides: {},
               effective: {
@@ -55,9 +57,11 @@ describe('Default minion provider autosave', () => {
                 defaultHarness: 'burrow',
                 codexModel: null,
                 claudeModel: null,
+                geminiModel: null,
                 burrowModel: null,
                 codexEnabled: false,
                 claudeEnabled: false,
+                geminiEnabled: false,
               },
             },
     );
