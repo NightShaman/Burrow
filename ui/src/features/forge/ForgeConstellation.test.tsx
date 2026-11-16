@@ -1,19 +1,14 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { ForgeConstellation, forgeFigures } from './ForgeConstellation';
+import { ForgeConstellation } from './ForgeConstellation';
 
 afterEach(cleanup);
-it('keeps all three authored silhouettes and eight Gerald arms with effects off', () => {
+it('omits figure artwork and disables the canvas effects when off', () => {
   const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
   const { container } = render(<ForgeConstellation enabled={false} />);
   expect(context).not.toHaveBeenCalled();
-  expect([...container.querySelectorAll('svg')].map((s) => s.dataset.figure)).toEqual([
-    'Goblin',
-    'Gerald the octopus',
-    'Kerning the magenta dragon',
-  ]);
-  expect(forgeFigures[1].paths.slice(4)).toHaveLength(8);
-  expect(container.querySelectorAll('circle').length).toBeGreaterThan(100);
+  expect(container.querySelector('svg')).toBeNull();
+  expect(container.querySelector('canvas')).not.toBeNull();
 });
 it('caps DPR, reacts to the pointer, pauses while hidden and cleans up', () => {
   const ctx = {
@@ -53,6 +48,7 @@ it('caps DPR, reacts to the pointer, pauses while hidden and cleans up', () => {
     .dispatchEvent(new MouseEvent('pointermove', { clientX: 200, clientY: 100 }));
   callback(performance.now());
   expect(ctx.createRadialGradient).toHaveBeenCalled();
+  expect(ctx.arc).toHaveBeenCalled();
   document.dispatchEvent(new Event('visibilitychange'));
   expect(cancel).toHaveBeenCalled();
   unmount();
@@ -62,7 +58,7 @@ it('caps DPR, reacts to the pointer, pauses while hidden and cleans up', () => {
   expect(raf.mock.calls.length).toBe(calls);
   vi.unstubAllGlobals();
 });
-it('renders static artwork without a canvas context under reduced motion', () => {
+it('disables canvas effects under reduced motion', () => {
   vi.stubGlobal('matchMedia', () => ({
     matches: true,
     addEventListener: vi.fn(),
@@ -71,6 +67,6 @@ it('renders static artwork without a canvas context under reduced motion', () =>
   const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
   const { container } = render(<ForgeConstellation enabled />);
   expect(context).not.toHaveBeenCalled();
-  expect(container.querySelectorAll('svg')).toHaveLength(3);
+  expect(container.querySelectorAll('svg')).toHaveLength(0);
   vi.unstubAllGlobals();
 });

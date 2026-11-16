@@ -64,7 +64,7 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(crest.getAttribute('src')).toBe('/forge.png');
   expect(crest.getAttribute('width')).toBe('1254');
   expect(crest.getAttribute('height')).toBe('1254');
-  expect(document.querySelectorAll('.forge-home-constellation svg')).toHaveLength(3);
+  expect(document.querySelectorAll('.forge-home-constellation svg')).toHaveLength(0);
   expect(screen.queryByLabelText('Creation shortcuts')).toBeNull();
   expect(screen.queryByText(/Choose a medium/)).toBeNull();
   expect(screen.queryByRole('heading', { name: 'The Phantasm Forge' })).toBeNull();
