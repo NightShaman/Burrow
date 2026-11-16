@@ -62,8 +62,13 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(document.querySelector('.forge-home svg')).toBeNull();
   expect(screen.queryByLabelText('Creation shortcuts')).toBeNull();
   expect(screen.queryByText(/Choose a medium/)).toBeNull();
-  expect(screen.queryByText('The Phantasm Forge')).toBeNull();
-  expect(screen.queryByText('Manufacture sights, sounds, and moving lies.')).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'The Phantasm Forge' })).toBeNull();
+  expect(screen.getByText('The Phantasm Forge').parentElement?.style.visibility).toBe('hidden');
+  expect(
+    screen
+      .getByText('Manufacture sights, sounds, and moving lies.')
+      .parentElement?.getAttribute('aria-hidden'),
+  ).toBe('true');
   expect(screen.getByRole('heading', { name: 'The Forge Awaits', level: 1 })).toBeTruthy();
   expect(screen.queryByText('Give an idea its form.')).toBeNull();
   expect(screen.queryByText('Make something extraordinary.')).toBeNull();

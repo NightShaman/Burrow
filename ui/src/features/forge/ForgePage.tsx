@@ -800,13 +800,13 @@ export function Forge({
   return (
     <main ref={machineRef} className="forge-page forge-machine">
       <header className="forge-heading">
-        <div>
-          {!showHome && (
-            <>
-              <h1>The Phantasm Forge</h1>
-              <p>Manufacture sights, sounds, and moving lies.</p>
-            </>
-          )}
+        <div
+          className="forge-heading-copy"
+          style={{ visibility: showHome ? 'hidden' : undefined }}
+          aria-hidden={showHome || undefined}
+        >
+          <h1>The Phantasm Forge</h1>
+          <p>Manufacture sights, sounds, and moving lies.</p>
         </div>
         <div
           className="forge-modes"
