@@ -203,7 +203,7 @@ function normalizeAction(action, index) {
   if (tool === 'files_write' && normalized.content === null) errors.push('content_required');
   if (tool === 'files_patch' && !normalized.patch) errors.push('patch_required');
   if (tool === 'spawn_subagent') {
-    if (normalized.harness !== null && !['burrow', 'codex', 'claude'].includes(normalized.harness)) errors.push('harness_invalid');
+    if (normalized.harness !== null && !['burrow', 'codex', 'claude', 'gemini'].includes(normalized.harness)) errors.push('harness_invalid');
     if (!normalized.task) errors.push('task_required');
     normalized.target = normalizeSpawnTarget(action?.target, errors);
   }
@@ -471,7 +471,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
           additionalProperties: false,
           properties: {
             task: { type: 'string' },
-            harness: { type: 'string', enum: ['burrow', 'codex', 'claude'], description: 'Optional child execution harness. Omit to use the agent minion default.' },
+            harness: { type: 'string', enum: ['burrow', 'codex', 'claude', 'gemini'], description: 'Optional child execution harness. Omit to use the agent minion default.' },
             label: { type: 'string', description: 'Optional short display label for the child in the agent tree (maximum 80 characters). Keep the full instruction in task.' },
             model: { type: 'string', description: 'Optional exact enabled configured model id for this child only. Omit to inherit the parent model.' },
             target: {

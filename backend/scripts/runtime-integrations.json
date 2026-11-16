@@ -13,5 +13,10 @@
     "packageName": "@openai/codex",
     "version": "latest",
     "executable": "codex"
+  },
+  "gemini-cli": {
+    "packageName": "@google/gemini-cli",
+    "version": "latest",
+    "executable": "gemini"
   }
 }

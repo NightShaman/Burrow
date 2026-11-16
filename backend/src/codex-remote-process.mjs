@@ -13,6 +13,11 @@ export async function openRemoteClaudeProcess(controller, targetId, cwd, { args,
   return openRemoteProcess(controller, targetId, { cwd, args, token }, 'claude');
 }
 
+export async function openRemoteGeminiProcess(controller, targetId, cwd, { args, apiKey } = {}) {
+  if (typeof controller?.codexRpc !== 'function') throw new Error('gemini_remote_transport_unavailable');
+  return openRemoteProcess(controller, targetId, { cwd, args, apiKey }, 'gemini');
+}
+
 async function openRemoteProcess(controller, targetId, options, runtime) {
   const operationId = `${runtime}-${randomUUID()}`;
   const rpc = (method, params = {}) => controller.codexRpc({ targetId, method: `${runtime}.${method}`, params: { operationId, ...params } });

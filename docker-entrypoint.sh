@@ -37,6 +37,7 @@ node /opt/burrow/scripts/ensure-runtime-integrations.mjs
 export BURROW_MCPORTER_ROOT="${BURROW_MCPORTER_ROOT:-${BURROW_RUNTIME_ROOT}/integrations/mcporter}"
 export BURROW_MCPORTER_BIN="${BURROW_MCPORTER_BIN:-${BURROW_MCPORTER_ROOT}/node_modules/.bin/mcporter}"
 export BURROW_CLAUDE_BIN="${BURROW_CLAUDE_BIN:-${BURROW_RUNTIME_ROOT}/integrations/claude-code/node_modules/.bin/claude}"
+export BURROW_GEMINI_EXECUTABLE="${BURROW_GEMINI_EXECUTABLE:-${BURROW_RUNTIME_ROOT}/integrations/gemini-cli/node_modules/.bin/gemini}"
 
 mode="${BURROW_POSTGRES_LIFECYCLE:-${BURROW_POSTGRES_MODE:-disabled}}"
 if [ "$mode" = "managed" ] || [ "$mode" = "external" ]; then

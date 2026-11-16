@@ -101,7 +101,7 @@ async function archiveEntries(archive, runTar) {
 async function validateRestoredTree(root) {
   const rootStat = await fs.lstat(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('unsafe restore root');
-  const controls = new Set([MANIFEST, 'burrow.env', 'integrations', 'integrations/mcporter', 'integrations/claude-code', 'integrations/codex']);
+  const controls = new Set([MANIFEST, 'burrow.env', 'integrations', 'integrations/mcporter', 'integrations/claude-code', 'integrations/codex', 'integrations/gemini-cli']);
   const inside = (target) => target === root || target.startsWith(`${root}${path.sep}`);
   const walk = async (current) => {
     const stat = await fs.lstat(current);
@@ -193,6 +193,7 @@ const RESTORED_INSTALL_PATHS = Object.freeze({
   BURROW_CACHE_ROOT: (root) => path.join(root, 'cache'),
   BURROW_CODEX_EXECUTABLE: (root) => path.join(root, 'integrations', 'codex', 'node_modules', '.bin', 'codex'),
   BURROW_CLAUDE_BIN: (root) => path.join(root, 'integrations', 'claude-code', 'node_modules', '.bin', 'claude'),
+  BURROW_GEMINI_EXECUTABLE: (root) => path.join(root, 'integrations', 'gemini-cli', 'node_modules', '.bin', 'gemini'),
 });
 
 async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot, mapping = {}) {
@@ -210,11 +211,11 @@ async function rebaseRestoredEnvironment(installRoot, finalRoot = installRoot, m
   await fs.chmod(envPath, 0o600);
 }
 
-async function installRestoredIntegrations(installRoot, runCommand = execFileAsync) {
+async function installRestoredIntegrations(installRoot, runCommand = execFileAsync, resolvePackageVersion) {
   const backend = await exists(path.join(installRoot, 'app/backend/package.json')) ? 'app/backend' : 'app';
   const manifest = JSON.parse(await fs.readFile(path.join(installRoot, backend, 'scripts/runtime-integrations.json'), 'utf8'));
   const integrations = Object.entries(manifest).map(([id, spec]) => {
-    const supportedVersion = spec?.version === 'latest' && id === 'codex';
+    const supportedVersion = spec?.version === 'latest' && ['codex', 'claude-code', 'gemini-cli'].includes(id);
     if (!/^[a-z0-9-]+$/.test(id) || !spec || !/^(?:@[a-z0-9-]+\/)?[a-z0-9.-]+$/.test(spec.packageName) ||
         (!supportedVersion && !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(spec.version)) || !/^[a-z0-9-]+$/.test(spec.executable)) {
       throw new Error('invalid pinned release integration manifest');
@@ -222,7 +223,7 @@ async function installRestoredIntegrations(installRoot, runCommand = execFileAsy
     return { id, packageName: spec.packageName, version: spec.version, executable: spec.executable };
   });
   if (!integrations.length) throw new Error('empty release integration manifest');
-  await ensureRuntimeIntegrations({ runtimeRoot: installRoot, integrations, runCommand, logger: { log() {} } });
+  await ensureRuntimeIntegrations({ runtimeRoot: installRoot, integrations, runCommand, resolvePackageVersion, logger: { log() {} } });
 }
 
 export async function planPortableInstallRestore({ archive, home = process.env.HOME || os.homedir(), replace = false, runTar = execFileAsync } = {}) {
@@ -240,7 +241,7 @@ export async function planPortableInstallRestore({ archive, home = process.env.H
   return { ok: true, dryRun: true, archive: sourceArchive, targetHome, target, replace: Boolean(replace), targetExists, archiveEntries: entries.length, environmentInventory: await previewEnvironment(sourceArchive, runTar), owner: { uid: homeStat.uid, gid: homeStat.gid } };
 }
 
-export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, mappingFile = null, runTar = execFileAsync, runCommand = execFileAsync } = {}) {
+export async function restorePortableInstall({ archive, home = process.env.HOME || os.homedir(), replace = false, mappingFile = null, runTar = execFileAsync, runCommand = execFileAsync, resolvePackageVersion } = {}) {
   const plan = await planPortableInstallRestore({ archive, home, replace, runTar });
   const mapping = mappingFile ? JSON.parse(await fs.readFile(mappingFile, 'utf8')) : {};
   if (!mapping || Array.isArray(mapping) || typeof mapping !== 'object' || Object.entries(mapping).some(([key, value]) => !/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== 'string' || /[\r\n]/.test(value))) throw new Error('invalid restore mapping');
@@ -261,7 +262,7 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
     if (manifest.policy?.databaseMode === 'managed' && (manifest.policy.sourceOwner !== os.userInfo().username || manifest.policy.sourceUid !== plan.owner.uid)) throw new Error('managed physical restore requires same OS owner; use logical PostgreSQL role migration separately');
     if (!manifest.policy && plan.environmentInventory.some(entry => entry.databaseIdentity)) throw new Error('legacy database archive lacks source owner evidence; create a new cold backup');
     await rebaseRestoredEnvironment(stagedRoot, plan.target, mapping);
-    await installRestoredIntegrations(stagedRoot, runCommand);
+    await installRestoredIntegrations(stagedRoot, runCommand, resolvePackageVersion);
     if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(stagedRoot, plan.owner);
     const previousRoot = path.join(staging, 'previous-install');
     let previousMoved = false;

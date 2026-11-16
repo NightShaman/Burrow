@@ -1,6 +1,7 @@
 import { claudeDirectEligible, claudePoolEligible } from './claude-model-selection.mjs';
 import { ProviderPoolEngine } from './provider-pool-engine.mjs';
 import { createProviderUsageService } from './provider-usage-service.mjs';
+import { geminiDirectEligible } from './gemini-model-selection.mjs';
 
 export const codexDirectEligible = connection => Boolean(connection
   && connection.enabled !== false
@@ -31,7 +32,8 @@ export function withCodexEligibility(connections) {
         const member = connections.find(item => item.id === id);
         return codexDirectEligible(member) && (member.models || []).some(model => model.selected !== false
           && codexSupportsModel(connection, model.id));
-      })) }));
+      })),
+    geminiEligible: geminiDirectEligible(connection) }));
 }
 
 export async function createCodexPoolRouting(store, connectionId, model, context) {

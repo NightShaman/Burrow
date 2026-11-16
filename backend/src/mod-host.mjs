@@ -687,7 +687,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
         if (!modAuthority) throw hostError('mod_authority_forbidden');
         await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
         if (admissionsPaused || !systemControllerReady || closing || stopped || !child.connected) throw hostError('codex_controller_unavailable');
-        if (!['codex.open', 'codex.write', 'codex.read', 'codex.close', 'claude.open', 'claude.write', 'claude.read', 'claude.close'].includes(request?.method)) throw hostError('codex_method_invalid');
+        if (!['codex.open', 'codex.write', 'codex.read', 'codex.close', 'claude.open', 'claude.write', 'claude.read', 'claude.close', 'gemini.open', 'gemini.write', 'gemini.read', 'gemini.close'].includes(request?.method)) throw hostError('codex_method_invalid');
         const requestId = randomUUID();
         return new Promise((resolve, reject) => {
           const timer = setTimeout(() => { pendingCodex.delete(requestId); reject(hostError('codex_rpc_timeout')); }, 15000);

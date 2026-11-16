@@ -2,6 +2,7 @@ import { resolveModelConfig } from './config.mjs';
 import { CLAUDE_SELECTION_ACTIONS, validateClaudeModelSelection } from './claude-model-selection.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
 import { CODEX_SELECTION_ACTIONS, validateCodexModelSelection } from './codex-model-selection.mjs';
+import { GEMINI_SELECTION_ACTIONS, validateGeminiModelSelection } from './gemini-model-selection.mjs';
 import { projectModelRecoveryMetadata } from './model-recovery-projection.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { canSpawnMinion, nextMinionDepth, resolveTurnMinionDepth, readMinionSettings } from './minion-depth.mjs';
@@ -27,7 +28,7 @@ function compactText(value, maxChars) {
 [${text.length - maxChars} chars omitted]` : text;
 }
 
-const NATIVE_SELECTION_ACTIONS = Object.freeze({ ...CODEX_SELECTION_ACTIONS, ...CLAUDE_SELECTION_ACTIONS });
+const NATIVE_SELECTION_ACTIONS = Object.freeze({ ...CODEX_SELECTION_ACTIONS, ...CLAUDE_SELECTION_ACTIONS, ...GEMINI_SELECTION_ACTIONS });
 
 const SALVAGED_EVIDENCE_BUDGET = 36_000;
 const SALVAGED_EVIDENCE_SINGLE_TEXT = 4_000;
@@ -242,12 +243,12 @@ export async function executeSpawnSubagentTool({
   const profile = selection.profile;
   blockers.push(...selection.blockers);
   const harness = profile?.harness ?? args.harness ?? settings.defaultHarness;
-  if (['codex', 'claude'].includes(harness) && !settings[`${harness}Enabled`]) blockers.push(`${harness}_minions_disabled`);
+  if (['codex', 'claude', 'gemini'].includes(harness) && !settings[`${harness}Enabled`]) blockers.push(`${harness}_minions_disabled`);
   const burrowSelection = profile?.model ?? settings.burrowModel;
-  if (!['burrow', 'codex', 'claude'].includes(harness)) blockers.push('subagent_harness_invalid');
+  if (!['burrow', 'codex', 'claude', 'gemini'].includes(harness)) blockers.push('subagent_harness_invalid');
   if (!task) blockers.push('subagent_task_required');
   if (!dataRoot) blockers.push('subagent_data_root_required');
-  if (!['codex','claude'].includes(harness) && !modelConfig && !burrowSelection) blockers.push('subagent_model_config_required');
+  if (!['codex','claude','gemini'].includes(harness) && !modelConfig && !burrowSelection) blockers.push('subagent_model_config_required');
 
   // A profile may pin an execution host. Resolve it before target validation so
   // the target is proven on the host that will actually run the child.
@@ -268,9 +269,9 @@ export async function executeSpawnSubagentTool({
   } : executionContext;
 
   const requestedModel = compactString(args.model || args.modelId || args.model_id) || null;
-  let childModelConfig = ['codex','claude'].includes(harness) ? null : modelConfig;
-  if ((harness === 'codex' || harness === 'claude') && !selection.blockers.length) {
-    const validate = harness === 'claude' ? validateClaudeModelSelection : validateCodexModelSelection;
+  let childModelConfig = ['codex','claude','gemini'].includes(harness) ? null : modelConfig;
+  if (['codex', 'claude', 'gemini'].includes(harness) && !selection.blockers.length) {
+    const validate = harness === 'claude' ? validateClaudeModelSelection : harness === 'gemini' ? validateGeminiModelSelection : validateCodexModelSelection;
     try {
       // A native profile carries its own validated selection; the legacy
       // per-agent default remains the source only when no profile is selected.
@@ -345,7 +346,7 @@ export async function executeSpawnSubagentTool({
       resolvedModel: modelSelection.resolvedModel,
       ...(() => {
         const actions = blockers.map(code => minionProfileAction(code)
-          || (['codex', 'claude'].includes(harness) ? NATIVE_SELECTION_ACTIONS[code] : null)).filter(Boolean);
+          || (['codex', 'claude', 'gemini'].includes(harness) ? NATIVE_SELECTION_ACTIONS[code] : null)).filter(Boolean);
         return actions.length ? { summary: actions.join(' ') } : {};
       })(),
       ...(selection.selectedProfileId ? { minionProfileId: selection.selectedProfileId } : {}),
@@ -474,9 +475,9 @@ export async function executeSpawnSubagentTool({
   let childRun;
   try {
     abortSignal?.throwIfAborted();
-    if (!['codex','claude'].includes(harness) && remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
+    if (!['codex','claude','gemini'].includes(harness) && remoteExecution && typeof childRunner !== 'function') throw new Error('subagent_child_runner_required');
     // Load the composed worker only at dispatch: it depends on proposal-execution.
-    const nativeHarness = ['codex','claude'].includes(harness);
+    const nativeHarness = ['codex','claude','gemini'].includes(harness);
     const runCodexChild = nativeHarness
       ? (await import('./subagent-worker-runner.mjs')).runSpawnSubagentChild : null;
     childRun = nativeHarness
@@ -494,12 +495,12 @@ export async function executeSpawnSubagentTool({
       result: { ok: false, summary: 'Minion child failed to start or dispatch.', blockers: [`subagent_child_dispatch_failed:${code}`], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false },
     };
   }
-  if (['codex','claude'].includes(harness)) {
+  if (['codex','claude','gemini'].includes(harness)) {
     childRun.spawned = Boolean(childRun.result?.spawned);
     childRun.cancelled = Boolean(childRun.result?.cancelled);
   }
   let childResult = childRun.result || { ok: false, summary: 'Minion returned no result.', blockers: ['subagent_result_missing'], warnings: [], evidence: [], artifacts: [], changedFiles: [], memoryWrites: [], sideEffectsApplied: false };
-  if (['codex','claude'].includes(harness) && childResult.model) {
+  if (['codex','claude','gemini'].includes(harness) && childResult.model) {
     childModelSelection = { ...childModelSelection, requestedModel: childModelConfig.model,
       resolvedModel: childResult.model.actual, resolvedConnectionId: childResult.model.resolvedConnectionId || childResult.model.connectionId,
       logicalConnectionId: childModelConfig.connectionId };

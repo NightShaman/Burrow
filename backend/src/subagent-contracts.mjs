@@ -129,7 +129,7 @@ function normalizeSpawnRequest(spawnRequest = null) {
     parentConversationId: compactString(spawnRequest.parentConversationId) || null,
     parentRunId: compactString(spawnRequest.parentRunId) || null,
     targetRoot: compactString(spawnRequest.targetRoot) || null,
-    harness: ['codex','claude'].includes(spawnRequest.harness) ? spawnRequest.harness : 'burrow',
+    harness: ['codex','claude','gemini'].includes(spawnRequest.harness) ? spawnRequest.harness : 'burrow',
     capability: compactString(spawnRequest.capability) || null,
     model: compactString(spawnRequest.model) || null,
     resolvedModel: compactString(spawnRequest.resolvedModel) || null,
@@ -155,7 +155,7 @@ function normalizeMinionProfileSnapshot(snapshot = null) {
   return {
     id,
     name: compactString(snapshot.name) || null,
-    harness: ['codex', 'claude'].includes(snapshot.harness) ? snapshot.harness : 'burrow',
+    harness: ['codex', 'claude', 'gemini'].includes(snapshot.harness) ? snapshot.harness : 'burrow',
     model,
     executionHostId: compactString(snapshot.executionHostId) || null,
     instructions: typeof snapshot.instructions === 'string' ? snapshot.instructions : '',
@@ -262,7 +262,7 @@ export function createSubagentContract({
   const contract = {
     contractVersion: SUBAGENT_CONTRACT_VERSION,
     kind: SUBAGENT_KIND,
-    harness: ['codex','claude'].includes(harness) ? harness : 'burrow',
+    harness: ['codex','claude','gemini'].includes(harness) ? harness : 'burrow',
     id: subagentId(id),
     owner: normalizeOwner(owner),
     ...(minionDepth ? { minionDepth: normalizeMinionDepth(minionDepth) } : {}),

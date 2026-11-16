@@ -1,30 +1,34 @@
 import { normalizeCodexModelSelection, validateCodexModelSelection } from './codex-model-selection.mjs';
 
 import { normalizeClaudeModelSelection, validateClaudeModelSelection } from './claude-model-selection.mjs';
+import { normalizeGeminiModelSelection, validateGeminiModelSelection } from './gemini-model-selection.mjs';
 
 export const DEFAULT_MINION_DEPTH = 1;
 export const MAX_MINION_DEPTH = 2;
 export const DEFAULT_MINION_HARNESS = 'burrow';
 
 function validHarness(value) {
-  return value === 'burrow' || value === 'codex' || value === 'claude';
+  return value === 'burrow' || value === 'codex' || value === 'claude'; // Gemini remains explicit per spawn, never a default selector.
 }
 
 function normalizeSettings(saved) {
   let burrowModel = null;
   try { burrowModel = normalizeCodexModelSelection(saved?.burrowModel ?? null); } catch {}
   let codexModel = null;
-  let claudeModel = null;
+  let claudeModel = null, geminiModel = null;
   try { codexModel = normalizeCodexModelSelection(saved?.codexModel ?? null); } catch {}
   try { claudeModel = normalizeClaudeModelSelection(saved?.claudeModel ?? null); } catch {}
+  try { geminiModel = normalizeGeminiModelSelection(saved?.geminiModel ?? null); } catch {}
   return {
     maxDepth: validMaxDepth(saved?.maxDepth) ? saved.maxDepth : DEFAULT_MINION_DEPTH,
     defaultHarness: validHarness(saved?.defaultHarness) ? saved.defaultHarness : DEFAULT_MINION_HARNESS,
     burrowModel,
     codexEnabled: typeof saved?.codexEnabled === 'boolean' ? saved.codexEnabled : Boolean(codexModel),
     claudeEnabled: typeof saved?.claudeEnabled === 'boolean' ? saved.claudeEnabled : Boolean(claudeModel),
+    geminiEnabled: typeof saved?.geminiEnabled === 'boolean' ? saved.geminiEnabled : Boolean(geminiModel),
     codexModel,
     claudeModel,
+    geminiModel,
     defaultMinionProfileId: typeof saved?.defaultMinionProfileId === 'string' ? saved.defaultMinionProfileId : null,
   };
 }
@@ -37,7 +41,7 @@ export const MINION_GLOBAL_SETTINGS_KEY = 'minion_settings';
 const settingsKey = agentId => agentId ? `minion_settings:${agentId}` : MINION_GLOBAL_SETTINGS_KEY;
 export function minionOverrideEnabled(saved) {
   return typeof saved?.overrideEnabled === 'boolean' ? saved.overrideEnabled
-    : Boolean(saved && Object.keys(saved).some(key => ['maxDepth', 'defaultHarness', 'burrowModel', 'codexEnabled', 'claudeEnabled', 'codexModel', 'claudeModel', 'defaultMinionProfileId'].includes(key)));
+    : Boolean(saved && Object.keys(saved).some(key => ['maxDepth', 'defaultHarness', 'burrowModel', 'codexEnabled', 'claudeEnabled', 'geminiEnabled', 'codexModel', 'claudeModel', 'geminiModel', 'defaultMinionProfileId'].includes(key)));
 }
 
 /** Saved editor state and resolved runtime state share one resolution path. */
@@ -60,15 +64,16 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   const hasDepth = object && Object.hasOwn(input, 'maxDepth');
   const hasHarness = object && Object.hasOwn(input, 'defaultHarness');
   const hasBurrow = object && Object.hasOwn(input, 'burrowModel');
-  const enableFields = ['codexEnabled', 'claudeEnabled'].filter(key => object && Object.hasOwn(input, key));
+  const enableFields = ['codexEnabled', 'claudeEnabled', 'geminiEnabled'].filter(key => object && Object.hasOwn(input, key));
   if (enableFields.some(key => typeof input[key] !== 'boolean')) throw Object.assign(new Error('minion_enabled_invalid'), { statusCode: 400 });
   const hasCodex = object && Object.hasOwn(input, 'codexModel');
   const hasClaude = object && Object.hasOwn(input, 'claudeModel');
+  const hasGemini = object && Object.hasOwn(input, 'geminiModel');
   const hasDefaultProfile = object && Object.hasOwn(input, 'defaultMinionProfileId');
   const hasOverride = object && Object.hasOwn(input, 'overrideEnabled');
   const hasProfiles = object && Object.hasOwn(input, 'profileOverrides');
   if ((hasOverride && (!agentId || typeof input.overrideEnabled !== 'boolean')) || (hasProfiles && !agentId)) throw Object.assign(new Error('minion_override_invalid'), { statusCode: 400 });
-  if ((!hasBurrow && !enableFields.length && !hasDepth && !hasHarness && !hasCodex && !hasClaude && !hasDefaultProfile && !hasOverride && !hasProfiles) || (hasDepth && !validMaxDepth(input.maxDepth))) {
+  if ((!hasBurrow && !enableFields.length && !hasDepth && !hasHarness && !hasCodex && !hasClaude && !hasGemini && !hasDefaultProfile && !hasOverride && !hasProfiles) || (hasDepth && !validMaxDepth(input.maxDepth))) {
     throw Object.assign(new Error('minion_max_depth_invalid'), { statusCode: 400 });
   }
   if (hasHarness && !validHarness(input.defaultHarness)) {
@@ -84,6 +89,8 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   if (codexModel) await validateCodexModelSelection(models, codexModel);
   const claudeModel = hasClaude ? normalizeClaudeModelSelection(input.claudeModel) : null;
   if (claudeModel) await validateClaudeModelSelection(models, claudeModel);
+  const geminiModel = hasGemini ? normalizeGeminiModelSelection(input.geminiModel) : null;
+  if (geminiModel) await validateGeminiModelSelection(models, geminiModel);
   if (hasProfiles) {
     const { validateMinionProfileOverrides } = await import('./minion-profiles.mjs');
     await validateMinionProfileOverrides(metadata, input.profileOverrides, models);
@@ -92,9 +99,9 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
   // First customization starts from global defaults, not hard-coded blanks.
   // Toggle-only off does not seed: first enabling can still inherit newer globals.
   const update = saved => {
-    const hasSavedDefaults = saved && ['maxDepth', 'defaultHarness', 'burrowModel', 'codexEnabled', 'claudeEnabled', 'codexModel', 'claudeModel', 'defaultMinionProfileId'].some(k => Object.hasOwn(saved, k));
+    const hasSavedDefaults = saved && ['maxDepth', 'defaultHarness', 'burrowModel', 'codexEnabled', 'claudeEnabled', 'geminiEnabled', 'codexModel', 'claudeModel', 'geminiModel', 'defaultMinionProfileId'].some(k => Object.hasOwn(saved, k));
     const firstCustomization = agentId && !hasSavedDefaults && !(hasOverride && !input.overrideEnabled);
-    const writeDefaults = firstCustomization || hasBurrow || enableFields.length > 0 || hasDepth || hasHarness || hasCodex || hasClaude || hasDefaultProfile || (!agentId && !saved);
+    const writeDefaults = firstCustomization || hasBurrow || enableFields.length > 0 || hasDepth || hasHarness || hasCodex || hasClaude || hasGemini || hasDefaultProfile || (!agentId && !saved);
     const merge = seed => ({
       ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}),
       ...(writeDefaults ? seed : {}),
@@ -106,8 +113,10 @@ export async function saveMinionSettings(metadata, agentId, input = {}, { models
       ...Object.fromEntries(enableFields.map(key => [key, input[key]])),
       ...(hasCodex ? { codexModel } : {}),
       ...(hasClaude ? { claudeModel } : {}),
+      ...(hasGemini ? { geminiModel } : {}),
       ...(!Object.hasOwn(saved || {}, 'codexEnabled') && !enableFields.includes('codexEnabled') && hasCodex ? { codexEnabled: Boolean(codexModel) } : {}),
       ...(!Object.hasOwn(saved || {}, 'claudeEnabled') && !enableFields.includes('claudeEnabled') && hasClaude ? { claudeEnabled: Boolean(claudeModel) } : {}),
+      ...(!Object.hasOwn(saved || {}, 'geminiEnabled') && !enableFields.includes('geminiEnabled') && hasGemini ? { geminiEnabled: Boolean(geminiModel) } : {}),
       ...(hasDefaultProfile ? { defaultMinionProfileId: input.defaultMinionProfileId } : {}),
     });
     return firstCustomization

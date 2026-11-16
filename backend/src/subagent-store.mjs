@@ -263,7 +263,7 @@ export function mergeSubagentResult(record = {}) {
 export function subagentVisibilitySummary(record = {}) {
   return {
     id: record.id || null,
-    harness: ['codex','claude'].includes(record.harness) ? record.harness : 'burrow',
+    harness: ['codex','claude','gemini'].includes(record.harness) ? record.harness : 'burrow',
     depth: record.minionDepth?.depth ?? 1,
     maxDepth: record.minionDepth?.maxDepth ?? 1,
     rootSessionId: record.minionDepth?.rootSessionId || null,
