@@ -23,7 +23,6 @@ type Settings = Defaults & {
 };
 const fields = [
   'maxDepth',
-  'defaultHarness',
   'codexModel',
   'claudeModel',
   'burrowModel',
@@ -220,25 +219,22 @@ export function MinionSettings({
   );
   const defaultEditor = (
     <fieldset disabled={busy || !enabled} className="minion-model-settings">
-      <Field label="Maximum minion depth">
-        <select
+      <Field label={`Maximum minion depth (${shown?.maxDepth ?? 1})`}>
+        <input
+          aria-label="Maximum minion depth"
+          aria-valuetext={`${shown?.maxDepth ?? 1}: ${['No minions', 'Direct minions', 'Nested minions'][shown?.maxDepth ?? 1]}`}
+          type="range"
+          min="0"
+          max="2"
+          step="1"
           value={shown?.maxDepth ?? 1}
           onChange={(e) => change({ maxDepth: Number(e.target.value) })}
-        >
-          <option value={0}>0 — No minions</option>
-          <option value={1}>1 — Direct minions</option>
-          <option value={2}>2 — Nested minions</option>
-        </select>
-      </Field>
-      <Field label="Default minion type">
-        <select
-          value={shown?.defaultHarness ?? 'burrow'}
-          onChange={(e) => change({ defaultHarness: e.target.value as Defaults['defaultHarness'] })}
-        >
-          <option value="burrow">Burrow</option>
-          <option value="codex">Codex</option>
-          <option value="claude">Claude</option>
-        </select>
+        />
+        <span className="minion-depth-marks" aria-hidden="true">
+          <span>0</span>
+          <span>1</span>
+          <span>2</span>
+        </span>
       </Field>
       <h3>Burrow defaults</h3>
       <ProviderModelFields

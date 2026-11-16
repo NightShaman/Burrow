@@ -102,10 +102,9 @@ it('keeps general and Burrow controls in the main column and native controls in 
     expect(third.contains(screen.getByLabelText('Codex Enabled'))).toBe(true);
     expect(third.contains(screen.getByLabelText('Claude model'))).toBe(true);
     fireEvent.change(screen.getByLabelText('Burrow provider'), { target: { value: 'native' } });
-    fireEvent.change(screen.getByLabelText('Default minion type'), { target: { value: 'claude' } });
     fireEvent.click(screen.getByText('Save minion defaults'));
     await waitFor(() => expect(puts()).toHaveLength(1));
-    expect(body()).toEqual({ burrowModel: pair, defaultHarness: 'claude' });
+    expect(body()).toEqual({ burrowModel: pair });
   } finally {
     view.unmount();
     third.remove();
@@ -156,4 +155,22 @@ it('rejects malformed responses and retries', async () => {
   fireEvent.click(screen.getByText('Retry minion settings'));
   await screen.findByLabelText('Burrow provider');
   expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true);
+});
+
+it('uses the existing depth slider range and never offers or writes a default harness', async () => {
+  setup(true);
+  render(<MinionSettings agentId="agent" />);
+  const slider = await screen.findByRole('slider', { name: 'Maximum minion depth' });
+  expect(slider.getAttribute('min')).toBe('0');
+  expect(slider.getAttribute('max')).toBe('2');
+  expect(slider.getAttribute('step')).toBe('1');
+  expect(screen.queryByLabelText('Default minion type')).toBeNull();
+  for (const depth of [0, 1, 2]) {
+    fireEvent.change(slider, { target: { value: String(depth) } });
+    fireEvent.click(screen.getByText('Save minion defaults'));
+    await waitFor(() => expect(body(puts().length - 1)).toEqual({ maxDepth: depth }));
+    await waitFor(() =>
+      expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
+    );
+  }
 });
