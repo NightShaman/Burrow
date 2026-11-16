@@ -896,10 +896,24 @@ export function Forge({
       )}
       {showHome && (
         <section className="forge-home" aria-label="Forge Home">
+          <div className="forge-home-atmosphere" aria-hidden="true">
+            <div className="forge-home-haze" />
+            {Array.from({ length: 16 }, (_, index) => (
+              <span
+                key={index}
+                className="forge-home-ember"
+                style={{
+                  left: `${12 + ((index * 37) % 77)}%`,
+                  animationDelay: `${-index * 1.7}s`,
+                  animationDuration: `${12 + (index % 5) * 3}s`,
+                }}
+              />
+            ))}
+          </div>
           <img
             className="forge-home-emblem"
             src="/forge.png"
-            alt="Steampunk fortress crest surrounding a luminous violet crystal"
+            alt="Arcane forge hammer above a glowing crystal and anvil"
             width={1254}
             height={1254}
           />

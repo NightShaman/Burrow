@@ -55,7 +55,11 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(screen.queryByRole('region', { name: 'Recent creations list' })).toBeNull();
   expect(screen.queryByLabelText('Creation viewer')).toBeNull();
   expect(fetchApi).not.toHaveBeenCalled();
-  const crest = screen.getByRole('img', { name: /Steampunk fortress crest/ });
+  const crest = screen.getByRole('img', { name: /Arcane forge hammer/ });
+  expect(document.querySelector('.forge-home-atmosphere')?.getAttribute('aria-hidden')).toBe(
+    'true',
+  );
+  expect(document.querySelectorAll('.forge-home-ember')).toHaveLength(16);
   expect(crest.getAttribute('src')).toBe('/forge.png');
   expect(crest.getAttribute('width')).toBe('1254');
   expect(crest.getAttribute('height')).toBe('1254');

@@ -725,3 +725,97 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/* Atmosphere belongs to Home only; decorative layers never intercept controls. */
+.forge-home {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.forge-home-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      ellipse at 50% 48%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(ellipse at 50% 58%, #ed8a2910, transparent 35%);
+  mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent);
+}
+.forge-home-haze {
+  position: absolute;
+  inset: -15%;
+  background:
+    radial-gradient(
+      ellipse at 23% 62%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 35%
+    ),
+    radial-gradient(
+      ellipse at 78% 42%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 38%
+    );
+  filter: blur(45px);
+  animation: forge-home-haze-drift 28s ease-in-out infinite alternate;
+}
+.forge-home-ember {
+  position: absolute;
+  bottom: 12%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #f6b46c;
+  box-shadow: 0 0 8px #ed8a2980;
+  opacity: 0;
+  animation: forge-home-ember-rise 18s linear infinite;
+}
+.forge-home-ember:nth-child(3n) {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+@keyframes forge-home-haze-drift {
+  from {
+    transform: translate(-3%, 2%) scale(1);
+  }
+  to {
+    transform: translate(3%, -2%) scale(1.08);
+  }
+}
+@keyframes forge-home-ember-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  15% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.25;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(38px, -65vh);
+  }
+}
+.forge-motion-reduced .forge-home-haze,
+.forge-motion-paused .forge-home-haze {
+  animation: none;
+}
+.forge-motion-reduced .forge-home-ember,
+.forge-motion-paused .forge-home-ember {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .forge-home-haze {
+    animation: none;
+  }
+  .forge-home-ember {
+    display: none;
+  }
+}
