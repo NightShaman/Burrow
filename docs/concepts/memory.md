@@ -1,9 +1,13 @@
 # Memory and continuity
 
 
-!!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
+:::note[Source review and historical material]
+
+This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
+
+:::
 
 BURROW separates original conversation evidence, editable agent profiles, operational working memory and explicit saved memories. These have different scopes, lifetimes and routes into model context. Understanding those boundaries helps explain both recall and retention.
 
@@ -14,7 +18,7 @@ These contracts follow the inspected current implementation. Explicitly dated pu
 | Layer | Purpose | Scope and use |
 |---|---|---|
 | Original conversation history | Recover what was actually said | Agent/session originals, including retained archive generations |
-| Profile documents | Identity, behavior, preferences and compact DreamMemory | Six PostgreSQL-backed documents per agent |
+| Profile documents | Identity, behavior, preferences and legacy stored DreamMemory (not automatically injected) | Six PostgreSQL-backed documents per agent |
 | Working memory | Decisions, findings, blockers, handoffs and tasks | Agent plus explicit continuity scope; explicit search/write tools |
 | Tiddle rolling cards | Recurring topics and cross-session continuity | Scoped cards; explicit rolling search |
 | Session handoff | Compact goal, outcome and evidence pointers | Agent/session-local recall metadata |

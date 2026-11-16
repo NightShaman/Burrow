@@ -1,9 +1,9 @@
 # Trust boundaries
 
 
+
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
-
 
 BURROW is an operator-controlled runtime with native filesystem/process tools, model connections, MCP integrations, and installable code. Deploy it inside a trust boundary suitable for the data and credentials available to its service account. HTTP login, encrypted settings, and child processes each provide specific protections; together they do not establish hostile multi-tenant isolation.
 
@@ -101,9 +101,11 @@ Do not generalize one subprocess's environment policy to another:
 | Process path | Environment behavior |
 |---|---|
 | Native shell harness | Defaults to `PATH` and `HOME` plus explicit values; full inheritance is an explicit option |
-| Local minion runner | Allowlist includes runtime paths, settings key, and PostgreSQL connection credentials |
+| Local Burrow-harness minion runner | Allowlist includes runtime paths, settings key, and PostgreSQL connection credentials |
 | Mod child host | Inherits service environment through the default Node `fork` behavior |
 | MCP stdio provider definition | Service `PATH` plus explicitly configured provider values |
+
+Native Codex/Claude Minions have separate runner-owned CLI processes and credential/continuation handling. Their native tool engines are not wrapped by Burrow's per-tool action reviewer; unsupported configured hard-block rules stop admission rather than being silently ignored. See [Minion boundary propagation](permissions.md#minion-boundary-propagation).
 
 None of those environment choices alone changes the process's OS file or network permissions.
 ## Browser and runtime trust

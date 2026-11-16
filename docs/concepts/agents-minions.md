@@ -1,8 +1,11 @@
 # Agents and minions
 
 
+
 !!! note "Source review and historical material"
+
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
 
@@ -34,7 +37,7 @@ The native `spawn_subagent` tool requires:
 - `target.kind`: `filesystem`
 - `target.root`: an absolute path to an existing directory
 
-Optional fields include a short `label`, `harness` (`burrow` or `codex`), and an exact configured `model` ID. For Burrow Minions, omitted model uses the agent's configured Minion model selection if present, otherwise the parent selection; an explicit model resolves on the parent's connection. Codex selection is separate, as described below. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
+Optional fields include a short `label`, `harness` (`burrow`, `codex` or `claude`), and an exact configured `model` ID. Normal dispatch uses effective global/agent Minion settings. A configured `burrowModel` pins the connection/model; a different per-call model fails with `burrow_model_override_unsupported`. With no Burrow pair, the actual parent turn model is inherited and an explicit enabled model resolves through the parent resolver. The retained `/minion-model-selection` compatibility setting is not the normal dispatch default. Native Codex and Claude selections are independent, as described below. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
 
 ```json
 {
@@ -51,7 +54,7 @@ The target is validated before dispatch. Local wrapper directories may be refine
 
 ### Minion Depth
 
-Current development has an independent per-agent **Minion Depth** setting, default **1**:
+Current development has a **Maximum minion depth** setting, default **1**, inherited from global Minion defaults unless the agent enables its override:
 
 | Depth limit | Work permitted from the root (depth 0) |
 |---|---|
@@ -59,7 +62,7 @@ Current development has an independent per-agent **Minion Depth** setting, defau
 | `1` | Direct children only; children are leaves |
 | `2` | Children may spawn grandchildren; grandchildren are leaves |
 
-At a leaf, `spawn_subagent` is absent from the tool surface and the executor independently rejects a manually requested spawn. This is a nesting ceiling, not a fan-out control or a per-spawn argument. Saving or clearing the separate Minion model selection does not change depth. Use the [Minion settings API](../reference/api/settings.md#minion-depth) for the request contract.
+At a leaf, `spawn_subagent` is absent from the tool surface and the executor independently rejects a manually requested spawn. This is a nesting ceiling, not a fan-out control or a per-spawn argument. Model selection and depth are separate fields in the same Minion settings record. Use the [Minion settings API](../reference/api/settings.md#minion-depth) for the request contract.
 
 Child ancestry and its spawn-time budget persist. Reopening a child does not turn it into a root; historical direct children without a marker remain depth 1 with budget 1. The current agent setting can tighten the effective spawning budget, but raising it does not enlarge a child's saved lineage budget.
 
@@ -70,8 +73,11 @@ A child starts with a purpose-built prompt containing its task and working direc
 Local minions use a separate Node process. A remote-assigned minion uses the child runner in-process so it can preserve the trusted remote execution controller. Both have separate child-session lineage and receipts.
 
 
+
 !!! warning "Isolation is about session/process context"
+
     A minion target is not a filesystem cage. An instruction such as “do not modify files” communicates task scope, but the target directory does not remove mutation tools. Configured execution boundaries are forwarded into child review and execution; they retain the limited enforcement scope described in [Permissions](../security/permissions.md#minion-boundary-propagation).
+
 
 ### Completion and evidence
 
@@ -100,7 +106,7 @@ Identical structural spawn requests within the same parent lineage can reuse an 
 
 ## Native Codex minions
 
-Choose **Burrow Minion** or **Codex Minion** in the agent's Minions settings. The saved default remains `burrow`; an explicit `spawn_subagent.harness` (`burrow` or `codex`) overrides it for that child without changing settings. The receipt and child session retain the actual harness.
+Open **Settings → Agents → Global → Minions** for shared defaults, or an individual agent’s **Minions** section and enable **Override global minion settings**. Configure Burrow defaults and independent **Codex Enabled** / **Claude Enabled** model pairs, then choose **Save minion defaults**. Disabling overrides preserves saved agent values; re-enabling restores them. The compatibility API retains `defaultHarness` (unconfigured default `burrow`); an explicit `spawn_subagent.harness` selects an enabled harness for one child without changing defaults. Native enablement is independent of the default harness. Disabled native harnesses reject new dispatch but do not disable existing-session follow-ups. The receipt and child session retain the actual harness.
 
 Codex has its own saved connection/model pair. Select an enabled model on a direct OpenAI OAuth connection or an eligible enabled OpenAI load balancer with enabled OAuth members supporting that model. API-key connections and other providers are not supported. Codex does not inherit the parent/Burrow Minion model; an explicit spawn `model` must match the saved Codex selection. Catalog eligibility is not proof of available quota or successful authentication.
 
@@ -115,6 +121,18 @@ Configured execution-boundary hard blocks are unsupported by this adapter and pr
 ### Codex pool continuation
 
 Pools retain their logical connection separately from the actual serving account/model. Same-account continuation resumes the native thread. A different account/member starts a fresh thread on the same host only with a complete portable native checkpoint. Current checkpoints can include terminal command results and file-change diffs, including failed attempts with possible effects; historical actions are context, not calls to execute again. Unknown items, unresolved effects, incomplete or oversized history remain account-bound. Missing required owners fail with `codex_pool_replay_unavailable`, not blind replay. At most one eligible alternate attempt is allowed after cleanup and authoritative effect reconciliation. Transport loss, cancellation, unresolved effects and partial assistant output alone do not authorize retry. A failed completed-turn history export retains a pending checkpoint; same-owner continuation must repair that export before new work or report `codex_checkpoint_repair_required`. These native checkpoints are not independently verified Burrow tool receipts.
+
+## Native Claude minions
+
+Enable Claude and select its independent connection/model pair in the same Minion defaults. Eligible direct Anthropic OAuth connections and enabled Anthropic pools are supported; API keys and parent-model inheritance are not. `claudeEligible` is structural catalog eligibility, not available quota or successful authentication. A per-call model must match the saved native selection.
+
+The current Claude CLI must exist on the selected host; `BURROW_CLAUDE_EXECUTABLE` can select an absolute executable. Node Goblin’s `--with-claude` option can provision the remote CLI. Core uses a private remote process transport, never a public shell credential command or a fallback to the controller host.
+
+Claude runs its own native tools and stream-JSON workflow. It requires inspection **and mutation** authorization; read-only policy fails with `claude_execution_policy_unsupported`. Unsupported hard execution boundaries block dispatch. Native tool permission admission does not make the target a filesystem cage; no-commit remains an instruction, not OS enforcement. Remaining native permission requests are denied rather than waiting for an absent prompt handler. An incompatible CLI fails explicitly.
+
+Text follow-ups resume the saved native session on the original host/model binding. A result is provisional until process close with exit code zero. Cancellation attempts process-tree cleanup; unconfirmed cleanup blocks reuse. Sanitized native text and activity remain model provenance: verification is `not_run`, not a Burrow tool-evidence pass.
+
+Same-account continuation resumes normally. A different pool member requires a complete, bounded successful-turn checkpoint and starts a fresh native session with that history as inert context. Unknown/unmatched tools, compaction, oversized history, failed or cancelled turns and uncertain persistence keep continuation account-bound. There is no automatic failed-turn retry and no claim of lossless native session import or model-level exactly-once behavior.
 
 ## Peer agent messages
 
@@ -200,3 +218,7 @@ Failed, cancelled and incomplete peer partials remain visible and attributed but
 
 Checked **12 November 2026**: An `@` mention begins at the start of text or after whitespace. Escapes and inline/fenced Markdown code are literal. Matching is case-insensitive and prefers the longest registered name or ID, including supported Unicode name characters. A nonempty explicit `agentIds` list is authoritative; prose mentions do not silently replace it. Without explicit recipients, an unknown mention is rejected; no explicit recipients and no recognized mentions broadcasts to the existing participants.
 
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

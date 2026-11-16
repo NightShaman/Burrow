@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-15**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 Health, operational projections and conversation/trace evidence expose different levels of information. A read-only route is not necessarily content-free, and an HTTP success is not proof that a full model/tool workflow succeeded.
@@ -122,3 +122,7 @@ Updated against Backend `4df4b424e2b2856cb2c25c8464da7f806eb661e0` on **2026-10-
 ## 29 October development delta
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../../project/source-map.md).
+
+## 15 November full static review
+
+Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.

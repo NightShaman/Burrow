@@ -1,8 +1,11 @@
 # Interface guide
 
 
+
 !!! note "Source review and historical material"
+
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 For task-oriented instructions, start with [Everyday use](../guide/everyday-use.md). This page is the detailed screen, control, and browser-state reference.
 
@@ -11,8 +14,11 @@ The BURROW interface brings conversations, agent configuration, project tasks, r
 The runtime owns durable state. The browser presents API responses and live activity, and keeps some local preferences and conversation caches. A visible answer, an accepted job, and a verified result are different states; inspect the relevant run or evidence before treating work as complete.
 
 
+
 !!! note "Development screenshots"
+
     The screenshots below show synthetic development fixtures captured on October 16, 2026. They illustrate interface layout, not verified task execution, provider generation, or saved configuration. Empty outer canvas has been cropped; application content is unchanged. Select an image to inspect it at full resolution. The source-backed behavior described in this guide remains pinned to the documented release.
+
 
 ## Find the right page
 
@@ -117,7 +123,7 @@ This settings map reflects the development UI checked **3 November 2026**, rathe
 | Category | Built-in sections |
 | --- | --- |
 | **General** | Personalization (Operator profile, reference photo, Operator timezone, Appearance and Browser tab), Trace retention, Continuity, Export, Rail panels |
-| **Agents** | Select **Global** for Global documents and Execution boundaries; select an agent for Agent details, Profile documents, MCP tools, Cron jobs, Workflow events, Dreams, Skills |
+| **Agents** | Select **Global** for Global documents, Minions and Execution boundaries; select an agent for Agent details, Minions, Profile documents, MCP tools, Cron jobs, Workflow events, Dreams, Skills |
 | **Skills** | Installed skills, Import from repository, New text skill |
 | **Connections** | Authentication, OpenTelemetry, Models, Load balancing, MCP servers, API tokens |
 | **Mods** | Installed mods, Mod sources, Automatic source checks |
@@ -125,7 +131,7 @@ This settings map reflects the development UI checked **3 November 2026**, rathe
 Settings uses these workspace arrangements:
 
 - **Single forms:** one complete form occupies the left half on wider work areas, with the other half intentionally empty. Examples include Trace retention, Authentication, skill import/creation and Automatic source checks. Below 640px of available work-area width, the form fills that width.
-- **Paired forms:** Personalization, Continuity, Export/Import, Agent details/Minion settings and Dreams keep their related groups beside each other, with their existing independent save scopes.
+- **Paired forms:** Personalization, Continuity, Export/Import, Agent details and Minion defaults and Dreams keep their related groups beside each other, with their existing independent save scopes.
 - **Inventory/editor:** a bounded list sits left of the selected item's full editor and actions. MCP servers, model pools, tokens, installed skills/mods, sources, boundaries, Cron and Workflow events use this arrangement.
 - **Documents/tools:** compact selectors remain beside their useful editing or tool controls.
 - **Models:** a dedicated provider list stays on the left, with connection controls, model rows and capability details in the remaining area.
@@ -143,7 +149,7 @@ The **Agents** selector is a horizontal, non-wrapping row of named buttons at ev
 - **Authentication, API tokens, and Execution boundaries:** review the relevant [authentication](../security/authentication.md) and [trust-boundary](../security/trust-boundaries.md) guidance before changing access or execution policy.
 - **Export and Trace retention:** use [Backup and recovery](../operations/backup-recovery.md) and [Operator procedures](../operations/procedures.md). Trace retention uses **Apply policy**. Applying an enabled policy can start scheduled deletion without Preview or Run now. For a manual cleanup, apply the intended policy, inspect **Preview cleanup**, then choose **Run now** with unchanged inputs. Any policy edit requires applying and previewing again.
 
-**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agent details** places **Minion settings** in that additional column, with the default Minion model and **Maximum minion depth** (0: none; 1: direct children, the default; 2: one further nested level). Depth saves when slider adjustment ends; existing Minion trees cannot gain extra depth. **OpenTelemetry** keeps the **Destinations** inventory left of the selected destination editor; **Dreams** pairs its configuration with **Dream memory**, with retained history in **Archive → Dreams**. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
+**Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agents → Global → Minions** owns shared defaults; each agent has a **Minions** section with an override toggle. Depth, Burrow model and native enable/model choices use **Save minion defaults**, rather than the earlier autosave controls. Inactive overrides remain saved. **OpenTelemetry** keeps the **Destinations** inventory left of the selected destination editor; **Dreams** pairs its configuration with **Dream memory**, with retained history in **Archive → Dreams**. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
 
 Under **Mods**, source checks discover available versions; they do not automatically install updates. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization.
 
@@ -276,8 +282,11 @@ Brains replaces the former Albdruck knowledge workspace. Memories belong to an *
 Migrated records show **Migrated from legacy Albdruck** and expandable **Legacy migration details**. These are retained historical records, not fresh verification. Saved memories are not automatically preloaded into every conversation. The agent explicitly invokes memory tools when needed. For provider-backed semantic search, see **Settings → General → Continuity** and [Memory](memory.md). Embeddings are optional and off by default; hosted providers can receive memory contents and queries when enabled.
 
 
+
 !!! warning "Review before deleting memories"
+
     **Delete memory** and **Delete selected memories** issue deletion immediately; the workspace does not present the old conversation-purge confirmation. **Select page** selects only the displayed page. Bulk deletion is independent per record, not atomic: inspect every reported result, then **Reload list** before retrying conflicts. Deleting a saved memory does not erase its source conversation.
+
 
 <figure markdown="span">
 [![Brains with an Agent owner selector, saved-memory list, and an editor for a synthetic memory and source references.](../assets/screenshots/06-brains-memory.webp){ loading=lazy }](../assets/screenshots/06-brains-memory.webp)
@@ -303,9 +312,9 @@ Supported PNG, JPEG, GIF and WebP artifacts up to 20 MiB also offer **Copy refer
 
 ### Gallery and recent jobs
 
-Checked **14 November 2026**: **Gallery** collects retained, succeeded operator-owned images and videos, including eligible older agent-generated jobs. It is not limited to the last 24 hours. Audio, failed jobs, ordinary chat uploads and mod-private creations are not included. **Recents** remains the last 24 hours of jobs; individual generation modes show their five latest matching jobs.
+Checked **15 November 2026**: **Gallery** collects retained, succeeded operator-owned images and videos, including eligible older agent-generated jobs. It is not limited to the last 24 hours. Audio, failed jobs, ordinary chat uploads and mod-private creations are not included. **Recents** remains the last 24 hours of jobs; individual generation modes show their five latest matching jobs.
 
-Use **New folder** inside the current folder to create a nested folder, navigate with the breadcrumb, and choose **Move** to place media in a folder or return it to the Gallery root. Folders and placements persist on the server; they do not move chat copies or rename the generated file. Opening media uses the existing image/video viewer and download controls.
+Use **New folder** inside the current folder to create a nested folder, navigate with the breadcrumb, and choose **Move** to place media in a folder or return it to the Gallery root. Select multiple visible items and choose **Move selected** to move them together. If some moves fail, the dialog reports the partial result and retries only the remaining items; successful moves are not repeated. Changing folders clears the selection. Folders and placements persist on the server; they do not move chat copies or rename the generated file. Opening media uses the existing image/video viewer and download controls.
 
 **Delete** asks for confirmation and permanently removes that media from the live gallery. Its original Forge preview/download and copied references stop working. Archive metadata and already-delivered chat copies remain; deleting one item is not deleting its whole job. Folder rename, move and deletion are not offered by this version. See [Gallery API and deletion](../reference/api/artifacts.md#forge-gallery).
 
@@ -371,7 +380,7 @@ The Minion depth controls, nested Minion tree and multi-destination telemetry se
 
 ## Current save behavior and history locations
 
-Independent controls autosave with saving/saved/error feedback: operator and agent names on validated blur; avatar changes and agent enabled state immediately; timezone/tab-suffix text on validated blur; MCP grants, complete Minion model choices and Dream toggles immediately; Minion depth, Dream emphasis and temperature at adjustment completion. Failed edits remain retryable and protected by the shared unsaved-change guard. Independent writes use accepted counterpart values rather than silently saving unrelated drafts.
+Independent controls autosave with saving/saved/error feedback: operator and agent names on validated blur; avatar changes and agent enabled state immediately; timezone/tab-suffix text on validated blur; MCP grants and Dream toggles immediately; Dream emphasis and temperature at adjustment completion. Current Minion defaults instead use their explicit save action. Failed edits remain retryable and protected by the shared unsaved-change guard. Independent writes use accepted counterpart values rather than silently saving unrelated drafts.
 
 Coupled editors retain an explicit save: profile documents, model providers/pools, authentication, MCP connections, skills/sources, cron jobs, workflow watches/receiver, embeddings, execution boundaries and OpenTelemetry. Tiddle model source/provider/path settings remain under **Save Tiddle Settings**; temperature autosaves only against an already accepted model. Built-in Mods automatic-check settings autosave a valid complete enabled/interval/stale scope. Do not assume contributed mod forms have the same shared guard.
 
@@ -442,10 +451,13 @@ A retained completed/failed run summary is not live activity. After its transcri
 
 
 
-
 ## Native Codex child controls and Forge references
 
-Current Minions settings expose a default **Minion Type**, with separate Burrow and Codex model selections. An existing child's **Codex Minion** badge describes its saved harness, not the current default. Codex child chat supports text follow-ups; attachment upload/paste/drop, steering and parent-model controls are unavailable where native continuation does not support them. Do not interpret a disabled control as successful submission.
+Current Minions settings expose Burrow defaults and independent enabled Codex/Claude defaults, with global inheritance and per-agent overrides. Existing children retain their saved harness badge and host. Native child chat supports text follow-ups; unsupported attachments, steering and parent-model controls are unavailable. A disabled control is not a successful submission. See [Minion setup and limits](agents-minions.md).
 
 Forge gallery/preview actions include **Copy reference** for eligible PNG/JPEG/GIF/WebP artifacts up to 20 MiB. It copies an exact `[forge:jobId:artifactId]` reference for reuse, not image bytes. **Attach to conversation** uses the current session and reports success/failure independently. **Use as video reference** is shown only for eligible artifacts and a video model advertising reference support; model reference limits include portraits and selected artifacts. These actions do not themselves start a new generation.
 
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

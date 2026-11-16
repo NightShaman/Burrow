@@ -90,7 +90,7 @@ Important limits:
 
 Restore is an operator recovery procedure. Test your backup before an emergency. It restores to **`<home>/.burrow`**, not an arbitrary `--dir` target, and does not automatically start a service.
 
-For a managed physical database, the source OS username and UID must match the restoring account/home owner. Prepare compatible PostgreSQL 17 binaries and pgvector, Node.js, and npm on the target. Network access may be needed to reinstall the pinned runtime integrations. Migration to a different OS owner needs a separate logical PostgreSQL migration plan.
+For a managed physical database, the source OS username and UID must match the restoring account/home owner. Prepare compatible PostgreSQL 17 binaries and pgvector, Node.js, and npm on the target. Network access may be needed to reinstall runtime integrations. Current manifests resolve Claude Code and Codex from npm `latest`, so a restore can obtain a newer CLI than the original installation; record and verify the resulting versions. Migration to a different OS owner needs a separate logical PostgreSQL migration plan.
 
 ### Inspect before replacing anything
 
@@ -116,7 +116,7 @@ For an otherwise unmodified native Ubuntu installation, a mapping may look like 
 }
 ```
 
-Save it as `$HOME/burrow-restore-map.json` with private permissions. Add every additional mapping required by your archive and verify each target path. Installer-owned runtime, workspace, cache, and Claude executable paths are rebased automatically. A physical managed archive cannot switch to external lifecycle during this restore.
+Save it as `$HOME/burrow-restore-map.json` with private permissions. Add every additional mapping required by your archive and verify each target path. Installer-owned runtime, workspace, cache, Claude login-helper (`BURROW_CLAUDE_BIN`) and Codex executable (`BURROW_CODEX_EXECUTABLE`) paths are rebased automatically. Other explicit paths, including a separate Claude Minion executable override, require review through the environment inventory. A physical managed archive cannot switch to external lifecycle during this restore.
 
 ### Apply a replacement
 

@@ -1,9 +1,9 @@
 # Environment variables
 
 
+
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
-
 
 This reference separates supported service settings from installer, test and compatibility names. The inventory was statically checked against the current source; internal/test names are classified separately below. Installation scripts and containers can override them; inspect the actual service environment before diagnosing a mismatch. Never paste encryption keys, database passwords or provider credentials into a diagnostic report.
 
@@ -141,7 +141,9 @@ Compression controls normalize invalid values to supported defaults. The retaine
 |---|---|
 | `BURROW_MCPORTER_ROOT` | `<runtimeRoot>/integrations/mcporter`; requires an active runtime root if not explicit |
 | `BURROW_MCPORTER_BIN` | `<mcporterRoot>/node_modules/.bin/mcporter` |
-| `BURROW_CLAUDE_BIN` | Login-helper executable; installer/container supplies its managed integration path |
+| `BURROW_CLAUDE_BIN` | Claude login-helper executable; installer/container supplies its managed integration path. This is not the Claude Minion executable override. |
+| `BURROW_CODEX_EXECUTABLE` | Optional absolute Codex Minion executable override; a missing/invalid explicit override fails rather than falling back. Otherwise discovery checks absolute PATH entries and managed/package locations. |
+| `BURROW_CLAUDE_EXECUTABLE` | Optional absolute Claude Minion executable override; a missing/invalid explicit override fails rather than falling back. Otherwise discovery checks absolute PATH entries and managed/package locations. |
 | `BURROW_OPENAI_OAUTH_CALLBACK_HOST` | Loopback callback host; only `localhost`, `127.0.0.1`, `::1` accepted |
 | `BURROW_OPENAI_OAUTH_USAGE_URL` | `https://chatgpt.com/backend-api/wham/usage`; specialized usage endpoint override |
 | `BURROW_MANAGED_SKILL_SYNC_INTERVAL_MS` | Managed skill reconciliation interval, default six hours and minimum one minute; not a runtime/release version override |

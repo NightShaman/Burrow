@@ -1,6 +1,7 @@
 # Configuration
 
 
+
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
@@ -59,7 +60,7 @@ See [Installation](../getting-started/installation.md)
 
 ## Models and generation defaults
 
-Select an enabled connection and an enabled model within it. Agent defaults can supply the pair; explicit per-turn fields override the corresponding selection. A missing pair returns no model; an unknown connection or disabled model is an error. Provider credentials are resolved from the authoritative connection store. Logical OAuth pools resolve an eligible concrete member instead of owning credentials themselves. See [native account pools](../guide/models.md#native-oauth-account-pools). Model execution uses the native API runtime, not the login helper as an execution engine.
+Select an enabled connection and an enabled model within it. Agent defaults can supply the pair; explicit per-turn fields override the corresponding selection. A missing pair returns no model; an unknown connection or disabled model is an error. Provider credentials are resolved from the authoritative connection store. Logical OAuth pools resolve an eligible concrete member instead of owning credentials themselves. See [native account pools](../guide/models.md#native-oauth-account-pools). Ordinary Burrow model execution uses the native API runtime. Codex and Claude Minions are separate, explicitly selected native CLI harnesses with their own saved connection/model pairs; do not apply the ordinary-chat transport description to those children.
 
 | Parameter | Runtime behavior |
 |---|---|
@@ -73,7 +74,11 @@ Select an enabled connection and an enabled model within it. Agent defaults can 
 Capacity fallbacks are BURROW defaults, not a guarantee of a provider's current limits. Catalog output capacity is metadata and is distinct from the requested generation limit. See [models](../concepts/models.md) before changing provider details.
 ## Minion settings
 
-Minion Depth is a durable per-agent integer 0–2, default 1, separate from the Minion model selection. Zero disables spawning; one permits direct children; two permits grandchildren. Runtime-owned child lineage retains its original budget and can be tightened by current settings. See the [settings API](api/settings.md#minion-depth).
+Global Minion settings live under **Settings → Agents → Global**. A per-agent override can replace the simple fields as a group; turning it off inherits global values without deleting the saved agent values. The API returns saved values separately from `effective` settings.
+
+Minion Depth is an integer 0–2, default 1. Zero disables spawning; one permits direct children; two permits grandchildren. Runtime-owned child lineage retains its original budget and can be tightened by current effective settings.
+
+`defaultHarness` selects `burrow`, `codex` or `claude`. `codexEnabled` and `claudeEnabled` independently control new dispatch; selecting a default does not enable a native harness. Existing-session follow-ups are unaffected by disabling new dispatch. Each harness has its own nullable connection/model pair. An unset `burrowModel` inherits the actual parent turn model, not the obsolete separate Minion model default. Codex/Claude require their configured eligible native model pair. Legacy profiles and selection storage remain for explicit compatibility operations but do not choose normal dispatch defaults. See the [settings API](api/settings.md#minion-depth) and [Minion guide](../concepts/agents-minions.md).
 
 ## Context compression
 

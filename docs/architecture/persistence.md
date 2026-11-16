@@ -1,9 +1,9 @@
 # Persistence architecture
 
 
+
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
-
 
 BURROW uses PostgreSQL for application settings, conversation history, memory and execution metadata. File attachments, generated artifacts, traces and several worker records remain on disk. A recoverable installation therefore includes both database and filesystem state, plus the key that decrypts stored credentials.
 
@@ -56,12 +56,12 @@ Changing lifecycle mode does not migrate data between clusters. Plan a database 
 
 ## Migrations and transactions
 
-The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **100 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, provider pools, Archive projections, scheduled board tasks/one-time jobs, independent Anthropic thinking-mode selections, indexed recall, durable completion/reset outcomes, and Parked board tasks. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
+The historical **2026.10.19** manifest contained 60 migrations. Current reviewed Core contains **104 append-only migrations**, including global profiles, durable mod turns/generations, compaction/delivery state, provider pools, Archive projections, scheduled board tasks/one-time jobs, independent Anthropic thinking-mode selections, indexed recall, durable completion/reset outcomes, and Parked board tasks. See the [current migration inventory](../reference/storage-schema.md). Each applied version records its name and SQL checksum in `burrow_schema_migrations`. Startup holds a transaction-scoped advisory lock while validating the ledger and applying pending SQL. Unknown versions, gaps, renamed migrations or changed checksums stop migration rather than silently rewriting history.
 Nested transaction work uses savepoints. A nested operation cannot commit the outer transaction; rollback failure causes the client to be discarded. Per-domain locks add narrower guarantees: session appends lock the session row, Tiddle writes lock the agent, and scheduled occurrences have unique database identities.
+
 
 !!! warning "A reader command may apply migrations"
     The PostgreSQL CLI wrapper does not start PostgreSQL, but it calls the application composition, which validates and applies pending migrations. Treat CLI access during an upgrade as a possible schema-changing operation. Current readers resolve the lifecycle-aware connection environment, including the managed private socket; they do not start the database. Use [CLI reference](../reference/cli.md) and the [upgrade procedure](../operations/upgrades.md).
-
 
 ## Runtime continuity and crash recovery
 

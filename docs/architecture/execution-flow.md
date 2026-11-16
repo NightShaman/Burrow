@@ -1,9 +1,9 @@
 # Execution flow
 
 
+
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
-
 
 This page follows a selected native tool call through validation, dispatch, provider continuation, and terminal reporting. For setup and tool arguments, see [Tools](../concepts/tools.md).
 
@@ -40,9 +40,9 @@ This catches changes between discovery, model selection, and execution. It does 
 
 Process and supported native filesystem routers use immutable target facts. Remote operation identity is derived from parent-run and provider-tool-call identifiers. Protected values are passed separately from ordinary command text.
 
-Minion spawning is independently depth-gated: per-agent `maxDepth` defaults to 1 and permits 0–2; leaf tool surfaces omit `spawn_subagent`, and the executor rejects attempted bypasses. Runtime-owned lineage persists root, immediate parent, depth and the saved budget. See [Minion Depth](../concepts/agents-minions.md#minion-depth).
+Minion spawning is independently depth-gated: effective global/per-agent `maxDepth` defaults to 1 and permits 0–2; leaf tool surfaces omit `spawn_subagent`, and the executor rejects attempted bypasses. Runtime-owned lineage persists root, immediate parent, depth and the saved budget. See [Minion Depth](../concepts/agents-minions.md#minion-depth).
 
-For local minions, the parent writes a private temporary payload, starts the child Node process, and captures bounded stdout/stderr tails. The child emits progress and a distinct terminal JSON sentinel. The parent records the final receipt and removes temporary payload material. For remote-assigned minions, the runner stays in-process to retain the trusted execution controller.  
+For local **Burrow-harness** minions, the parent writes a private temporary payload, starts the child Node process, and captures bounded stdout/stderr tails. The child emits progress and a distinct terminal JSON sentinel. The parent records the final receipt and removes temporary payload material. For remote-assigned Burrow-harness minions, the runner stays in-process to retain the trusted execution controller. Codex and Claude Minions instead use native CLI runners with separate protocol, credential, continuation and terminal-outcome contracts; see [Minions](../concepts/agents-minions.md).  
 
 ## Bound memory without ending useful work
 

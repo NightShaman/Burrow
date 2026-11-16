@@ -106,10 +106,14 @@ Signed ping is acknowledged without creating work. Accepted completed events are
 
 ## Work delegated to minions
 
-An agent may spawn a minion for part of a request. The **Agents** panel lets you inspect child activity by expanding its parent and selecting the child. To choose a default minion model, open **Settings → Agents → [agent] → Agent details**, use **Minion settings** in the additional-settings column to configure **Default minion provider/model**. Complete model selections and supported thinking/effort choices autosave; temperature saves when adjustment ends. Check saved feedback and use the displayed retry action after a failure. Inheritance uses the current parent turn's model; an explicit model choice at spawn takes precedence.
+An agent may spawn a minion for part of a request. Expand the parent in the **Agents** panel to inspect each child. Configure shared defaults at **Settings → Agents → Global → Minions**. An individual agent’s **Minions** section has **Override global minion settings**; off inherits global settings while preserving saved overrides. Set Burrow provider/model or inherit the actual parent turn model, independent Codex/Claude enable flags and eligible provider/model pairs, and maximum depth. Choose **Save minion defaults**; these fields are a guarded draft, not the former independent autosaving model controls. Existing children retain their admission/session bindings. See [Agents and minions](../concepts/agents-minions.md).
 
 [Source: child selection](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L119-L132) · [Source: default minion model](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/DefaultMinionModel.tsx#L53-L71)
 
 ## Retained workflow delivery history
 
 Open **Archive → Workflow Events** to search retained GitHub workflow deliveries and inspect their GitHub conclusion separately from Burrow handling state, result/error and chat run. Use the agent/date filters and local-time calendar. Accepted delivery does not prove the instruction completed. Settings → Agents → Workflow events retains watch and receiver configuration; its former Recent events history has moved to Archive. Review retained instruction/error text before sharing it, even when result fields are redacted.
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

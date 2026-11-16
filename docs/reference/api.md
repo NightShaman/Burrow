@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-15**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 The API serves BURROW's UI and external clients. It is an operator-level control surface: it can create agents, change credentials and grants, execute model/tool work, import data and delete retained content. Read [authentication](../security/authentication.md) and [trust boundaries](../security/trust-boundaries.md) before exposing it.
@@ -36,7 +36,7 @@ The API serves BURROW's UI and external clients. It is an operator-level control
 
 The public assembly includes `backend/docs/openapi.json`. Its contract includes Brains, Dream controls, Git-skill management, Minion model selection, task history/attachments and OpenTelemetry settings. Retired `/api/albdruck/*` routes are absent. The source-backed endpoint pages still need to be read alongside the schema: its inventory is not proof of request/response parity or live compatibility.
 
-The current development contract reviewed on **2026-11-09** has **199 paths, 267 operations and 214 component schemas**, including task/one-time schedules and independent model-selection controls. Its SHA-256 is `9f62472c5edd11c04780135bb7a0034d73036aaa8f0022839bea4c10ab615c19`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
+The current development contract reviewed on **2026-11-15** has **205 paths, 276 operations and 242 component schemas**, including task/one-time schedules, independent model-selection controls, Forge Gallery and reference-image contracts. Its SHA-256 is `4784f43b92f1d942b255cd742c1b2749dbe139777c89084a21eee9821361d56c`; `info.version` remains `2026.08.25`. The table above describes the historical public artifact, not the current development inventory. Use the schema served by your installation and check the source-reviewed family pages for implementation details.
 
 
 !!! warning "The schema is incomplete"
@@ -48,9 +48,9 @@ Specific drift:
 - The UI-preference schema/generated types omit `hc.settingsUtilityPanelOpen` and `hc.accountStatusOrder`, which the runtime accepts; use the [source-reviewed key list](api/settings.md#operator-ui-preferences)
 
 - Mod catalog responses also carry lifecycle status, failure information, version and Archive UI contributions
-- Forge request selection now includes `mode` and canonical-photo selectors; earlier explicit-pair-only schema guidance is obsolete
-- Music availability is catalog-dependent; it is not unconditionally false as the old schema states
-- Forge jobs can include bounded `errorDetails`; the old job schema omits them
+- Forge creation now has schema coverage for `mode`, canonical-photo selectors, typed image/GIF options and existing artifact/chat references; that coverage is not a runtime compatibility guarantee
+- Music and video availability are catalog-dependent; the current catalog schema still incorrectly fixes both to false
+- Forge jobs can include bounded `errorDetails`, reference details and native-chat delivery status; the closed job schema does not cover the full runtime projection
 - Archive calendar now documents local-day retained-occurrence behavior; the earlier UTC-only summary is obsolete
 - Native OAuth pool settings and metrics now have schema coverage, but the model-connection description still says union while current runtime catalogs use the intersection of non-manual member models
 - The operator mod-access route is source-implemented but absent from this schema
@@ -115,3 +115,7 @@ Changed contracts checked statically against Backend `32ff99dfc0317635f5c7aa53b4
 
 Changed contracts above were checked statically against Backend `4057b50a5d5a9b14d36bb3b70f35781c4b29a9b9` on **2026-10-29**. This is not a runtime, provider or collector test, nor a revalidation of unchanged historical sections. See [source coverage](../project/source-map.md).
 
+
+## 15 November full static review
+
+Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.

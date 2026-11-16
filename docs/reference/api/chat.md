@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-15**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 
 `POST /api/chat` submits one user-visible turn. Select an existing agent; its configured model and tools determine what the turn can do. A request can incur provider charges and execute granted tools.
@@ -13,7 +13,7 @@
 |---|---|
 | `agentId` | Registered agent; explicit selection is recommended |
 | `sessionId` | Session name, default `default` |
-| `message` | Nonblank string; an image attachment permits an image-only request |
+| `message` | Nonblank string; a retained attachment permits an attachment-only request |
 | `runId` | Optional caller-supplied run identifier; absence generates one, not a general idempotency key |
 | `attachments` | Array of `{name, type, size, encoding, content}` records |
 | `modelConnectionId`, `model` | Optional exact enabled connection/model overrides |
@@ -27,7 +27,7 @@ Normal chat does not accept a workspace-selection/execution-target protocol. A c
 
 The browser defaults to **8 MiB per file**, **16 MiB per attachment batch**, and **8 files**. These are pre-read browser resource budgets, not server admission policy. Deployments can override positive integer values through `window.__BURROW_CLIENT_BUDGETS__` before loading the UI bundle. 
 
-The server separately truncates non-image attachment content to 200,000 characters and rejects image content above 30,000,000 characters with 413. Its JSON request reader defaults to **96 MiB** total body bytes and **30 seconds** for body receipt; `BURROW_REQUEST_MAX_BYTES` and `BURROW_REQUEST_TIMEOUT_MS` configure those ceilings. JSON traversal is also bounded. None of these limits proves native PDF/Office parsing from a filename or guarantees that all attachment text reaches the model.
+The server preserves accepted non-image attachment content without the former 200,000-character clipping, and rejects image content above 30,000,000 characters with 413. This is storage/admission behavior, not a guarantee that the whole attachment is injected into model context. Its JSON request reader defaults to **96 MiB** total body bytes and **30 seconds** for body receipt; `BURROW_REQUEST_MAX_BYTES` and `BURROW_REQUEST_TIMEOUT_MS` configure those ceilings. JSON traversal is also bounded. None of these limits proves native PDF/Office parsing from a filename or guarantees that all attachment text reaches the model.
 ## NDJSON protocol
 
 Send `Accept: application/x-ndjson` to receive newline-delimited JSON over the POST response. The response uses HTTP 200 and `application/x-ndjson; charset=utf-8`, with `no-cache, no-transform` and `x-accel-buffering: no`. It is not Server-Sent Events.
@@ -172,3 +172,7 @@ Admission, shared transcript appends and deletion share a per-room serialized bo
 ## Registered slash commands and complete attachments
 
 Checked **12 November 2026**: Only registered slash-command names are intercepted. Unknown slash text, malformed non-command slash text and absolute paths remain ordinary chat input; arguments to known commands are still validated. Accepted attachment text/data URLs retain the original payload instead of silently clipping it to the context-preview budget. This does not bypass request or configured upload limits.
+
+## 15 November full static review
+
+Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.

@@ -1,8 +1,11 @@
 # Known limitations
 
 
+
 !!! note "Source review and historical material"
+
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
 
 
 These observations were statically reconciled against the 8 November implementation baseline, while explicitly labeled older release examples remain historical. They are not an independently tested running installation. Recheck installed behavior when upgrading.
@@ -91,3 +94,7 @@ The immutable links below record earlier public evidence. Current contracts were
 ## 28 October development delta
 
 Changed behavior above was checked statically against Backend `a04acb16b0eab2a910c3ef0fb452622df81a05cb` on **2026-10-28**. This is not a live provider, database or collector test, nor a revalidation of unchanged historical sections. See [source coverage](source-map.md).
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

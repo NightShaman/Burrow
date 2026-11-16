@@ -143,3 +143,9 @@ Inspected assembly **2026.11.12.3** (`e2f6c49c9d449bced1d18244b2551e9fee9a7755`)
 
 The ordinary pass compares the successful 12 November implementation baseline. The **8 November** full-review scope remains unchanged. Source and regression-test definitions were inspected statically; no application/provider tests, runtime deployment or release promotion were performed. Documentation publication does not update an installed build.
 
+
+## Sunday full reconciliation: 15 November 2026
+
+Current assembly **2026.11.16.6** (`fa4fed7c13c8ce75e45fcdb9884d212dc4e0d18b`) records Core `29ca7b6cec378700503a587703adc1d82e9d6f6d` and UI `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5`. The complete guide surface was statically reconciled, not only recent changes. Current source implements native Claude Minions, global Minion defaults with preserved agent overrides, independent native enable flags, and storage migrations through 104. Node Goblin native CLI support and persistent Menagerie visits are documented in their component guides.
+
+Use the [current source table](source-map.md) and installed health/release manifest. Earlier dated sections are history, not competing current inventories. No application/provider tests, runtime deployment, release promotion or live installed-skill refresh is claimed by this documentation review.

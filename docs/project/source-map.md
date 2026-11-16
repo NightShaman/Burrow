@@ -1,15 +1,15 @@
 # Source and coverage
 
-The operator guide follows inspected current development implementation, without waiting for the daily public-source mirror. The Sunday reconciliation on **8 November 2026** compared every Burrow and Skills page with source for its setup, configuration, API, operations, troubleshooting, and historical scope. This is static documentation reconciliation, not a runtime acceptance test.
+The operator guide follows inspected current development implementation, without waiting for the daily public-source mirror. The Sunday reconciliation on **15 November 2026** compared every Burrow and Skills page with source for its setup, configuration, API, operations, troubleshooting, and historical scope. This is static documentation reconciliation, not a runtime acceptance test.
 
 ## Current implementation baseline
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.12.3` | `e2f6c49c9d449bced1d18244b2551e9fee9a7755` |
-| Core / Backend | `f589673df9124a459617f76230e90d021577a067` |
-| UI | `f86bf45bf239606da23e6cf8bc370495e81eda88` |
-| Skills | `31470b9f184efbe88dd8ae420d5286a7fd8303c5` |
+| Assembled Burrow, build `2026.11.16.6` | `fa4fed7c13c8ce75e45fcdb9884d212dc4e0d18b` |
+| Core / Backend | `29ca7b6cec378700503a587703adc1d82e9d6f6d` |
+| UI | `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5` |
+| Skills | `dc3586763e828052ade31700691445aa69f6f406` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -163,3 +163,9 @@ The current table records assembly **2026.11.12.3** and its exact Backend/UI pin
 
 See [the interface behavior](../concepts/interface.md#chat-polling-and-render-reuse). This is a static ordinary delta, not another full review, performance benchmark or application/provider test. Earlier dated review sections retain their own pins; unchanged pages inherit the **8 November** full reconciliation and subsequent reviewed deltas.
 
+
+## Sunday full reconciliation: 15 November 2026
+
+All existing guides were rechecked against the pinned current implementation, including unchanged pages, setup and recovery, routing, APIs, operations, troubleshooting, navigation and cross-component skills. Material corrections include global/inherited Minion defaults and native Claude execution, native CLI provisioning, current storage migrations, persistent Menagerie visit sessions, Tutor host contracts and stale API/schema descriptions. Historical examples, screenshots and earlier audit sections retain their dates. Existing runtime skill instructions were reconciled separately without changing executable scripts or versions.
+
+Checks cover documentation builds, links and non-executing skill/reference structure, not live providers, model calls, OAuth, production restore, application tests or installed skill delivery. The maintenance receipt records per-page evidence and exact publication checks. A newer implementation pin is not a new public runtime release.

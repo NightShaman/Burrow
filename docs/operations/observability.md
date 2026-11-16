@@ -1,8 +1,11 @@
 # Observability
 
 
+
 !!! note "Implementation and historical evidence"
+
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
 
 Use runtime receipts, persisted history, logs, and provider-request evidence to answer different questions. A green process or successful HTTP response is not proof that the requested work completed.
 
@@ -169,3 +172,11 @@ These are source-backed instrument contracts, not proof of collector ingestion. 
 ## 3 November development delta
 
 The changed context observations and destination layout above were checked statically against Backend `32dde3266a231777ddfec6dba141d6b9972a21fd` and UI `4a17a8c73c588a7582835ca6ff50dcabe409c33c` on **2026-11-03**. No application, provider or database tests were run; unchanged historical sections retain their earlier qualifications. See [source coverage](../project/source-map.md).
+
+## Native Minion evidence
+
+Burrow Minions use the Core model/tool loop; native Codex and Claude Minions do not. Native activity/session linkage and sanitized reports remain visible, but their command outputs and model text are not promoted into independently verified Core tool receipts. Do not infer full native per-tool/token export or collector ingestion from a successful child report. Verify actual changes and each harness’s continuation/cleanup evidence separately. See [native Minions](../concepts/agents-minions.md#native-codex-minions).
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

@@ -1,8 +1,12 @@
 # Models and providers
 
 
-!!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
+:::note[Source review and historical material]
+
+This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
+:::
 
 Model selection is explicit configuration. A connection describes the provider endpoint and credential source; a model identifies the configured capability to use through that connection. The connection ID is durable identity. A display label is presentation.
 
@@ -43,7 +47,7 @@ Credential type and acquisition flow are different:
 - A login/import helper obtains credentials for a supported connection flow
 - The provider adapter consumes the resolved credential; it does not make the UI the credential store
 
-The Claude Code helper wraps the installed CLI's `claude auth login --claudeai` flow in a scratch home, tracks status, and supports import/cancellation cleanup. It is not a separate credential type or a model execution engine. See [Authentication](../security/authentication.md) for operator and provider credential boundaries. 
+The Claude Code helper wraps the installed CLI's `claude auth login --claudeai` flow in a scratch home, tracks status, and supports import/cancellation cleanup. The login helper itself is not a separate credential type or a model execution engine. Native Claude minions are a distinct execution path using the configured Claude harness and eligible OAuth credentials; see [agents and minions](agents-minions.md). See [Authentication](../security/authentication.md) for operator and provider credential boundaries. 
 
 ## Vision and generated output
 
@@ -102,10 +106,14 @@ OpenAI Responses continuations replay prepared context rather than relying on `p
 The runtime selects and compresses context before calling a model. The current message is kept intact; lower-priority material is reduced, or a request that still cannot fit is rejected.
 
 
-!!! note "Request estimates and measured input"
-    The meter follows the latest physical model request, not the largest request in a run. A smaller continuation or final synthesis replaces the earlier value. Matching provider-reported input tokens take precedence over that request's estimate, even when lower; the original estimate remains separately available. A new request clears the previous response's usage, outcome and identifiers.
 
-    Character-based estimates and image allowances are not a provider tokenizer. Some schema and wire fields are not fully represented in the current adapter estimate. Conservative request-preparation limits still apply independently. Pressure describes the token/budget ratio, not whether the request was dispatched, accepted or rejected. Do not use the meter as an exact billing count or a guarantee of provider acceptance.
+:::note[Request estimates and measured input]
+
+The meter follows the latest physical model request, not the largest request in a run. A smaller continuation or final synthesis replaces the earlier value. Matching provider-reported input tokens take precedence over that request's estimate, even when lower; the original estimate remains separately available. A new request clears the previous response's usage, outcome and identifiers.
+
+Character-based estimates and image allowances are not a provider tokenizer. Some schema and wire fields are not fully represented in the current adapter estimate. Conservative request-preparation limits still apply independently. Pressure describes the token/budget ratio, not whether the request was dispatched, accepted or rejected. Do not use the meter as an exact billing count or a guarantee of provider acceptance.
+
+:::
 
 Legacy usage without request correlation is labeled historical. After actual semantic compaction, stale measurements are replaced by a reconstructed estimate until successor-context usage is available. Requested model and provider-returned model are separate facts; a missing returned model stays unknown. See the [context-status fields](../reference/api/sessions.md#latest-request-context-status).
 

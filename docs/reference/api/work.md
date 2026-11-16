@@ -1,9 +1,9 @@
 # Tasks, schedules and groups
 
 
+
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
-
 
 BURROW exposes several work surfaces with different state models. The task board, scheduled jobs, group channels and retained Workbench compatibility API are not interchangeable task queues.
 
@@ -38,9 +38,9 @@ At execution, task targets must still exist, be assigned to the selected agent a
 `POST /api/scheduled-jobs/{jobId}/trigger` returns 202 admission/skipping, not completion. Inspect `/runs` and optional `lastRun` in job reads for status/error/completion. Per-job overlap is skipped; missed downtime occurrences are recorded, not replayed. Restart reconciles exact terminal task receipts where available, otherwise interrupted work is recorded rather than automatically rerun. To request cancellation while execution is active, POST `/runs/{runId}/cancel` with optional `reason`; a non-active/finalizing run returns 404. Cancellation does not undo completed tools or reverse task status.
 
 
+
 !!! warning "Validate execution, not only scheduling"
     The current scheduler receives the composed stores; the old missing-store wiring defect is resolved. Saving a cron job or receiving a trigger acknowledgement still does not establish successful unattended execution. Inspect terminal receipts and try a harmless job before relying on it.
-
 
 ## GitHub workflow completion events
 
@@ -66,11 +66,13 @@ A 202 receipt is durable acceptance, not agent success. It returns only accepted
 
 ## Group channels
 
-Create with `name` and a nonempty `participantAgentIds` array. The browser asks for at least two agents; the server boundary permits a nonempty participant list. Read channel detail for up to 500 turns plus active runs.
+Create with `name` and a nonempty `participantAgentIds` array. The browser asks for at least two agents; the server boundary permits a nonempty participant list. Read channel detail for the newest page of up to 500 turns plus active runs. Continue with the returned `olderCursor` as the `before` query value; each page keeps chronological display order. A single response is not the whole group transcript.
 
 POST messages with `message` and optional `agentIds`. Explicit targets win; otherwise recognized `@` mentions select participants; without targets/mentions the message is broadcast. Unknown mentions fail validation. The server launches private per-agent `group-<channelId>` sessions and returns 202 with run IDs. Participants keep their own identity, tools and memory scope while receiving shared room context; the visible transcript is not a single merged agent identity.
 
 Cancel through the group run endpoint. Poll detail for final visible messages; there is no group NDJSON contract here.
+
+`DELETE /api/group-channels/{channelId}` cancels that channel's active runs and deletes its shared display transcript and channel metadata. It does **not** delete participant agents' individual sessions or undo prior tool side effects. A missing channel returns 404; invalid channel IDs return 400. Deletion and new group admissions share a channel gate. A database deletion failure leaves metadata available for retry.
 ## Legacy Workbench compatibility
 
 `/api/tasks` and `/api/workbench` remain isolated compatibility routes for work items and planning/step/continuation. They are distinct from `/api/task-board/tasks`, the current Tasks UI and Minion execution. Do not build new task-board clients by treating the names as aliases.
@@ -104,7 +106,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/scheduled-jobs/{jobId}/trigger` | Trigger a scheduled job |
 | `GET` | `/api/group-channels` | List group channels |
 | `POST` | `/api/group-channels` | Create a group channel |
-| `GET` | `/api/group-channels/{channelId}` | Read a group channel |
+| `GET` | `/api/group-channels/{channelId}` | Read a group channel page |
+| `DELETE` | `/api/group-channels/{channelId}` | Delete the channel and shared display transcript, retaining participant sessions |
 | `POST` | `/api/group-channels/{channelId}/messages` | Post a group-channel message |
 | `POST` | `/api/group-channels/{channelId}/runs/{runId}/cancel` | Cancel a group-channel run |
 | `POST` | `/api/task-board/tasks/{id}/execute` | Execute task-board task |
@@ -147,4 +150,8 @@ Checked **7 November 2026**: the scheduler stages the exact terminal result befo
 
 Checked **12 November 2026**: The native agent tools `scheduled_jobs_list` and `scheduled_job_runs` return `nextCursor`, `hasMore`, `resultCount` and `totalCount`. Jobs default to 50 entries (maximum 100), ordered by immutable ID ascending; runs default to 50 (maximum 200), ordered by scheduled time, creation time and ID descending. Opaque cursors are bound to their agent/filter or job scope; mismatches fail as `cursor_invalid`.
 
-These are live keyset pages, not a frozen multi-page snapshot. Deleting an anchor does not invalidate continuation, but insertions before the cursor require restarting to see them; totals describe each query. This is the native agent-tool contract, not a change to the separate mod scheduler facade.
+These are live keyset pages, not a frozen multi-page snapshot. Deleting an anchor does not invalidate continuation, but insertions before the cursor require restarting to see them; totals describe each query. This is the native agent-tool contract, not a change to the separate mod scheduler facade or operator HTTP routes. `GET /api/scheduled-jobs` still returns `jobs` plus `activeRuns` without keyset cursors. HTTP `/runs` accepts `limit` and returns a `runs` array, not the native tool's pagination envelope.
+
+## 15 November 2026 static API reconciliation
+
+Reviewed this page against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d` and UI `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5`, including mounted routes and their relevant stores/UI callers. Corrections above describe implementation, not a live API, database or provider test. Earlier dated receipts remain historical.

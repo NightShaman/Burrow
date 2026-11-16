@@ -1,10 +1,9 @@
 # Backup and recovery
 
 
+
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 A complete recovery set contains both PostgreSQL state and the associated filesystem state, including the **matching encryption key**. Selective export is useful for portability but is not disaster recovery.
 
@@ -71,7 +70,7 @@ Existing nonempty destinations require `--replace --confirm`. The restore is pre
 
 Restore preserves file modes, rebases installer-owned paths, assigns the target-home owner's UID/GID, and reinstalls runtime integrations with npm. Filesystem chown does not rename PostgreSQL roles: startup connects as the current OS username. Managed physical restore now rejects a different source owner name or target UID, rather than attempting that migration. Use a separately planned logical database/role migration for another owner. It needs network access and does not install missing host prerequisites. It does not recreate the systemd service.
 
-Before the first start, inspect retained absolute paths. Restore rebases only runtime root, workspace root, cache root, and the Claude executable path. Explicit PostgreSQL data/socket/log paths, PostgreSQL binary locations, external database URLs, and other absolute overrides must be acknowledged through the mapping file. Missing required mappings fail before activation. Verify the resulting environment before starting; a restored configuration must not accidentally reuse the original cluster.
+Before the first start, inspect retained absolute paths. Restore rebases only runtime root, workspace root, cache root, the Claude login-helper path (`BURROW_CLAUDE_BIN`), and the Codex executable path (`BURROW_CODEX_EXECUTABLE`). Explicit PostgreSQL data/socket/log paths, PostgreSQL binary locations, external database URLs, and other absolute overrides must be acknowledged through the mapping file. Missing required mappings fail before activation. Verify the resulting environment before starting; a restored configuration must not accidentally reuse the original cluster.
 
 As the target account, after checking paths and key:
 

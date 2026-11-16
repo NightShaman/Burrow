@@ -1,9 +1,13 @@
 # MCP connections and tools
 
 
-!!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
+:::note[Source review and historical material]
+
+This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
+
+:::
 
 BURROW separates a provider connection, its discovered tool catalog and each agent's grants. Saving or discovering a connection does not grant an agent permission to call its tools. PostgreSQL owns these records; mcporter supplies transport.
 
@@ -36,7 +40,7 @@ Three stable native tools expose external capabilities:
 
 | Tool | Purpose |
 |---|---|
-| `mcp_providers` | List enabled/discovered providers, at most 50 |
+| `mcp_providers` | List all enabled providers, with discovered tool and grant counts |
 | `mcp_capabilities` | Search/page one provider's tools and see grant state |
 | `mcp_call` | Invoke an exact provider/tool with arguments |
 

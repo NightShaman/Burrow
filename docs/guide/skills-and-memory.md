@@ -32,7 +32,7 @@ Use **Installed skills** to search by name, ID, or description, filter by lifecy
 
 1. Open **Settings → Skills → Import from repository**.
 2. Enter the repository and **Skill path**. Select a directory for a package with companion files, or `SKILL.md` for instructions only.
-3. Under **Ref & automatic updates**, choose a ref if needed. `HEAD` uses the repository default; tags and commit IDs stay pinned. Automatic sync is off unless enabled.
+3. Under **Ref & automatic updates**, choose a ref if needed. `HEAD` uses the repository default. A commit ID pins immutable content; a tag selects that named ref and can change if its owner moves the tag. Automatic sync is off unless enabled.
 4. Click **Preview skill**. Read the actual instructions, included files, and previewed revision.
 5. Review **Install ID & availability**, then click **Install skill**.
 6. Assign it to the intended agents if you did not assign it globally.
@@ -81,10 +81,14 @@ Memories you create or edit through the operator interface are operator-owned; a
 [Source: Brains UI](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L72-L119) · [Source: ownership and revisions](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/postgres-brain-store.mjs#L43-L56) · [Source: operator mutations](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/scripts/ui/brain-routes.mjs#L23-L26) · [Source: retrieval contract](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/backend/src/action-proposal.mjs#L230-L231)
 
 
-!!! warning "Check the selection before deleting"
 
-    **Delete memory** and **Delete selected memories** act directly in this release; there is no confirmation dialog in the Brains page. **Select page** selects only the visible page. Bulk deletion runs independently for each record, so some deletions may succeed while others fail. Read the per-record result before retrying. This page has no restore button.
+:::warning[Check the selection before deleting]
 
+
+**Delete memory** and **Delete selected memories** act directly in this release; there is no confirmation dialog in the Brains page. **Select page** selects only the visible page. Bulk deletion runs independently for each record, so some deletions may succeed while others fail. Read the per-record result before retrying. This page has no restore button.
+
+
+:::
 
 [Source: deletion behavior](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/brains/BrainsPage.tsx#L83-L118)
 

@@ -136,6 +136,7 @@ An eligible alternate may serve immediately after a 429 even if the failed accou
 Checked **7 November 2026**: expand a direct OpenAI OAuth connection's settings to enable **Automatically use expiring resets**, then save the connection. It is off by default and is not offered on logical load-balancing pools. Once saved, the backend checks at startup and every minute, even with the browser closed, for available credits expiring within ten minutes. Manual resets remain available. Enabling this authorizes automatic consumption of eligible banked credits; a consumed reset cannot be undone.
 
 Each attempt pins the account, exact credit and expiry. Confirmed `nothing_to_reset` or a definite rejection can retry that same available, unexpired credit after a one-minute cooldown. It does not silently substitute another credit. Unknown outcomes fence the account across aliases and restarts. A later exact redeemed record with a redemption timestamp can reconcile the attempt; disappearance, expiry or a stale available listing is not proof of success. Do not bypass the fence or repeatedly click reset. Successful consumption is recorded separately from a subsequent usage-refresh failure.
+
 ## Account freshness and local clocks
 
 Checked **12 November 2026**: Accounts and reset-credit freshness use a server response-time anchor plus elapsed browser time, not the PC wall clock. A wall-clock change does not make cached usage fresh or stale. Without a valid server clock anchor the account state can be **Unknown**; missing usage and actual rate limits remain separate states. Reset controls still require valid current credits and explicit confirmation.
@@ -143,9 +144,13 @@ Checked **12 November 2026**: Accounts and reset-credit freshness use a server r
 
 ## Codex Minion models
 
-Codex Minions use a separate saved connection/model pair under the agent's Minions settings, not parent/Burrow Minion inheritance. Direct OpenAI OAuth and eligible enabled OpenAI pools are supported. Each selected pool model needs an enabled direct OpenAI OAuth member with that model enabled. A catalog's `codexEligible` flag is structural eligibility, not live quota. Native tool-bearing Codex history cannot automatically move to another account. See [Codex Minions](../concepts/agents-minions.md#native-codex-minions) before relying on pool failover.
+Codex and Claude Minions use independent saved connection/model pairs in global Minion defaults or the agent’s enabled override. Native enable flags are independent of model selection. Codex supports direct OpenAI OAuth and eligible OpenAI pools; Claude supports direct Anthropic OAuth and eligible Anthropic pools. API-key connections and parent-model inheritance are not native substitutes. An enabled eligible member must support the exact selected model; catalog eligibility is not live quota. Account changes require complete portable native history, not blind replay. See [Codex](../concepts/agents-minions.md#native-codex-minions) and [Claude](../concepts/agents-minions.md#native-claude-minions) for distinct continuation and policy limits.
 
 ## Account usage refresh and stale results
 
 Accounts offers an explicit refresh with visible loading/failure state. A previous usage snapshot can remain displayed as stale after a refresh fails; it is not fresh quota evidence. Anthropic OAuth usage requests coordinate through PostgreSQL across callers sharing the same origin/credential. A manual force refresh shares an already-completed concurrent attempt and cannot bypass provider retry cooldown. Provider Retry-After is respected; otherwise bounded backoff applies. Profile/tier metadata has a separate longer cache and is not forcibly refreshed with every usage request. Missing coordination fails visibly rather than presenting unknown usage as zero.
 
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

@@ -1,10 +1,9 @@
 # Containers
 
 
+
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 The assembled repository supplies the canonical `Dockerfile`, `docker-entrypoint.sh`, and `compose.yml`. The public release image is `ghcr.io/goblinking-burrow/burrow`.
 
@@ -78,7 +77,7 @@ The image builds the UI in a separate stage and installs backend production depe
 
 The entrypoint reads or creates `/data/config/settings.key`, unless `BURROW_SETTINGS_KEY_FILE` changes the path. If a supplied `BURROW_SETTINGS_KEY` disagrees with the persisted file, startup stops. Restore the matching key/database pair instead of deleting the key file.
 
-The entrypoint also provisions runtime-owned CLI integrations below `/data/integrations`. mcporter is pinned to `0.13.7`; current reviewed Core pins Claude Code to `2.1.283`. Startup can require npm network access to materialize these declared versions. Historical source snapshots may use different integration versions; check the installed integration manifest rather than assuming the current pin applies to an older image. Plan egress and reproducibility requirements accordingly.
+The entrypoint also provisions runtime-owned CLI integrations below `/data/integrations`. mcporter is pinned to `0.13.7`; the current manifest selects npm `latest` for Claude Code and Codex. Startup can require npm network access to materialize the declared packages. `latest` is not an immutable CLI version: record the installed package versions as well as the Burrow image identity when diagnosing native Minions. Historical source snapshots may use different selections; check the installed integration manifest instead of assuming this policy applies to an older image. Plan egress and reproducibility requirements accordingly.
 
 ## External database
 

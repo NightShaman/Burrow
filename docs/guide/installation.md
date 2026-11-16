@@ -6,6 +6,7 @@ Choose a native Linux installation or a container, then [create your first agent
 
 Burrow starts with authentication set to **None**. Keep the first-run interface on localhost or behind an SSH tunnel. Before opening it to other computers, configure authentication, HTTPS, and network access controls.
 
+
 !!! warning "Grant access deliberately"
     Burrow does not provide a comprehensive sandbox around agent actions. Its tools can use the host permissions and credentials you grant. Start with an unprivileged account, restricted network access, and a test workspace. Read [trust boundaries](../security/trust-boundaries.md) before enabling integrations.
 
@@ -109,6 +110,10 @@ Under the default `~/.burrow` root:
 - `config/`, `cache/`, `reports/`, `integrations/`: additional runtime state and installed integrations
 
 Keep `burrow.env` private and back it up with the matching database. Updates replace application files while preserving durable state. The database is authoritative for core settings and conversations; a workspace directory is not a transcript database. See [persistence](../architecture/persistence.md) and [maintenance and recovery](maintenance.md).
+
+### Runtime-owned CLI integrations
+
+Installation provisions mcporter, Claude Code and Codex below `integrations/`. Current manifests pin mcporter to `0.13.7` and resolve Claude Code/Codex from npm `latest`; installation or startup can therefore require npm registry access even when application files are already available. These native CLI versions are separate from the Burrow build number. Record their installed versions for reproducibility and diagnose failed provisioning before assuming a Minion model setting is at fault. Ordinary Burrow chat still uses its native provider API, not a CLI harness.
 
 ### Using an existing PostgreSQL server
 

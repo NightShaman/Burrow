@@ -1,9 +1,13 @@
 # Workers, tasks, and schedules
 
 
-!!! note "Source review and historical material"
-    This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
+:::note[Source review and historical material]
+
+This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
+
+
+:::
 
 BURROW has several forms of work. Choose by the outcome you need, rather than treating every task record as a running agent.
 
@@ -49,7 +53,7 @@ A scheduled job stores a name and owner agent, a prompt or task target (`jobKind
 
 Agent-created jobs default to disabled unless `enabled` is explicitly true. The default session is the current chat. Public **2026.10.19** uses the operator timezone for every job. Legacy payload timezone values are accepted but are not authoritative; migration 53 clears earlier overrides. Changing the operator timezone reconciles cached effective zones and recomputes next occurrences.
 
-The cron fields are minute, hour, day of month, month, and weekday (`0` is Sunday; `6` is Saturday). Fields support numbers, `*`, comma-separated lists, numeric ranges, and steps. Named months/weekdays, seconds, and cron macros are not supported. **Every field must match**, including both day of month and weekday when restricted; do not assume the traditional cron OR rule. Next-occurrence calculation skips impossible calendar days and scans eligible UTC minutes within a 366-day horizon and can reject a valid-looking expression with no occurrence in that window. Local daylight-saving gaps or repeats therefore affect which wall-clock occurrences match.
+The cron fields are minute, hour, day of month, month, and weekday (`0` is Sunday; `6` is Saturday). Fields support numbers, `*`, comma-separated lists, numeric ranges, and steps. Named months/weekdays, seconds, and cron macros are not supported. **Every field must match**, including both day of month and weekday when restricted; do not assume the traditional cron OR rule. Next-occurrence calculation skips impossible calendar days and scans eligible UTC minutes over a 400-year Gregorian calendar cycle (plus a UTC boundary day), rather than rejecting sparse valid schedules simply because they have no occurrence in the next year. An expression with no resolvable occurrence still fails. Local daylight-saving gaps or repeats therefore affect which wall-clock occurrences match.
 
 Example preparation of a disabled weekday job:
 
@@ -96,9 +100,13 @@ Due claims are transactional and use row locks plus a unique job/occurrence iden
 The scheduler validates model selection and mod-owner availability before dispatch. It prevents a second manual trigger while a running record is found. Cancelling a locally active run aborts its signal; stopping the scheduler timer does not itself cancel active runs.
 
 
-!!! warning "Verify scheduled dispatch on the installed version"
-    The current default scheduled chat dispatch receives the composed stores; the historical injection gap is fixed. This documentation update did not validate a live end-to-end scheduled turn. Inspect each terminal run result and test a harmless job before depending on a schedule.
 
+:::warning[Verify scheduled dispatch on the installed version]
+
+The current default scheduled chat dispatch receives the composed stores; the historical injection gap is fixed. This documentation update did not validate a live end-to-end scheduled turn. Inspect each terminal run result and test a harmless job before depending on a schedule.
+
+
+:::
 
 `BURROW_DISABLE_BACKGROUND_SCHEDULERS=1` (also `true`, `yes`, or `on`) disables background schedulers through the shared environment policy. Consult [Environment variables](../reference/environment.md) and [Configuration](../reference/configuration.md) before changing a service.
 
@@ -106,7 +114,7 @@ The scheduler validates model selection and mod-owner availability before dispat
 
 The curator and Dream subsystems maintain distinct forms of continuity. They are not general task-board workers. Read [Memory](memory.md) and [Dreams](dreams.md) for configuration, lifecycle, and what enters the prompt.
 
-Forge persists generation as a durable job. The operator HTTP/Forge surface creates asynchronously and supports explicit inspection/attachment. Checked **6 November 2026**: native `forge_create_job` instead waits for the job to finish and automatically sends every succeeded artifact to the originating conversation as assistant-authored attachments. It does not require a model polling loop or a second attach call. Cancelling the model waiter does not cancel paid generation; reset-generation fencing prevents delivery into a newly reset conversation. Generation may incur provider cost and requires an explicit generation request. Checked **12 November 2026**: catalog-qualified native Google video and capability-declared animated GIF generation are implemented. Typed image settings, selected saved portraits, and eligible existing Forge image references for video have explicit contracts; arbitrary source uploads/URLs and generic provider tuning remain unsupported. Native attachment retries within a turn deduplicate; an explicit later-turn resend delivers the existing artifact again without another generation. See [Forge media contracts](../reference/api/artifacts.md#typed-image-options-and-animated-gif).
+Forge persists generation as a durable job. The operator HTTP/Forge surface creates asynchronously and supports explicit inspection/attachment. Checked **6 November 2026**: native `forge_create_job` instead waits for the job to finish and automatically sends every succeeded artifact to the originating conversation as assistant-authored attachments. It does not require a model polling loop or a second attach call. Cancelling the model waiter does not cancel paid generation; reset-generation fencing prevents delivery into a newly reset conversation. Generation may incur provider cost and requires an explicit generation request. Checked **12 November 2026**: catalog-qualified native Google video and capability-declared animated GIF generation are implemented. Typed image settings, selected saved portraits, eligible existing Forge image references for supported image/video models, and current-session runtime-owned PNG/JPEG/WebP attachment IDs have explicit contracts. `referenceAttachmentIds` selects chat source images after portrait and artifact references; it does not accept arbitrary bytes, paths or URLs. The combined six-reference limit applies to video. Generic provider tuning remains unsupported. Native attachment retries within a turn deduplicate; an explicit later-turn resend delivers the existing artifact again without another generation. See [Forge media contracts](../reference/api/artifacts.md#typed-image-options-and-animated-gif).
 
 ## Legacy work items and workbench
 

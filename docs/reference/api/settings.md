@@ -1,8 +1,11 @@
 # Settings and integrations
 
 
+
 !!! note "Source-reviewed API reference"
+
     This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+
 
 
 These are privileged operator routes. They share the normal interactive authentication gate; `diagnostics:read` Bearer tokens do not authorize them. Stored settings, environment overrides and effective runtime behavior are explained in [configuration](../configuration.md).
@@ -18,7 +21,7 @@ In the UI, use **Settings → Connections → Models → Connect**, select the m
 
 Connection save accepts `provider`, `apiType`, `baseUrl`, and `models`; include `id` to update an existing connection. Omit `apiKey` to preserve an existing credential, or supply a nonblank replacement. Discovery refreshes provider/catalog facts while preserving explicit operator capability overrides. Discovery, connection authentication, model enablement, and agent selection are separate state transitions.
 
-A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`), nullable `thinkingMode`, and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects unknown connections, models not enabled in the catalog, absent authentication, and unsupported mode/effort combinations. `/api/agents/{agentId}/minion-model-selection` has the same independent fields. Archive-summary selection is separate and can be cleared. Adapter compatibility can omit saved temperature from the provider request.
+A per-agent selection uses `connectionId` and `model`, with optional `reasoningEffort` (default `off`), nullable `thinkingMode`, and `temperature` (0–2; omission preserves the prior value or defaults to 0.2). The backend rejects unknown connections, models not enabled in the catalog, absent authentication, and unsupported mode/effort combinations. The retained `/api/agents/{agentId}/minion-model-selection` compatibility endpoint has the same fields, but does not choose normal Minion dispatch defaults. Archive-summary selection is separate and can be cleared. Adapter compatibility can omit saved temperature from the provider request.
 
 For Anthropic Messages and native Anthropic pools, `thinkingMode` is `default`, `disabled`, `adaptive`, `enabled` (Manual), or `between_tools` (No up-front thinking), subject to the selected model's capabilities. Explicit `default` omits the provider thinking field; `null` preserves the legacy effort-based interpretation and is **not** provider default. Omitting mode when saving the same connection/model preserves its prior mode; changing model with omitted mode starts legacy/null. Explicit null clears the selection to legacy. Other provider families reject an explicit Anthropic mode.
 
@@ -51,19 +54,21 @@ Members must exist and belong to the matching provider family. OpenAI pools acce
 
 ## Minion Depth
 
-`GET /api/agents/{agentId}/minion-settings` returns `{ "ok": true, "maxDepth": 1, "defaultHarness": "burrow", "codexModel": null }` when unset. `PUT` accepts a nonempty subset of:
+`GET`/`PUT /api/settings/minion-settings` owns global defaults; `GET`/`PUT /api/agents/{agentId}/minion-settings` owns saved agent values and their effective inheritance. PUT partially updates:
 
-- `maxDepth`: integer 0–2.
-- `defaultHarness`: `burrow` or `codex`.
-- `codexModel`: `null` to clear, or a complete `{ "connectionId": "...", "model": "..." }` pair.
+- `maxDepth`: integer 0–2, default 1.
+- `defaultHarness`: `burrow`, `codex` or `claude`, default `burrow`.
+- `burrowModel`, `codexModel`, `claudeModel`: null or a complete `{ "connectionId": "…", "model": "…" }` pair.
+- `codexEnabled`, `claudeEnabled`: booleans. New unconfigured native harnesses default disabled.
+- Agent-only `overrideEnabled`: whether saved agent defaults override global values.
 
-Omitted values remain unchanged; invalid combined updates write nothing. Both model-pair strings must be nonempty; unknown nested fields are rejected. The response contains the complete saved settings. These settings are durable and isolated per agent. The separate `/minion-model-selection` endpoint configures Burrow Minions only, not Codex.
+Agent GET returns saved fields plus `overrideEnabled` and `effective`; execution uses `effective`, not inactive saved overrides. Disabling overrides preserves their values. First customization seeds current global defaults; later re-enabling restores the saved snapshot. Omitted fields remain unchanged and invalid combined updates write nothing. Both pair strings must be nonempty and unknown nested fields are rejected. Native enablement and model choice are independent of `defaultHarness`; turning a harness off does not clear its pair or stop existing-session follow-ups. For migrated settings lacking enable flags, the corresponding configured native pair determines initial enablement.
 
-Zero depth disables spawning; one permits direct children; two also permits grandchildren. Leaves lack Burrow's spawn tool, and runtime independently enforces the ceiling. The current setting can tighten a resumed child's saved budget without rewriting ancestry. Codex native grandchildren are not implemented.
+A null `burrowModel` inherits the actual parent turn model, not the obsolete separate `/minion-model-selection` default. A configured Burrow pair rejects a differing per-call model. Codex requires a direct OpenAI OAuth connection or eligible OpenAI pool; Claude requires direct Anthropic OAuth or an eligible Anthropic pool. Models must be enabled on the selected logical connection and an eligible member. Catalog `codexEligible` / `claudeEligible` flags are structural eligibility, not live quota or authentication proof. Native selection never inherits the parent model.
 
-Codex selection accepts direct OpenAI OAuth or eligible OpenAI pools, with the selected model enabled on an eligible OAuth member and the pool. The connection catalog's `codexEligible` flag is configuration eligibility, not live quota/authentication proof, and exact-model validation still applies. Pool selections save the pool ID. Missing selection fails with `codex_model_selection_required`; invalid pairs, missing connections, unsupported auth, ineligible pools and disabled models return actionable stable codes. Clearing the pair does not change the default harness.
+Native dispatch errors include `codex_minions_disabled`, `claude_minions_disabled`, `{harness}_model_selection_required` and `{harness}_model_override_unsupported`. Invalid depth/harness/enable values return `minion_max_depth_invalid`, `minion_default_harness_invalid` or `minion_enabled_invalid`; malformed JSON returns `invalid_json`. Clearing a native pair does not change its harness or enable flag.
 
-Invalid depth/harness values return `minion_max_depth_invalid` / `minion_default_harness_invalid`; an empty update also fails. Malformed JSON returns `invalid_json`. Normal authorization and enabled-agent requirements remain. See [agents and minions](../../concepts/agents-minions.md#native-codex-minions).
+Zero depth prevents children; one permits direct children; two permits grandchildren. Current settings can tighten, not expand, a resumed child’s saved lineage budget. Native grandchildren are not implemented. Legacy profile CRUD and stored profile fields remain compatibility surfaces, but ordinary dispatch does not select a stored default profile or require profile discovery. See [agents and minions](../../concepts/agents-minions.md).
 
 ## OpenTelemetry destinations
 
@@ -127,7 +132,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `POST` | `/api/retention/cleanup` | Deprecated: run retention cleanup (compatibility) |
 | `GET` | `/api/agents/{agentId}/model-selection` | Read agent model selection |
 | `PUT` | `/api/agents/{agentId}/model-selection` | Update agent model selection |
-| `GET`, `PUT` | `/api/agents/{agentId}/minion-settings` | Read/save nesting depth 0–2 |
+| `GET`, `PUT` | `/api/settings/minion-settings` | Read/save global Minion defaults |
+| `GET`, `PUT` | `/api/agents/{agentId}/minion-settings` | Read/save agent defaults and effective inheritance |
 | `GET` | `/api/agents/{agentId}/minion-model-selection` | Read separate Minion model selection |
 | `PUT` | `/api/agents/{agentId}/minion-model-selection` | Save separate Minion model selection |
 | `GET` | `/api/agents/{agentId}/mcp-tools` | Read agent MCP tools |
@@ -203,3 +209,7 @@ Allowed keys are `hc.theme`, `hc.selectedAgentId`, `hc.leftCollapsed`, `hc.right
 
 Unknown keys, unknown top-level fields, malformed bodies, nonboolean `seedOnly`, and values other than string/null return `400 invalid_ui_preferences` without mutation. The home server owns one operator-wide `settings_meta` record named `ui_preferences`, under the existing authentication boundary. This is not per-user or selected-node storage. Credentials, drafts and caches are excluded. See [workspace restoration](../../concepts/interface.md#workspace-preference-synchronization).
 
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

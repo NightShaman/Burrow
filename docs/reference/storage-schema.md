@@ -1,10 +1,11 @@
 # Storage schema
 
 
+
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
-This reference reviews application storage ownership and records the current migration ledger through **102**, checked against Core on **14 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
+This reference reviews application storage ownership and records the current migration ledger through **104**, checked against Core on **15 November 2026**. Current additions are listed explicitly below; historical table descriptions are not a complete column-by-column schema export. Use application stores or the [API](api.md), not direct SQL writes, so validation and lifecycle rules remain intact. See [source coverage](../project/source-map.md).
 
 See [Persistence architecture](../architecture/persistence.md) for the data flow and [Backup and recovery](../operations/backup-recovery.md) for recovery scope.
 
@@ -100,7 +101,7 @@ Early schema constants intentionally remain immutable. Read them together with l
 | `model_auth_previews` | `connection_id`; connection FK cascades | Non-secret authentication preview JSON text |
 | `model_settings_cache` | `cache_key` | Catalog/settings cache JSON text and update time |
 | `agent_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Selected connection/model, reasoning effort, nullable thinking mode and temperature |
-| `agent_minion_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Optional separate Minion connection/model, effort, nullable thinking mode and temperature |
+| `agent_minion_model_selections` | `agent_id`; agent FK cascades, connection FK restricts | Legacy Minion connection/model selection retained for compatibility; normal dispatch uses current simple Minion settings |
 Temperature is constrained to 0–2, default 0.2. Profile kind is constrained by the database; profile size and complete-replacement semantics are enforced by the store. Secret tables store encrypted bytes, not the external `BURROW_SETTINGS_KEY`. See [Authentication](../security/authentication.md).
 
 ## Conversations and original evidence
@@ -154,7 +155,7 @@ Migration 18 moves legacy rolling envelopes into relational scope/identity while
 | `dream_preload_entries` | `(key, position)`; envelope FK cascades | Ordered preload payload JSONB |
 | `dream_scope_review_entries` | `(key, position)`; envelope FK cascades | Ordered scope-review candidate JSONB |
 Migration 25 splits legacy Dream collections from `working_memory_meta` into envelope metadata and native rows, preserving array order and refusing malformed object/array envelopes. The write helper uses an advisory lock per key, merges metadata and appends or replaces entries transactionally. It removes legacy store-level count/reference truncation; generation callers can still select bounded subsets.
-Diary phase permits `light`, `deep`, `rem` and `manual`. Incremental batches are successful derived checkpoints, including empty candidate results; they are not another store of original transcripts. The compact DreamMemory result lives in `agent_profile_documents`, not a dedicated DreamMemory table. See [Dream cycles](../concepts/dreams.md).
+Diary phase permits `light`, `deep`, `rem` and `manual`. Incremental batches are successful derived checkpoints, including empty candidate results; they are not another store of original transcripts. The legacy `DREAM_MEMORY` document remains in `agent_profile_documents`, not a dedicated table. Current ordinary context assembly excludes it from prompt injection; its presence is not proof that a current turn received it. See [Dream cycles](../concepts/dreams.md).
 
 ## Brains and optional embeddings
 
@@ -376,3 +377,12 @@ Checked **14 November 2026**: migration **102**, `forge-image-gallery`, adds `fo
 ## Workflow watch conclusions
 
 Migration **101**, `workflow-watch-conclusions`, adds `conclusions` to `github_workflow_watches`. Existing and default watches select `failure`, `timed_out`, `startup_failure` and `action_required`; explicit supported filters can include other terminal conclusions. See [workflow watches](api/work.md). No migration was executed during this documentation review.
+
+## 15 November source reconciliation: migrations 103–104
+
+| Version | Migration | Purpose |
+|---|---|---|
+| 103 | `anthropic-coordination-state` | Adds `anthropic_coordination_state`, keyed by `key` with a `state_json` JSONB payload, for durable Anthropic coordination state. |
+| 104 | `mcp-connection-tls-verification` | Adds non-null `mcp_connections.verify_tls`, default true. Existing connections retain certificate verification unless deliberately changed through the supported connection controls. |
+
+Simple global/per-agent Minion settings use existing `settings_meta` keys (`minion_settings` and `minion_settings:<agentId>`), not another migration or replacement model-selection table. Saved per-agent values and `overrideEnabled` are distinct from effective inherited settings. Legacy profile and Minion-model rows remain compatibility data, not normal dispatch defaults. See [Minion configuration](configuration.md#minion-settings). No migrations or application tests were executed for this review.

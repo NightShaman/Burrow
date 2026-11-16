@@ -1,6 +1,7 @@
 # Sessions and Archive
 
 
+
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
@@ -10,7 +11,7 @@ A session's canonical conversation evidence is in PostgreSQL. The current prompt
 
 `GET /api/sessions` supports `agentId`, `archived=true`, `q`, `updatedSince` and `limit`. Without `agentId`, it aggregates enabled agents, sorts by update time and applies the overall limit. Archived sessions are excluded by default here; Archive list defaults differ.
 
-For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Read detail for the UI projection or `/export` for canonical raw records. Mutation bodies include:
+For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Read detail for the UI projection. `/export` returns the normalized canonical transcript for the active reset generation; `/export?format=raw` returns retained stored JSON evidence across active entries and archives, including reset archives. Mutation bodies include:
 
 | Action | Relevant body / effect |
 |---|---|
@@ -21,6 +22,14 @@ For `/api/sessions/{sessionId}` and its actions, pass `agentId` in the query. Re
 | `fork` | Optional `targetSessionId`, otherwise `<source>-fork`; separate copy/provenance, not a live branch |
 
 Reset and archive retain original evidence. Current reset captures a handoff, blocks new admissions during the boundary change, supersedes active session runs, and resets the stored conversation. Current cancellation propagates into PostgreSQL work, with rollback/drain before client release and generation fencing against late writes; do not interpret a cancellation acknowledgement as immediate quiescence. The response can include `supersededRuns`; Archive summary generation is queued separately, so reset success is not a summary-completion receipt. Historical public 2026.10.19 predates this reset coordination. The former Albdruck purge endpoint is retired. The current retention preview/run controls manage traces, not individual conversation purge; see [retention and deletion](../../concepts/conversation-history.md#retention-and-deletion). Do not conflate hiding a session with deleting retained content.
+## Creating a session and exporting evidence
+
+`POST /api/sessions` accepts JSON `{ "agentId": "agent-id", "sessionId": "new-session", "operationId": "client-operation-id" }`. The session and operation IDs must be nonblank. The response is `{ ok: true, agentId, sessionId, operationId }`. Retain the same payload when retrying an uncertain create: the same target and creation operation replay successfully without clearing subsequently written messages. An existing target with a different operation returns `409 session_target_exists`. This creation replay contract is separate from reset's outcome-only operation ID below.
+
+`GET /api/sessions/{sessionId}/export?agentId=...` reconstructs the active-generation transcript with compacted predecessors, deduplicating overlap. Add `format=raw` for `burrow-session-raw-evidence/v1`: `occurrences` preserve each stored occurrence's `sourceKind`, `sourceId`, textual `ordinal` and `rawJson`. That raw view includes retained reset archives and does not deduplicate occurrences or parse their payloads into normalized entries. It preserves stored JSON text, **not original transport bytes**. It can return an empty occurrence list, so do not use it alone to prove that a session exists.
+
+Fork is also not a full evidence export: the HTTP route uses the store's default tail of at most 200 active entries and returns `copiedEntries`. It does not clone the source's complete archive history.
+
 ## Context, search and continuity
 
 `/api/session/context` and `/api/context` inspect context; `/api/session/context-status` includes current limits and live usage where available. Defaults use session `default`. These responses may expose private conversational material.
@@ -74,6 +83,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/sessions` | List sessions for incremental export discovery |
+| `POST` | `/api/sessions` | Create an empty session with a replayable creation operation |
 | `GET` | `/api/sessions/{sessionId}` | Read one session |
 | `POST` | `/api/sessions/{sessionId}/reset` | Reset a session |
 | `GET` | `/api/session/continuity-scope` | Read continuity scope |
@@ -100,7 +110,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/archive/continuity/cards/{agentId}/{cardId}` | Read a current continuity card and its Signal history |
 | `GET` | `/api/archive/runs` | List archived runtime proof packets |
 | `GET` | `/api/archive/runs/{runId}` | Read one archived runtime proof packet |
-| `GET` | `/api/sessions/{sessionId}/export` | Export canonical raw session records |
+| `GET` | `/api/sessions/{sessionId}/export` | Export normalized transcript, or stored occurrence evidence with `format=raw` |
 | `GET` | `/api/archive/calendar` | List retained Archive days in the requested timezone |
 
 ## Targeted source review
@@ -160,3 +170,7 @@ The newest page, current metadata, live chat-input extras and activity are read 
 Checked **7 November 2026**: when the receiving agent disables **A2A in default**, incoming default routes, including explicit `default`, trusted default returns and mirrored final replies, go to its canonical per-sender `a2a-<sender-id>` inbox. Nondefault explicit/attested routes are preserved. Final replies consult the receiver's current preference; no existing messages are moved. See [peer routing](../../concepts/agents-minions.md#peer-agent-messages).
 
 Session rename/fork destination conflicts return HTTP 409 with the specific conflict code and preserve the original sessions. Unexpected storage failures remain server errors, not misleading conflict responses.
+
+## 15 November 2026 static API reconciliation
+
+Reviewed this page against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d` and UI `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5`, including mounted routes and their relevant stores/UI callers. Corrections above describe implementation, not a live API, database or provider test. Earlier dated receipts remain historical.

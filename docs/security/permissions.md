@@ -1,6 +1,7 @@
 # Permissions and execution boundaries
 
 
+
 !!! note "Current source review"
     This page was reconciled against current development source on **2026-11-08**. Historical public-source links retain their original revisions and do not establish that a public mirror or installed runtime contains current behavior. This is static documentation/source review, not an application, provider, database or security test.
 
@@ -46,12 +47,13 @@ The accepted operation vocabulary is broader than the native review call sites. 
 | Native action | Boundary evaluation performed by action review |
 |---|---|
 | `files_write`, `files_edit` | `write` against the supplied file path |
-| `files_patch` | `write` against paths extracted from recognized unified-diff headers |
+| `files_patch` | `write` against paths extracted by the same supported patch-dialect parser used at execution |
 | `shell_exec` | `execute` against command text and the explicitly supplied `cwd`, if any |
 | `spawn_subagent` | `delegate` against an explicit filesystem target root |
 | Filesystem reads/list/find/inspect/search and Git status/diff | Validation review; this branch does not evaluate execution hard blocks |
 
-There is no independent native `delete` hard-block evaluation in this review function. A shell command's eventual file effects are not parsed into complete read/write/delete targets; checking its command string or `cwd` is not equivalent to controlling every file it accesses. Patch-path extraction recognizes particular diff headers, not every possible patch representation. These limitations are important when designing deny rules.
+There is no independent native `delete` hard-block evaluation in this review function. A shell command's eventual file effects are not parsed into complete read/write/delete targets; checking its command string or `cwd` is not equivalent to controlling every file it accesses. Patch-path extraction shares the executor’s supported unified and structured patch parsing, including quoted Git paths and declared rename/copy paths; it is not a parser for arbitrary shell mutations. These limitations are important when designing deny rules.
+
 
 !!! warning "No default command safety classifier"
     Ordinary mutations are permitted absent applicable configured blockers. A command's display labels, a natural-language instruction, or a selected project do not create a hard deny rule. Shell commands can reach resources permitted by the host account.
@@ -59,7 +61,9 @@ There is no independent native `delete` hard-block evaluation in this review fun
 The execution-policy helper filters for explicit user-configured hard blockers. Its mutation capability is allowed when those blockers are absent, and its commit capability additionally requires structural action `factory` or `commit`. This is the helper's workflow policy, not a guarantee that arbitrary `git` commands inside unrestricted shell are prohibited. Legacy mutation/commit gates use observed tool receipts and verification evidence; they are workflow safeguards, not kernel isolation.
 ## Minion boundary propagation
 
-Local minion dispatch forwards the parent's `executionBoundaries` in its child payload. The child reconstructs that trusted context; its review and concrete execution receive the boundaries. In-process remote children retain the parent execution context and remote controller. Cancellation is also forwarded into child tool execution. This propagates the configured checks described above, not OS containment or a broader deny-rule interpretation.
+Local Burrow-harness minion dispatch forwards the parent's `executionBoundaries` in its child payload. The child reconstructs that trusted context; its review and concrete execution receive the boundaries. In-process remote children retain the parent execution context and remote controller. Cancellation is also forwarded into child tool execution. This propagates the configured checks described above, not OS containment or a broader deny-rule interpretation.
+Native Codex and Claude Minions do not emulate Burrow hard-block rules inside their own tool engines. Their runners reject dispatch when enabled hard blocks cannot be represented (`codex_execution_boundaries_unsupported` / `claude_execution_boundaries_unsupported`). Codex selects read-only or full-access native sandbox mode from its admitted execution policy; Claude currently requires inspection and mutation capability and has no read-only sandbox bridge. Native coding tools retain their harness-specific permissions. These checks are admission contracts, not a claim that Burrow reviews each native CLI internal tool call.
+
 ## MCP and mod tool grants
 
 Saving a connection or discovering its catalog does not grant an agent permission to invoke all its tools. A normal invocation needs an enabled connection, an exact catalog tool name, and an agent grant for that connection/tool pair. Provider selection uses an exact connection ID or a unique case-insensitive display name. An ambiguous name cannot select a provider.

@@ -8,18 +8,24 @@ Burrow is a self-hosted, chat-first AI agent application. Connect a model, give 
 [Install Burrow](guide/installation.md)
 [Create your first agent](guide/first-agent.md)
 
-Operator guide · **current implementation reviewed 8 November 2026**
+Operator guide · **current implementation reviewed 15 November 2026**
+
 
 
 
 !!! danger "Burrow is not safe by design."
 
+
     Burrow gives agents real tools and real access. Depending on what you enable, they can run commands, change or delete files, use credentials, and affect connected systems. Models make mistakes. **Burrow is not a sandbox; you are responsible for the access you grant and the consequences.**
+
+
 
 
 !!! note "Note from The Goblin King"
 
+
     I don’t write code. I provide the ideas, direction, and testing. The Goblin AI agents write 100% of the code, and yes, they sometimes break shit.
+
 
 
 ## Start small. Add what you need.
@@ -54,7 +60,7 @@ You run Burrow on your own host and open its web interface in a browser. Model p
 
 ## A guide to current implementation
 
-These user guides follow inspected current Core implementation, without waiting for the daily public-source sync. The reviewed assembly is **2026.11.08.7**; [source coverage](project/source-map.md) records exact revisions and historical boundaries. Features depend on your installed version, provider, and enabled mods. A documentation update does not upgrade your installation.
+These user guides follow inspected current Core implementation, without waiting for the daily public-source sync. The reviewed assembly is **2026.11.16.6**; [source coverage](project/source-map.md) records exact revisions and historical boundaries. Features depend on your installed version, provider, and enabled mods. A documentation update does not upgrade your installation.
 
 Architectural and API material remains under the existing technical-reference navigation. The Sunday review reconciles current contracts while preserving explicitly historical examples and citations. [Read the source and verification scope](project/source-map.md).
 

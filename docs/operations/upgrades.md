@@ -1,10 +1,9 @@
 # Upgrades
 
 
+
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Upgrade the deployment through its own distribution path: the native launcher for user installs, image replacement for containers. Preserve durable state and the settings encryption key.
 
@@ -16,7 +15,7 @@ Upgrade the deployment through its own distribution path: the native launcher fo
 4. Allow space for new and previous application payloads and dependency staging
 5. Plan a maintenance window for active agent work, provider calls, and schema migration
 
-Current inspected development source includes PostgreSQL migrations through **100**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
+Current inspected development source includes PostgreSQL migrations through **104**. The historical public **2026.10.19** snapshot ended at 60. Check the target build rather than assuming your installed or public package already contains the newer ledger. Existing history can require data backfill; allow migration time and keep a restorable pre-upgrade copy. See [storage schema](../reference/storage-schema.md) for the exact ledger.
 
 If startup appears to wait on PostgreSQL, use [long-migration checks](troubleshooting.md#upgrade-waits-on-a-database-migration) to distinguish elapsed time, CPU activity and lock waits before taking action.
 
@@ -30,7 +29,7 @@ Run as the installation owner:
 "$HOME/.burrow/bin/burrow" update --verbose
 ```
 
-The launcher enters the installed updater, which resolves the selected update repository’s current `main` SHA (the public repository for a default public install), downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing managed user service. It preserves the service enablement state, so a disabled service is not re-enabled. Existing manual installations remain manual; the automatic creation of a persistent service applies to fresh default installs only.
+The launcher enters the installed updater, which resolves the selected update repository’s current `main` SHA (the public repository for a default public install), downloads that immutable archive, and hands control to the incoming installer. The installer stages the replacement while the existing service remains active, swaps the app directory, updates the launcher/integrations, then restarts an existing active managed user service. A stopped service remains stopped. It preserves the service enablement state, so a disabled service is not re-enabled. Existing manual installations remain manual; the automatic creation of a persistent service applies to fresh default installs only.
 
 Durable `burrow.env`, `config/`, `workspace/`, `cache/`, `reports/`, and integrations remain under the install root. Installer-owned path variables are reconciled. Existing listener values are preserved unless supplied explicitly:
 
@@ -56,10 +55,9 @@ cat "$HOME/.burrow/app/SOURCE_VERSIONS"
 Check the returned version against the installed build, then verify a normal conversation and one required integration. Do not infer completion from a Git push, downloaded files, or an active systemd unit alone.
 
 
+
 !!! note "Public readiness verification"
-
     The installer checks `/api/health` after restarting. Both health paths now run before authentication and report readiness/build identity. If verification fails, inspect the service invocation, listener, logs, and expected version; authentication alone is no longer the source-backed explanation. Health does not validate a complete model or integration workflow.
-
 
 If no managed user service exists, the installer does not manage your external supervisor. Restart and validate it through the supervisor you own.
 

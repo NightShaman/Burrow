@@ -1,10 +1,9 @@
 # Deployment
 
 
+
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Use one replaceable application and one clearly owned durable-state root. Keep the database, encryption key, and filesystem artifacts recoverable together.
 
@@ -40,7 +39,7 @@ A fresh default install creates, enables, and starts the persistent user service
 
 The launcher loads `burrow.env`, locates its own installation, and starts the PostgreSQL supervisor. The user unit is installed below `~/.config/systemd/user` unless `XDG_CONFIG_HOME` overrides it. Lingering is required for persistence across logout/reboot; installation enables and verifies it, with a sudo fallback if needed. The installer waits for HTTP readiness and verifies the installed application version through this normal supervisor path.
 
-Use `sh install-burrow.sh --no-service` for foreground use or your own supervisor. Development installs with `--no-install-dependencies` also skip automatic service setup. To add the persistent service later, run `burrow service install`. Existing managed installations are updated/restarted without re-enabling a disabled service, while existing manual installations remain manual.
+Use `sh install-burrow.sh --no-service` for foreground use or your own supervisor. Development installs with `--no-install-dependencies` also skip automatic service setup. To add the persistent service later, run `burrow service install`. Existing active managed installations are updated/restarted without re-enabling a disabled service; stopped services remain stopped, and existing manual installations remain manual.
 
 Run service management as the installation owner. Do not mix a foreground `serve` process and a user service on the same port. Historical system-wide unit examples in supporting source are not the default installer workflow.
 

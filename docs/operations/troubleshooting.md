@@ -1,8 +1,11 @@
 # Troubleshooting
 
 
+
 !!! note "Implementation and historical evidence"
+
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
+
 
 Start with the installed version, exact error, expected deployment shape, and relevant agent/session/run ID. Avoid changing several settings at once or retrying an operation that may still be running.
 
@@ -297,7 +300,6 @@ Checked **14 November 2026**: model failures retain a sanitized actual diagnosti
 
 Authenticated settings, skill-source, Forge, reference-image and final HTTP failure responses can include sanitized `message` alongside their stable `error` code/status. Public/pre-authentication and webhook failures intentionally remain generic. Ordinary tool activity may carry safe error detail; MCP activity uses only its dedicated sanitized diagnostic field, never arbitrary output, while mod/skill raw payloads remain excluded. This is not a guarantee that every historical error or every service response contains recoverable detail. Errors already stripped from old records cannot be reconstructed.
 
-
 ## Codex Minion setup or continuation fails
 
 - `codex_model_selection_required`: save the separate Codex connection/model pair in Minions settings; parent/Burrow model inheritance does not apply.
@@ -309,3 +311,20 @@ Authenticated settings, skill-source, Forge, reference-image and final HTTP fail
 
 A native final answer is a report, not promoted tool evidence or independent verification. Inspect actual changes and possible effects before retrying failed work. Stale running state or uncertain process cleanup requires explicit reconciliation.
 
+
+## Claude and inherited Minion defaults
+
+Check **Agents → Global → Minions** and the selected agent’s override before changing model connections. The agent response distinguishes saved fields from `effective`; an inactive saved override is not the dispatch configuration. Save model/enable/depth edits with **Save minion defaults**.
+
+- `codex_minions_disabled` / `claude_minions_disabled`: the effective native enable flag is off. An existing child’s follow-up is separate from new admission.
+- `claude_model_selection_required`: configure an eligible Anthropic OAuth connection or pool and an enabled model; parent-model inheritance does not apply.
+- `claude_execution_policy_unsupported`: this adapter requires inspection and mutation authority and cannot provide the Burrow read-only policy bridge. Use a suitable harness rather than claiming read-only isolation.
+- `claude_execution_boundaries_unsupported`: configured hard boundaries cannot be enforced by this native adapter.
+- `claude_continuation_effects_ambiguous`: the required account or complete portable checkpoint is unavailable. Do not blindly restart potentially effectful work.
+- Native executable or transport errors: verify the selected execution host’s compatible CLI and Node Goblin package. Remote work does not silently fall back to the controller.
+
+Claude result text alone is not a verified receipt. Process close, cancellation/cleanup state and saved native session bindings must be reconciled before retrying. See [Claude Minions](../concepts/agents-minions.md#native-claude-minions).
+
+## Sunday source checkpoint: 15 November 2026
+
+This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.

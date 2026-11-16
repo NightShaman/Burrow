@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-15**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 Mods are trusted installed server/UI code. Distribution, activation, tool grants and application data are separate lifecycles. See [extension development](../../development/extensions.md) and [trust boundaries](../../security/trust-boundaries.md) before installing a source.
 
@@ -46,6 +46,8 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `PUT` | `/api/mod-management/source-refresh` | Replace persisted mod source refresh settings |
 | `POST` | `/api/mod-management/sources` | Add and inspect a mod source |
 | `DELETE` | `/api/mod-management/sources/{sourceId}` | Remove a mod source |
+| `DELETE` | `/api/mod-management/sources/{sourceId}/credential` | Remove its stored source credential without uninstalling code |
+| `GET` | `/api/mod-management/secret-references` | Optional source-credential reference discovery; current distribution service returns an empty fallback |
 | `POST` | `/api/mod-management/refresh` | Refresh all mod sources |
 | `POST` | `/api/mod-management/{modId}/install` | Install or update a mod |
 | `POST` | `/api/mod-management/{modId}/enable` | Enable an installed mod |
@@ -64,8 +66,12 @@ The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6
 
 Current Core's host capability `context.agents.turns.submit` accepts optional `attachments` beside `agentId`, `sessionId`, `message`, optional `displayMessage`, and `idempotencyKey`. This is an internal mod capability, not a new public HTTP route. Attachments use normal ChatAttachment fields (`name`, `type` or `mimeType`, `size`, `encoding`, `content`); actual nonempty content is required. Images must be matching `data:image/...;base64,...` content with canonical padded base64, never provider download URLs, private storage paths or credentials.
 
-Core normalizes before durable acceptance and rejects dropped/truncated or malformed input. Image content is limited to 30,000,000 characters including the data URL prefix; non-image content beyond 200,000 characters is rejected. Provider/model limits still apply. Normalized bytes persist with the durable receipt and normal agent attachment artifacts. Submit/read/cancel public projections omit those submitted payloads.
+Core normalizes before durable acceptance and rejects dropped/truncated or malformed input. Image content is limited to 30,000,000 characters including the data URL prefix. Non-image content is preserved by the current shared chat normalizer; the former 200,000-character truncation/rejection is not a current limit. Host IPC, request-allocation and model-context budgets remain separate. Provider/model limits still apply. Normalized bytes persist with the durable receipt and normal agent attachment artifacts. Submit/read/cancel public projections omit those submitted payloads.
 
 Idempotency compares normalized attachment content and metadata as well as agent/session/message/display input. Omitted attachments and `[]` are equivalent; changing attachments under an existing key returns `mod_external_turn_idempotency_conflict`. A vision-capable selected model receives the actual image; otherwise the ordinary chat vision fallback applies. Update Core before enabling a transport feature that depends on this capability. See [Tutor external-turn lesson](https://docs.goblin-kingdom.com/burrow-tutor/advanced/external-agent-turns/).
 
 Source reviewed on **31 October 2026** against Core `8275b6bedf1fcd969fb5289cf0b673a80ddc8146`; no transport/provider call was performed.
+
+## 15 November full static review
+
+Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.

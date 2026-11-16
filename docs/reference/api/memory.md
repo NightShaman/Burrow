@@ -1,9 +1,9 @@
 # Memory and Dreams
 
 
+
 !!! note "Source-reviewed API reference"
     This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
-
 
 Brains stores explicit saved memories. Conversation originals, temporary continuity and Dream processing are separate surfaces. Read [memory](../../concepts/memory.md), [Dreams](../../concepts/dreams.md) and [conversation history](../../concepts/conversation-history.md) for lifecycle semantics. The route and store behavior here was checked against current source; no live deployment test is asserted.
 
@@ -75,6 +75,8 @@ All these routes share the normal API authentication boundary. They are present 
 | `POST` | `/api/agents/{agentId}/dream-memory/consolidate` | Retained legacy route; current wiring returns the missing synthesized-items error described below |
 | `GET`, `POST` | `/api/agents/{agentId}/dream-cycle` | Read receipts or run a cycle |
 
+For mod-managed agents, Dream-settings GET/PUT and Dream-cycle POST return `409 agent_dream_managed_by_mod`; the owning mod controls that lifecycle. This restriction does not mean every diary or receipt read is unavailable.
+
 Dream settings include `enabled`, `quietDayDreams`, `promoteToMemory`, `cron`, `prompt`, optional `modelConnectionId` and `model`. The persisted default is enabled at `0 4 * * *`, with quiet-day Dreams enabled and operator timezone/model selection. Public migration 53 retires per-Dream timezone overrides; the retained `timezone` field is returned as null and the operator timezone governs scheduling. Explicit model overrides must supply a complete valid pair. A Dream prompt is at most 20,000 characters.
 
 Diary GET supports `date`, `phase`, `limit` (default 30) and `format`/`markdown`. Cycle receipt GET defaults to 20 entries. Cycle POST accepts `limit` and optional `generatedAt`; these are processing controls, not a separate scheduling API. Inspect the returned phase outcomes: current Dream cycles save individual Dream-generated Brain connections, not a mandatory DreamMemory preload.
@@ -131,3 +133,7 @@ The changed preference, recall, embedding or shared-guidance contracts above wer
 ## Lexical rollout progress
 
 Checked **6 November 2026**: the historical recall worker's status distinguishes configured `pageSize` from adaptive `activePageSize`. Default pages use up to 16 occurrences and a 60-second preparation budget. Preparation avoids foreground session/source row locks; a separate 250ms publication cancellation budget covers version checks, projection writes and cursor advancement. Failed pages roll back without advancing the checkpoint. Timeout reduces the next page size down to one; four consecutive full committed pages increase it toward the configured maximum. Broad recall still waits for lexical readiness; exact original expansion remains separate. No history truncation or automatic embedding opt-in is introduced.
+
+## 15 November 2026 static API reconciliation
+
+Reviewed this page against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d` and UI `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5`, including mounted routes and their relevant stores/UI callers. Corrections above describe implementation, not a live API, database or provider test. Earlier dated receipts remain historical.

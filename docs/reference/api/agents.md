@@ -2,7 +2,7 @@
 
 
 !!! note "Source-reviewed API reference"
-    This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
+    This reference was reconciled against current development source on **2026-11-15**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
 
 The agent registry is PostgreSQL-backed. An empty registry is valid; a fallback agent label in code does not establish that a real agent exists. Start with `GET /api/setup/status` and `GET /api/agents`.
 
@@ -74,3 +74,7 @@ Metadata contains `id`, `attachmentId`, `contentUrl`, `mimeType`, `fileName`, `s
 PostgreSQL owns links in `agent_reference_images` and singleton `operator_reference_images`; files live in Core's runtime-managed artifacts. Replacement/removal cleans the previous owned file, and agent deletion cleans its photo. These are not chat-retention attachments or selective-export payloads. See [generation selectors](artifacts.md#canonical-reference-image-generation).
 
 The exact photo-byte endpoints are `GET /api/agents/{agentId}/reference-image/content` and `GET /api/operator/reference-image/content`, with the `id` revision query. Core also serves mod-owned photo bytes at `GET /api/mod-reference-images/{modId}/{key}/content?id=...` through ordinary media authentication; mod HTTP handlers themselves remain JSON-only.
+
+## 15 November full static review
+
+Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.
