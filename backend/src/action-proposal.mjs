@@ -471,7 +471,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
           additionalProperties: false,
           properties: {
             task: { type: 'string' },
-            harness: { type: 'string', enum: ['burrow', 'codex', 'claude', 'gemini'], description: 'Optional child execution harness. Omit to use the agent minion default.' },
+            harness: { type: 'string', enum: ['burrow', 'codex', 'claude', 'gemini'], description: 'Choose the harness per task: burrow, codex, claude, or gemini. Native harnesses must be enabled and configured in effective Minion settings. Omission uses the effective stored compatibility harness setting; explicit selection is recommended.' },
             label: { type: 'string', description: 'Optional short display label for the child in the agent tree (maximum 80 characters). Keep the full instruction in task.' },
             model: { type: 'string', description: 'Optional exact enabled configured model id for this child only. Omit to inherit the parent model.' },
             target: {
