@@ -47,6 +47,8 @@ async function openRemoteProcess(controller, targetId, options, runtime) {
         const result = await rpc('read');
         if (closed) break;
         if (result.data) child.stdout.write(result.data);
+        if (runtime === 'gemini' && result.stderr) child.stderr.write(result.stderr);
+        if (runtime === 'gemini' && result.processError) child.emit('error', new Error(result.processError));
         if (result.done) { finish(result); break; }
         await new Promise(resolve => setTimeout(resolve, 20));
       }

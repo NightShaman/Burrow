@@ -28,10 +28,30 @@ export async function discoverGeminiExecutable(env = process.env) {
   fail('gemini_executable_unavailable');
 }
 
-// Attach every listener before start()/stdin. Never retain stderr, tool payloads,
-// or unbounded JSONL. Result is provisional until the actual process closes.
-function processClient(child, onEvent) {
+// Diagnostic text only: never serialize native events, stacks or tool payloads.
+function diagnosticText(value, redact) {
+  if (typeof value !== 'string') return '';
+  return redact(value).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/)
+    .filter(line => !/[{}]|^[\s]*[\[]|tool[_ -]?(use|result|payload)|parameters\s*[:=]/i.test(line))
+    .join(' ').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 2000);
+}
+
+// Attach every listener before start()/stdin. Bound diagnostic retention, not turns.
+// Result is provisional until the actual process closes.
+function processClient(child, onEvent, redact) {
   let buffer = '', text = '', result, failure, closed = false;
+  let stderr = '', stderrLine = '', droppingLine = false, nativeError = '', processError = '', exitCode = null, exitSignal = null;
+  const diagnostic = value => diagnosticText(value, redact);
+  const retainStderr = chunk => {
+    for (const part of String(chunk).split(/(?<=\n)/)) {
+      if (!droppingLine) stderrLine += part;
+      if (stderrLine.length > 32768) { stderrLine = ''; droppingLine = true; }
+      if (part.endsWith('\n')) {
+        if (!droppingLine) stderr = (stderr + ' ' + diagnostic(stderrLine)).slice(-8000);
+        stderrLine = ''; droppingLine = false;
+      }
+    }
+  };
   let resolveExit;
   const exit = new Promise(resolve => { resolveExit = resolve; });
   const reject = code => { failure ||= code; };
@@ -45,11 +65,16 @@ function processClient(child, onEvent) {
       const chunk = typeof event.content === 'string' ? event.content : typeof event.text === 'string' ? event.text : '';
       if (text.length + chunk.length > MAX_OUTPUT) reject('gemini_output_limit'); else text += chunk;
     }
-    if (event.type === 'error' && event.severity === 'error') reject('gemini_native_result_failed');
+    if (event.type === 'error' && event.severity === 'error') {
+      nativeError = diagnostic(event.message); reject('gemini_native_result_failed');
+    }
     if (event.type === 'result') {
       if (result) reject('gemini_invalid_stream');
       result = event;
-      if (event.error || event.status !== 'success') reject('gemini_native_result_failed');
+      if (event.error || event.status !== 'success') {
+        nativeError ||= diagnostic(typeof event.error === 'string' ? event.error : event.error?.message);
+        reject('gemini_native_result_failed');
+      }
       const finalText = event.response ?? event.result;
       if (typeof finalText === 'string') {
         if (finalText.length > MAX_OUTPUT) reject('gemini_output_limit');
@@ -71,18 +96,23 @@ function processClient(child, onEvent) {
     }
     if (buffer.length > MAX_LINE) { buffer = ''; reject('gemini_stream_line_limit'); }
   });
-  child.stderr.on('data', () => {});
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', retainStderr);
   child.stderr.on('error', () => reject('gemini_process_failed'));
   child.stdout.on('error', () => reject('gemini_process_failed'));
   child.stdin.on('error', () => reject('gemini_input_failed'));
-  child.on('error', () => { reject('gemini_process_failed'); });
-  child.once('close', code => {
+  child.on('error', error => { processError = diagnostic(error?.message); reject('gemini_process_failed'); });
+  child.once('close', (code, signal) => {
+    exitCode = code; exitSignal = signal || null;
     closed = true;
     if (buffer && !failure) line(buffer);
     if (code !== 0) reject('gemini_process_failed');
     resolveExit();
   });
-  return { exit, get closed() { return closed; }, get failure() { return failure; }, finish() {
+  return { exit, diagnostics() {
+    return { ...(nativeError ? { nativeError } : {}), ...(processError ? { processError } : {}),
+      stderr: diagnostic(stderr + ' ' + (droppingLine ? '' : stderrLine)), exitCode, signal: exitSignal };
+  }, get closed() { return closed; }, get failure() { return failure; }, finish() {
     if (failure) fail(failure);
     if (!result) fail('gemini_result_missing');
     if (!text.trim()) fail('gemini_empty_result');
@@ -96,7 +126,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
   executionPolicy = parentExecutionContext?.executionPolicy, continuation = null } = {}) {
   const cancellation = new AbortController();
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
-  let resolvedConnectionId, actualModel = null;
+  let resolvedConnectionId, actualModel = null, launchAttempted = false;
   let child, client, poll, killTimer, spawned = false, nativeSession, store, authority, recorded = false;
   let writes = Promise.resolve(), persistenceFailed = false, sequence = 0, pendingWrites = 0, result, lastActivity = 0, initSeen = false;
   const secrets = new Set();
@@ -185,7 +215,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
     if (auth?.type !== 'api_key' || typeof auth.apiKey !== 'string' || !auth.apiKey || auth.apiKey.length > 16384 || /[\x00-\x20\x7f]/.test(auth.apiKey)) fail('gemini_google_api_key_required');
     const prompt = `Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${task}`;
     if (Buffer.byteLength(prompt) > 96 * 1024 || prompt.includes('\0')) fail('gemini_prompt_invalid');
-    const args = ['-p', prompt, '--output-format', 'stream-json', '--model', geminiCliModel(selected.model), '--approval-mode', 'yolo',
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--model', geminiCliModel(selected.model), '--approval-mode', 'yolo', '--skip-trust',
       ...(saved?.sessionId ? ['--resume', saved.sessionId] : [])];
     const executable = remote ? null : await discoverGeminiExecutable();
     await save({ sessionId: saved?.sessionId || null, resolvedConnectionId, portableHistory: false, connectionId: selected.connectionId, model: selected.model,
@@ -205,6 +235,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
       await fs.writeFile(settingsPath, JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key', enforcedType: 'gemini-api-key', useExternal: false } } }), { mode: 0o600 });
       env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = settingsPath;
     }
+    launchAttempted = true;
     child = remote ? await openRemoteGeminiProcess(controller, host.targetId, target.root, { args, apiKey: auth.apiKey })
       : spawn(executable, args, { cwd: target.root, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'], env });
     spawned = true;
@@ -224,7 +255,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
           activity: { kind: 'run', status: 'running', phase: 'gemini-native', label, sequence: ++sequence, lastActualActivityAt: new Date().toISOString() } });
         });
       }
-    });
+    }, redact);
     if (signal.aborted) abort();
     else {
       child.start?.();
@@ -245,11 +276,19 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
     await save({ state: 'completed', actualModel });
     result = { ...base, ok: true, summary: text, blockers: [], warnings: [], sideEffectsApplied: null };
   } catch (error) {
-    // Only our fixed runner codes escape. Never forward provider/OS/store errors.
+    // Keep stable blockers; diagnostics are separately sanitized and process-scoped.
     const code = persistenceFailed ? 'gemini_session_persistence_failed' : signal.aborted ? 'gemini_cancelled'
       : error?.[RUNNER_ERROR] || 'gemini_native_run_failed';
     result = { ...base, ok: false, summary: signal.aborted ? 'Gemini minion cancelled.' : 'Gemini minion unavailable or failed.',
       blockers: [code], warnings: [], sideEffectsApplied: spawned ? null : false };
+    // Remote open errors can include a native/transport reason; pre-auth/store
+    // exceptions remain opaque because their contents are not process output.
+    if (launchAttempted && secrets.size && !client) {
+      const message = diagnosticText(error?.message, redact);
+      if (message && !error?.[RUNNER_ERROR]) {
+        result.diagnostics = { processError: message }; result.summary += ` ${message}`;
+      }
+    }
   } finally {
     clearInterval(poll);
     signal.removeEventListener('abort', abort);
@@ -263,6 +302,12 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
       if (!client?.closed) await Promise.race([client?.exit || delay(750), delay(750)]);
       cleanupUnconfirmed = !client?.closed;
       child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+    }
+    if (client && !result?.ok) {
+      result.diagnostics = client.diagnostics();
+      const detail = [result.diagnostics.nativeError, result.diagnostics.processError, result.diagnostics.stderr,
+        ...(client.closed ? [`Process exit: ${result.diagnostics.exitCode ?? 'none'}${result.diagnostics.signal ? ` (${result.diagnostics.signal})` : ''}.`] : [])].filter(Boolean).join(' ');
+      if (detail) result.summary += ` ${detail}`;
     }
     clearTimeout(killTimer);
     await writes;
