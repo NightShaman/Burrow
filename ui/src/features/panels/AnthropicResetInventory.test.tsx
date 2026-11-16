@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AccountStatus, AnthropicResetInventory } from './AccountStatus';
+import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { api } from '../../app/api';
 vi.mock('../../app/api', async (original) => ({
   ...(await original<typeof import('../../app/api')>()),
@@ -24,7 +25,7 @@ it('shows zero without implying unavailable and has no redemption control', () =
   render(
     <AnthropicResetInventory inventory={{ availableCount: 0, nearestExpiresAt: null }} now={0} />,
   );
-  expect(screen.getByText('0 full resets')).toBeTruthy();
+  expect(screen.getByText('0 Full')).toBeTruthy();
   expect(screen.queryByRole('button')).toBeNull();
   expect(screen.queryByText('expiry unknown')).toBeNull();
 });
@@ -43,31 +44,33 @@ it('uses supplied server clock for expiry and marks elapsed inventory pending re
     />,
   );
   expect(screen.getByText('Full resets awaiting refresh')).toBeTruthy();
-  expect(screen.queryByText('3 full resets')).toBeNull();
+  expect(screen.queryByText('3 Full')).toBeNull();
 });
 it('carries inventory through the existing Anthropic usage fetch only', async () => {
   vi.mocked(api).mockResolvedValue({
     usage: { windows: [], fullResets: { availableCount: 4, nearestExpiresAt: null } },
   });
   render(
-    <AccountStatus
-      providers={[
-        {
-          id: 'inventory-integration',
-          provider: 'Anthropic',
-          apiType: 'anthropic-messages',
-          url: '',
-          apiKey: '',
-          models: [],
-          oauthConfigured: true,
-        },
-      ]}
-    />,
+    <ConfirmProvider>
+      <AccountStatus
+        providers={[
+          {
+            id: 'inventory-integration',
+            provider: 'Anthropic',
+            apiType: 'anthropic-messages',
+            url: '',
+            apiKey: '',
+            models: [],
+            oauthConfigured: true,
+          },
+        ]}
+      />
+    </ConfirmProvider>,
   );
-  await waitFor(() => expect(screen.getByText('4 full resets')).toBeTruthy());
+  await waitFor(() => expect(screen.getByText('4 Full')).toBeTruthy());
   expect(screen.getByText('expiry unknown')).toBeTruthy();
   expect(vi.mocked(api).mock.calls.map(([path]) => path)).toEqual([
     '/api/anthropic/oauth/usage?connectionId=inventory-integration',
   ]);
-  expect(screen.queryByRole('button')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Use Full reset' })).toBeTruthy();
 });

@@ -170,9 +170,15 @@ export type RuntimeModel = {
 
 export type AnthropicUsageWindow = { key: string; usedPercent: number; resetAt?: string | null };
 export type AnthropicFullResets = { availableCount: number; nearestExpiresAt: string | null };
+export type AnthropicFullResetsFreshness = {
+  fetchedAt: string | null;
+  sampleAgeMs: number | null;
+  stale: boolean;
+};
 export type AnthropicUsage = {
   windows: AnthropicUsageWindow[];
   fullResets?: AnthropicFullResets | null;
+  fullResetsFreshness?: AnthropicFullResetsFreshness;
 };
 export type OpenAiUsageWindow = {
   key: string;

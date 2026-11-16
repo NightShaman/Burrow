@@ -11,6 +11,7 @@ import { responseClock, serverNow, type ServerClock } from '../../app/serverCloc
 import type { SavedProvider } from '../../app/types';
 import { AccountCard } from './AccountCard';
 import { OpenAiResets } from './OpenAiResets';
+import { AnthropicResets, validFullResets } from './AnthropicResets';
 
 export type AccountVendor = 'Anthropic' | 'OpenAI';
 export type UsageBar = {
@@ -28,6 +29,8 @@ export type AccountUsageCard = {
   bars: UsageBar[];
   accountStatus?: OpenAiAccountStatus;
   fullResets?: AnthropicFullResets | null;
+  fullResetsFreshness?: AnthropicUsage['fullResetsFreshness'];
+  inventoryReceivedAt?: number;
   clock?: ServerClock | null;
   error?: string;
   sample?: { ageMs: number; receivedAt: number } | null;
@@ -161,7 +164,10 @@ type AnthropicUsageResponse = {
   error?: string;
 };
 
-function anthropicCard(base: AccountUsageCard, result: AnthropicUsageResponse): AccountUsageCard {
+export function anthropicCard(
+  base: AccountUsageCard,
+  result: AnthropicUsageResponse,
+): AccountUsageCard {
   const receivedAt = performance.now();
   const serverMs = result.serverTime ? Date.parse(result.serverTime) : NaN;
   const clock = Number.isFinite(serverMs) ? { serverMs, receivedAt } : base.clock;
@@ -170,10 +176,29 @@ function anthropicCard(base: AccountUsageCard, result: AnthropicUsageResponse): 
   const age = 'sampleAgeMs' in result ? (result.sampleAgeMs ?? NaN) : derivedAge;
   const usage = result.usage ?? result.lastSuccess?.usage;
   const failed = base.state === 'error' || result.ok === false;
+  const inventoryFreshness = validFullResets(usage?.fullResets)
+    ? usage?.fullResetsFreshness
+    : undefined;
   return {
     ...base,
     clock,
-    fullResets: failed ? null : (usage?.fullResets ?? null),
+    fullResets:
+      usage && !failed && usage.fullResets === null
+        ? null
+        : validFullResets(usage?.fullResets)
+          ? usage.fullResets
+          : base.fullResets,
+    fullResetsFreshness: inventoryFreshness
+      ? {
+          ...inventoryFreshness,
+          stale: failed || inventoryFreshness.stale,
+        }
+      : {
+          fetchedAt: base.fullResetsFreshness?.fetchedAt ?? null,
+          sampleAgeMs: base.fullResetsFreshness?.sampleAgeMs ?? null,
+          stale: true,
+        },
+    inventoryReceivedAt: inventoryFreshness ? receivedAt : base.inventoryReceivedAt,
     state: failed ? 'error' : 'ready',
     bars: usage ? anthropicBars(usage) : 'lastSuccess' in result ? [] : base.bars,
     sample:
@@ -258,7 +283,10 @@ export function useAccountUsage(
                 {},
                 options,
               );
-              next = anthropicCard({ ...base, clock, state: 'ready', bars: [] }, result);
+              next = anthropicCard(
+                { ...usageCardCache.get(key), ...base, clock, state: 'ready', bars: [] },
+                result,
+              );
             } else {
               const result = await api<{ usage?: OpenAiUsage | null }>(
                 `/api/openai/oauth/usage?connectionId=${encodeURIComponent(provider.id)}`,
@@ -290,7 +318,11 @@ export function useAccountUsage(
               } else {
                 // A network failure cannot renew a sample or a cooldown.
                 next.rateLimited = false;
-                next.fullResets = null;
+                next.fullResetsFreshness = {
+                  fetchedAt: next.fullResetsFreshness?.fetchedAt ?? null,
+                  sampleAgeMs: next.fullResetsFreshness?.sampleAgeMs ?? null,
+                  stale: true,
+                };
               }
             }
           }
@@ -385,7 +417,11 @@ function UsageMeter({
 export function AnthropicResetInventory({
   inventory,
   now,
+  freshness,
+  inventoryAgeMs,
 }: {
+  freshness?: AnthropicUsage['fullResetsFreshness'];
+  inventoryAgeMs?: number;
   inventory?: AnthropicFullResets | null;
   now: number | null;
 }) {
@@ -400,25 +436,30 @@ export function AnthropicResetInventory({
   const expiry = inventory.nearestExpiresAt;
   const expired = expiry !== null && now !== null && Date.parse(expiry) <= now;
   return (
-    <div className="account-resets">
-      <div className="account-resets-row">
-        <span
-          className="account-resets-summary"
-          title={expiry ? `Earliest expiry: ${new Date(expiry).toLocaleString()}` : undefined}
+    <span
+      className="account-resets-summary"
+      title={expiry ? `Earliest expiry: ${new Date(expiry).toLocaleString()}` : undefined}
+    >
+      <span>{expired ? 'Full resets awaiting refresh' : `${inventory.availableCount} Full`}</span>
+      {freshness && (
+        <small
+          title={
+            freshness.fetchedAt
+              ? `Inventory checked ${new Date(freshness.fetchedAt).toLocaleString()}`
+              : 'Inventory check time unknown'
+          }
         >
-          <span>
-            {expired ? 'Full resets awaiting refresh' : `${inventory.availableCount} full resets`}
-          </span>
-          {!expired && inventory.availableCount > 0 && (
-            <small>
-              {expiry
-                ? `expires ${now === null ? '—' : formatResetIn(expiry, now)}`
-                : 'expiry unknown'}
-            </small>
-          )}
-        </span>
-      </div>
-    </div>
+          {freshness.stale || inventoryAgeMs === undefined || inventoryAgeMs >= 30_000
+            ? 'Inventory stale'
+            : 'Inventory fresh'}
+        </small>
+      )}
+      {!expired && inventory.availableCount > 0 && (
+        <small>
+          {expiry ? `expires ${now === null ? '—' : formatResetIn(expiry, now)}` : 'expiry unknown'}
+        </small>
+      )}
+    </span>
   );
 }
 
@@ -535,10 +576,23 @@ export function AccountStatus({ providers }: { providers: SavedProvider[] }) {
                 </div>
               )}
               {card.vendor === 'Anthropic' && (
-                <AnthropicResetInventory
-                  inventory={card.fullResets}
-                  now={serverNow(card.clock, now)}
-                />
+                <AnthropicResets
+                  connectionId={card.id}
+                  name={card.name}
+                  onUsageRefresh={() => setRevision((value) => value + 1)}
+                >
+                  <AnthropicResetInventory
+                    freshness={card.fullResetsFreshness}
+                    inventoryAgeMs={
+                      card.fullResetsFreshness?.sampleAgeMs == null
+                        ? undefined
+                        : card.fullResetsFreshness.sampleAgeMs +
+                          Math.max(0, now - (card.inventoryReceivedAt ?? now))
+                    }
+                    inventory={card.fullResets}
+                    now={serverNow(card.clock, now)}
+                  />
+                </AnthropicResets>
               )}
               {card.vendor === 'OpenAI' && (
                 <OpenAiResets
