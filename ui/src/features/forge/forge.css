@@ -777,19 +777,26 @@
 }
 .forge-etch-energy {
   opacity: 0.65;
-  stroke-dasharray: 24 650;
+  stroke-dasharray: 32 480;
   stroke-dashoffset: 0;
 }
-.forge-schematic-live .forge-etch-energy {
+.forge-schematic-live .forge-etch-energy path {
   animation: forge-etch-flow 14s linear infinite;
 }
 @keyframes forge-etch-flow {
   to {
-    stroke-dashoffset: -1348;
+    stroke-dashoffset: -1024;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .forge-schematic-live .forge-etch-energy {
+  .forge-schematic-live .forge-etch-energy path {
     animation: none;
   }
+}
+
+.forge-etch-energy path:nth-child(2n) {
+  animation-delay: -5s;
+}
+.forge-etch-energy path:nth-child(3n) {
+  animation-delay: -9s;
 }

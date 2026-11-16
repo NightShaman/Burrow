@@ -28,7 +28,7 @@ export function ForgeConstellation({ enabled }: { enabled: boolean }) {
       ctx.clearRect(0, 0, width, height);
       if (pointer) {
         const light = ctx.createRadialGradient(pointer.x, pointer.y, 0, pointer.x, pointer.y, 160);
-        light.addColorStop(0, '#f6b7ff55');
+        light.addColorStop(0, '#f6b7ff38');
         light.addColorStop(1, '#c785ff00');
         ctx.fillStyle = light;
         ctx.fillRect(0, 0, width, height);

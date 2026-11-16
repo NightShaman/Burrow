@@ -73,6 +73,11 @@ export function ForgeSchematic({ enabled }: { enabled: boolean }) {
           <path d="M0 240H310L390 320H680L810 450H1080" />
           <path d="M2400 790H2130L2020 680H1810L1690 560" />
           <path d="M2400 310H2060L1980 390H1770L1630 530H1350" />
+          <path d="M80 760H400L510 650H710L850 510" />
+          <path d="M210 0V150L480 420V590L310 760V1000" />
+          <path d="M2180 0V190L1950 420V650L2210 910V1000" />
+          <path d="M500 130H790L880 220H1030" />
+          <path d="M1550 800H1760L1850 890H2160" />
         </g>
       </g>
     </svg>
