@@ -41,12 +41,15 @@ export class CodexMinionClient {
   constructor({ executable = 'codex', cwd, env = process.env, spawnProcess = spawn,
     clientInfo = { name: 'burrow', title: 'Burrow', version: '0.1.0' },
     onActivity = () => {}, refreshAuthTokens,
-    requestTimeoutMs = 15_000, turnTimeoutMs = 300_000,
+    requestTimeoutMs = 15_000, turnTimeoutMs = null,
     refreshTimeoutMs = 8_000, interruptTimeoutMs = 5_000, shutdownTimeoutMs = 1_000,
     maxLineBytes = 8 * 1024 * 1024 } = {}) {
-    for (const value of [requestTimeoutMs, turnTimeoutMs, refreshTimeoutMs,
+    for (const value of [requestTimeoutMs, refreshTimeoutMs,
       interruptTimeoutMs, shutdownTimeoutMs, maxLineBytes]) {
       if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError('Limits must be positive integers');
+    }
+    if (turnTimeoutMs !== null && (!Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs <= 0)) {
+      throw new TypeError('Optional turn timeout must be null or a positive integer');
     }
     Object.assign(this, { executable, cwd, env, spawnProcess, clientInfo, onActivity,
       refreshAuthTokens, requestTimeoutMs, turnTimeoutMs, refreshTimeoutMs,
@@ -166,7 +169,7 @@ export class CodexMinionClient {
     this.active = active;
     const abort = () => { void this.interrupt().catch(() => {}); };
     signal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(() => {
+    const timer = this.turnTimeoutMs === null ? null : setTimeout(() => {
       active.done.reject(failure('TURN_TIMEOUT', 'Codex turn timed out'));
       void this.interrupt().catch(() => {});
     }, this.turnTimeoutMs);

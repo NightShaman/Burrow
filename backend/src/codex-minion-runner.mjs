@@ -326,8 +326,8 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     }
     const replayBlocked = poolEngine && ((toolObserved && Boolean(providerReason))
       || error?.message === 'provider_pool_continuation_owner_unavailable');
-    const code = signal?.aborted ? 'codex_cancelled' : replayBlocked ? 'codex_pool_replay_unavailable' : error?.runnerCode || (['provider_pool_no_eligible_members', 'provider_pool_disabled'].includes(error?.message) ? error.message : 'codex_native_run_failed');
-    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : CODEX_SELECTION_ACTIONS[code] || (providerReason ? `Codex provider rejected the request (${providerReason}). Check account access or quota and retry.` : 'Codex minion unavailable or failed.'),
+    const code = signal?.aborted ? 'codex_cancelled' : replayBlocked ? 'codex_pool_replay_unavailable' : error?.runnerCode || (error?.code === 'TURN_TIMEOUT' ? 'codex_turn_timeout' : null) || (['provider_pool_no_eligible_members', 'provider_pool_disabled'].includes(error?.message) ? error.message : 'codex_native_run_failed');
+    result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : (code === 'codex_turn_timeout' ? 'Codex turn exceeded its explicitly configured time limit.' : null) || CODEX_SELECTION_ACTIONS[code] || (providerReason ? `Codex provider rejected the request (${providerReason}). Check account access or quota and retry.` : 'Codex minion unavailable or failed.'),
       blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
   } finally {
     clearInterval(cancellationPoll);
