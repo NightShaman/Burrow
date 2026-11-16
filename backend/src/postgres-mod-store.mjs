@@ -1,3 +1,4 @@
+import { parseStoredJson } from './diagnostic-boundary.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { closePostgresPool } from './postgres-foundation.mjs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
@@ -46,7 +47,7 @@ export class PostgresModSettingsStore {
   async get(name, fallback = null) {
     const result = await this.pool.query('SELECT value_json::text AS value_json FROM mod_settings WHERE mod_id=$1 AND name=$2', [this.modId, String(name)]);
     if (!result.rows[0]) return fallback;
-    try { return JSON.parse(result.rows[0].value_json); } catch { return fallback; }
+    return parseStoredJson(result.rows[0].value_json, 'mod_settings_corrupt');
   }
   async set(name, value) {
     const stamp = this.clock();

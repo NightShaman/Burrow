@@ -1,3 +1,5 @@
+import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
+import { operationalEvent } from './operational-log.mjs';
 import pg from 'pg';
 import { readSessionRecallReadiness } from './postgres-session-recall-backfill.mjs';
 import { createHash } from 'node:crypto';
@@ -169,6 +171,7 @@ export class PostgresConversationEmbeddings {
   Object.assign(this,{pool,settings,provider,retryBaseMs,retryMaxMs,batchSize,embeddingBatchSize,pollMs,logger});
   this.running=null;this.timer=null;this.stopped=false;this.active=new Set();this.vectorSchema=null;this.lastError=null;this.settingSignature=null;
  }
+ reportFailure(error, stage) { operationalEvent(this.logger, 'conversation_embedding_unavailable', boundaryDiagnostic(error, stage), { component:'conversation-embeddings' }); }
  async reconcile() {
   let s=await this.settings.reconcile();
   if(enabled(s))s=await withPostgresTransaction(this.pool,async c=>{
@@ -210,7 +213,7 @@ export class PostgresConversationEmbeddings {
    this.vectorSchema=ext.nspname;
    if(['conversation_embedding_pgvector_unavailable','conversation_embedding_storage_unavailable'].includes(this.lastError))this.lastError=null;
    return true;
-  }catch{this.lastError='conversation_embedding_storage_unavailable';return false;}
+  }catch(error){this.reportFailure(error, 'storage');this.lastError='conversation_embedding_storage_unavailable';return false;}
  }
  async ensureIndex(client,dimensions) {
   const type=`${ident(this.vectorSchema)}.halfvec(${dimensions})`;
@@ -307,6 +310,7 @@ export class PostgresConversationEmbeddings {
    this.lastError=null;
   }catch(error){
    if(signal.aborted)return false;
+   this.reportFailure(error, phase);
    const f=error?.message==='conversation_embedding_dimensions_invalid'||phase==='provider'?failure(error):{code:'conversation_embedding_storage_unavailable',retryable:true};
    const delay=Math.min(this.retryMaxMs,this.retryBaseMs*2**Math.min(row.attempts,30));this.lastError=f.code;
    await withPostgresTransaction(this.pool,async c=>{
@@ -319,13 +323,13 @@ export class PostgresConversationEmbeddings {
   return true;
  }
  start() {if(this.timer)return;this.stopped=false;this.timer=setInterval(()=>this.wake(),this.pollMs);this.timer.unref();this.wake();}
- wake() {if(!this.stopped&&!this.running)this.running=this.drain().catch(()=>{this.lastError='conversation_embedding_worker_unavailable';}).finally(()=>{this.running=null;});}
+ wake() {if(!this.stopped&&!this.running)this.running=this.drain().catch(error=>{this.reportFailure(error, 'worker');this.lastError='conversation_embedding_worker_unavailable';}).finally(()=>{this.running=null;});}
  async close() {this.stopped=true;clearInterval(this.timer);this.timer=null;for(const c of this.active)c.abort();if(this.running)await this.running;}
  async drain() {
   // Separate ownership session prevents max=1 pool deadlock during provider auth.
   const owner=new pg.Client({...this.pool.options,connectionTimeoutMillis:this.pool.options.connectionTimeoutMillis||10000});
   const controller=new AbortController();this.active.add(controller);let locked=false;
-  const lost=()=>controller.abort();owner.on('error',lost);
+  const lost=error=>{if(!this.stopped)this.reportFailure(error, 'owner_session');controller.abort();};owner.on('error',lost);
   try{
    await owner.connect();locked=(await owner.query("SELECT pg_try_advisory_lock(hashtextextended(current_schema() || ':conversation-embedding-worker',0)) AS locked")).rows[0].locked;
    if(!locked||controller.signal.aborted)return;
@@ -344,8 +348,8 @@ export class PostgresConversationEmbeddings {
     if(!await this.indexOne(s,controller.signal))break;
    }
   }finally{
-   if(locked)await owner.query("SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':conversation-embedding-worker',0))").catch(()=>{});
-   await owner.end().catch(()=>{});this.active.delete(controller);
+   if(locked)await owner.query("SELECT pg_advisory_unlock(hashtextextended(current_schema() || ':conversation-embedding-worker',0))").catch(error=>{if(!this.stopped)this.reportFailure(error, 'unlock');});
+   await owner.end().catch(error=>{if(!this.stopped)this.reportFailure(error, 'session_close');});this.active.delete(controller);
   }
  }
  async reindex() {

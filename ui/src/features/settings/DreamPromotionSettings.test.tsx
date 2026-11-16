@@ -64,3 +64,16 @@ it('ignores a late save after navigation', async () => {
   await act(async () => resolve({ promoteDreamsToMemory: false }));
   expect(toggle().checked).toBe(true);
 });
+
+it('shows actionable load diagnostics instead of an empty or default success', async () => {
+  vi.mocked(api).mockRejectedValueOnce(
+    Object.assign(new Error('Settings database is offline.'), {
+      code: 'settings_unavailable',
+      status: 503,
+    }),
+  );
+  render(<DreamPromotionSettings />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('Settings database is offline.');
+  expect(alert.textContent).toContain('settings_unavailable; HTTP 503');
+});

@@ -49,4 +49,43 @@ describe('runtime and mod boundaries', () => {
     ]);
     expect(fetchMock).toHaveBeenCalledWith('/api/mods', expect.any(Object));
   });
+  it('rejects catalog outages rather than returning an empty success', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error: 'catalog_unavailable',
+            message: 'Mod discovery failed.',
+          }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    await expect(loadModSettingsContributions()).rejects.toMatchObject({
+      message: 'Mod discovery failed.',
+      code: 'catalog_unavailable',
+      status: 503,
+    });
+  });
+  it('distinguishes an empty catalog from a malformed catalog', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, mods: [] }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+    );
+    await expect(loadModSettingsContributions()).resolves.toEqual([]);
+    await expect(loadModSettingsContributions()).rejects.toThrow('Invalid mod catalog response.');
+  });
 });

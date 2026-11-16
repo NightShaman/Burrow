@@ -1,3 +1,4 @@
+import { boundaryFailure, boundaryDiagnostic } from './diagnostic-boundary.mjs';
 import { publishModAgentProvider, unpublishModAgentProvider, revokeModAgentProvider } from './mod-agent-runtime.mjs';
 import { publishModTools, unpublishModTools } from './mod-agent-tools.mjs';
 import { createModCapabilities } from './mod-capabilities.mjs';
@@ -120,17 +121,22 @@ function manifestContributions(id, value = {}, ui = {}) {
   return contributions;
 }
 
+function manifestErrorCode(error) {
+  const code = String(error?.message || '').split(':')[0];
+  return /^(?:mod_|system_mod_)[a-z_]+$/.test(code) ? code : 'mod_manifest_invalid';
+}
+
 function failedMod({ id, name, root, error }) {
-  return { id: id || path.basename(root), name: name || id || path.basename(root), root, manifest: null, server: null, ui: {}, contributions: {}, routes: [], store: null, status: 'failed', error: String(error?.message || error || 'mod_invalid').split(':')[0] };
+  return { id: id || path.basename(root), name: name || id || path.basename(root), root, manifest: null, server: null, ui: {}, contributions: {}, routes: [], store: null, status: 'failed', error: manifestErrorCode(error), diagnostic: boundaryDiagnostic(error, 'manifest_read') };
 }
 
 export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow', logger = console } = {}) {
   const modsRoot = path.join(runtimeRoot, 'mods');
   try { await fs.mkdir(modsRoot, { recursive: true }); }
-  catch { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode: 'mod_directory_unavailable' }, 'warn'); return []; }
+  catch (error) { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode:'mod_directory_unavailable', causeCode:boundaryDiagnostic(error, 'discovery').errorCode, stage:'discovery' }, 'warn'); throw boundaryFailure('mod_directory_unavailable', error, 'discovery'); }
   let entries;
   try { entries = await fs.readdir(modsRoot, { withFileTypes: true }); }
-  catch { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode: 'mod_directory_unreadable' }, 'warn'); return []; }
+  catch (error) { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode:'mod_directory_unreadable', causeCode:boundaryDiagnostic(error, 'discovery').errorCode, stage:'discovery' }, 'warn'); throw boundaryFailure('mod_directory_unreadable', error, 'discovery'); }
   const mods = [];
   const seen = new Map();
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -160,7 +166,7 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
       seen.set(id, mod); mods.push(mod);
     } catch (error) {
       mods.push(failedMod({ id: entry.name, root, error }));
-      emitModEvent(logger, 'mod_discovery_failed', { modId: modLogIdentity({ id: entry.name }), errorCode: 'mod_manifest_invalid' }, 'warn');
+      emitModEvent(logger, 'mod_discovery_failed', { modId: modLogIdentity({ id: entry.name }), ...boundaryDiagnostic(error, 'manifest_read', 'mod_manifest_invalid') }, 'warn');
     }
   }
   return mods;
@@ -322,7 +328,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
       // contain secrets, SQL, paths, or arbitrary mod-controlled text.
       const candidate = String(error?.code || error?.message || '').split(':')[0];
       emitModEvent(logger, 'mod_activation_failed', { modId: modLogIdentity(mod), errorCode: ACTIVATION_LOG_CODES.has(candidate) ? candidate : 'mod_activation_failed', ...(host?.exitDetails || {}), ...(host ? { output: host.outputDiagnostics() } : {}) }, 'error');
-      loaded.push({ ...mod, routes: [], store: null, host: null, status: 'failed', error: String(error?.message || error) });
+      loaded.push({ ...mod, routes: [], store: null, host: null, status: 'failed', error: ACTIVATION_LOG_CODES.has(candidate) ? candidate : 'mod_activation_failed', diagnostic: boundaryDiagnostic(error, 'activation') });
     }
   }
   return loaded;
@@ -335,7 +341,7 @@ export function modCatalog(mods = []) {
       id: mod.id,
       name: mod.name,
       status: mod.status || 'discovered',
-      ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed' } : {}),
+      ...(mod.status === 'failed' ? { error: mod.error || 'mod_failed', ...(mod.diagnostic ? { diagnostic: mod.diagnostic } : {}) } : {}),
       ...(mod.status !== 'failed' && mod.manifest?.version ? { version: String(mod.manifest.version) } : {}),
       ...(mod.status !== 'failed' && mod.manifest?.system === true ? { system: true, systemCapabilities: [...(mod.systemCapabilities || [])] } : {}),
       ...(active && Object.keys(mod.contributions || {}).length ? { contributions: { ...mod.contributions } } : {}),

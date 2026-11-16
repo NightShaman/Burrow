@@ -1,3 +1,4 @@
+import { diagnosticText } from './native-minion-diagnostics.mjs';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
@@ -19,9 +20,15 @@ export async function openRemoteGeminiProcess(controller, targetId, cwd, { args,
 }
 
 async function openRemoteProcess(controller, targetId, options, runtime) {
+  const redact = value => {
+    for (const secret of [options.token, options.apiKey].filter(Boolean)) value = value.split(secret).join('[redacted]');
+    return value;
+  };
+  const transportError = (stage, error) => Object.assign(new Error(diagnosticText(error?.message, redact) || `${runtime}_remote_${stage}_failed`),
+    { code: error?.code == null ? `${runtime}_remote_${stage}_failed` : diagnosticText(String(error.code), redact), stage });
   const operationId = `${runtime}-${randomUUID()}`;
   const rpc = (method, params = {}) => controller.codexRpc({ targetId, method: `${runtime}.${method}`, params: { operationId, ...params } });
-  await rpc('open', options);
+  try { await rpc('open', options); } catch (error) { throw transportError('open', error); }
   const child = new EventEmitter();
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
   let closed = false;
@@ -36,10 +43,10 @@ async function openRemoteProcess(controller, targetId, options, runtime) {
         await rpc('write', { data: text.slice(0, end) });
         text = text.slice(end);
       }
-    })().then(() => callback(), () => callback(new Error(`${runtime}_remote_write_failed`)));
+    })().then(() => callback(), error => callback(transportError('write', error)));
   },
-    final(callback) { rpc('close').then(() => { callback(); }, () => { callback(new Error(`${runtime}_remote_close_failed`)); }); } });
-  child.kill = signal => { void rpc('close', { signal }).then(() => {}, () => child.emit('error', new Error(`${runtime}_remote_close_failed`))); return true; };
+    final(callback) { rpc('close').then(() => { callback(); }, error => { callback(transportError('close', error)); }); } });
+  child.kill = signal => { void rpc('close', { signal }).then(() => {}, error => child.emit('error', transportError('close', error))); return true; };
   let started = false;
   child.start = () => { if (started || closed) return; started = true; void (async () => {
     try {
@@ -47,12 +54,12 @@ async function openRemoteProcess(controller, targetId, options, runtime) {
         const result = await rpc('read');
         if (closed) break;
         if (result.data) child.stdout.write(result.data);
-        if (runtime === 'gemini' && result.stderr) child.stderr.write(result.stderr);
-        if (runtime === 'gemini' && result.processError) child.emit('error', new Error(result.processError));
+        if (result.stderr) child.stderr.write(result.stderr);
+        if (result.processError) child.emit('error', transportError('process', { message: result.processError, code: result.code }));
         if (result.done) { finish(result); break; }
         await new Promise(resolve => setTimeout(resolve, 20));
       }
-    } catch { if (!closed) child.emit('error', new Error(`${runtime}_remote_read_failed`)); }
+    } catch (error) { if (!closed) child.emit('error', transportError('read', error)); }
   })(); };
   return child;
 }

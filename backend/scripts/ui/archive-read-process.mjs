@@ -1,3 +1,5 @@
+import { boundaryDiagnostic } from '../../src/diagnostic-boundary.mjs';
+import { operationalEvent } from '../../src/operational-log.mjs';
 import { fork } from 'node:child_process';
 import { ARCHIVE_READ_TIMEOUT_MS, archiveReadBudget } from '../../src/postgres-archive-read.mjs';
 import { requestReadOwner } from './request-read-owner.mjs';
@@ -13,7 +15,7 @@ export function isIsolatedArchiveRead(method, url) {
 
 // Each worker retains its single owner until SQL and pipe output settle, even
 // if its HTTP caller has stopped waiting. Its queue/quarantine is lane-local.
-function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs }) {
+function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs, logger }) {
   let child = null, ready = null, active = null, sequence = 0, closed = false, closing;
   let quarantineUntil = 0, resumeTimer;
   const queue = [];
@@ -39,7 +41,8 @@ function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs
   function start() {
     const current = child = fork(childPath, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc', 'pipe'], serialization: 'advanced', execArgv: [] });
     let terminal = false, rejectReady;
-    const lost = () => {
+    const lost = (code, signal) => {
+      if (!closed && !terminal) operationalEvent(logger, 'archive_reader_unavailable', { stage:'child_exit', exitCode:Number.isInteger(code)?code:null, signal:['SIGTERM','SIGKILL','SIGABRT','SIGSEGV'].includes(signal)?signal:null }, { component:'archive-reader' });
       if (terminal) return; terminal = true;
       rejectReady?.(failure('archive_reader_unavailable'));
       if (child !== current) return;
@@ -56,7 +59,8 @@ function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs
       }
       drain();
     };
-    const terminate = () => {
+    const terminate = error => {
+      if (error instanceof Error) operationalEvent(logger, 'archive_reader_unavailable', boundaryDiagnostic(error, 'transport'), { component:'archive-reader' });
       // An IPC error is not proof the process or its SQL has stopped.
       if (current.pid && current.exitCode === null && !current.signalCode) current.kill('SIGKILL');
       else lost();
@@ -71,13 +75,14 @@ function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs
       current.on('message', message => {
         if (child !== current || terminal) return;
         if (message?.type === 'ready') { resolve(); return; }
-        if (message?.type === 'init_error') { terminate(); return; }
+        if (message?.type === 'init_error') { operationalEvent(logger, 'archive_reader_unavailable', boundaryDiagnostic(message.diagnostic, 'initialization'), { component:'archive-reader' }); terminate(); return; }
         const job = active;
         if (!job || !job.sent || message?.id !== job.id) { terminate(); return; }
         if (message.type === 'headers') {
           const result = message.result;
           if (job.header || job.complete || !Number.isInteger(result?.status) || result.status < 100 || result.status > 599
               || !Number.isSafeInteger(result?.length) || result.length < 0) { terminate(); return; }
+          if (result.diagnostic) operationalEvent(logger, 'archive_read_failed', boundaryDiagnostic(result.diagnostic, 'read'), { component:'archive-reader' });
           job.header = result; job.received = 0;
           try { if (!job.signal.aborted && !job.transportError) job.receive.headers(result); }
           catch (error) { job.transportError = error; job.abort(); }
@@ -124,7 +129,7 @@ function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs
     }
     const job = queue.shift(); active = job;
     try { if (!child) start(); }
-    catch { child = null; ready = null; finish(job, failure('archive_reader_unavailable')); return; }
+    catch (error) { operationalEvent(logger, 'archive_reader_unavailable', boundaryDiagnostic(error, 'spawn'), { component:'archive-reader' }); child = null; ready = null; finish(job, failure('archive_reader_unavailable')); return; }
     const current = child;
     ready.then(() => {
       if (child !== current || active !== job || job.done) return;
@@ -184,8 +189,8 @@ function createArchiveReadWorker({ poolConfig, rootDir, childPath, cancelGraceMs
 // foreground list/detail/Proof read (or vice versa). Both children stay lazy;
 // their physical pools are one connection each, never four connections total.
 export function createArchiveReadProcess({ poolConfig, rootDir, onResult = () => {},
-  childPath = CHILD, timeoutMs, cancelGraceMs = 10_000 } = {}) {
-  const config = { poolConfig, rootDir, childPath, cancelGraceMs };
+  childPath = CHILD, timeoutMs, cancelGraceMs = 10_000, logger = console } = {}) {
+  const config = { poolConfig, rootDir, childPath, cancelGraceMs, logger };
   const calendar = createArchiveReadWorker(config), foreground = createArchiveReadWorker(config);
   const workerFor = url => url.pathname === '/api/archive/calendar' && url.searchParams.get('kind') === 'sessions'
     ? calendar : foreground;

@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
 import { isUnsavedChangesModalTarget, useUnsavedChanges } from '../../app/UnsavedChanges';
@@ -49,9 +50,9 @@ export function OperatorTimezone() {
         setBaseline(result.timezone);
         setState('ready');
       })
-      .catch(() => {
+      .catch((cause) => {
         if (owner.current === ticket) {
-          setError('Could not load operator timezone.');
+          setError(apiErrorMessage(cause, 'Could not load operator timezone.'));
           setState('error');
         }
       });
@@ -97,9 +98,9 @@ export function OperatorTimezone() {
         setNotice('Operator timezone saved.');
         return true;
       }
-    } catch {
+    } catch (cause) {
       if (owner.current === ticket) {
-        setError('Could not save operator timezone.');
+        setError(apiErrorMessage(cause, 'Could not save operator timezone.'));
         setSaveFailed(true);
       }
     } finally {

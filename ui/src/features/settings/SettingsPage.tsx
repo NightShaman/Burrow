@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { usePersistedForgeEffects } from '../../app/usePersistedLayout';
 import { MinionSettings } from './MinionSettings';
 import './settingsWorkspace.css';
@@ -179,6 +180,7 @@ export function Settings({
       decodeLegacy: (raw) => (raw === 'true' ? true : raw === 'false' ? false : undefined),
     }),
   );
+  const [modCatalogError, setModCatalogError] = useState('');
   const agents = settingsAgents(catalog);
   const settingsSelected = agents.find((agent) => agent.id === settingsAgentId) ?? agents[0];
 
@@ -191,9 +193,17 @@ export function Settings({
     let sequence = 0;
     const refresh = () => {
       const current = ++sequence;
-      void loadModSettingsContributions().then((items) => {
-        if (!cancelled && current === sequence) setTargetContributions(items);
-      });
+      void loadModSettingsContributions()
+        .then((items) => {
+          if (!cancelled && current === sequence) {
+            setTargetContributions(items);
+            setModCatalogError('');
+          }
+        })
+        .catch((cause) => {
+          if (!cancelled && current === sequence)
+            setModCatalogError(apiErrorMessage(cause, 'Could not load mod settings.'));
+        });
     };
     refresh();
     window.addEventListener(modContributionsChangedEvent, refresh);
@@ -401,6 +411,7 @@ export function Settings({
         aria-label="Settings workspace"
       >
         {!navigationTarget && settingsNavigation}
+        {modCatalogError && <p role="alert">{modCatalogError}</p>}
         {tab === 'agents' && (
           <div className="settings-prototype-agent-selector">
             <AgentToolbar

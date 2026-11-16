@@ -1,3 +1,4 @@
+import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
 import { createHash } from 'node:crypto';
 import { createAnthropicResetService } from './anthropic-reset-service.mjs';
 import { isProviderPool } from './provider-pool-settings.mjs';
@@ -314,7 +315,7 @@ function anthropicConnectionCandidate(connection = {}) {
                   const failures = (state.profile?.failures || 0) + 1;
                   state.profile = { metadata:state.profile?.metadata || anthropicTierMetadata(null, {unavailable:true}), failures, expiresAtMs:clock() + retryDelay(profileResponse, failures, clock()) };
                 } else state.profile = { metadata:anthropicTierMetadata(await profileResponse.json()), failures:0, expiresAtMs:clock() + 3_600_000 };
-              } catch { const failures = (state.profile?.failures || 0) + 1; state.profile = { metadata:state.profile?.metadata || anthropicTierMetadata(null, {unavailable:true}), failures, expiresAtMs:clock() + retryDelay(null, failures, clock()) }; }
+              } catch (error) { const failures = (state.profile?.failures || 0) + 1; state.profile = { metadata:state.profile?.metadata || anthropicTierMetadata(null, {unavailable:true}), diagnostic:boundaryDiagnostic(error, 'profile_fetch'), failures, expiresAtMs:clock() + retryDelay(null, failures, clock()) }; }
             }
             state.lastSuccess = { fetchedAt:new Date(now).toISOString(), usage:{...usage, tierMetadata:state.profile.metadata} };
             state.lastError = null; state.failures = 0; state.retryAtMs = 0;
@@ -323,7 +324,7 @@ function anthropicConnectionCandidate(connection = {}) {
             const status = err.status || 502;
             const error = (err.malformed || err instanceof SyntaxError) ? 'anthropic_oauth_usage_invalid' : err.status ? `anthropic_oauth_usage_failed:${status}` : 'anthropic_oauth_usage_unavailable';
             state.failures = (state.failures || 0) + 1;
-            state.lastError = {error,status,at:new Date(now).toISOString()};
+            state.lastError = {error,status,at:new Date(now).toISOString(), diagnostic:boundaryDiagnostic(err, 'usage_fetch')};
             state.retryAtMs = now + retryDelay(response, state.failures, now);
           }
           state.generation = (state.generation || 0) + 1;
@@ -338,7 +339,7 @@ function anthropicConnectionCandidate(connection = {}) {
         const result = { ok, status:ok ? 200 : state.lastError?.status || 503, error:ok ? null : state.lastError?.error || 'anthropic_oauth_usage_unavailable', source:'anthropic-oauth', endpoint:'/api/oauth/usage', connectionId:source.connectionId, provider:source.provider, usage:retainedUsage, fetchedAt:state.lastSuccess?.fetchedAt || null, cached, cacheTtlMs:ok ? Math.max(0, ANTHROPIC_USAGE_CACHE_MS - sampleAgeMs) : 0, serverTime:new Date(now).toISOString(), sampleAgeMs, stale:sampleAgeMs === null || sampleAgeMs >= ANTHROPIC_USAGE_CACHE_MS, lastSuccess:state.lastSuccess ? {...state.lastSuccess,usage:retainedUsage} : null, lastError:state.lastError || null, retryAt:retryAfterMs ? new Date(state.retryAtMs).toISOString() : null, retryAfterMs, refreshing:false };
         return {state,result};
       });
-    } catch { return { ...empty('anthropic_oauth_coordination_unavailable', 503), connectionId:source.connectionId, provider:source.provider }; }
+    } catch (error) { const result = empty('anthropic_oauth_coordination_unavailable', 503); result.lastError.diagnostic = boundaryDiagnostic(error, 'usage_coordination'); return { ...result, connectionId:source.connectionId, provider:source.provider }; }
   }
 
 
@@ -355,8 +356,9 @@ function anthropicConnectionCandidate(connection = {}) {
       const headers = { accept: 'application/json', authorization: `Bearer ${source.token}`, originator: 'burrow', 'user-agent': 'burrow/dev' };
       if (source.accountId) headers['ChatGPT-Account-Id'] = source.accountId;
       const response = await fetchImpl(OPENAI_OAUTH_USAGE_URL, { headers, signal: AbortSignal.timeout(10_000) });
-      const data = await response.json().catch(() => ({}));
       if (!response.ok) return { ok: false, status: response.status, error: `openai_oauth_usage_failed:${response.status}`, usage: null };
+      const data = await response.json();
+      if (!data || typeof data !== 'object' || Array.isArray(data) || data.error || !['rate_limit', 'rateLimit', 'plan_type', 'planType', 'credits'].some(key => key in data)) return { ok:false, status:502, error:'openai_oauth_usage_invalid', usage:null };
       const result = {
         ok: true,
         source: 'openai-oauth-wham',
@@ -371,7 +373,7 @@ function anthropicConnectionCandidate(connection = {}) {
       if (fetchGeneration === openaiUsageGeneration) openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
       return result;
     } catch (error) {
-      return { ok: false, status: 502, error: 'openai_oauth_usage_unavailable', usage: null };
+      return { ok: false, status: 502, error: error instanceof SyntaxError ? 'openai_oauth_usage_invalid' : 'openai_oauth_usage_unavailable', usage: null, diagnostic: boundaryDiagnostic(error, 'usage_fetch') };
     }
   }
 
@@ -391,7 +393,7 @@ function anthropicConnectionCandidate(connection = {}) {
         // reconciliation. Never select a replacement after an uncertain POST.
         const result = await resets.autoConsumeExpiringResetCredit({ connectionId: connection.id });
         results.push({ connectionId: connection.id, ...result });
-      } catch { results.push({ connectionId: connection.id, ok: false, error: 'openai_reset_poll_failed' }); }
+      } catch (error) { results.push({ connectionId: connection.id, ok: false, error: 'openai_reset_poll_failed', diagnostic: boundaryDiagnostic(error, 'reset_poll') }); }
     }
     return results;
   }

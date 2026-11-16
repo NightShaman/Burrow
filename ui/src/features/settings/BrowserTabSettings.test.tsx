@@ -63,7 +63,7 @@ it('validates before blur autosave and preserves a failed draft for explicit ret
   expect(api).toHaveBeenCalledTimes(1);
   fireEvent.change(input, { target: { value: 'Prod' } });
   fireEvent.blur(input);
-  await screen.findByText('Could not save browser tab suffix.');
+  await screen.findByText(/Could\ not\ save\ browser\ tab\ suffix\./);
   expect((input as HTMLInputElement).value).toBe('Prod');
   fireEvent.click(screen.getByRole('button', { name: 'Retry saving browser tab suffix' }));
   await screen.findByText('Browser tab suffix saved.');
@@ -149,7 +149,7 @@ it.each([
 ])('fails closed on malformed tab read: %s', async (_label, response) => {
   vi.mocked(api).mockResolvedValueOnce(response).mockResolvedValueOnce({ suffix: 'Dev' });
   render(<BrowserTabSettings />);
-  await screen.findByText('Could not load browser tab settings.');
+  await screen.findByText(/Could\ not\ load\ browser\ tab\ settings\./);
   expect((screen.getByLabelText('Browser tab suffix') as HTMLInputElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Retry browser tab settings' }));
   await waitFor(() =>
@@ -184,7 +184,7 @@ it.each([
       await waitFor(() => expect(input.value).toBe('Dev'));
       fireEvent.change(input, { target: { value: 'Prod' } });
       fireEvent.blur(input);
-      await screen.findByText('Could not save browser tab suffix.');
+      await screen.findByText(/Could\ not\ save\ browser\ tab\ suffix\./);
       expect(input.value).toBe('Prod');
       expect(screen.queryByText('Browser tab suffix saved.')).toBeNull();
       expect(screen.getByRole('button', { name: 'Retry saving browser tab suffix' })).toBeTruthy();
@@ -220,3 +220,16 @@ function Leave({ onLeave }: { onLeave: () => void }) {
   const navigate = useUnsavedNavigation();
   return <button onClick={() => navigate(onLeave)}>Leave</button>;
 }
+
+it('shows actionable load diagnostics instead of an empty or default success', async () => {
+  vi.mocked(api).mockRejectedValueOnce(
+    Object.assign(new Error('Settings database is offline.'), {
+      code: 'settings_unavailable',
+      status: 503,
+    }),
+  );
+  render(<BrowserTabSettings />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('Settings database is offline.');
+  expect(alert.textContent).toContain('settings_unavailable; HTTP 503');
+});

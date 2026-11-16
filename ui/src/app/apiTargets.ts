@@ -73,7 +73,10 @@ export type ModContribution = {
 export const modContributionsChangedEvent = 'burrow:mod-contributions-changed';
 
 async function loadModsCatalog(): Promise<ModsResponse> {
-  return apiLocal<ModsResponse>('/api/mods').catch(() => ({ ok: true as const, mods: [] }));
+  const catalog = await apiLocal<ModsResponse>('/api/mods');
+  if (!catalog || catalog.ok !== true || !Array.isArray(catalog.mods))
+    throw new Error('Invalid mod catalog response.');
+  return catalog;
 }
 
 export async function loadModSettingsContributions(): Promise<ModContribution[]> {

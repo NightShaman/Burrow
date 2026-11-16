@@ -1,3 +1,4 @@
+import { boundaryFailure } from './diagnostic-boundary.mjs';
 // Live mod-agent provider publication is independent of tool catalogs and MCP.
 // Only Core publishes an activated host, keyed by its trusted installed identity.
 const providers = new Map();
@@ -78,7 +79,7 @@ export async function resolveSharedModContext(agentRuntime, { sessionId, signal 
       // Revoked/replaced/paused/crashed hosts cannot leak stale results.
       if (activeSharedProvider(id) !== mod) continue;
       context = validateSharedRecords(result);
-    } catch { throw unavailable(); }
+    } catch (error) { throw boundaryFailure('mod_agent_unavailable', error, 'context_invoke'); }
     if (context.length) contributions.push({ ownerModId: id, context, mod });
   }
   if (signal?.aborted) throw unavailable();
@@ -96,7 +97,7 @@ export async function resolveModAgentContext(agentRuntime, { sessionId, signal }
     // A replaced, disabled or crashed host must not complete a dependent turn.
     if (activeModAgentProvider(agent) !== mod || signal?.aborted) throw unavailable();
     return validateRecords(result);
-  } catch { throw unavailable(); }
+  } catch (error) { throw boundaryFailure('mod_agent_unavailable', error, 'context_invoke'); }
 }
 
 // Native bridge is intentionally small and does not require an MCP connection or

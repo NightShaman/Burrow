@@ -1,3 +1,4 @@
+import { parseStoredJson } from './diagnostic-boundary.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { isTiddleIdentity, readTiddle, writeTiddle } from './postgres-tiddle-store.mjs';
 import { closePostgresPool, withPostgresTransaction } from './postgres-foundation.mjs';
@@ -25,7 +26,7 @@ export class PostgresSettingsMetadataStore {
     if (isTiddleIdentity(key)) return readTiddle(this.pool,key);
     const result = await this.pool.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1', [String(key)]);
     if (!result.rows[0]) return null;
-    try { return JSON.parse(result.rows[0].value_json); } catch { return null; }
+    return parseStoredJson(result.rows[0].value_json, 'settings_metadata_corrupt');
   }
   /** Serialize metadata read/modify/write, including the first insertion. */
   async atomicUpdate(key, update, at = this.clock()) {
@@ -35,7 +36,7 @@ export class PostgresSettingsMetadataStore {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`settings-meta:${id}`]);
       const result = await client.query('SELECT value_json::text AS value_json FROM settings_meta WHERE key=$1 FOR UPDATE', [id]);
       let current = null;
-      try { current = JSON.parse(result.rows[0]?.value_json || 'null'); } catch {}
+      if (result.rows[0]) current = parseStoredJson(result.rows[0].value_json, 'settings_metadata_corrupt');
       const value = await update(current);
       await client.query(`INSERT INTO settings_meta(key,value_json,updated_at) VALUES($1,$2,$3)
         ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json,updated_at=EXCLUDED.updated_at`, [id, JSON.stringify(value), at]);

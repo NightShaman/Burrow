@@ -1,3 +1,4 @@
+import { diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { projectCodexCheckpoint, codexHandoffContext, codexObservedEvidence } from './codex-native-checkpoint.mjs';
 import { createCodexPoolRouting } from './codex-pool-routing.mjs';
 import { openRemoteCodexProcess } from './codex-remote-process.mjs';
@@ -51,6 +52,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   let recorded = false;
   let sequence = 0;
   let client;
+  let launchAttempted = false;
   let authority;
   let dispatched = false;
   let writes = Promise.resolve();
@@ -76,9 +78,10 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       update: old => ({ ...old, codexSession: nativeSession }) });
   };
   const secrets = new Set();
+  collectDiagnosticSecrets(secrets, process.env);
   const redact = (value) => {
     let text = String(value || '');
-    for (const secret of secrets) if (secret) text = text.split(secret).join('[redacted]');
+    for (const secret of [...secrets].sort((a, b) => b.length - a.length)) if (secret) text = text.split(secret).join('[redacted]');
     return text;
   };
   const base = { evidence: [], artifacts: [], changedFiles: [], memoryWrites: [],
@@ -175,8 +178,9 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const policy = normalizeExecutionPolicyInput(executionPolicy);
     if (policy.blockers.length) fail('codex_execution_policy_blocked');
     signal?.throwIfAborted();
+    launchAttempted = true;
     const remoteProcess = remote ? await openRemoteCodexProcess(remoteController, executionHost.targetId, target.root) : null;
-    client = new CodexMinionClient({ executable, cwd: target.root,
+    client = new CodexMinionClient({ executable, cwd: target.root, redact,
       ...(remoteProcess ? { spawnProcess: () => { queueMicrotask(() => remoteProcess.start()); return remoteProcess; } } : {}),
       refreshAuthTokens: async () => {
         try {
@@ -191,7 +195,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
           && !['agentMessage', 'userMessage', 'reasoning'].includes(params?.item?.type)) toolObserved = true;
         if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta'
           || (['item/started', 'item/completed'].includes(method) && params?.item?.type === 'agentMessage')) outputObserved = true;
-        if (method === 'model/rerouted' && typeof params?.toModel === 'string') actualModel = params.toModel;
+        if (method === 'model/rerouted' && typeof params?.toModel === 'string') actualModel = redact(params.toModel);
         // Public activity is labels only; private checkpoint metadata is projected separately.
         const label = { 'turn/started': 'Codex turn started.', 'item/started': 'Codex item started.',
           'item/completed': 'Codex item completed.', 'turn/completed': 'Codex turn completed.' }[method];
@@ -221,7 +225,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         ? await client.resumeThread(continuation.threadId, threadParams)
         : await client.startThread({ ...threadParams, ephemeral: false });
       const { thread } = threadResult;
-      actualModel = threadResult.model || null;
+      actualModel = threadResult.model ? redact(threadResult.model) : null;
       if (!thread?.id || (continuation && !handoff && thread.id !== continuation.threadId)) fail('codex_thread_invalid');
       // Repair a completed turn's missing export before accepting new work. Never
       // resubmit that turn: its workspace effects may already have happened.
@@ -329,6 +333,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const code = signal?.aborted ? 'codex_cancelled' : replayBlocked ? 'codex_pool_replay_unavailable' : error?.runnerCode || (error?.code === 'TURN_TIMEOUT' ? 'codex_turn_timeout' : null) || (['provider_pool_no_eligible_members', 'provider_pool_disabled'].includes(error?.message) ? error.message : 'codex_native_run_failed');
     result = { ...base, ok: false, summary: signal?.aborted ? 'Codex minion cancelled.' : (code === 'codex_turn_timeout' ? 'Codex turn exceeded its explicitly configured time limit.' : null) || CODEX_SELECTION_ACTIONS[code] || (providerReason ? `Codex provider rejected the request (${providerReason}). Check account access or quota and retry.` : 'Codex minion unavailable or failed.'),
       blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
+    if (launchAttempted && !client) attachDiagnostics(result, { stage: 'open', processError: diagnosticText(error?.message, redact), ...(error?.code ? { code: diagnosticText(String(error.code), redact) } : {}) });
   } finally {
     clearInterval(cancellationPoll);
     if (nativeSession && !result?.ok) {
@@ -340,10 +345,11 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       if (nativeSession) {
         try { await saveNative({ state: 'running', cleanupUnconfirmed: true }); } catch { /* Fail closed where possible. */ }
       }
-      result = { ...base, ok: false, summary: 'Codex process cleanup could not be confirmed.',
+      result = { ...result, ...base, ok: false, summary: 'Codex process cleanup could not be confirmed.',
         blockers: ['codex_cleanup_failed'], warnings: [], sideEffectsApplied: dispatched ? null : false };
     }
   }
+  if (client && !result.ok) attachDiagnostics(result, client.diagnostics.snapshot());
   if (poolRecovery?.originalResult && !route) {
     result = { ...poolRecovery.originalResult, warnings: [...(poolRecovery.originalResult.warnings || []), 'codex_pool_alternate_unavailable'] };
   }

@@ -1,3 +1,4 @@
+import { boundaryFailure } from './diagnostic-boundary.mjs';
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -50,7 +51,7 @@ export function postgresConfig(env = process.env) {
     config.ssl = { rejectUnauthorized: true, checkServerIdentity: (_servername, cert) => checkServerIdentity(hostname, cert) };
     if (caFile) {
       try { config.ssl.ca = readFileSync(caFile, 'utf8'); }
-      catch { throw new Error('Unable to read BURROW_POSTGRES_SSL_CA_FILE'); }
+      catch (error) { throw boundaryFailure('postgres_ssl_ca_unreadable', error, 'ssl_ca_read'); }
       if (!config.ssl.ca.includes('-----BEGIN CERTIFICATE-----')) {
         throw new Error('BURROW_POSTGRES_SSL_CA_FILE must contain a PEM certificate');
       }

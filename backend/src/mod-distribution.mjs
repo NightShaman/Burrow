@@ -1,3 +1,4 @@
+import { boundaryFailure, boundaryDiagnostic } from './diagnostic-boundary.mjs';
 import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { approveOperatorExecutionProvider, executionProviderEligibility, isOperatorModAction } from './execution-provider-approval.mjs';
 import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
@@ -395,7 +396,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   async function refreshSettings(db) {
     const row = await db.refreshSettings();
     try { return validateModSourceRefreshConfig(JSON.parse(row?.value_json || '{}'), { partial: true }); }
-    catch { return { ...DEFAULT_SOURCE_REFRESH }; }
+    catch (error) { throw boundaryFailure('mod_source_refresh_settings_corrupt', error, 'parse'); }
   }
   function clearPoll() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
   function armPoll(wait) {
@@ -451,8 +452,8 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       if (failedSources.delete(row.id) || row.status === 'failed') report('mod_source_restored', { sourceId: operationalId(row.id) }, 'info');
       return { ...row, ...inspected, status: 'ready', error: null };
     } catch (error) {
-      const message = String(error?.message || error);
-      if (!failedSources.has(row.id)) report('mod_source_unavailable', { sourceId: operationalId(row.id), errorCode: sourceErrorCode(error) });
+      const message = sourceErrorCode(error);
+      if (!failedSources.has(row.id)) report('mod_source_unavailable', { sourceId: operationalId(row.id), ...boundaryDiagnostic(error, 'source_refresh'), errorCode: sourceErrorCode(error) });
       failedSources.add(row.id);
       await db.updateSourceFailed(row.id, message, checkedAt);
       return { ...row, status: 'failed', error: message };

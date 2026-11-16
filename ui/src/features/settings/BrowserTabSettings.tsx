@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { useEffect, useRef, useState } from 'react';
 import { api, jsonMutation } from '../../app/api';
 import { browserTabChanged, browserTabTitle } from '../../app/browserTab';
@@ -41,8 +42,9 @@ export function BrowserTabSettings() {
           setLoaded(true);
         }
       })
-      .catch(() => {
-        if (owner.current === ticket) setError('Could not load browser tab settings.');
+      .catch((cause) => {
+        if (owner.current === ticket)
+          setError(apiErrorMessage(cause, 'Could not load browser tab settings.'));
       });
     return () => {
       if (owner.current === ticket) owner.current = null;
@@ -80,9 +82,9 @@ export function BrowserTabSettings() {
       window.dispatchEvent(new CustomEvent(browserTabChanged, { detail: result.suffix }));
       setNotice('Browser tab suffix saved.');
       return true;
-    } catch {
+    } catch (cause) {
       if (owner.current !== ticket) return false;
-      setError('Could not save browser tab suffix.');
+      setError(apiErrorMessage(cause, 'Could not save browser tab suffix.'));
       setSaveFailed(true);
       return false;
     } finally {

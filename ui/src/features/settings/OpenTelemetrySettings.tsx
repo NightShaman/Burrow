@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { useEffect, useState } from 'react';
 import './telemetryWorkspace.css';
 import { createPortal } from 'react-dom';
@@ -174,8 +175,9 @@ export function OpenTelemetrySettings({
       .then((result) => {
         if (!controller.signal.aborted) accept(result);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError('Could not load OpenTelemetry settings.');
+      .catch((cause) => {
+        if (!controller.signal.aborted)
+          setError(apiErrorMessage(cause, 'Could not load OpenTelemetry settings.'));
       });
     return () => controller.abort();
   }, [retry]);
@@ -321,9 +323,12 @@ export function OpenTelemetrySettings({
           : 'OpenTelemetry settings saved and applied live.',
       );
       return true;
-    } catch {
+    } catch (cause) {
       setError(
-        'Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.',
+        apiErrorMessage(
+          cause,
+          'Could not save OpenTelemetry settings. Your changes have not been confirmed. Try again.',
+        ),
       );
       return false;
     } finally {
@@ -363,7 +368,7 @@ export function OpenTelemetrySettings({
           Add destination
         </button>
       </div>
-      {destinations.length === 0 ? (
+      {!saved ? null : destinations.length === 0 ? (
         <p className="settings-empty">No saved destinations.</p>
       ) : (
         <div className="telemetry-inventory-list">

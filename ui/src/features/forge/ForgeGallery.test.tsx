@@ -87,7 +87,7 @@ it('retains image and dialog on move failure; retries explicitly', async () => {
   await screen.findByAltText('Portrait');
   fireEvent.click(screen.getByLabelText('Move Portrait'));
   fireEvent.click(screen.getByRole('button', { name: 'Move image' }));
-  await screen.findByText('Could not move the image. Please try again.', {
+  await screen.findByText(/Could not move the image\. Please try again\./, {
     selector: '.forge-gallery-dialog p',
   });
   expect(screen.getByRole('dialog')).toBeTruthy();
@@ -103,7 +103,7 @@ it('keeps failed folder creation open and allows retry', async () => {
   fireEvent.click(screen.getByText('＋ New folder'));
   fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: 'Test' } });
   fireEvent.click(screen.getByText('Create folder'));
-  await screen.findByText('Could not create the folder. Please try again.', {
+  await screen.findByText(/Could not create the folder\. Please try again\./, {
     selector: '.forge-gallery-dialog p',
   });
   expect(screen.getByDisplayValue('Test')).toBeTruthy();
@@ -212,7 +212,7 @@ it('moves a selection, retains only failed items and retries without replaying s
   fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'folder' } });
   fireEvent.submit(screen.getByRole('dialog').querySelector('form')!);
   await screen.findByText(
-    '1 moved; 1 could not be moved. Retry will move only the remaining items.',
+    /1 moved; 1 could not be moved\. Retry will move only the remaining items\./,
   );
   expect(screen.queryByAltText('Portrait')).toBeNull();
   expect(screen.getByAltText('Landscape')).toBeTruthy();
@@ -261,4 +261,18 @@ it('locks batch controls while pending and supports moving back to the gallery r
     '/api/forge/gallery/images/job/art',
     expect.objectContaining({ method: 'PUT', body: JSON.stringify({ folderId: null }) }),
   );
+});
+
+it('shows catalog diagnostics and never labels an outage as an empty gallery', async () => {
+  api.mockRejectedValueOnce(
+    Object.assign(new Error('Gallery database is offline.'), {
+      code: 'gallery_unavailable',
+      status: 503,
+    }),
+  );
+  renderGallery();
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('Gallery database is offline.');
+  expect(alert.textContent).toContain('gallery_unavailable; HTTP 503');
+  expect(screen.queryByText('No images yet.')).toBeNull();
 });

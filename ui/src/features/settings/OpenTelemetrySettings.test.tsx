@@ -395,7 +395,7 @@ it('validates endpoint and header syntax before sending an atomic destination up
   expect(lastUpdate().destinations).toHaveLength(2);
 });
 
-it('retries a failed read without displaying the backend error or inventing saved settings', async () => {
+it('retries a failed read with redacted diagnostics without inventing saved settings', async () => {
   vi.mocked(api)
     .mockRejectedValueOnce(Error('Authorization=load-secret'))
     .mockResolvedValueOnce(response());
@@ -403,6 +403,7 @@ it('retries a failed read without displaying the backend error or inventing save
   const retry = await screen.findByRole('button', { name: 'Retry OpenTelemetry settings' });
   expect(screen.getByRole('alert').textContent).toMatch(/Could not load/);
   expect(document.body.textContent).not.toContain('load-secret');
+  expect(screen.queryByText('No saved destinations.')).toBeNull();
   expect(putCalls()).toHaveLength(0);
   fireEvent.click(retry);
   await screen.findByLabelText('Name');
@@ -619,4 +620,17 @@ it('retains destination drafts when portal target relocates and selections chang
   view.unmount();
   first.remove();
   second.remove();
+});
+
+it('shows actionable load diagnostics instead of an empty or default success', async () => {
+  vi.mocked(api).mockRejectedValueOnce(
+    Object.assign(new Error('Settings database is offline.'), {
+      code: 'settings_unavailable',
+      status: 503,
+    }),
+  );
+  render(<OpenTelemetrySettings />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('Settings database is offline.');
+  expect(alert.textContent).toContain('settings_unavailable; HTTP 503');
 });

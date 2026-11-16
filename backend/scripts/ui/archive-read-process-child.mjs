@@ -1,3 +1,4 @@
+import { boundaryDiagnostic } from '../../src/diagnostic-boundary.mjs';
 import { createWriteStream } from 'node:fs';
 import { checkServerIdentity } from 'node:tls';
 import { EventEmitter } from 'node:events';
@@ -67,7 +68,7 @@ process.on('message', async message => {
         sendJson(res, status, body) { res.result = { status, error: body?.ok === false ? body.error : null, json: JSON.stringify(body, null, 2) }; res.writableFinished = true; },
       });
       send({ type: 'ready' });
-    } catch { send({ type: 'init_error' }); void close(); }
+    } catch (error) { send({ type: 'init_error', diagnostic: boundaryDiagnostic(error, 'initialization') }); void close(); }
     return;
   }
   if (message?.type === 'continue' && active?.id === message.id) { active.continue?.(); return; }
@@ -90,15 +91,17 @@ process.on('message', async message => {
     } catch (error) {
       const status = error?.message === 'archive_query_timeout' ? 504
         : error?.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 500;
-      res.result = { status, error: String(error?.message || 'archive_read_failed'),
-        json: JSON.stringify({ ok: false, error: String(error?.message || 'archive_read_failed') }) };
+      const candidate = error?.message;
+      const code = typeof candidate === 'string' && /^archive_[a-z_]+$/.test(candidate) ? candidate : 'archive_read_failed';
+      res.result = { status, error: code, diagnostic: boundaryDiagnostic(error, 'read'),
+        json: JSON.stringify({ ok: false, error: code }) };
     } finally {
       try {
         if (closing) return;
         const result = res.result || { status: 500, error: 'archive_read_failed', json: '{"ok":false,"error":"archive_read_failed"}' };
         const bytes = Buffer.from(result.json);
         const continued = new Promise(resolve => { job.continue = resolve; });
-        send({ type: 'headers', id: job.id, result: { status: result.status, error: result.error, length: bytes.length } });
+        send({ type: 'headers', id: job.id, result: { status: result.status, error: result.error, diagnostic: result.diagnostic, length: bytes.length } });
         await continued;
         if (closing) return;
         for (let start = 0; start < bytes.length; start += 64 * 1024) {

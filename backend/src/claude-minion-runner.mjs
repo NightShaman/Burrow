@@ -1,3 +1,4 @@
+import { createProcessDiagnostics, diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { createClaudePoolRouting } from './claude-pool-routing.mjs';
 import { createClaudeCheckpoint, claudeHandoffContext } from './claude-native-checkpoint.mjs';
 import { spawn } from 'node:child_process';
@@ -28,13 +29,17 @@ export async function discoverClaudeExecutable(env = process.env) {
   fail('claude_executable_unavailable');
 }
 
-// Attach every listener before start()/stdin. Never retain stderr, tool payloads,
+// Attach every listener before start()/stdin. Retain only sanitized diagnostics, not tool payloads,
 // or unbounded JSONL. Result is provisional until the actual process closes.
-function processClient(child, onEvent) {
+function processClient(child, onEvent, redact) {
+  const diagnostics = createProcessDiagnostics(redact);
   let buffer = '', text = '', result, failure, closed = false;
   let resolveExit;
   const exit = new Promise(resolve => { resolveExit = resolve; });
-  const reject = code => { failure ||= code; };
+  const reject = code => {
+    if (!failure && !diagnostics.snapshot().nativeError && !diagnostics.snapshot().processError) diagnostics.error({ code }, 'stream');
+    failure ||= code;
+  };
   function line(raw) {
     if (!raw.trim()) return;
     let event;
@@ -50,7 +55,10 @@ function processClient(child, onEvent) {
     if (event.type === 'result') {
       if (result) reject('claude_invalid_stream');
       result = event;
-      if (event.is_error || event.subtype !== 'success') reject('claude_native_result_failed');
+      if (event.is_error || event.subtype !== 'success') {
+        diagnostics.error({ message: [event.result, ...(Array.isArray(event.errors) ? event.errors : [])].filter(v => typeof v === 'string').join(' ') }, 'result', 'nativeError');
+        reject('claude_native_result_failed');
+      }
       if (typeof event.result === 'string') {
         if (event.result.length > MAX_OUTPUT) reject('claude_output_limit');
         else text = event.result;
@@ -71,18 +79,20 @@ function processClient(child, onEvent) {
     }
     if (buffer.length > MAX_LINE) { buffer = ''; reject('claude_stream_line_limit'); }
   });
-  child.stderr.on('data', () => {});
-  child.stderr.on('error', () => reject('claude_process_failed'));
-  child.stdout.on('error', () => reject('claude_process_failed'));
-  child.stdin.on('error', () => reject('claude_input_failed'));
-  child.on('error', () => { reject('claude_process_failed'); });
-  child.once('close', code => {
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => diagnostics.stderr(chunk));
+  child.stderr.on('error', error => { diagnostics.error(error); reject('claude_process_failed'); });
+  child.stdout.on('error', error => { diagnostics.error(error); reject('claude_process_failed'); });
+  child.stdin.on('error', error => { diagnostics.error(error, 'input'); reject('claude_input_failed'); });
+  child.on('error', error => { diagnostics.error(error); reject('claude_process_failed'); });
+  child.once('close', (code, signal) => {
+    diagnostics.close(code, signal);
     closed = true;
     if (buffer && !failure) line(buffer);
     if (code !== 0) reject('claude_process_failed');
     resolveExit();
   });
-  return { exit, get closed() { return closed; }, get failure() { return failure; }, finish() {
+  return { exit, diagnostics: () => diagnostics.snapshot(), get closed() { return closed; }, get failure() { return failure; }, finish() {
     if (failure) fail(failure);
     if (!result) fail('claude_result_missing');
     if (!text.trim()) fail('claude_empty_result');
@@ -96,13 +106,14 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
   executionPolicy = parentExecutionContext?.executionPolicy, continuation = null } = {}) {
   const cancellation = new AbortController();
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
-  let poolEngine, route, resolvedConnectionId, actualModel = null, checkpoint, history = [];
+  let poolEngine, route, resolvedConnectionId, actualModel = null, checkpoint, history = [], launchAttempted = false;
   let child, client, poll, killTimer, spawned = false, nativeSession, store, authority, recorded = false;
   let writes = Promise.resolve(), persistenceFailed = false, sequence = 0, pendingWrites = 0, result, lastActivity = 0, initSeen = false;
   const secrets = new Set();
+  collectDiagnosticSecrets(secrets, process.env);
   const collect = value => { // OAuth records can change on refresh; capture both generations.
     for (const [key, item] of Object.entries(value || {})) {
-      if (/token|secret/i.test(key) && typeof item === 'string' && item) secrets.add(item);
+      if (/token|secret|api_?key/i.test(key) && typeof item === 'string' && item) secrets.add(item);
     }
   };
   const redact = value => {
@@ -213,12 +224,13 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     const env = { ...process.env };
     for (const key of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_|CLAUDECODE$)/.test(key)) delete env[key];
     env.CLAUDE_CODE_OAUTH_TOKEN = resolved.token;
+    launchAttempted = true;
     child = remote ? await openRemoteClaudeProcess(controller, host.targetId, target.root, { args, token: resolved.token })
       : spawn(executable, args, { cwd: target.root, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'], env });
     spawned = true;
     client = processClient(child, event => {
       checkpoint.observe(event);
-      if (event.type === 'assistant' && typeof event.message?.model === 'string') actualModel = event.message.model;
+      if (event.type === 'assistant' && typeof event.message?.model === 'string') actualModel = redact(event.message.model);
       // Persist init on arrival, not just on a successful final result.
       if ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') {
         if ((!initSeen || event.type === 'result') && typeof event.session_id === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(event.session_id) && ![...secrets].some(secret => event.session_id.includes(secret))) { initSeen = true; enqueue(() => save({ sessionId: event.session_id })); }
@@ -234,7 +246,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
           activity: { kind: 'run', status: 'running', phase: 'claude-native', label, sequence: ++sequence, lastActualActivityAt: new Date().toISOString() } });
         });
       }
-    });
+    }, redact);
     if (signal.aborted) abort();
     else {
       child.start?.();
@@ -259,7 +271,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
       preparedHistory: bounded ? history : [], checkpointFailure: projection.reason || (bounded ? null : 'oversized_history') });
     result = { ...base, ok: true, summary: text, blockers: [], warnings: [], sideEffectsApplied: null };
   } catch (error) {
-    // Only our fixed runner codes escape. Never forward provider/OS/store errors.
+    // Stable blockers remain separate from sanitized native diagnostics; store errors stay opaque.
     if (poolEngine && route && !signal.aborted && error?.[RUNNER_ERROR] === 'claude_native_result_failed') {
       // Native print mode does not expose trustworthy HTTP status. Account only
       // a generic native failure; never invent auth/quota classifications.
@@ -269,6 +281,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
       : error?.[RUNNER_ERROR] || 'claude_native_run_failed';
     result = { ...base, ok: false, summary: signal.aborted ? 'Claude minion cancelled.' : 'Claude minion unavailable or failed.',
       blockers: [code], warnings: [], sideEffectsApplied: spawned ? null : false };
+    if (launchAttempted && !client) attachDiagnostics(result, { stage: 'open', processError: diagnosticText(error?.message, redact), ...(error?.code ? { code: diagnosticText(String(error.code), redact) } : {}) });
   } finally {
     clearInterval(poll);
     signal.removeEventListener('abort', abort);
@@ -288,7 +301,8 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     if (nativeSession && (!result?.ok || cleanupUnconfirmed)) {
       try { await save({ state: cleanupUnconfirmed ? 'running' : signal.aborted ? 'interrupted' : 'failed', ...(cleanupUnconfirmed ? { cleanupUnconfirmed: true } : {}) }); } catch { /* Fail closed: running metadata cannot resume. */ }
     }
-    if (cleanupUnconfirmed) result = { ...base, ok: false, summary: 'Claude process cleanup could not be confirmed.', blockers: ['claude_cleanup_failed'], warnings: [], sideEffectsApplied: null };
+    if (cleanupUnconfirmed) result = { ...result, ...base, ok: false, summary: 'Claude process cleanup could not be confirmed.', blockers: ['claude_cleanup_failed'], warnings: [], sideEffectsApplied: null };
   }
+  if (client && !result.ok) attachDiagnostics(result, client.diagnostics());
   return { ...result, model: { requested: modelConfig?.model || null, actual: actualModel, connectionId: modelConfig?.connectionId || null, resolvedConnectionId: resolvedConnectionId || null }, spawned, cancelled: signal.aborted };
 }

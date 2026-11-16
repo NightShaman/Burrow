@@ -74,7 +74,7 @@ it('preserves a failed timezone draft and retries the write', async () => {
   await waitFor(() => expect((input as HTMLInputElement).value).toBe('UTC'));
   fireEvent.change(input, { target: { value: 'Europe/London' } });
   fireEvent.blur(input);
-  await screen.findByText('Could not save operator timezone.');
+  await screen.findByText(/Could\ not\ save\ operator\ timezone\./);
   expect((input as HTMLInputElement).value).toBe('Europe/London');
   fireEvent.click(screen.getByRole('button', { name: 'Retry saving operator timezone' }));
   await screen.findByText('Operator timezone saved.');
@@ -93,7 +93,7 @@ it.each<[string, unknown]>([
 ])('fails closed on a malformed timezone read: %s', async (_label, response) => {
   vi.mocked(api).mockResolvedValueOnce(response).mockResolvedValueOnce({ timezone: 'UTC' });
   render(<OperatorTimezone />);
-  await screen.findByText('Could not load operator timezone.');
+  await screen.findByText(/Could\ not\ load\ operator\ timezone\./);
   expect((screen.getByLabelText('Operator timezone') as HTMLInputElement).disabled).toBe(true);
   expect(
     (screen.getByRole('button', { name: 'Use browser timezone' }) as HTMLButtonElement).disabled,
@@ -132,7 +132,7 @@ it.each<[string, unknown]>([
     await waitFor(() => expect(input.value).toBe('UTC'));
     fireEvent.change(input, { target: { value: 'Europe/London' } });
     fireEvent.blur(input);
-    await screen.findByText('Could not save operator timezone.');
+    await screen.findByText(/Could\ not\ save\ operator\ timezone\./);
     expect(input.value).toBe('Europe/London');
     expect(screen.queryByText('Operator timezone saved.')).toBeNull();
     expect(screen.getByRole('button', { name: 'Retry saving operator timezone' })).toBeTruthy();
@@ -198,3 +198,16 @@ function Leave({ onLeave }: { onLeave: () => void }) {
   const navigate = useUnsavedNavigation();
   return <button onClick={() => navigate(onLeave)}>Leave</button>;
 }
+
+it('shows actionable load diagnostics instead of an empty or default success', async () => {
+  vi.mocked(api).mockRejectedValueOnce(
+    Object.assign(new Error('Settings database is offline.'), {
+      code: 'settings_unavailable',
+      status: 503,
+    }),
+  );
+  render(<OperatorTimezone />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('Settings database is offline.');
+  expect(alert.textContent).toContain('settings_unavailable; HTTP 503');
+});

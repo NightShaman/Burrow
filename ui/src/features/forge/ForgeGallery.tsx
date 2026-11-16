@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { AccessibleModal } from '../../app/AccessibleModal';
@@ -40,8 +41,8 @@ export function ForgeGallery({
       .then((data) => {
         if (active) setCatalog(data);
       })
-      .catch(() => {
-        if (active) setError('Could not load the gallery.');
+      .catch((cause) => {
+        if (active) setError(apiErrorMessage(cause, 'Could not load the gallery.'));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -247,8 +248,10 @@ export function ForgeGallery({
                               (image) => `${image.jobId}:${image.artifactId}` !== picture.id,
                             ),
                           }));
-                        } catch {
-                          setError('Could not delete the media. Please try again.');
+                        } catch (cause) {
+                          setError(
+                            apiErrorMessage(cause, 'Could not delete the media. Please try again.'),
+                          );
                         } finally {
                           setBusy(false);
                         }
@@ -302,8 +305,10 @@ export function ForgeGallery({
                   );
                   setCatalog((data) => ({ ...data, folders: [...data.folders, result.folder] }));
                   setCreating(false);
-                } catch {
-                  setError('Could not create the folder. Please try again.');
+                } catch (cause) {
+                  setError(
+                    apiErrorMessage(cause, 'Could not create the folder. Please try again.'),
+                  );
                 } finally {
                   setBusy(false);
                 }
@@ -383,9 +388,20 @@ export function ForgeGallery({
                 if (failed.length) {
                   setMoving(failed);
                   setError(
-                    batchMove
-                      ? `${succeeded.size} moved; ${failed.length} could not be moved. Retry will move only the remaining items.`
-                      : 'Could not move the image. Please try again.',
+                    [
+                      batchMove
+                        ? `${succeeded.size} moved; ${failed.length} could not be moved. Retry will move only the remaining items.`
+                        : 'Could not move the image. Please try again.',
+                      ...Array.from(
+                        new Set(
+                          results.flatMap((result) =>
+                            result.status === 'rejected'
+                              ? [apiErrorMessage(result.reason, '').trim()]
+                              : [],
+                          ),
+                        ),
+                      ),
+                    ].join(' '),
                   );
                 } else {
                   setMoving(null);

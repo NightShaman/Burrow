@@ -1,3 +1,4 @@
+import { boundaryDiagnostic, boundaryFailure } from './diagnostic-boundary.mjs';
 import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { randomUUID } from 'node:crypto';
 
@@ -109,6 +110,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
         if (value?.ok === false) { status = 'failed'; errorCode = 'mod_management_failed'; }
         result = { ...safeResult(value), outcome: status === 'succeeded' ? 'succeeded' : 'unknown' };
       } catch (error) {
+        report('mod_management_operation_failed', { operationId: operationalId(row.id), ...boundaryDiagnostic(error, 'distribution') });
         status = 'failed';
         errorCode = ERRORS.has(error?.message) ? error.message : 'mod_management_failed';
         // Revocation is checked before distribution starts, so this specific
@@ -138,7 +140,7 @@ export function createModManagement({ distribution, repositoryFactory, modAuthor
     if (closed) throw unavailable();
     assertCallerActive?.();
     let value;
-    try { value = await distribution.list(); } catch { throw unavailable(); }
+    try { value = await distribution.list(); } catch (error) { report('mod_management_inventory_failed', boundaryDiagnostic(error, 'inventory')); throw boundaryFailure('mod_management_unavailable', error, 'inventory'); }
     assertCallerActive?.();
     const mods = Array.isArray(value?.mods) ? value.mods : [];
     const sources = Array.isArray(value?.sources) ? value.sources : [];

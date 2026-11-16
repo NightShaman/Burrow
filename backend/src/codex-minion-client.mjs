@@ -1,3 +1,4 @@
+import { createProcessDiagnostics, collectDiagnosticSecrets } from './native-minion-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 
@@ -40,7 +41,7 @@ const tokensPayload = (tokens) => {
 export class CodexMinionClient {
   constructor({ executable = 'codex', cwd, env = process.env, spawnProcess = spawn,
     clientInfo = { name: 'burrow', title: 'Burrow', version: '0.1.0' },
-    onActivity = () => {}, refreshAuthTokens,
+    onActivity = () => {}, refreshAuthTokens, redact = value => value,
     requestTimeoutMs = 15_000, turnTimeoutMs = null,
     refreshTimeoutMs = 8_000, interruptTimeoutMs = 5_000, shutdownTimeoutMs = 1_000,
     maxLineBytes = 8 * 1024 * 1024 } = {}) {
@@ -54,6 +55,13 @@ export class CodexMinionClient {
     Object.assign(this, { executable, cwd, env, spawnProcess, clientInfo, onActivity,
       refreshAuthTokens, requestTimeoutMs, turnTimeoutMs, refreshTimeoutMs,
       interruptTimeoutMs, shutdownTimeoutMs, maxLineBytes });
+    this.diagnosticSecrets = new Set();
+    collectDiagnosticSecrets(this.diagnosticSecrets, env);
+    this.diagnostics = createProcessDiagnostics(value => {
+      for (const secret of [...this.diagnosticSecrets].sort((a, b) => b.length - a.length)) value = value.split(secret).join('[redacted]');
+      return redact(value);
+    });
+    this.stage = 'spawn';
     this.pending = new Map();
     this.nextId = 1;
     this.buffer = '';
@@ -69,22 +77,24 @@ export class CodexMinionClient {
         this.proc = this.spawnProcess(this.executable, ['app-server', '--listen', 'stdio://'],
           { cwd: this.cwd, env: this.env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
         this.exit = deferred();
-        this.proc.on('error', () => this.fail(failure('PROCESS_ERROR', 'Codex process failed')));
-        this.proc.on('close', () => {
+        this.proc.on('error', error => { this.diagnostics.error(error, this.stage); this.fail(failure('PROCESS_ERROR', 'Codex process failed')); });
+        this.proc.on('close', (code, signal) => {
+          this.diagnostics.close(code, signal);
           this.exited = true;
           this.exit.resolve();
           this.fail(failure('PROCESS_EXIT', 'Codex process closed'));
         });
-        this.proc.stdin.on('error', () => this.fail(failure('STDIN_ERROR', 'Codex stdin failed')));
-        this.proc.stdout.on('error', () => this.fail(failure('STDOUT_ERROR', 'Codex stdout failed')));
+        this.proc.stdin.on('error', error => { this.diagnostics.error(error, 'input'); this.fail(failure('STDIN_ERROR', 'Codex stdin failed')); });
+        this.proc.stdout.on('error', error => { this.diagnostics.error(error, 'output'); this.fail(failure('STDOUT_ERROR', 'Codex stdout failed')); });
         this.proc.stdout.on('data', (chunk) => this.consume(this.decoder.write(chunk)));
         this.proc.stdout.on('end', () => {
           this.consume(this.decoder.end());
           if (!this.closed) this.fail(failure('STDOUT_EOF', 'Codex stdout ended'));
         });
-        // Never forward stderr: native diagnostics can contain credentials.
-        this.proc.stderr?.on('data', () => {});
-        this.proc.stderr?.on('error', () => {});
+        // Keep sanitized text only; protocol payloads are never diagnostics.
+        this.proc.stderr?.setEncoding('utf8');
+        this.proc.stderr?.on('data', chunk => this.diagnostics.stderr(chunk));
+        this.proc.stderr?.on('error', error => this.diagnostics.error(error, 'stderr'));
         const result = await this.request('initialize', {
           clientInfo: this.clientInfo, capabilities: { experimentalApi: true },
         });
@@ -92,6 +102,7 @@ export class CodexMinionClient {
         this.ready = true;
         return result;
       } catch (error) {
+        if (!this.diagnostics.snapshot().nativeError && !this.diagnostics.snapshot().processError) this.diagnostics.error(error, this.stage);
         this.fail(error?.code ? error : failure('PROCESS_ERROR', 'Could not start Codex'));
         await this.close();
         throw this.fatal;
@@ -105,6 +116,7 @@ export class CodexMinionClient {
   }
   async login(tokens) {
     this.assertReady();
+    collectDiagnosticSecrets(this.diagnosticSecrets, tokens);
     return this.request('account/login/start', { type: 'chatgptAuthTokens', ...tokensPayload(tokens) });
   }
   async startThread(params = {}) {
@@ -226,12 +238,13 @@ export class CodexMinionClient {
     this.proc.stdin.write(`${JSON.stringify(message)}\n`);
   }
   request(method, params, timeout = this.requestTimeoutMs) {
+    this.stage = method;
     const id = this.nextId++;
     const done = deferred();
     const timer = setTimeout(() => {
       this.fail(failure('RPC_TIMEOUT', 'Codex request timed out'));
     }, timeout);
-    this.pending.set(id, { ...done, timer });
+    this.pending.set(id, { ...done, timer, method });
     try { this.send({ id, method, params }); }
     catch { this.fail(failure('IPC_ERROR', 'Could not write to Codex')); }
     return done.promise;
@@ -262,8 +275,11 @@ export class CodexMinionClient {
       if (!done) return;
       clearTimeout(done.timer);
       this.pending.delete(message.id);
-      // Do not expose server error messages/data (which may echo auth params).
-      if (message.error) done.reject(providerError('RPC_ERROR', 'Codex request rejected', message.error?.data || message.error));
+      // Extract only sanitized reason/code; never serialize error.data or auth params.
+      if (message.error) {
+        this.diagnostics.error(message.error, done.method, 'nativeError');
+        done.reject(providerError('RPC_ERROR', 'Codex request rejected', message.error?.data || message.error));
+      }
       else if ('result' in message) done.resolve(message.result);
       else done.reject(failure('PROTOCOL_ERROR', 'Invalid Codex response'));
       return;
@@ -283,6 +299,7 @@ export class CodexMinionClient {
     if (['item/started', 'item/completed'].includes(method) && params.item?.id) active.observed.set(params.item.id, params.item);
     if (method === 'item/completed' && params.item?.id) active.items.set(params.item.id, params.item);
     if (method === 'error' && params.willRetry !== true) {
+      this.diagnostics.error(params.error, 'turn', 'nativeError');
       active.done.reject(providerError('TURN_ERROR', 'Codex turn reported an error', params.error));
     }
     if (method !== 'turn/completed') return;
@@ -290,8 +307,11 @@ export class CodexMinionClient {
       const items = [...active.items.values()];
       active.done.resolve({ threadId: active.threadId, turnId: active.turnId,
         status: 'completed', items, observed: [...active.observed.values()], text: items.filter((item) => item.type === 'agentMessage').map((item) => item.text).join('\n') });
-    } else active.done.reject(providerError(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
+    } else {
+      this.diagnostics.error(params.turn.error, 'turn/completed', 'nativeError');
+      active.done.reject(providerError(params.turn.status === 'interrupted' ? 'ABORTED' : 'TURN_FAILED',
       params.turn.status === 'interrupted' ? 'Codex turn cancelled' : 'Codex turn failed', params.turn.error));
+    }
   }
   async serverRequest(message) {
     const { id, method, params } = message;
@@ -301,6 +321,7 @@ export class CodexMinionClient {
         return;
       }
       const tokens = await this.bounded(Promise.resolve().then(() => this.refreshAuthTokens(params)), this.refreshTimeoutMs);
+      collectDiagnosticSecrets(this.diagnosticSecrets, tokens);
       this.send({ id, result: tokensPayload(tokens) });
     } catch {
       if (!this.closed) {
@@ -310,6 +331,7 @@ export class CodexMinionClient {
   }
   fail(error) {
     if (this.closed) return;
+    if (!this.diagnostics.snapshot().nativeError && !this.diagnostics.snapshot().processError) this.diagnostics.error(error, this.stage);
     this.fatal = error;
     this.closed = true;
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }

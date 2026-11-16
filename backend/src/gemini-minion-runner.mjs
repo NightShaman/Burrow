@@ -1,3 +1,4 @@
+import { diagnosticText, collectDiagnosticSecrets } from './native-minion-diagnostics.mjs';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -28,19 +29,11 @@ export async function discoverGeminiExecutable(env = process.env) {
   fail('gemini_executable_unavailable');
 }
 
-// Diagnostic text only: never serialize native events, stacks or tool payloads.
-function diagnosticText(value, redact) {
-  if (typeof value !== 'string') return '';
-  return redact(value).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/)
-    .filter(line => !/[{}]|^[\s]*[\[]|tool[_ -]?(use|result|payload)|parameters\s*[:=]/i.test(line))
-    .join(' ').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 2000);
-}
-
 // Attach every listener before start()/stdin. Bound diagnostic retention, not turns.
 // Result is provisional until the actual process closes.
 function processClient(child, onEvent, redact) {
   let buffer = '', text = '', result, failure, closed = false;
-  let stderr = '', stderrLine = '', droppingLine = false, nativeError = '', processError = '', exitCode = null, exitSignal = null;
+  let stderr = '', stderrLine = '', droppingLine = false, nativeError = '', processError = '', exitCode = null, exitSignal = null, processCode, stage = 'process';
   const diagnostic = value => diagnosticText(value, redact);
   const retainStderr = chunk => {
     for (const part of String(chunk).split(/(?<=\n)/)) {
@@ -54,7 +47,11 @@ function processClient(child, onEvent, redact) {
   };
   let resolveExit;
   const exit = new Promise(resolve => { resolveExit = resolve; });
-  const reject = code => { failure ||= code; };
+  const reject = code => {
+    if (!failure && !processCode) processCode = code;
+    if (!failure && stage === 'process' && !processError) stage = 'stream';
+    failure ||= code;
+  };
   function line(raw) {
     if (!raw.trim()) return;
     let event;
@@ -66,12 +63,13 @@ function processClient(child, onEvent, redact) {
       if (text.length + chunk.length > MAX_OUTPUT) reject('gemini_output_limit'); else text += chunk;
     }
     if (event.type === 'error' && event.severity === 'error') {
-      nativeError = diagnostic(event.message); reject('gemini_native_result_failed');
+      stage = 'error'; nativeError = diagnostic(event.message); reject('gemini_native_result_failed');
     }
     if (event.type === 'result') {
       if (result) reject('gemini_invalid_stream');
       result = event;
       if (event.error || event.status !== 'success') {
+        stage = 'result';
         nativeError ||= diagnostic(typeof event.error === 'string' ? event.error : event.error?.message);
         reject('gemini_native_result_failed');
       }
@@ -98,10 +96,16 @@ function processClient(child, onEvent, redact) {
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', retainStderr);
-  child.stderr.on('error', () => reject('gemini_process_failed'));
-  child.stdout.on('error', () => reject('gemini_process_failed'));
-  child.stdin.on('error', () => reject('gemini_input_failed'));
-  child.on('error', error => { processError = diagnostic(error?.message); reject('gemini_process_failed'); });
+  const processFailure = (error, at, code) => {
+    stage = diagnostic(error?.stage) || at;
+    processError = diagnostic(error?.message);
+    if (error?.code != null) processCode = diagnostic(String(error.code));
+    reject(code);
+  };
+  child.stderr.on('error', error => processFailure(error, 'stderr', 'gemini_process_failed'));
+  child.stdout.on('error', error => processFailure(error, 'output', 'gemini_process_failed'));
+  child.stdin.on('error', error => processFailure(error, 'input', 'gemini_input_failed'));
+  child.on('error', error => processFailure(error, 'process', 'gemini_process_failed'));
   child.once('close', (code, signal) => {
     exitCode = code; exitSignal = signal || null;
     closed = true;
@@ -111,7 +115,7 @@ function processClient(child, onEvent, redact) {
   });
   return { exit, diagnostics() {
     return { ...(nativeError ? { nativeError } : {}), ...(processError ? { processError } : {}),
-      stderr: diagnostic(stderr + ' ' + (droppingLine ? '' : stderrLine)), exitCode, signal: exitSignal };
+      stderr: diagnostic(stderr + ' ' + (droppingLine ? '' : stderrLine)), stage, ...(processCode ? { code: processCode } : {}), exitCode, signal: exitSignal };
   }, get closed() { return closed; }, get failure() { return failure; }, finish() {
     if (failure) fail(failure);
     if (!result) fail('gemini_result_missing');
@@ -130,6 +134,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
   let child, client, poll, killTimer, spawned = false, nativeSession, store, authority, recorded = false;
   let writes = Promise.resolve(), persistenceFailed = false, sequence = 0, pendingWrites = 0, result, lastActivity = 0, initSeen = false;
   const secrets = new Set();
+  collectDiagnosticSecrets(secrets, process.env);
   const collect = value => { // Never persist native credential echoes.
     for (const [key, item] of Object.entries(value || {})) {
       if (/token|secret|apiKey/i.test(key) && typeof item === 'string' && item) secrets.add(item);
@@ -286,7 +291,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
     if (launchAttempted && secrets.size && !client) {
       const message = diagnosticText(error?.message, redact);
       if (message && !error?.[RUNNER_ERROR]) {
-        result.diagnostics = { processError: message }; result.summary += ` ${message}`;
+        result.diagnostics = { stage: 'open', ...(error?.code != null ? { code: diagnosticText(String(error.code), redact) } : {}), processError: message }; result.summary += ` ${message}`;
       }
     }
   } finally {
@@ -314,7 +319,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
     if (nativeSession && (!result?.ok || cleanupUnconfirmed)) {
       try { await save({ state: cleanupUnconfirmed ? 'running' : signal.aborted ? 'interrupted' : 'failed', ...(cleanupUnconfirmed ? { cleanupUnconfirmed: true } : {}) }); } catch { /* Fail closed: running metadata cannot resume. */ }
     }
-    if (cleanupUnconfirmed) result = { ...base, ok: false, summary: 'Gemini process cleanup could not be confirmed.', blockers: ['gemini_cleanup_failed'], warnings: [], sideEffectsApplied: null };
+    if (cleanupUnconfirmed) result = { ...result, ...base, ok: false, summary: 'Gemini process cleanup could not be confirmed.', blockers: ['gemini_cleanup_failed'], warnings: [], sideEffectsApplied: null };
   }
   return { ...result, model: { requested: modelConfig?.model || null, actual: actualModel, connectionId: modelConfig?.connectionId || null, resolvedConnectionId: resolvedConnectionId || null }, spawned, cancelled: signal.aborted };
 }

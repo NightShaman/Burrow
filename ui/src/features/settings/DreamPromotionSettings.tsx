@@ -1,3 +1,4 @@
+import { apiErrorMessage } from '../../app/apiError';
 import { useUnsavedChanges } from '../../app/UnsavedChanges';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../app/api';
@@ -24,9 +25,9 @@ export function DreamPromotionSettings() {
         setSaved(result.promoteDreamsToMemory ?? true);
         setState('idle');
       })
-      .catch(() => {
+      .catch((cause) => {
         if (controller.signal.aborted) return;
-        setError('Could not load Dream promotion settings.');
+        setError(apiErrorMessage(cause, 'Could not load Dream promotion settings.'));
         setState('error');
       });
     return () => controller.abort();
@@ -62,10 +63,13 @@ export function DreamPromotionSettings() {
       setSaved(accepted);
       setNotice('Dream promotion settings saved.');
       return true;
-    } catch {
+    } catch (cause) {
       if (active())
         setError(
-          'Could not save Dream promotion settings. Your change is still here; retry saving.',
+          apiErrorMessage(
+            cause,
+            'Could not save Dream promotion settings. Your change is still here; retry saving.',
+          ),
         );
     } finally {
       if (active()) {
