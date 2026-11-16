@@ -15,7 +15,7 @@ function fixture(t, options = {}) {
   write(join(source,'backend/package.json'), '{"version":"test-version"}');
   write(join(source,'ui/package.json'), '{}');
   write(join(source,'ui/dist/index.html'), 'real-ui-fixture');
-  write(join(source,'backend/scripts/runtime-integrations.json'), '{"mcporter":{"version":"1"},"claude-code":{"version":"2"},"codex":{"packageName":"@openai/codex","version":"3.0.0","executable":"codex"}}');
+  write(join(source,'backend/scripts/runtime-integrations.json'), '{"mcporter":{"version":"1"},"claude-code":{"version":"2"},"codex":{"packageName":"@openai/codex","version":"3.0.0","executable":"codex"},"gemini-cli":{"packageName":"@google/gemini-cli","version":"4.0.0","executable":"gemini"}}');
   write(join(source,'SOURCE_VERSIONS'),'Burrow-Build-Version test-version\n');
   // The assembled backend carries the canonical launcher's exact bytes.
   const launcher = resolve('backend/deploy/installer/burrow');
@@ -31,7 +31,7 @@ function fixture(t, options = {}) {
   write(envfile,'BURROW_POSTGRES_LIFECYCLE=external\nBURROW_POSTGRES_URL=postgres://fixture\nOPERATOR_SETTING=preserve\n');
   // Never let the test runner's Node version trigger real package provisioning.
   write(join(bin,'node'), `#!/bin/sh\nif [ "$1" = -p ]; then echo 24; else exec '${process.execPath}' "$@"; fi\n`);
-  write(join(bin,'npm'), '#!/bin/sh\necho "npm $*" >> "$LOG"\n[ "${1:-}" != prefix ] || echo "$HOME/npm"\nif [ "${1:-}" = install ] && [ "${2:-}" = --prefix ]; then\n  case "$3" in */integrations/codex)\n    mkdir -p "$3/node_modules/.bin"\n    printf \'#!/bin/sh\\nexit 99\\n\' > "$3/node_modules/.bin/codex"\n    chmod 755 "$3/node_modules/.bin/codex";;\n  esac\nfi\n');
+  write(join(bin,'npm'), '#!/bin/sh\necho "npm $*" >> "$LOG"\n[ "${1:-}" != prefix ] || echo "$HOME/npm"\nif [ "${1:-}" = install ] && [ "${2:-}" = --prefix ]; then\n  case "$3" in */integrations/codex|*/integrations/gemini-cli)\n    executable=codex\n    [ "${3##*/}" != gemini-cli ] || executable=gemini\n    mkdir -p "$3/node_modules/.bin"\n    printf \'#!/bin/sh\\nexit 99\\n\' > "$3/node_modules/.bin/$executable"\n    chmod 755 "$3/node_modules/.bin/$executable";;\n  esac\nfi\n');
   write(join(bin,'id'), '#!/bin/sh\ncase "$1" in -u) echo 1000;; -un) echo fixture;; *) exit 1;; esac\n');
   write(join(bin,'sudo'), '#!/bin/sh\necho "sudo $*" >> "$LOG"\n[ "${FAIL_SUDO:-0}" != 1 ] || exit 1\nexport SUDO_CALLED=1\nexec "$@"\n');
   write(join(bin,'loginctl'), '#!/bin/sh\necho "loginctl $*" >> "$LOG"\ncase "$1" in show-user) [ -f "$HOME/linger" ] && echo yes || echo no;; enable-linger) [ "${SUDO_CALLED:-0}" = 1 ] || exit 1; touch "$HOME/linger";; esac\n');
