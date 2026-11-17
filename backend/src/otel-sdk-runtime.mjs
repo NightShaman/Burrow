@@ -8,6 +8,7 @@ import { resourceFromAttributes } from '@opentelemetry/resources';
 import { extractTraceContext, traceContextFromSpan } from './otel-context.mjs';
 import { projectModelRecoveryRecord } from './model-recovery-projection.mjs';
 import { createProviderResponsivenessProjection } from './provider-responsiveness-otel.mjs';
+import { configuredProviderId } from './model-adapters/provider-responsiveness.mjs';
 import { createOperationalProjection } from './operational-otel.mjs';
 import { observeOperationalTelemetry, operationalTelemetrySnapshot } from './operational-telemetry.mjs';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -239,6 +240,7 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         modelTTFT: meter.createHistogram('burrow.model.ttft', { unit: 'ms' }),
         modelFirstDelta: meter.createHistogram('burrow.model.first_delta', { unit: 'ms' }),
         tokens: meter.createCounter('burrow.model.tokens'),
+        nativeTokens: meter.createCounter('burrow.minion.native.tokens', { unit: '{token}' }),
         tools: meter.createCounter('burrow.tool.calls'),
         toolDuration: meter.createHistogram('burrow.tool.duration', { unit: 'ms' }),
         activeRuns: meter.createObservableGauge('burrow.runs.active'),
@@ -299,7 +301,7 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         },
       }, parentContext);
       const runContext = trace.setSpan(parentContext, span);
-      const state = { runId: String(runId), startedAt, span, context: runContext, modelSpans: new Map(), toolSpans: new Map(), source: bounded(source, 64) || 'chat' };
+      const state = { runId: String(runId), startedAt, span, context: runContext, modelSpans: new Map(), toolSpans: new Map(), nativeSpans: new Map(), source: bounded(source, 64) || 'chat' };
       activeRuns.set(state.runId, state);
       return Object.freeze({ runId: state.runId, traceContext: traceContextFromSpan(span), context: runContext });
     } catch {
@@ -365,9 +367,54 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
         return;
       }
       if (providerProjection?.observe(record, state)) return;
+      const harness = ['codex', 'claude', 'gemini'].includes(payload.harness) ? payload.harness : null;
+      if (record.type === 'native-minion') {
+        if (!harness || !payload.activityId) return;
+        const key = String(payload.activityId);
+        if (payload.phase === 'start') {
+          if (state.nativeSpans.has(key)) return;
+          const requestedModel = configuredProviderId(payload.requestedModel);
+          const span = tracer.startSpan('burrow.minion.native.invocation', { kind: SpanKind.INTERNAL, attributes: {
+            'burrow.minion.harness': harness, 'burrow.run.id': state.runId,
+            ...(requestedModel ? { 'gen_ai.request.model': requestedModel } : {}),
+          } }, state.context);
+          state.nativeSpans.set(key, { span, harness });
+        }
+        const entry = state.nativeSpans.get(key);
+        if (!entry || entry.harness !== harness) return;
+        if (payload.phase === 'response' || payload.phase === 'usage-model') {
+          const model = configuredProviderId(payload.model);
+          if (model) entry.span.addEvent(payload.phase === 'response' ? 'burrow.minion.native.response' : 'burrow.minion.native.usage_model', { 'gen_ai.response.model': model });
+        }
+        if (payload.phase === 'result') {
+          state.nativeSpans.delete(key);
+          const { span } = entry;
+          const outcome = safeOutcome({ status: payload.outcome });
+          const model = configuredProviderId(payload.model);
+          if (model) span.setAttribute('burrow.minion.native.reported_model', model);
+          if (['success', 'failure', 'cancelled'].includes(payload.nativeOutcome)) span.setAttribute('burrow.minion.native.reported_outcome', payload.nativeOutcome);
+          span.setAttribute('burrow.outcome', outcome);
+          const usage = payload.usage || {};
+          for (const [kind, attr] of Object.entries({ input: 'input_tokens', output: 'output_tokens', total: 'total_tokens',
+            cached: 'cache_read.input_tokens', cacheWrite: 'cache_creation.input_tokens', reasoning: 'reasoning.output_tokens' })) {
+            const value = usage[kind];
+            if (!Number.isSafeInteger(value) || value < 0) continue;
+            if ((kind === 'cached' || kind === 'cacheWrite') && Number.isSafeInteger(usage.input) && value > usage.input) continue;
+            if (kind === 'reasoning' && Number.isSafeInteger(usage.output) && value > usage.output) continue;
+            span.setAttribute(`gen_ai.usage.${attr}`, value);
+            instruments.nativeTokens.add(value, { 'burrow.minion.harness': harness, 'burrow.token.kind': kind });
+          }
+          if (outcome === 'success') span.setStatus({ code: SpanStatusCode.OK });
+          else span.setStatus({ code: SpanStatusCode.ERROR, message: outcome });
+          span.end();
+        }
+        return;
+      }
+
       if (record.type === 'tool' && payload.phase === 'start' && payload.activityId) {
         const attributes = {
           'burrow.tool.name': bounded(payload.tool, 120) || 'unknown',
+          ...(harness ? { 'burrow.minion.harness': harness, 'burrow.run.id': state.runId } : {}),
           ...(bounded(payload.executionTarget, 32) ? { 'burrow.execution.target': bounded(payload.executionTarget, 32) } : {}),
           ...(bounded(payload.providerId, 120) ? { 'burrow.execution.provider': bounded(payload.providerId, 120) } : {}),
         };
@@ -378,12 +425,13 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
       if (record.type === 'tool' && payload.phase === 'result' && payload.activityId) {
         const entry = state.toolSpans.get(String(payload.activityId));
         if (!entry) return;
-        const outcome = safeOutcome(payload);
-        const metricAttributes = { 'burrow.tool.name': entry.attributes['burrow.tool.name'], 'burrow.execution.target': entry.attributes['burrow.execution.target'] || 'local', 'burrow.outcome': outcome };
+        const nativeHarness = entry.attributes['burrow.minion.harness'];
+        const outcome = nativeHarness && payload.status === 'unobserved' ? 'unobserved' : safeOutcome(payload);
+        const metricAttributes = { 'burrow.tool.name': entry.attributes['burrow.tool.name'], 'burrow.execution.target': entry.attributes['burrow.execution.target'] || 'local', 'burrow.outcome': outcome, ...(nativeHarness ? { 'burrow.minion.harness': nativeHarness } : {}) };
         const exitCode = finite(payload.exitCode);
         if (exitCode !== null) entry.span.setAttribute('process.exit.code', exitCode);
         entry.span.setAttribute('burrow.outcome', outcome);
-        entry.span.setStatus({ code: outcome === 'success' ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(outcome === 'success' ? {} : { message: outcome === 'failure' ? 'tool_call_failed' : outcome }) });
+        if (outcome !== 'unobserved') entry.span.setStatus({ code: outcome === 'success' ? SpanStatusCode.OK : SpanStatusCode.ERROR, ...(outcome === 'success' ? {} : { message: outcome === 'failure' ? 'tool_call_failed' : outcome }) });
         entry.span.end();
         state.toolSpans.delete(String(payload.activityId));
         instruments.tools.add(1, metricAttributes);
@@ -400,6 +448,10 @@ export function createOtelRuntime({ env = process.env, destinations = null, serv
     activeRuns.delete(state.runId);
     const outcome = safeOutcome(result);
     providerProjection?.endRun(state);
+    for (const { span } of state.nativeSpans.values()) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: 'run_ended_before_child_span' });
+      span.end();
+    }
     for (const entry of state.toolSpans.values()) {
       entry.span.setStatus({ code: SpanStatusCode.ERROR, message: 'run_ended_before_child_span' });
       entry.span.end();

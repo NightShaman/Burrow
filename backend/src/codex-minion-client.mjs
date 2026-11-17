@@ -172,12 +172,12 @@ export class CodexMinionClient {
   }
 
   /** Resolves only on turn/completed; only one active turn per client. */
-  async startTurn(params, { signal } = {}) {
+  async startTurn(params, { signal, onTurnEvent } = {}) {
     this.assertReady();
     if (this.active) throw failure('TURN_ACTIVE', 'A Codex turn is already active');
     if (!params?.threadId) throw new TypeError('threadId is required');
     if (signal?.aborted) throw failure('ABORTED', 'Codex turn cancelled');
-    const active = { threadId: params.threadId, done: deferred(), items: new Map(), observed: new Map(), early: [] };
+    const active = { threadId: params.threadId, onTurnEvent, done: deferred(), items: new Map(), observed: new Map(), early: [] };
     this.active = active;
     const abort = () => { void this.interrupt().catch(() => {}); };
     signal?.addEventListener('abort', abort, { once: true });
@@ -295,7 +295,8 @@ export class CodexMinionClient {
     const active = this.active;
     if (!active || params.threadId !== active.threadId) return;
     const turnId = params.turnId ?? params.turn?.id;
-    if (turnId !== active.turnId) return;
+    if (turnId !== active.turnId || active.terminal) return;
+    try { active.onTurnEvent?.({ method, params }); } catch { /* observer only */ }
     if (['item/started', 'item/completed'].includes(method) && params.item?.id) active.observed.set(params.item.id, params.item);
     if (method === 'item/completed' && params.item?.id) active.items.set(params.item.id, params.item);
     if (method === 'error' && params.willRetry !== true) {
@@ -303,6 +304,7 @@ export class CodexMinionClient {
       active.done.reject(providerError('TURN_ERROR', 'Codex turn reported an error', params.error));
     }
     if (method !== 'turn/completed') return;
+    active.terminal = true;
     if (params.turn.status === 'completed') {
       const items = [...active.items.values()];
       active.done.resolve({ threadId: active.threadId, turnId: active.turnId,

@@ -1,3 +1,4 @@
+import { createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { projectCodexCheckpoint, codexHandoffContext, codexObservedEvidence } from './codex-native-checkpoint.mjs';
 import { createCodexPoolRouting } from './codex-pool-routing.mjs';
@@ -46,6 +47,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
   modelConfig, traceDir = null, parentExecutionContext = null,
   signal = parentExecutionContext?.abortSignal, executionPolicy = null, continuation = null, poolRecovery = null } = {}) {
   const cancellation = new AbortController();
+  let nativeTelemetry;
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
   let cancellationPoll;
   let nativeStarted = false;
@@ -96,6 +98,8 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     // Check host routing before touching the target path, credentials or executable.
     const executionHost = resolveProcessExecutionTarget(parentExecutionContext || {});
     const remote = executionHost.kind === 'remote';
+    nativeTelemetry = createNativeMinionTelemetry({ harness: 'codex', runId: id, telemetry: parentExecutionContext?.telemetry,
+      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact });
     const savedHost = continuation?.executionHost || { kind: 'local' };
     if (continuation && (savedHost.kind !== executionHost.kind || savedHost.providerId !== executionHost.providerId || savedHost.targetId !== executionHost.targetId)) fail('codex_session_host_changed');
     const remoteController = parentExecutionContext?.processExecutionController;
@@ -252,9 +256,10 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       await saveNative({ state: 'running', runId: id, portableHistory: false, preparedHistory });
       signal?.throwIfAborted();
       dispatched = true;
+      nativeTelemetry?.start({ model: actualModel, fresh: !continuation || Boolean(handoff) });
       const turn = await client.startTurn({ threadId: thread.id,
         ...(modelConfig.extra?.reasoning?.effort ? { effort: modelConfig.extra.reasoning.effort } : {}),
-        input: [{ type: 'text', text: `${handoff || poolRecovery?.replay ? codexHandoffContext(preparedHistory) : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${poolRecovery?.reconciled ? 'Continue the unfinished work in the last checkpoint. Completed actions must not be repeated.' : task}` }] }, { signal });
+        input: [{ type: 'text', text: `${handoff || poolRecovery?.replay ? codexHandoffContext(preparedHistory) : ''}Working directory: ${target.root}\nDo not commit changes unless explicitly permitted: ${policy.mayCommit}.\nReturn readable Markdown findings and disclose verification gaps.\n\n${poolRecovery?.reconciled ? 'Continue the unfinished work in the last checkpoint. Completed actions must not be repeated.' : task}` }] }, { signal, onTurnEvent: nativeTelemetry?.observe });
       const final = turn.items.filter((item) => item.type === 'agentMessage' && item.phase === 'final_answer');
       const summary = redact((final.length ? final.map((item) => item.text).join('\n') : turn.text).trim());
       if (!summary) fail('codex_final_response_missing');
@@ -335,6 +340,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       blockers: [code], warnings: [], sideEffectsApplied: dispatched ? null : false };
     if (launchAttempted && !client) attachDiagnostics(result, { stage: 'open', processError: diagnosticText(error?.message, redact), ...(error?.code ? { code: diagnosticText(String(error.code), redact) } : {}) });
   } finally {
+    nativeTelemetry?.finish(result, { cancelled: signal.aborted, timedOut: result?.blockers?.includes('codex_turn_timeout') });
     clearInterval(cancellationPoll);
     if (nativeSession && !result?.ok) {
       try { await saveNative({ state: signal.aborted ? 'interrupted' : 'failed', ...(checkpointFailure ? { checkpointFailure } : {}) }); }

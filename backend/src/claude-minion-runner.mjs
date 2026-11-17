@@ -1,3 +1,4 @@
+import { createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { createProcessDiagnostics, diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { createClaudePoolRouting } from './claude-pool-routing.mjs';
 import { createClaudeCheckpoint, claudeHandoffContext } from './claude-native-checkpoint.mjs';
@@ -105,6 +106,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
   traceDir = null, parentExecutionContext = null, signal = parentExecutionContext?.abortSignal,
   executionPolicy = parentExecutionContext?.executionPolicy, continuation = null } = {}) {
   const cancellation = new AbortController();
+  let nativeTelemetry;
   signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
   let poolEngine, route, resolvedConnectionId, actualModel = null, checkpoint, history = [], launchAttempted = false;
   let child, client, poll, killTimer, spawned = false, nativeSession, store, authority, recorded = false;
@@ -154,6 +156,8 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     signal.throwIfAborted();
     const host = resolveProcessExecutionTarget(parentExecutionContext || {});
     const remote = host.kind === 'remote';
+    nativeTelemetry = createNativeMinionTelemetry({ harness: 'claude', runId: id, telemetry: parentExecutionContext?.telemetry,
+      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact });
     const boundaries = parentExecutionContext?.executionBoundaries;
     if (boundaries && (!Array.isArray(boundaries.hardBlocks) || boundaries.hardBlocks.some(rule => rule.enabled !== false))) fail('claude_execution_boundaries_unsupported');
     const policy = normalizeExecutionPolicyInput(executionPolicy);
@@ -228,7 +232,9 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     child = remote ? await openRemoteClaudeProcess(controller, host.targetId, target.root, { args, token: resolved.token })
       : spawn(executable, args, { cwd: target.root, shell: false, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'], env });
     spawned = true;
+    nativeTelemetry?.start({ fresh: !saved?.sessionId || Boolean(handoff) });
     client = processClient(child, event => {
+      nativeTelemetry?.observe(event);
       checkpoint.observe(event);
       if (event.type === 'assistant' && typeof event.message?.model === 'string') actualModel = redact(event.message.model);
       // Persist init on arrival, not just on a successful final result.
@@ -236,8 +242,8 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
         if ((!initSeen || event.type === 'result') && typeof event.session_id === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(event.session_id) && ![...secrets].some(secret => event.session_id.includes(secret))) { initSeen = true; enqueue(() => save({ sessionId: event.session_id })); }
       }
       const label = event.type === 'assistant' ? 'Claude response activity.'
-        : event.type === 'stream_event' ? 'Claude streaming activity.'
-          : event.type === 'system' && event.subtype === 'init' ? 'Claude session initialized.' : null;
+          : event.type === 'stream_event' ? 'Claude streaming activity.'
+        : event.type === 'system' && event.subtype === 'init' ? 'Claude session initialized.' : null;
       if (label && Date.now() - lastActivity >= 250) {
         lastActivity = Date.now();
         enqueue(async () => {
@@ -283,6 +289,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
       blockers: [code], warnings: [], sideEffectsApplied: spawned ? null : false };
     if (launchAttempted && !client) attachDiagnostics(result, { stage: 'open', processError: diagnosticText(error?.message, redact), ...(error?.code ? { code: diagnosticText(String(error.code), redact) } : {}) });
   } finally {
+    nativeTelemetry?.finish(result, { cancelled: signal.aborted });
     clearInterval(poll);
     signal.removeEventListener('abort', abort);
     let cleanupUnconfirmed = false;
