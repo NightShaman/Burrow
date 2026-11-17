@@ -48,7 +48,7 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
           attachmentInput: attachments,
           body: { message, attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
           telemetry, runSource: 'group-channel',
-          groupChannelContext: { channelId, channelName: channel.name, turns: room?.turns || [] },
+          groupChannelContext: { channelId, channelName: channel.name, participantAgentIds: [...channel.participantAgentIds], turns: room?.turns || [] },
         }).then(async (result) => {
           if (!controller.signal.aborted && (result?.answerText || result?.assistantTurn?.metadata?.outputArtifacts?.length)) await appendGroupChannelTurn({ rootDir, conversationStore, channelId, role: 'agent', content: result.answerText || '', runId, metadata: { attachmentAgentId: agentId, outputArtifacts: result?.assistantTurn?.metadata?.outputArtifacts || [], fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
         }).catch(async (error) => {

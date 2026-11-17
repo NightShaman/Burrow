@@ -309,7 +309,11 @@ export async function captureSideQuestionSnapshot({ stores, agentRuntime, sessio
   throwIfCancelled(signal);
   const shared = normalizeSharedModContext(await resolveSharedModContext(
     agentRuntime?.agent?.id === agentId ? agentRuntime : { agentId, agent: { id: agentId } },
-    { sessionId: logicalSessionId, signal },
+    // A side question is an operator addressing this recipient. The active
+    // run is only the source of snapshot content; its A2A/group peers were not
+    // addressed by the operator's side question and must not enter this route.
+    { sessionId: logicalSessionId, signal,
+      addressedParticipants: agentRuntime?.agent?.id === agentId ? [agentRuntime] : [], includeRecipient: true },
   ));
   throwIfCancelled(signal);
   owner?.assertCurrent();

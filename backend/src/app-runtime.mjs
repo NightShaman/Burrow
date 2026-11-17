@@ -14,6 +14,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
 import { activeModAgentProvider, resolveModAgentContext, resolveSharedModContext } from './mod-agent-runtime.mjs';
+import { addressedParticipantsForSharedContext } from './runtime-shared-participants.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
@@ -268,7 +269,10 @@ async function runAskChatUnserialized({
   };
   const modAgentContext = modAgent ? { ownerModId: modAgent.ownerModId, ...await resolveModAgentContext(agentRuntime, { sessionId: historySessionId, signal: normalizedArgs.abort_signal }) } : null;
   if (modAgent) assertOwnerStillCurrent();
-  const sharedModContext = await resolveSharedModContext(agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } }, { sessionId: historySessionId, signal: normalizedArgs.abort_signal });
+  const sharedRoute = await addressedParticipantsForSharedContext({ agentRuntime, incomingAgentMessage, groupChannelContext,
+    runSource, turnSource, command, resolveAgentRuntime });
+  const sharedModContext = await resolveSharedModContext(agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } }, { sessionId: historySessionId, signal: normalizedArgs.abort_signal,
+    addressedParticipants: sharedRoute.participants, includeRecipient: sharedRoute.includeRecipient });
   const attachmentRetention = stores.albdruck ? (await stores.albdruck.readRetention()).attachmentDays : 30;
   const persistedAttachments = await persistChatAttachments({ retentionDays: attachmentRetention, agentWorkspaceRoot: runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot, attachments });
   const turnAttachments = persistedAttachments.length ? persistedAttachments : attachments;

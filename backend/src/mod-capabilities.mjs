@@ -189,8 +189,8 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
   }
   function validateOwnedPatch(input, create = false) {
     const value = exactKeys(plain(input), create
-      ? ['id','name','enabled','modelConnectionId','model','capabilities','visibility']
-      : ['name','avatar','enabled','modelConnectionId','model','capabilities','visibility']);
+      ? ['id','name','enabled','modelConnectionId','model','capabilities','visibility','participantTags']
+      : ['name','avatar','enabled','modelConnectionId','model','capabilities','visibility','participantTags']);
     if (create) bounded(value.id, 96);
     if (create || value.name !== undefined) {
       bounded(value.name, 64);
@@ -198,9 +198,11 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
     }
     if (value.avatar !== undefined && typeof value.avatar !== 'string') invalid();
     if (value.enabled !== undefined && typeof value.enabled !== 'boolean') invalid();
+    if (value.participantTags !== undefined && (!Array.isArray(value.participantTags) || value.participantTags.length > 32 || value.participantTags.some(tag => typeof tag !== 'string' || !/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(tag)) || new Set(value.participantTags).size !== value.participantTags.length)) invalid();
     for (const key of ['modelConnectionId', 'model']) if (value[key] !== undefined) bounded(value[key], key === 'model' ? 256 : 128);
     const metadata = normalizeModAgent({ ...(value.capabilities === undefined ? {} : { capabilities: value.capabilities }),
-      ...(value.visibility === undefined ? {} : { visibility: value.visibility }) }, { ownerModId: schedulerOwner() });
+      ...(value.visibility === undefined ? {} : { visibility: value.visibility }),
+      ...(value.participantTags === undefined ? {} : { participantTags: value.participantTags }) }, { ownerModId: schedulerOwner() });
     return { value, metadata };
   }
   // Per-installed-mod host instance: opaque cursors cannot cross owners, roots,
@@ -360,7 +362,8 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       if (changingModel) await validateOwnedSelection(connectionId, selectedModel);
       if (typeof injected.agents.updateOwned !== 'function') throw new Error('mod_owned_agents_unavailable');
       const metadata = { ...(patch.capabilities === undefined ? {} : { capabilities: patch.capabilities }),
-        ...(patch.visibility === undefined ? {} : { visibility: patch.visibility }) };
+        ...(patch.visibility === undefined ? {} : { visibility: patch.visibility }),
+        ...(patch.participantTags === undefined ? {} : { participantTags: patch.participantTags }) };
       const agent = await injected.agents.updateOwned(id, { name: patch.name, enabled: patch.enabled, modAgent: metadata },
         { ownerModId: schedulerOwner(), modelConnectionId: changingModel ? connectionId : undefined, model: changingModel ? selectedModel : undefined });
       if (patch.avatar !== undefined) await injected.models.saveIdentity({ kind: 'agent', id, avatar: patch.avatar });

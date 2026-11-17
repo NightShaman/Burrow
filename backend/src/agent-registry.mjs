@@ -43,7 +43,7 @@ const MOD_AGENT_VISIBILITY = Object.freeze(['agents', 'chat']);
 function normalizeModAgent(value, { ownerModId = null, partial = false, current = null } = {}) {
   const invalid = () => { throw new Error('mod_agent_metadata_invalid'); };
   const object = input => input && typeof input === 'object' && !Array.isArray(input);
-  if (!object(value) || Object.keys(value).some(key => !['ownerModId', 'capabilities', 'visibility'].includes(key))) invalid();
+  if (!object(value) || Object.keys(value).some(key => !['ownerModId', 'capabilities', 'visibility', 'participantTags'].includes(key))) invalid();
   const owner = ownerModId ?? value.ownerModId;
   if (typeof owner !== 'string' || owner.length > 120 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(owner)) invalid();
   if (value.ownerModId !== undefined && value.ownerModId !== owner) invalid();
@@ -53,7 +53,10 @@ function normalizeModAgent(value, { ownerModId = null, partial = false, current 
     if (input !== undefined && (!object(input) || Object.keys(input).some(key => !allowed.includes(key)) || Object.values(input).some(flag => typeof flag !== 'boolean'))) invalid();
     return Object.fromEntries(allowed.map(key => [key, input?.[key] ?? (partial ? current?.[name]?.[key] : false) ?? false]));
   };
-  return { ownerModId: owner, capabilities: flags('capabilities', MOD_AGENT_CAPABILITIES), visibility: flags('visibility', MOD_AGENT_VISIBILITY) };
+  const tags = value.participantTags ?? (partial ? current?.participantTags : []) ?? [];
+  if (!Array.isArray(tags) || tags.length > 32 || tags.some(tag => typeof tag !== 'string' || !/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(tag)) || new Set(tags).size !== tags.length) invalid();
+  return { ownerModId: owner, capabilities: flags('capabilities', MOD_AGENT_CAPABILITIES), visibility: flags('visibility', MOD_AGENT_VISIBILITY),
+    ...((value.participantTags !== undefined || current?.participantTags !== undefined) ? { participantTags: [...tags] } : {}) };
 }
 
 function assertAgent(input = {}, { requireName = true, allowReserved = false } = {}) {
