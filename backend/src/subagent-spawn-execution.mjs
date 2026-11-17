@@ -28,6 +28,7 @@ function compactText(value, maxChars) {
 [${text.length - maxChars} chars omitted]` : text;
 }
 
+const NATIVE_HARNESSES = ['codex', 'claude', 'gemini'];
 const NATIVE_SELECTION_ACTIONS = Object.freeze({ ...CODEX_SELECTION_ACTIONS, ...CLAUDE_SELECTION_ACTIONS, ...GEMINI_SELECTION_ACTIONS });
 
 const SALVAGED_EVIDENCE_BUDGET = 36_000;
@@ -244,11 +245,13 @@ export async function executeSpawnSubagentTool({
   blockers.push(...selection.blockers);
   const harness = profile?.harness ?? args.harness ?? settings.defaultHarness;
   if (['codex', 'claude', 'gemini'].includes(harness) && !settings[`${harness}Enabled`]) blockers.push(`${harness}_minions_disabled`);
-  const burrowSelection = profile?.model ?? settings.burrowModel;
+  const defaultModel = settings[`${harness}Model`];
+  const modelLocked = settings[`${harness}ModelLocked`] === true;
+  const configuredModel = modelLocked ? defaultModel : profile?.model ?? defaultModel;
   if (!['burrow', 'codex', 'claude', 'gemini'].includes(harness)) blockers.push('subagent_harness_invalid');
   if (!task) blockers.push('subagent_task_required');
   if (!dataRoot) blockers.push('subagent_data_root_required');
-  if (!['codex','claude','gemini'].includes(harness) && !modelConfig && !burrowSelection) blockers.push('subagent_model_config_required');
+  if (!['codex','claude','gemini'].includes(harness) && !modelConfig && !configuredModel) blockers.push('subagent_model_config_required');
 
   // A profile may pin an execution host. Resolve it before target validation so
   // the target is proven on the host that will actually run the child.
@@ -269,36 +272,44 @@ export async function executeSpawnSubagentTool({
   } : executionContext;
 
   const requestedModel = compactString(args.model || args.modelId || args.model_id) || null;
-  let childModelConfig = ['codex','claude','gemini'].includes(harness) ? null : modelConfig;
-  if (['codex', 'claude', 'gemini'].includes(harness) && !selection.blockers.length) {
-    const validate = harness === 'claude' ? validateClaudeModelSelection : harness === 'gemini' ? validateGeminiModelSelection : validateCodexModelSelection;
-    try {
-      // A native profile carries its own validated selection; the legacy
-      // per-agent default remains the source only when no profile is selected.
-      childModelConfig = await validate(executionContext?.stores?.models, profile ? profile.model : settings[`${harness}Model`]);
-      if (requestedModel && requestedModel !== childModelConfig.model) {
-        childModelConfig = null;
-        blockers.push(`${harness}_model_override_unsupported`);
-      }
-    } catch (error) {
-      blockers.push(error?.statusCode === 400 ? error.message : `${harness}_model_selection_unavailable`);
-    }
-  } else if (harness === 'burrow' && burrowSelection && !selection.blockers.length) {
-    try {
-      await validateBurrowProfileModel(executionContext?.stores?.models, burrowSelection);
-      childModelConfig = await resolveModelConfig({ stores: executionContext?.stores,
-        modelConnectionId: burrowSelection.connectionId, model: burrowSelection.model, abortSignal });
-      if (requestedModel && requestedModel !== childModelConfig.model) {
-        childModelConfig = null;
-        blockers.push('burrow_model_override_unsupported');
-      }
-    } catch (error) {
+  const native = NATIVE_HARNESSES.includes(harness);
+  let childModelConfig = native ? null : modelConfig;
+  if (!selection.blockers.length && (native || harness === 'burrow')) {
+    if (modelLocked && ((requestedModel && requestedModel !== configuredModel.model)
+      || (profile?.model && (profile.model.model !== configuredModel.model || profile.model.connectionId !== configuredModel.connectionId)))) {
       childModelConfig = null;
-      blockers.push(error?.message || 'burrow_model_selection_unavailable');
+      blockers.push(`${harness}_model_locked`);
+    } else if (profile?.model && requestedModel && requestedModel !== profile.model.model) {
+      childModelConfig = null;
+      blockers.push(`${harness}_model_override_unsupported`);
+    } else if (native || configuredModel) {
+      // Per-spawn model IDs select within the configured connection. Never
+      // silently switch accounts or fall back after an ineligible request.
+      const pair = configuredModel && requestedModel ? { ...configuredModel, model: requestedModel } : configuredModel;
+      try {
+        if (native) {
+          const validate = harness === 'claude' ? validateClaudeModelSelection : harness === 'gemini' ? validateGeminiModelSelection : validateCodexModelSelection;
+          childModelConfig = await validate(executionContext?.stores?.models, pair);
+        } else {
+          await validateBurrowProfileModel(executionContext?.stores?.models, pair);
+          childModelConfig = await resolveModelConfig({ stores: executionContext?.stores,
+            modelConnectionId: pair.connectionId, model: pair.model, abortSignal });
+        }
+      } catch (error) {
+        childModelConfig = null;
+        blockers.push(native ? (error?.statusCode === 400 ? error.message : `${harness}_model_selection_unavailable`)
+          : error?.message || 'burrow_model_selection_unavailable');
+      }
+    } else if (requestedModel) {
+      try {
+        if (!modelConfig?.resolveChildModel) throw new Error('child_model_resolver_unavailable');
+        childModelConfig = await modelConfig.resolveChildModel(requestedModel);
+      } catch {
+        childModelConfig = null;
+        blockers.push(`subagent_model_unavailable:${requestedModel}`);
+      }
     }
-  } else if (requestedModel && modelConfig?.resolveChildModel) {
-    try { childModelConfig = await modelConfig.resolveChildModel(requestedModel); } catch { childModelConfig = null; blockers.push(`subagent_model_unavailable:${requestedModel || 'default'}`); }
-  } else if (requestedModel) blockers.push(`subagent_model_unavailable:${requestedModel}`);
+  }
   const requestedModelProfile = compactString(args.modelProfile || args.model_profile || args.profile) || null;
   const modelSelection = {
     requestedModel,
@@ -345,8 +356,9 @@ export async function executeSpawnSubagentTool({
       resolvedModelProfile: modelSelection.resolvedProfile,
       resolvedModel: modelSelection.resolvedModel,
       ...(() => {
-        const actions = blockers.map(code => minionProfileAction(code)
-          || (['codex', 'claude', 'gemini'].includes(harness) ? NATIVE_SELECTION_ACTIONS[code] : null)).filter(Boolean);
+        const actions = blockers.map(code => code === `${harness}_model_locked`
+          ? `The ${harness === 'burrow' ? 'Burrow' : harness === 'codex' ? 'Codex' : harness === 'claude' ? 'Claude' : 'Gemini'} model is locked to ${configuredModel.model} in Minion settings.`
+          : minionProfileAction(code) || (native ? NATIVE_SELECTION_ACTIONS[code] : null)).filter(Boolean);
         return actions.length ? { summary: actions.join(' ') } : {};
       })(),
       ...(selection.selectedProfileId ? { minionProfileId: selection.selectedProfileId } : {}),

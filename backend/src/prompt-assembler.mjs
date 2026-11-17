@@ -572,7 +572,8 @@ function renderGroupChannel(group = null, budget = 12_000) {
 
 function renderPromptBoundary({ availableModels = [] } = {}) {
   const modelIds = (Array.isArray(availableModels) ? availableModels : []).map((item) => String(item?.id || '').trim()).filter(Boolean);
-  const childModelGuidance = modelIds.length ? `- For spawn_subagent, omit model to use the operator-configured minion default (or inherit the parent when unset). If a child model is needed, use only this enabled configured model id list: ${modelIds.join(', ')}.` : '- For spawn_subagent, omit model to use the operator-configured minion default (or inherit the parent when unset) unless enabled configured model ids are supplied.';
+  const childModelGuidance = '- For spawn_subagent, omit model to use the configured Minion default (or inherit the parent for unconfigured Burrow Minions). If unlocked, an explicit model must be eligible on the selected Minion connection; it applies only to that spawn. A lock rejects a different model.'
+    + (modelIds.length ? ` Enabled model IDs on the parent connection (relevant to unconfigured Burrow Minions only): ${modelIds.join(', ')}.` : '');
   return `Runtime prompt boundary labels:
 - Workspace routes. Memory recalls. Tools execute selected actions. Conversation informs. Evidence answers. Receipts record. Traces explain.
 - This model prompt deliberately omits planner execution labels and runtime capability-policy fields. Every tool provided in the current turn is callable; infer capability only from the offered tool surface and actual tool receipts. Only structurally invalid calls and explicitly configured hard blocks can fail mechanically.

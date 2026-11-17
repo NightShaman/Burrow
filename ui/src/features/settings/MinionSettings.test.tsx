@@ -20,7 +20,7 @@ const defaults = {
   claudeModel: null,
   geminiModel: null,
 };
-function setup(overrideEnabled = false) {
+function setup(overrideEnabled = false, extra = {}) {
   let settings = {
     ok: true,
     ...defaults,
@@ -29,6 +29,7 @@ function setup(overrideEnabled = false) {
     codexEnabled: true,
     overrideEnabled,
     effective: defaults,
+    ...extra,
   };
   vi.mocked(api).mockImplementation(async (path, init) => {
     if (String(path).includes('/minions')) throw new Error('Roster must not be read');
@@ -214,5 +215,132 @@ it('saves Gemini toggles without changing models and preserves native Latest IDs
   );
   fireEvent.change(screen.getByLabelText('Gemini provider'), { target: { value: '' } });
   fireEvent.click(screen.getByText('Save minion defaults'));
-  await waitFor(() => expect(body(2)).toEqual({ geminiModel: null }));
+  await waitFor(() => expect(body(2)).toEqual({ geminiModel: null, geminiModelLocked: false }));
 });
+
+for (const harness of ['burrow', 'codex', 'claude', 'gemini'] as const) {
+  const label = harness[0].toUpperCase() + harness.slice(1);
+  it(`saves ${harness} lock independently and atomically clears it with the model`, async () => {
+    setup(true, { [`${harness}Model`]: pair });
+    const original = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      const result = (await original(path, init)) as any;
+      if (String(path).includes('model-connections'))
+        return {
+          connections: [
+            {
+              id: 'native',
+              provider: 'Native',
+              apiType:
+                harness === 'gemini'
+                  ? 'google-generative-language'
+                  : harness === 'claude'
+                    ? 'anthropic-lb'
+                    : 'openai-lb',
+              enabled: true,
+              codexEligible: true,
+              claudeEligible: true,
+              geminiEligible: true,
+              models: [{ id: 'model' }],
+            },
+          ],
+        };
+      if (!init?.method && String(path).endsWith('/minion-settings'))
+        return { ...result, [`${harness}Model`]: pair };
+      return result;
+    });
+    render(<MinionSettings agentId="agent" />);
+    const toggle = await screen.findByLabelText(`Lock ${label} model`);
+    expect(toggle).toHaveProperty('checked', false);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByText('Save minion defaults'));
+    await waitFor(() => expect(body()).toEqual({ [`${harness}ModelLocked`]: true }));
+    await waitFor(() =>
+      expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
+    );
+    fireEvent.change(screen.getByLabelText(`${label} provider`), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Save minion defaults'));
+    await waitFor(() =>
+      expect(body(1)).toEqual({ [`${harness}Model`]: null, [`${harness}ModelLocked`]: false }),
+    );
+  });
+}
+it('shows inherited locks read-only and restores saved override lock values', async () => {
+  setup();
+  const original = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    const result = (await original(path, init)) as any;
+    return String(path).endsWith('/minion-settings')
+      ? {
+          ...result,
+          codexModelLocked: false,
+          effective: { ...defaults, codexModel: pair, codexModelLocked: true },
+        }
+      : result;
+  });
+  render(<MinionSettings agentId="agent" />);
+  const toggle = await screen.findByLabelText('Lock Codex model');
+  expect(toggle).toHaveProperty('checked', true);
+  expect(toggle.closest('fieldset')?.disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText('Override global minion settings'));
+  await waitFor(() => expect(toggle).toHaveProperty('checked', false));
+  expect(body()).toEqual({ overrideEnabled: true });
+});
+it('allows unlocking unavailable saved models but not relocking them', async () => {
+  setup(true);
+  const original = vi.mocked(api).getMockImplementation()!;
+  vi.mocked(api).mockImplementation(async (path, init) => {
+    const result = (await original(path, init)) as any;
+    if (String(path).includes('model-connections')) return { connections: [] } as never;
+    return !init?.method ? { ...result, codexModelLocked: true } : result;
+  });
+  render(<MinionSettings />);
+  const toggle = await screen.findByLabelText('Lock Codex model');
+  fireEvent.click(toggle);
+  expect(toggle).toHaveProperty('disabled', true);
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await waitFor(() => expect(body()).toEqual({ codexModelLocked: false }));
+});
+it('retains lock draft on rejected acknowledgement and retries only that field', async () => {
+  setup(true);
+  render(<MinionSettings />);
+  fireEvent.click(await screen.findByLabelText('Lock Codex model'));
+  vi.mocked(api).mockRejectedValueOnce(new Error('offline'));
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await screen.findByRole('alert');
+  expect(screen.getByLabelText('Lock Codex model')).toHaveProperty('checked', true);
+  fireEvent.click(screen.getByText('Save minion defaults'));
+  await waitFor(() => expect(body(1)).toEqual({ codexModelLocked: true }));
+});
+
+for (const agentId of [undefined, 'agent']) {
+  it(`rejects an omitted lock acknowledgement from an older ${agentId ? 'agent' : 'global'} backend and retains the draft for retry`, async () => {
+    setup(true);
+    const original = vi.mocked(api).getMockImplementation()!;
+    let legacy = true;
+    vi.mocked(api).mockImplementation(async (path, init) => {
+      const result = await original(path, init);
+      if (legacy && String(path).endsWith('/minion-settings')) {
+        const { codexModelLocked: _ignored, ...withoutLock } = result as any;
+        return withoutLock;
+      }
+      return result;
+    });
+    render(<MinionSettings agentId={agentId} />);
+    const toggle = await screen.findByLabelText('Lock Codex model');
+    expect(toggle).toHaveProperty('checked', false);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByText('Save minion defaults'));
+    await screen.findByText(/Minion settings were not acknowledged/);
+    expect(body()).toEqual({ codexModelLocked: true });
+    expect(toggle).toHaveProperty('checked', true);
+    expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', false);
+    legacy = false;
+    fireEvent.click(screen.getByText('Save minion defaults'));
+    await waitFor(() =>
+      expect(screen.getByText('Save minion defaults')).toHaveProperty('disabled', true),
+    );
+    expect(body(1)).toEqual({ codexModelLocked: true });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+}
