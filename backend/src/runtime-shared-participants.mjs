@@ -52,7 +52,7 @@ export function sharedContextContinuation({ agentRuntime, sessionId, route, reso
       }
       participants.set(agentRuntime.agentId, agentRuntime);
       const shared = await resolveSharedModContext(agentRuntime, { sessionId, signal,
-        addressedParticipants: [...participants.values()], includeRecipient: true });
+        addressedParticipants: [...participants.values()], outgoingRecipientIds: [...peerIds], includeRecipient: true });
       dirty = false;
       return sharedModContextMessages(shared);
     },
