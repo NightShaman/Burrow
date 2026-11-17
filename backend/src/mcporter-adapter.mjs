@@ -83,7 +83,7 @@ const boundedJson = (value, maxChars = 1_000) => { try { const rendered = typeof
 // classifications, never launcher stderr or remote server payloads.
 export function publicMcpError(error, fallback = 'mcp_runtime_failed') {
   const message = String(error?.message || error || '');
-  if (/^mcp_(?:connection_disabled|transport_invalid|tool_name_invalid|discovery_invalid_response|runtime_timeout|runtime_failed|tool_failed)$/.test(message)) return message;
+  if (/^mcp_(?:connection_disabled|transport_invalid|tool_name_invalid|discovery_invalid_response|runtime_timeout|runtime_failed|tool_failed|response_too_large)$/.test(message)) return message;
   if (message.startsWith('mcp_tool_failed:')) return 'mcp_tool_failed';
   if (message.startsWith('mcp_runtime_failed:')) return 'mcp_runtime_failed';
   return fallback;
@@ -374,6 +374,10 @@ export async function invokeMcpTool(connection, { apiKey, environmentVariables =
       output = error.stdout;
     }
     signal?.throwIfAborted();
+    // A transport that supplies a diagnostic tail must never expose a partial
+    // protocol response (which may contain raw image bytes) as successful text.
+    // Our runner preserves stdout in full; this also protects injected runners.
+    if (/^\[\d+ earlier bytes omitted\]\r?\n/.test(output)) throw new Error('mcp_response_too_large');
     try {
       const parsed = JSON.parse(output);
       const structuredFailure = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.isError === true || parsed.error || parsed.ok === false || parsed.success === false);

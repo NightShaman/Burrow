@@ -96,12 +96,12 @@ function anthropicConnectionCandidate(connection = {}) {
   }
 
   function isoOrNull(value) {
-    if (!value) return null;
-    const text = String(value);
-    const ms = Number(text);
-    if (Number.isFinite(ms) && ms > 0) return new Date(ms < 10_000_000_000 ? ms * 1000 : ms).toISOString();
-    const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? text : date.toISOString();
+    const numeric = finiteNumber(value);
+    const ms = numeric !== null
+      ? (numeric > 0 ? numeric < 10_000_000_000 ? numeric * 1000 : numeric : NaN)
+      : typeof value === 'string' && value.trim() ? Date.parse(value) : NaN;
+    const date = new Date(ms);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
   }
 
   function sanitizeAnthropicUsageWindow(key, raw = null) {
@@ -157,7 +157,7 @@ function anthropicConnectionCandidate(connection = {}) {
 
 
   function finiteNumber(value) {
-    if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+    if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
@@ -233,7 +233,10 @@ function anthropicConnectionCandidate(connection = {}) {
     } : null;
     const limitReached = boolean(rateLimit?.limit_reached ?? rateLimit?.limitReached);
     const exhausted = exhaustedFromWindows(mainWindows);
-    const blocked = allowed === false || limitReached === true || exhausted === true || Boolean(reachedType);
+    // Overage-credit limits do not override an explicit provider allowance for
+    // included subscription usage. Account/workspace spend caps still block.
+    const spendBlocked = spendControl?.limitReached === true || (credits?.overageLimitReached === true && allowed !== true);
+    const blocked = allowed === false || limitReached === true || exhausted === true || Boolean(reachedType) || spendBlocked;
     const checkedAt = new Date(clock()).toISOString();
     const status = (status, label, reason, scope = 'account', resetAt = null) => ({ status, label, reason, scope, resetAt, checkedAt });
     // Subscription windows describe the actionable restriction first. WHAM may
@@ -241,7 +244,7 @@ function anthropicConnectionCandidate(connection = {}) {
     const long = mainWindows.find(window => window.exhausted && (window.windowSeconds >= 86400 || (window.windowSeconds === null && window.key === 'secondary')));
     const short = mainWindows.find(window => window.exhausted && window !== long);
     let accountStatus;
-    if (spendControl?.limitReached === true || credits?.overageLimitReached === true || /spend.*(cap|limit)|spend_control|workspace_(owner|member)_usage_limit_reached/.test(reachedType || '')) {
+    if (spendBlocked || /spend.*(cap|limit)|spend_control|workspace_(owner|member)_usage_limit_reached/.test(reachedType || '')) {
       accountStatus = status('spend_cap', 'Spend Cap Reached', 'spend_cap_reached');
     } else if (/entitlement|subscription|not_entitled|usage_not_included/.test(reachedType || '')) {
       accountStatus = status('entitlement', 'Entitlement Required', 'entitlement_required');
@@ -358,7 +361,18 @@ function anthropicConnectionCandidate(connection = {}) {
       const response = await fetchImpl(OPENAI_OAUTH_USAGE_URL, { headers, signal: AbortSignal.timeout(10_000) });
       if (!response.ok) return { ok: false, status: response.status, error: `openai_oauth_usage_failed:${response.status}`, usage: null };
       const data = await response.json();
-      if (!data || typeof data !== 'object' || Array.isArray(data) || data.error || !['rate_limit', 'rateLimit', 'plan_type', 'planType', 'credits'].some(key => key in data)) return { ok:false, status:502, error:'openai_oauth_usage_invalid', usage:null };
+      if (!data || typeof data !== 'object' || Array.isArray(data) || data.error) return { ok:false, status:502, error:'openai_oauth_usage_invalid', usage:null };
+      const usage = sanitizeOpenAiOauthUsage(data);
+      const rateLimit = data.rate_limit ?? data.rateLimit;
+      const limitReached = rateLimit?.limit_reached ?? rateLimit?.limitReached;
+      // Require recognizable typed evidence, not merely the presence of a key.
+      // WHAM can legitimately return only a reached type or spend control.
+      const hasEvidence = usage.windows.length > 0 || usage.allowed !== null || typeof limitReached === 'boolean'
+        || (typeof usage.planType === 'string' && usage.planType.trim() !== '')
+        || (typeof usage.reachedType === 'string' && usage.reachedType.trim() !== '')
+        || (usage.spendControl && Object.values(usage.spendControl).some(value => value !== null))
+        || (usage.credits && Object.values(usage.credits).some(value => value !== null));
+      if (!hasEvidence) return { ok:false, status:502, error:'openai_oauth_usage_invalid', usage:null };
       const result = {
         ok: true,
         source: 'openai-oauth-wham',
@@ -368,7 +382,7 @@ function anthropicConnectionCandidate(connection = {}) {
         cached: false,
         cacheTtlMs: OPENAI_OAUTH_USAGE_CACHE_MS,
         fetchedAt: new Date(nowMs).toISOString(),
-        usage: sanitizeOpenAiOauthUsage(data),
+        usage,
       };
       if (fetchGeneration === openaiUsageGeneration) openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
       return result;
