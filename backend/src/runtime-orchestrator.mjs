@@ -11,7 +11,7 @@ import { createRuntimeTurnResult, assertRuntimeTurnContract } from './chat-runti
 import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { accumulateToolConsequences, summarizeToolResults } from './runtime-result-shapes.mjs';
 import { inspectRuntimeObject } from './runtime-heap-diagnostics.mjs';
-import { normalizeNativeToolCalls, normalizeProviderMessages } from './provider-messages.mjs';
+import { normalizeNativeToolCalls, normalizeProviderMessage, normalizeProviderMessages, replaceSharedContextMessages } from './provider-messages.mjs';
 import './continuation-evidence.mjs';
 import { inspectionResultSummary, shouldFollowReadOnlyInspection, hasExecutedInspectionEvidence, hasExecutedReadFileEvidence, missingInspectionTargets, shouldForceInspectionEvidence, defaultInspectionFileList, runDefaultReadOnlyInspection, pendingInspectionFallback } from './inspection-evidence.mjs';
 import { CHAT_TOOL_HISTORY_LIMIT, CHAT_TOOL_RESULT_HISTORY_LIMIT, CHAT_TOOL_CALL_HISTORY_LIMIT, compactToolCalls, boundedToolArgumentValue, stableJson, fingerprint, toolPlanFingerprint, exactRepeatVerdict, loopReceiptText, appendBoundedChatHistory, appendBoundedMapEntry, compactPromptEvidenceResult, runtimeObservationFacts, materialEvidenceKeys, recordMaterialProgress, repeatedToolCallObservations, semanticInspectionObservations, logChatToolLoopHeapStage, normalizedToolOutcome } from './tool-loop-detection.mjs';
@@ -184,13 +184,14 @@ export function modelInputForPlainTurn({ promptText, promptMessages = null, atta
     if (messages) {
       const lastUserIndex = messages.reduce((latest, entry, index) => entry?.role === 'user' ? index : latest, -1);
       if (lastUserIndex >= 0) {
-        const multimodalMessages = messages.map((entry, index) => index === lastUserIndex ? {
+        const multimodalMessages = messages.map((entry, index) => index === lastUserIndex ? normalizeProviderMessage({
           ...entry,
+          ...(entry.metadata ? { metadata: entry.metadata } : {}),
           content: [
             { type: 'text', text: messageTextContent(entry.content) },
             ...images.map((image) => ({ type: 'image_url', image_url: { url: image.dataUrl } })),
           ],
-        } : entry);
+        }) : entry);
         return { prompt: null, messages: multimodalMessages, stableMessages: messages.slice(0, lastUserIndex), imageCount: images.length, images, vision: true, fallback: false };
       }
     }
@@ -198,7 +199,7 @@ export function modelInputForPlainTurn({ promptText, promptMessages = null, atta
   }
   if (messages) {
     const last = messages.length - 1;
-    return { prompt: null, messages: messages.map((entry, index) => index === last && entry.role === 'user' ? { ...entry, content: imageFallbackPrompt(String(entry.content || ''), images) } : entry), imageCount: images.length, images, vision: false, fallback: true };
+    return { prompt: null, messages: messages.map((entry, index) => index === last && entry.role === 'user' ? normalizeProviderMessage({ ...entry, ...(entry.metadata ? { metadata: entry.metadata } : {}), content: imageFallbackPrompt(String(entry.content || ''), images) }) : entry), imageCount: images.length, images, vision: false, fallback: true };
   }
   return { prompt: imageFallbackPrompt(promptText, images), messages: null, imageCount: images.length, images, vision: false, fallback: true };
 }
@@ -528,13 +529,7 @@ export async function runPlainModelTurn({
       // or compatibility continuation is budgeted/serialized.
       const sharedMessages = await executionContext?.sharedContextContinuation?.refresh();
       if (sharedMessages !== null && sharedMessages !== undefined) {
-        const replaceShared = messages => {
-          const retained = normalizeProviderMessages(messages).filter(message => message.metadata?.providerMessageSource !== 'mod-shared-context-provider');
-          const index = retained.findIndex(message => message.role !== 'system' && message.role !== 'developer');
-          retained.splice(index < 0 ? retained.length : index, 0, ...sharedMessages);
-          return retained;
-        };
-        modelInput = { ...modelInput, prompt: null, messages: replaceShared(modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }]) };
+        modelInput = { ...modelInput, prompt: null, messages: replaceSharedContextMessages(modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }], sharedMessages) };
       }
       // Select the provider path before constructing/budgeting compatibility
       // prose. An unused fallback must never veto a native continuation.

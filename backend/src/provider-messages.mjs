@@ -289,6 +289,20 @@ export function providerMessageManifest(messages = []) {
   });
 }
 
+// Refresh request-local guidance in its existing slot. First activation belongs
+// just before the current task, after reusable history/support, never ahead of
+// the conversation or inside an assistant/tool-result protocol round.
+export function replaceSharedContextMessages(messages = [], sharedMessages = []) {
+  const normalized = normalizeProviderMessages(messages);
+  const existing = normalized.findIndex(message => message.metadata?.providerMessageSource === 'mod-shared-context-provider');
+  const retained = normalized.filter(message => message.metadata?.providerMessageSource !== 'mod-shared-context-provider');
+  const current = retained.findIndex(message => message.metadata?.providerMessageSource === 'current-task');
+  const firstDialogue = retained.findIndex(message => !['system', 'developer'].includes(message.role));
+  const index = existing >= 0 ? existing : current >= 0 ? current : firstDialogue >= 0 ? firstDialogue : retained.length;
+  retained.splice(index, 0, ...normalizeProviderMessages(sharedMessages));
+  return retained;
+}
+
 export function conversationProviderMessages({ priorSummary = '', recentMessages = [], task = '' } = {}) {
   return normalizeProviderMessages([
     ...(text(priorSummary) ? [{ role: 'user', content: `# prior-conversation-summary\n\n${text(priorSummary)}` }] : []),

@@ -49,8 +49,8 @@ export async function appendRuntimeActivity({
 export async function appendRuntimeProviderTurn({ messages = [], ...scope } = {}) {
   const currentIndex = messages.length - 1;
   if (currentIndex < 0 || messages[currentIndex]?.role !== 'user') throw new Error('provider_turn_current_user_required');
-  // Fresh support is assembled before replayed conversation, so adjacency to
-  // the current user message is not a reliable boundary. Select only the
+  // Select support by its provenance, not its current position. Adjacency to
+  // the current user message is not a durable capture contract. Keep only the
   // current provider support pack and current task; historical snapshots and
   // replayed dialogue already have their own durable owners.
   const freshSupport = messages.filter((message) => message?.metadata?.providerMessageSource === 'support-context-provider');

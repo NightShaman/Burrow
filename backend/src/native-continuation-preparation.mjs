@@ -1,6 +1,6 @@
 import { attestPreparation } from './pool-replay-attestation.mjs';
 export { isPreparedPoolReplay } from './pool-replay-attestation.mjs';
-import { normalizeProviderMessages } from './provider-messages.mjs';
+import { normalizeProviderMessages, replaceSharedContextMessages } from './provider-messages.mjs';
 import { compactSearchMatch } from './search-match-receipt.mjs';
 import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
@@ -137,9 +137,7 @@ export function compactContinuationDialogue(messages, { maxChars = 6000, recapTe
 function continuationMessages(options) {
   let baseMessages = options.baseMessages || [];
   if (Array.isArray(options.sharedContextMessages)) {
-    baseMessages = normalizeProviderMessages(baseMessages).filter(message => message.metadata?.providerMessageSource !== 'mod-shared-context-provider');
-    const index = baseMessages.findIndex(message => !['system', 'developer'].includes(message.role));
-    baseMessages.splice(index < 0 ? baseMessages.length : index, 0, ...normalizeProviderMessages(options.sharedContextMessages));
+    baseMessages = replaceSharedContextMessages(baseMessages, options.sharedContextMessages);
   }
   return [...chatToolContinuationMessages({ ...options, baseMessages }), ...(options.pendingSteering || [])];
 }
