@@ -32,7 +32,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores, agentRuntime
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [] } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [], sharedContextContinuation = null } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   const context = createExecutionContext({
@@ -75,6 +75,7 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
   return Object.freeze(Object.defineProperties({}, {
     ...Object.getOwnPropertyDescriptors(context),
     skillOverrides: { value: skillOverrides, enumerable: true },
+    sharedContextContinuation: { value: sharedContextContinuation, enumerable: false },
     // Run-local trusted return address, never serialized into model tool args.
     agentMessageReplyTo: { value: agentMessageReplyTo ? Object.freeze({
       recipientAgentId: agentMessageReplyTo.recipientAgentId,

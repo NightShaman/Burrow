@@ -120,7 +120,7 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 // user turn; attribution identifies where the message came from.
 // parentTraceContext is runtime-only transport: never add it to delivery identity,
 // persisted requests, transcript provenance, or model-visible content.
-export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null } = {}) {
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null, onAddressedParticipant = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   assertA2AParticipant(senderRuntime?.agent);
@@ -177,6 +177,8 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
       messageMode: resolvedMode, direction: 'inbound', deliveryId,
     });
+    // Routing fact only: recipient ingress succeeded, independently of reply outcome.
+    onAddressedParticipant?.(recipientRuntime);
     const sourceEntry = await appendAgentMessage({
       conversationStore, agentId: sender, sessionId: source, content: body,
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
@@ -200,13 +202,19 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   // Claim before recipient ingress or execution. A concurrent/restarted retry
   // observes the same durable terminal result rather than waking the recipient twice.
   const claim = await conversationStore.claimAgentMessageDelivery({ deliveryId, request: deliveryRequest });
+  const observedDelivery = result => {
+    // Durable replay may skip deliver(); only a persisted ingress receipt is
+    // evidence that this canonical peer was actually addressed.
+    if (result?.recipientEntryId && result.recipientAgentId === recipient) onAddressedParticipant?.(recipientRuntime);
+    return result;
+  };
   if (!claim.execute) {
-    if (claim.status === 'completed' || claim.status === 'unowned') return claim.result;
+    if (claim.status === 'completed' || claim.status === 'unowned') return observedDelivery(claim.result);
     for (;;) {
       abortSignal?.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, 20));
       const observed = await conversationStore.readAgentMessageDelivery({ deliveryId });
-      if (observed?.status === 'completed' || observed?.status === 'unowned') return observed.result;
+      if (observed?.status === 'completed' || observed?.status === 'unowned') return observedDelivery(observed.result);
       if (!observed) throw new Error('agent_message_delivery_claim_missing');
     }
   }

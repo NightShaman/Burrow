@@ -14,7 +14,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
 import { activeModAgentProvider, resolveModAgentContext, resolveSharedModContext } from './mod-agent-runtime.mjs';
-import { addressedParticipantsForSharedContext } from './runtime-shared-participants.mjs';
+import { addressedParticipantsForSharedContext, sharedContextContinuation } from './runtime-shared-participants.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
@@ -258,7 +258,7 @@ async function runAskChatUnserialized({
     : historySessionId;
   // Providers receive the logical conversation, not an internal fresh-execution
   // session ID: scheduled/transport context selection must survive isolation.
-  // Resolve exactly once at the native-turn boundary, before any planner/model
+  // Resolve owner identity once at the native-turn boundary, before any planner/model
   // request, reset or continuity claim. Missing owners never fall back to Core.
   const modAgent = agentRuntime?.agent?.modAgent || null;
   const ownerProvider = modAgent ? activeModAgentProvider(agentRuntime.agent) : null;
@@ -457,7 +457,11 @@ async function runAskChatUnserialized({
     : null;
   const minionDepth = await resolveTurnMinionDepth({ metadata: stores?.metadata, conversations: stores?.conversations, agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId });
   const minionProfiles = []; // Legacy profiles are not part of normal discovery.
-  const executionContext = createRuntimeExecutionContext({ minionDepth, minionProfiles, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  const sharedContinuation = sharedContextContinuation({
+    agentRuntime: agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } },
+    sessionId: historySessionId, route: sharedRoute, resolveAgentRuntime, signal: normalizedArgs.abort_signal,
+  });
+  const executionContext = createRuntimeExecutionContext({ sharedContextContinuation: sharedContinuation, minionDepth, minionProfiles, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   // Native child sessions never fall through to Burrow planning or tools.
   const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
     agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,

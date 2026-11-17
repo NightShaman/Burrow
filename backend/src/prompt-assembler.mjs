@@ -176,6 +176,14 @@ export function normalizeSharedModContext(value = null) {
   } catch { throw new Error('mod_shared_context_invalid'); }
 }
 
+// Same shared-guidance projection for initial prompts and routed continuations.
+export function sharedModContextMessages(sharedModContext, limits = {}) {
+  const sections = normalizeSharedModContext(sharedModContext).map(entry =>
+    renderModRecords(entry.context, { ownerModId: entry.ownerModId, kind: 'shared-context', totalBudget: limits.modSharedContextChars, perFileBudget: limits.modSharedContextFileChars }).text
+  ).filter(Boolean).map(text => `# mod-shared-context\n\n${text}`);
+  return sections.length ? [{ role: 'developer', content: `Current-turn shared mod guidance (not agent identity, tools, or historical conversation):\n\n${sections.join('\n\n---\n\n')}`, metadata: { providerMessageSource: 'mod-shared-context-provider' } }] : [];
+}
+
 // Normal names use URI percent encoding. Preserve even lone UTF-16 surrogates
 // (which the provider record contract permits) injectively with an escaped-~
 // convention rather than letting encodeURIComponent throw or merge names.
@@ -761,12 +769,11 @@ export async function assemblePrompt({
   const operatingSections = staticSections.filter((item) => !identitySectionNames.has(item.name));
   const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task']);
   const supportSections = volatileSections.filter((item) => !conversationSectionNames.has(item.name) && item.name !== 'mod-shared-context');
-  const sharedSections = volatileSections.filter((item) => item.name === 'mod-shared-context');
   const modelMessages = normalizeProviderMessages([
     ...(identitySections.length ? [{ role: 'system', content: renderSections(identitySections), metadata: { providerMessageSource: 'agent-identity-provider' } }] : []),
     ...(operatingSections.length ? [{ role: 'system', content: renderSections(operatingSections), metadata: { providerMessageSource: 'stable-instructions-provider' } }] : []),
     ...(supportSections.length ? [{ role: 'user', content: renderSections(supportSections), metadata: { providerMessageSource: 'support-context-provider' } }] : []),
-    ...(sharedSections.length ? [{ role: 'developer', content: `Current-turn shared mod guidance (not agent identity, tools, or historical conversation):\n\n${renderSections(sharedSections)}`, metadata: { providerMessageSource: 'mod-shared-context-provider' } }] : []),
+    ...sharedModContextMessages(sharedContext, limits),
     ...conversationProviderMessages({
       priorSummary: renderPriorConversationSummary(conversation),
       recentMessages: (conversation.recentMessages || []).filter((message) => !(

@@ -523,6 +523,19 @@ export async function runPlainModelTurn({
         chatToolLoop.loopWarnings.push(warning);
         await traceLogger?.event?.('chat-tool-loop-warning', warning);
       }
+      // All calls in this batch have completed (including provider-native parallel
+      // calls). Refresh the sender's volatile guidance before either native
+      // or compatibility continuation is budgeted/serialized.
+      const sharedMessages = await executionContext?.sharedContextContinuation?.refresh();
+      if (sharedMessages !== null && sharedMessages !== undefined) {
+        const replaceShared = messages => {
+          const retained = normalizeProviderMessages(messages).filter(message => message.metadata?.providerMessageSource !== 'mod-shared-context-provider');
+          const index = retained.findIndex(message => message.role !== 'system' && message.role !== 'developer');
+          retained.splice(index < 0 ? retained.length : index, 0, ...sharedMessages);
+          return retained;
+        };
+        modelInput = { ...modelInput, prompt: null, messages: replaceShared(modelInput.messages || [{ role: 'user', content: modelInput.prompt || prompt.text }]) };
+      }
       // Select the provider path before constructing/budgeting compatibility
       // prose. An unused fallback must never veto a native continuation.
       const useNativeContinuation = !toolLoopNoProgress && typeof adapter.continueWithToolResults === 'function';
@@ -544,6 +557,7 @@ export async function runPlainModelTurn({
             tools: continuationToolSchemas(),
             contextThreshold,
             pendingSteering,
+            sharedContextMessages: sharedMessages,
           }, { adapter, signal: abortSignal, traceLogger })
         : null;
       if (!nativeContinuation) {
@@ -595,8 +609,8 @@ export async function runPlainModelTurn({
       // next iteration through loop state, diagnostics, or closures.
       rawToolResults = null;
       executed = null;
-      if (useNativeContinuation && Array.isArray(model?.nativeTranscript)) {
-        nativeTranscript = normalizeProviderMessages(model.nativeTranscript);
+      if (useNativeContinuation) {
+        nativeTranscript = normalizeProviderMessages(Array.isArray(model?.nativeTranscript) ? model.nativeTranscript : nativeContinuation.messages);
       }
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-model-response', {
         iteration,

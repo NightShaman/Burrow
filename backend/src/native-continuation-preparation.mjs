@@ -1,5 +1,6 @@
 import { attestPreparation } from './pool-replay-attestation.mjs';
 export { isPreparedPoolReplay } from './pool-replay-attestation.mjs';
+import { normalizeProviderMessages } from './provider-messages.mjs';
 import { compactSearchMatch } from './search-match-receipt.mjs';
 import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
@@ -130,11 +131,24 @@ export function compactContinuationDialogue(messages, { maxChars = 6000, recapTe
 }
 
 
+// Core supplies this volatile replacement after trusted outgoing routing. Keep
+// the original base intact for provider-pool replay proof, and attest the
+// replacement through the same projector as compaction and steering.
+function continuationMessages(options) {
+  let baseMessages = options.baseMessages || [];
+  if (Array.isArray(options.sharedContextMessages)) {
+    baseMessages = normalizeProviderMessages(baseMessages).filter(message => message.metadata?.providerMessageSource !== 'mod-shared-context-provider');
+    const index = baseMessages.findIndex(message => !['system', 'developer'].includes(message.role));
+    baseMessages.splice(index < 0 ? baseMessages.length : index, 0, ...normalizeProviderMessages(options.sharedContextMessages));
+  }
+  return [...chatToolContinuationMessages({ ...options, baseMessages }), ...(options.pendingSteering || [])];
+}
+
 export function prepareNativeToolContinuation(options = {}) {
   return attestPreparation(prepareContinuation(options), options);
 }
-function prepareContinuation({ baseMessages = [], toolCalls = [], toolResults = [], modelConfig = null, tools = null, contextThreshold = null, pendingSteering = [], recapText = null, preserveDialogue = false } = {}) {
-  let complete = [...chatToolContinuationMessages({ baseMessages, toolCalls, toolResults }), ...pendingSteering];
+function prepareContinuation({ baseMessages = [], toolCalls = [], toolResults = [], modelConfig = null, tools = null, contextThreshold = null, pendingSteering = [], recapText = null, preserveDialogue = false, sharedContextMessages = null } = {}) {
+  let complete = continuationMessages({ baseMessages, toolCalls, toolResults, pendingSteering, sharedContextMessages });
   const completeInspection = inspectionFor(complete, { modelConfig, tools });
   const threshold = normalizeContextCompressionConfig({ contextThreshold: contextThreshold ?? modelConfig?.contextCompression?.contextThreshold }).contextThreshold;
   const targetTokens = Math.floor(Number(completeInspection.contextTokens) * threshold);
@@ -188,7 +202,7 @@ export const __test__ = { transcriptChars, projectToolFields };
 // an ephemeral model request: never persist it as an operator turn or execute tools.
 export async function prepareNativeToolContinuationAsync(options = {}, { adapter, signal, traceLogger } = {}) {
   signal?.throwIfAborted();
-  const complete = [...chatToolContinuationMessages(options), ...(options.pendingSteering || [])];
+  const complete = continuationMessages(options);
   const inspection = inspectionFor(complete, options);
   const threshold = normalizeContextCompressionConfig({ contextThreshold: options.contextThreshold ?? options.modelConfig?.contextCompression?.contextThreshold }).contextThreshold;
   if (inspection.contextTokens == null || inspection.contextTokens < 0 || inspection.estimatedTokens <= inspection.contextTokens * threshold) return prepareNativeToolContinuation(options);

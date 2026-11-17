@@ -1,3 +1,6 @@
+import { resolveSharedModContext } from './mod-agent-runtime.mjs';
+import { sharedModContextMessages } from './prompt-assembler.mjs';
+
 // Build the identity list for shared context from Core-owned route provenance.
 // Message content and serialized request fields are deliberately absent.
 export async function addressedParticipantsForSharedContext({ agentRuntime = null, incomingAgentMessage = null,
@@ -22,4 +25,35 @@ export async function addressedParticipantsForSharedContext({ agentRuntime = nul
   if (group) for (const id of groupChannelContext.participantAgentIds.slice(0, 32)) await addResolved(id);
   const unique = new Map(participants.map(runtime => [runtime.agentId, runtime]));
   return { participants: [...unique.values()], includeRecipient };
+}
+
+// Turn-local routing facts, never session state or model-visible tool receipts.
+// Delivery admission supplies canonical identities; a failed/denied lookup does
+// not activate anything. A delivered request still counts if its reply fails.
+export function sharedContextContinuation({ agentRuntime, sessionId, route, resolveAgentRuntime, signal } = {}) {
+  const peerIds = new Set();
+  let dirty = false;
+  return {
+    addressed(runtime) {
+      if (runtime?.agentId && runtime.agent?.id === runtime.agentId) {
+        peerIds.add(runtime.agentId);
+        dirty = true;
+      }
+    },
+    async refresh() {
+      if (!dirty) return null;
+      const participants = new Map(route.participants.map(runtime => [runtime.agentId, runtime]));
+      for (const id of peerIds) {
+        try {
+          const runtime = await resolveAgentRuntime(id);
+          if (runtime?.agentId === id && runtime.agent?.id === id) participants.set(id, runtime);
+        } catch { /* A removed peer contributes no current tags. */ }
+      }
+      participants.set(agentRuntime.agentId, agentRuntime);
+      const shared = await resolveSharedModContext(agentRuntime, { sessionId, signal,
+        addressedParticipants: [...participants.values()], includeRecipient: true });
+      dirty = false;
+      return sharedModContextMessages(shared);
+    },
+  };
 }
