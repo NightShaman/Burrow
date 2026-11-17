@@ -12,28 +12,38 @@ let media: {
   removeEventListener: ReturnType<typeof vi.fn>;
 };
 let visibility: boolean;
-function Harness({ job, ready = true }: { job: MotionJob; ready?: boolean }) {
+function Harness({
+  job,
+  ready = true,
+  home = false,
+}: {
+  job: MotionJob;
+  ready?: boolean;
+  home?: boolean;
+}) {
   const root = useRef<HTMLElement>(null);
-  const motion = useForgeMotion(root, job, 'live', () => ready);
+  const motion = useForgeMotion(root, job, 'live', () => ready, !home);
   return (
     <main ref={root} className="forge-machine">
-      <div className="forge-grid">
-        <canvas className="forge-seam-sparks" />
-        <section className="forge-studio">
-          <div className="forge-pressure">
-            <strong data-forge-meter-state />
-          </div>
-        </section>
-        <section className="forge-preview">
-          <div className="forge-viewer-body">
-            <div className="forge-output-content">
-              <button>Output action</button>
+      {!home && (
+        <div className="forge-grid">
+          <canvas className="forge-seam-sparks" />
+          <section className="forge-studio">
+            <div className="forge-pressure">
+              <strong data-forge-meter-state />
             </div>
-            <canvas className="forge-blast" />
-          </div>
-        </section>
-        <section className="forge-history" />
-      </div>
+          </section>
+          <section className="forge-preview">
+            <div className="forge-viewer-body">
+              <div className="forge-output-content">
+                <button>Output action</button>
+              </div>
+              <canvas className="forge-blast" />
+            </div>
+          </section>
+          <section className="forge-history" />
+        </div>
+      )}
       <label>
         <input
           type="checkbox"
@@ -139,5 +149,18 @@ it('switching selected job mid-reveal drops masks without replaying completed hi
   view.rerender(<Harness job={job('succeeded', 'old')} />);
   expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
   view.rerender(<Harness job={job('succeeded')} />);
+  expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
+});
+
+it('attaches effects after leaving Home and reattaches after returning', () => {
+  const view = render(<Harness job={job('running')} home />);
+  expect(document.querySelectorAll('.forge-fracture')).toHaveLength(0);
+  view.rerender(<Harness job={job('running')} />);
+  expect(document.querySelectorAll('.forge-fracture')).toHaveLength(14);
+  view.rerender(<Harness job={job('running')} home />);
+  view.rerender(<Harness job={job('running')} />);
+  expect(document.querySelectorAll('.forge-fracture')).toHaveLength(14);
+  view.rerender(<Harness job={job('succeeded')} />);
+  advance(4000);
   expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
 });

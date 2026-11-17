@@ -346,7 +346,9 @@ export function Settings({
                 ))}
               </div>
             </fieldset>
-            <label className="settings-checkbox">
+          </SettingSection>
+          <SettingSection title="Effects">
+            <label className="settings-checkbox-row">
               <input
                 type="checkbox"
                 checked={forgeEffects}

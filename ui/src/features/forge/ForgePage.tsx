@@ -617,11 +617,17 @@ export function Forge({
     : orderedJobs.filter((job) => jobMode(job) === mode).slice(0, 5);
   const recentJobs = scopedJobs;
   const selectedJob = scopedJobs.find((job) => job.id === selectedJobId) ?? scopedJobs[0];
-  const motion = useForgeMotion(machineRef, selectedJob, submittedJobRef.current, () => {
-    const output = machineRef.current?.querySelector('.forge-output-content');
-    if (!output || output.querySelector('[data-forge-preview-loading]')) return false;
-    return [...output.querySelectorAll('img')].every((image) => image.complete);
-  });
+  const motion = useForgeMotion(
+    machineRef,
+    selectedJob,
+    submittedJobRef.current,
+    () => {
+      const output = machineRef.current?.querySelector('.forge-output-content');
+      if (!output || output.querySelector('[data-forge-preview-loading]')) return false;
+      return [...output.querySelectorAll('img')].every((image) => image.complete);
+    },
+    !showHome,
+  );
   const submit = async () => {
     const model = availableModels.find((item) => modelKey(item) === selectedModel);
     const submittedPrompt = mode === 'music' ? composeMusicPrompt(prompt, lyrics) : prompt.trim();

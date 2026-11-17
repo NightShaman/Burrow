@@ -10,6 +10,7 @@ export function useForgeMotion(
   job: MotionJob | undefined,
   submittedId: string,
   ready: () => boolean,
+  surfaceActive = true,
 ) {
   const [enabled, setEnabled] = usePersistedForgeEffects();
   const [systemReduced, setSystemReduced] = useState(
@@ -95,7 +96,7 @@ export function useForgeMotion(
   });
 
   useEffect(() => {
-    if (!root.current) return;
+    if (!root.current || !surfaceActive) return;
     effects.current = createForgeEffects(root.current);
     paintRef.current();
     const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -124,7 +125,7 @@ export function useForgeMotion(
         content.removeAttribute('aria-hidden');
       }
     };
-  }, []);
+  }, [surfaceActive]);
 
   return { enabled: !reduced, setEnabled };
 }
