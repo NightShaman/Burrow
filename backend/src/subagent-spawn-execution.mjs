@@ -550,7 +550,11 @@ export async function executeSpawnSubagentTool({
     child,
   };
   const finished = await updateSubagentStatus({ dataRoot, id: childId, status, phase: 'idle', trace: { runId: childId, childSessionId: childSession, traceDir: childTrace }, model: childModelSelection, result, provenance: { source: 'spawn-subagent-tool', reason: status } });
-  await finishSubagentChildSession({ dataRoot, sessionId: childSession, id: childId, workerProfile: 'spawn_subagent', owner: childOwner, trace: { runId: childId, childSessionId: childSession, traceDir: childTrace }, status, result, model: childModelSelection, conversationStore });
+  // Native runners only return success after awaiting the final chat append.
+  // Keep the fallback for failures and for Burrow's structured terminal report.
+  await finishSubagentChildSession({ dataRoot, sessionId: childSession, id: childId, workerProfile: 'spawn_subagent',
+    owner: childOwner, trace: { runId: childId, childSessionId: childSession, traceDir: childTrace }, status, result,
+    model: childModelSelection, finalReplyPersisted: native && childResult.ok === true, conversationStore });
   await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'spawn_subagent', ...(activityId ? { activityId } : {}), ok: result.ok, harness, id: childId, childSessionId: childSession, status, spawned: Boolean(childRun.spawned), exitCode: childRun.exitCode ?? null, spawnRequestKey: spawnRequest.key, record: subagentVisibilitySummary(finished.record) });
 
   return {

@@ -52,21 +52,22 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, h
   return sessionId;
 }
 
-export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null, conversationStore = null } = {}) {
+export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null, finalReplyPersisted = false, conversationStore = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !sessionId) return null;
   const agentId = owner?.agentId;
   if (typeof agentId !== 'string' || !agentId.trim()) throw new Error('agent_id_required');
   const authority = conversationAuthority({ store: conversationStore, agentId });
-  const summary = compact(result.summary, `${workerProfile || 'Minion'} finished.`);
-  await authority.append({
-    sessionId,
-    type: 'message',
-    role: 'assistant',
-    content: summary,
-    runId: trace.runId || null,
-    metadata: { kind: 'subagent-result', workerProfile, subagentId: id, status, ok: Boolean(result.ok) },
-  });
+  if (!finalReplyPersisted) {
+    await authority.append({
+      sessionId,
+      type: 'message',
+      role: 'assistant',
+      content: compact(result.summary, `${workerProfile || 'Minion'} finished.`),
+      runId: trace.runId || null,
+      metadata: { kind: 'subagent-result', workerProfile, subagentId: id, status, ok: Boolean(result.ok) },
+    });
+  }
   const details = {
     status,
     ok: Boolean(result.ok),
