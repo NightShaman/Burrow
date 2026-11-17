@@ -164,3 +164,43 @@ it('attaches effects after leaving Home and reattaches after returning', () => {
   advance(4000);
   expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
 });
+
+it('keeps an agent-started reveal pending on Home until the machine is visible', () => {
+  const view = render(<Harness job={job('running', 'agent-job')} home />);
+  expect(frames.size).toBe(0);
+  advance(6000);
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} home />);
+  advance(20000);
+  expect(frames.size).toBe(0);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('arming');
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} />);
+  expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(true);
+  advance(1000);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('delivering');
+  advance(3200);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('success');
+  expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} home />);
+  advance(10000);
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} />);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('success');
+  expect(frames.size).toBe(0);
+});
+
+it('shows working on entry and pauses an in-progress blast while away', () => {
+  const view = render(<Harness job={job('running', 'agent-job')} home />);
+  view.rerender(<Harness job={job('running', 'agent-job')} />);
+  advance(1000);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('working');
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} />);
+  advance(1000);
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} home />);
+  expect(frames.size).toBe(0);
+  advance(20000);
+  view.rerender(<Harness job={job('succeeded', 'agent-job')} />);
+  expect(document.querySelector('main')?.dataset.forgePhase).toBe('delivering');
+  advance(80);
+  expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(true);
+  advance(3200);
+  expect(document.querySelector<HTMLElement>('.forge-output-content')!.inert).toBe(false);
+});

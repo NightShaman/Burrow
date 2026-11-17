@@ -25,6 +25,8 @@ export class ForgeMotion {
   observe(job: MotionJob | undefined, submittedId: string, ready: boolean, reduced: boolean) {
     const id = job?.id ?? '';
     if (id !== this.id) {
+      // Explicitly selecting another job dismisses an unfinished reveal.
+      if (this.revealing) this.played.add(this.id);
       this.id = id;
       this.status = '';
       this.observedActive = false;
@@ -46,13 +48,14 @@ export class ForgeMotion {
         job!.artifacts.length > 0 &&
         !this.played.has(id) &&
         (this.observedActive || id === submittedId);
-      if (celebrate) this.played.add(id);
+      if (celebrate && reduced) this.played.add(id);
       this.phase = celebrate && !reduced ? 'arming' : 'idle';
       this.elapsed = 0;
     } else if (!job) this.phase = 'idle';
     this.status = status;
     if (reduced && this.revealing) {
       this.phase = 'success';
+      this.played.add(id);
       this.elapsed = 0;
     }
   }
@@ -83,7 +86,10 @@ export class ForgeMotion {
         this.elapsed = 0;
       } else if (this.phase === 'delivering') {
         this.blastSeconds = this.elapsed;
-        if (this.elapsed >= 3.1) this.phase = 'success';
+        if (this.elapsed >= 3.1) {
+          this.phase = 'success';
+          this.played.add(this.id);
+        }
       }
     }
   }

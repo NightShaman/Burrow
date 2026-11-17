@@ -626,7 +626,7 @@ export function Forge({
       if (!output || output.querySelector('[data-forge-preview-loading]')) return false;
       return [...output.querySelectorAll('img')].every((image) => image.complete);
     },
-    !showHome,
+    !showHome && !showGallery,
   );
   const submit = async () => {
     const model = availableModels.find((item) => modelKey(item) === selectedModel);
