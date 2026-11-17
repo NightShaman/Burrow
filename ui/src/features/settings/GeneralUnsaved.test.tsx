@@ -44,7 +44,9 @@ it('browser tab guards a dirty focused draft; failed guarded Save stays and Disc
   fireEvent.change(field, { target: { value: 'Prod' } });
   fireEvent.click(screen.getByText('Leave settings'));
   fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
-  await screen.findByText('Could not save browser tab suffix.');
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Could not save browser tab suffix. offline',
+  );
   expect(document.body.getAttribute('data-destination')).toBeNull();
   expect((field as HTMLInputElement).value).toBe('Prod');
   fireEvent.click(screen.getByText('Leave settings'));
