@@ -349,6 +349,13 @@
     min-height: 18px;
     height: 18px;
   }
+  /* Keep the vendor beside the name so reset controls do not add a fourth row. */
+  .account-status .account-top > span:first-child {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 6px;
+  }
   .account-status .account-top small {
     font-size: 9px;
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AccountStatus } from '../../src/features/panels/AccountStatus';
 import { ConfirmProvider } from '../../src/app/ConfirmDialog';
@@ -23,17 +23,19 @@ const providers = [
 }));
 const expiry = () => new Date(Date.now() + 3 * 86400_000).toISOString();
 let scenario = 'Normal';
+const json = (data: unknown, init: ResponseInit = {}) =>
+  Response.json(data, { ...init, headers: { Date: new Date().toUTCString() } });
 window.fetch = async (input, init) => {
   const url = String(input);
   const connection = url.match(/connectionId=([^&]+)/)?.[1] || 'fixture-0';
   if (init?.method === 'POST') {
     await new Promise((resolve) => setTimeout(resolve, 800));
     if (scenario === 'Ambiguous')
-      return Response.json(
+      return json(
         { ok: false, error: 'reset_credit_outcome_unknown', ambiguous: true },
         { status: 502 },
       );
-    return Response.json({
+    return json({
       ok: true,
       code: 'reset',
       usageRefresh: { ok: true },
@@ -42,13 +44,23 @@ window.fetch = async (input, init) => {
   }
   if (url.includes('reset-credits')) {
     if (scenario === 'Unavailable')
-      return Response.json({ ok: false, error: 'unavailable' }, { status: 502 });
-    return Response.json(creditData(connection));
+      return json({ ok: false, error: 'unavailable' }, { status: 502 });
+    return json(creditData(connection));
   }
   const index = Number(connection.slice(-1));
   const anthropic = providers[index].provider.startsWith('Anthropic');
-  return Response.json({
+  return json({
     usage: {
+      ...(anthropic
+        ? {
+            fullResets: { availableCount: index === 2 ? 0 : 2, nearestExpiresAt: expiry() },
+            fullResetsFreshness: {
+              fetchedAt: new Date().toISOString(),
+              sampleAgeMs: 0,
+              stale: false,
+            },
+          }
+        : {}),
       accountStatus: {
         status: index <= 1 ? 'available' : index === 4 ? 'rate_limited' : 'limit_exceeded',
         label: index <= 1 ? 'Available' : index === 4 ? 'Rate Limited' : 'Limit Exceeded',
@@ -87,6 +99,23 @@ function creditData(connection: string) {
   };
 }
 function Fixture() {
+  const [geometry, setGeometry] = useState('');
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const panel = document.querySelector('.account-status') as HTMLElement | null;
+      const cards = [...document.querySelectorAll<HTMLElement>('.account-card')];
+      if (panel && cards.length)
+        setGeometry(
+          JSON.stringify({
+            client: panel.clientHeight,
+            scroll: panel.scrollHeight,
+            heights: cards.map((card) => Number(card.getBoundingClientRect().height.toFixed(2))),
+            clipped: cards.filter((card) => card.scrollHeight > card.clientHeight + 1).length,
+          }),
+        );
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
   const [compressed, setCompressed] = useState(true);
   const [version, setVersion] = useState(0);
   return (
@@ -120,6 +149,9 @@ function Fixture() {
             style={{ height: compressed ? 'calc(100vh - 118px)' : 850, padding: 24 }}
           >
             <h2>Chat</h2>
+            <output aria-label="Layout measurements" style={{ overflowWrap: 'anywhere' }}>
+              {geometry}
+            </output>
           </section>
           <aside
             className="rail-panel"

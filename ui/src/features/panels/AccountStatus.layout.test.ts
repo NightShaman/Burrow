@@ -100,3 +100,27 @@ it('keeps percentages next to their own bars with a distinct inter-meter gap', (
     }),
   ).toBe(true);
 });
+
+it('keeps the vendor inline at compact pane heights to leave room for reset controls', () => {
+  const compact = root.nodes.find(
+    (node) =>
+      node.type === 'atrule' &&
+      node.name === 'container' &&
+      node.params === 'account-pane (height < 800px)',
+  );
+  expect(
+    compact &&
+      compact.type === 'atrule' &&
+      compact.nodes?.some(
+        (node) =>
+          node.type === 'rule' &&
+          node.selector === '.account-status .account-top > span:first-child' &&
+          node.nodes.some(
+            (decl) => decl.type === 'decl' && decl.prop === 'display' && decl.value === 'flex',
+          ) &&
+          node.nodes.some(
+            (decl) => decl.type === 'decl' && decl.prop === 'flex-wrap' && decl.value === 'wrap',
+          ),
+      ),
+  ).toBe(true);
+});
