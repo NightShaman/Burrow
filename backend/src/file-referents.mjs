@@ -124,10 +124,10 @@ function uniqueByPath(referents = []) {
 }
 
 export function recentFileReferentSummaryFromTurns(turns = [], { limit = 12, workspaceRoot = null } = {}) {
-  const recentTurns = (turns || []).slice(Math.max(0, (turns || []).length - limit)).reverse();
+  const eligibleTurns = (turns || []).filter(isReferentBearingTurn);
+  const recentTurns = eligibleTurns.slice(Math.max(0, eligibleTurns.length - limit)).reverse();
   const referents = [];
   for (const turn of recentTurns) {
-    if (!isReferentBearingTurn(turn)) continue;
     const turnReferents = normalizeRecentFileReferents(turn.metadata?.recentFiles || [], {
       workspaceRoot,
       turnId: turn.id,

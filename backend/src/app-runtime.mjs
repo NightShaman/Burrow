@@ -15,6 +15,7 @@ import path from 'node:path';
 import { routeRequest } from './request-router.mjs';
 import { activeModAgentProvider, resolveModAgentContext, resolveSharedModContext } from './mod-agent-runtime.mjs';
 import { addressedParticipantsForSharedContext, sharedContextContinuation } from './runtime-shared-participants.mjs';
+import { isOperatorRuntimeTurn } from './runtime-provenance.mjs';
 import { prepareContextForTurn } from './context-builder.mjs';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveRuntimeTracePath } from './config.mjs';
@@ -95,7 +96,7 @@ export async function runAskChat(options = {}) {
     : options.completionEvent ? 'workflow-event' : options.chatInput ? 'queue_next'
       : options.runSource || options.turnSource || options.command || 'chat';
   const origin = source === 'a2a' ? 'agent' : source === 'mod/external' ? 'mod'
-    : ['operator-chat','queue_next'].includes(source) ? 'operator' : 'background';
+    : isOperatorRuntimeTurn({ source, incomingAgentMessage: options.incomingAgentMessage, externalTurnMetadata: options.externalTurnMetadata, completionEvent: options.completionEvent }) ? 'operator' : 'background';
   let result, failure, admitted = false;
   try {
     // Internal regression seam: stale-commit tests exercise the cross-process
@@ -610,8 +611,7 @@ async function runAskChatUnserialized({
   const turnSourceName = incomingAgentMessage ? 'a2a' : externalTurnMetadata ? 'mod/external'
     : completionEvent ? 'workflow-event' : chatInput ? 'queue_next'
       : runSource || turnSource || command || 'chat';
-  const operatorTurn = !incomingAgentMessage && !externalTurnMetadata && !completionEvent
-    && ['operator-chat', 'queue_next', 'chat'].includes(turnSourceName);
+  const operatorTurn = isOperatorRuntimeTurn({ source: turnSourceName, incomingAgentMessage, externalTurnMetadata, completionEvent });
   let promptContext;
   try {
     promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, sharedModContext, incomingAgentMessage, operatorTurn, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });

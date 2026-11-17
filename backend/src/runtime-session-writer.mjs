@@ -49,9 +49,13 @@ export async function appendRuntimeActivity({
 export async function appendRuntimeProviderTurn({ messages = [], ...scope } = {}) {
   const currentIndex = messages.length - 1;
   if (currentIndex < 0 || messages[currentIndex]?.role !== 'user') throw new Error('provider_turn_current_user_required');
-  const supportIndex = currentIndex - 1;
-  const start = messages[supportIndex]?.metadata?.providerMessageSource === 'support-context-provider' ? supportIndex : currentIndex;
-  const turnMessages = messages.slice(start).map(({ role, content, metadata }) => ({ role, content, ...(metadata ? { metadata } : {}) }));
+  // Fresh support is assembled before replayed conversation, so adjacency to
+  // the current user message is not a reliable boundary. Select only the
+  // current provider support pack and current task; historical snapshots and
+  // replayed dialogue already have their own durable owners.
+  const freshSupport = messages.filter((message) => message?.metadata?.providerMessageSource === 'support-context-provider');
+  const turnMessages = [...freshSupport, messages[currentIndex]]
+    .map(({ role, content, metadata }) => ({ role, content, ...(metadata ? { metadata } : {}) }));
   return appendRuntimeSessionEntry({ ...scope, type: 'provider_history',
     content: JSON.stringify({ version: 1, messages: turnMessages }),
     visibility: 'debug', entersPrompt: false, maxContentChars: Infinity });

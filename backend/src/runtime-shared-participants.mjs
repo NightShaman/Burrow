@@ -1,5 +1,6 @@
 import { resolveSharedModContext } from './mod-agent-runtime.mjs';
 import { sharedModContextMessages } from './prompt-assembler.mjs';
+import { isOperatorRuntimeSource } from './runtime-provenance.mjs';
 
 // Build the identity list for shared context from Core-owned route provenance.
 // Message content and serialized request fields are deliberately absent.
@@ -9,7 +10,7 @@ export async function addressedParticipantsForSharedContext({ agentRuntime = nul
   // app-runtime treats an omitted source as a direct `chat` turn. Keep the
   // routing projection aligned with that default so ordinary native runs are
   // not mistaken for background work.
-  const directOperator = source == null || ['operator-chat', 'queue_next', 'chat'].includes(source);
+  const directOperator = isOperatorRuntimeSource(source);
   const group = Boolean(groupChannelContext?.channelId && Array.isArray(groupChannelContext.participantAgentIds));
   const a2a = Boolean(incomingAgentMessage?.senderAgentId);
   const includeRecipient = directOperator || group || a2a;
