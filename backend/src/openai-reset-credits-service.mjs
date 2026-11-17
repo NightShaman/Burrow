@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
 
 // Native OpenAI WHAM banked rate-limit reset contract. Never retry an
 // uncertain POST. A new attempt is allowed only after confirmed non-consumption.
@@ -7,6 +8,10 @@ const attempts = new Map();
 const uncertainAccounts = new Set(); // Fallback for non-persistent/manual test clients.
 const identifier = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 256;
 const failure = (status, error, extra = {}) => ({ ok: false, status, error, ...extra });
+const failureDiagnostic = (error, stage, fallbackCode) => {
+  const diagnostic = boundaryDiagnostic(error, stage);
+  return { ...diagnostic, errorCode: diagnostic.errorCode === 'operation_failed' ? fallbackCode : diagnostic.errorCode };
+};
 const date = value => {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
   return new Date(value).toISOString();
@@ -22,9 +27,17 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
   async function snapshot(source, evidence = false) {
     try {
       const response = await fetchImpl(resetCreditsUrl, { headers: headers(source), signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
-      if (!response.ok) return failure(response.status, `openai_reset_credits_failed:${response.status}`);
-      const data = await response.json();
-      if (!data || data.error || !Array.isArray(data.credits) || !Number.isInteger(data.available_count) || data.available_count < 0) return failure(502, 'openai_reset_credits_invalid_response');
+      if (!response.ok) return failure(response.status, `openai_reset_credits_failed:${response.status}`, { connectionId: source.connectionId,
+        diagnostic: { errorCode: 'openai_reset_credits_http_failed', errorType: 'Error', stage: 'reset_inventory', httpStatus: response.status } });
+      let data;
+      try { data = await response.json(); }
+      catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        return failure(502, 'openai_reset_credits_invalid_response', { connectionId: source.connectionId,
+          diagnostic: { ...boundaryDiagnostic(error, 'reset_inventory_json', 'openai_reset_credits_invalid_json'), errorCode: 'openai_reset_credits_invalid_json' } });
+      }
+      if (!data || data.error || !Array.isArray(data.credits) || !Number.isInteger(data.available_count) || data.available_count < 0) return failure(502, 'openai_reset_credits_invalid_response', { connectionId: source.connectionId,
+        diagnostic: { errorCode: 'openai_reset_credits_invalid_response', errorType: 'Error', stage: 'reset_inventory' } });
       const observed = data.credits.filter(item => item && identifier(item.id)).map(item => ({ id: item.id, status: item.status,
         expiresAt: date(item.expires_at), redeemedAt: date(item.redeemed_at), redeemStartedAt: date(item.redeem_started_at) }));
       const available = observed.filter(item => item.status === 'available' && !item.redeemedAt && !item.redeemStartedAt)
@@ -34,7 +47,8 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
       return { ok: true, connectionId: source.connectionId, fetchedAt: new Date(clock()).toISOString(),
         credits: { availableCount: data.available_count, nearestExpiresAt: expiries[0] || null, available },
         ...(evidence ? { observed } : {}) };
-    } catch { return failure(502, 'openai_reset_credits_unavailable'); }
+    } catch (error) { return failure(502, 'openai_reset_credits_unavailable', { connectionId: source.connectionId,
+      diagnostic: failureDiagnostic(error, 'reset_inventory', 'openai_reset_credits_unavailable') }); }
   }
 
   async function openaiResetCredits({ connectionId } = {}) {
@@ -71,12 +85,16 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
               await resetStore.settle({ account, ...entry, outcome: 'consumed', code: 'provider_history_confirmed' });
             }
           }
-          if ((await resetStore.pending(account)).length) return failure(409, 'reset_credit_outcome_unknown', { ambiguous: true });
+          const remaining = await resetStore.pending(account);
+          if (remaining.length) return failure(409, 'reset_credit_outcome_unknown', { ambiguous: true,
+            pendingCount: remaining.length, unobservedPendingCount: remaining.filter(entry => !fresh.observed.some(item => item.id === entry.creditId)).length,
+            diagnostic: { errorCode: 'reset_credit_outcome_unknown', errorType: 'Error', stage: 'reset_ledger_reconcile' } });
           // Reconciliation is a read/settlement-only poll: never fall through to
           // another credit in the same operation that resolves an unknown one.
           if (pending.length) return { ok: true, connectionId, code: 'reset_credit_reconciled' };
           if (automatic) pinnedRetry = await resetStore.retryCredit(account);
-        } catch { return failure(503, 'reset_credit_ledger_unavailable'); }
+        } catch (error) { return failure(503, 'reset_credit_ledger_unavailable', { connectionId,
+          diagnostic: failureDiagnostic(error, 'reset_ledger_reconcile', 'reset_credit_ledger_unavailable') }); }
       } else if (uncertainAccounts.has(account)) return failure(409, 'reset_credit_outcome_unknown', { ambiguous: true });
       const eligible = item => item.expiresAt && Date.parse(item.expiresAt) > clock() && Date.parse(item.expiresAt) <= clock() + AUTO_RESET_EXPIRY_MS;
       const credit = automatic
@@ -91,7 +109,8 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
       const identity = { account, creditId, requestId, expiresAt: credit.expiresAt };
       if (resetStore) {
         try { if (!await resetStore.claim(identity)) return failure(409, 'reset_credit_already_claimed'); }
-        catch { return failure(503, 'reset_credit_claim_unavailable'); }
+        catch (error) { return failure(503, 'reset_credit_claim_unavailable', { connectionId,
+          diagnostic: failureDiagnostic(error, 'reset_ledger_claim', 'reset_credit_claim_unavailable') }); }
       }
       let result;
       let outcome = 'unknown';
@@ -108,26 +127,44 @@ export function createOpenAiResetCreditsService({ resolveSource, fetchImpl = glo
           // uncertainty/server failure. The same pinned credit is revalidated.
           const ambiguous = response.status >= 500 || response.status === 408 || response.status < 400;
           outcome = ambiguous ? 'unknown' : 'retryable';
-          result = failure(response.status, `openai_reset_credit_consume_failed:${response.status}`, { ambiguous });
+          result = failure(response.status, `openai_reset_credit_consume_failed:${response.status}`, { ambiguous,
+            diagnostic: { errorCode: 'reset_credit_consume_failed', errorType: 'Error', stage: 'reset_consume', httpStatus: response.status } });
         } else {
-          const data = await response.json();
-          if (data?.error || !['reset', 'nothing_to_reset', 'no_credit', 'already_redeemed'].includes(data?.code) ||
+          let data;
+          try { data = await response.json(); }
+          catch (error) {
+            if (error instanceof SyntaxError) {
+              result = failure(502, 'reset_credit_outcome_unknown', { ambiguous: true,
+                diagnostic: { ...boundaryDiagnostic(error, 'reset_consume_json', 'reset_credit_outcome_unknown'), errorCode: 'reset_credit_outcome_unknown' } });
+            } else throw error;
+          }
+          if (!result) {
+            if (data?.error || !['reset', 'nothing_to_reset', 'no_credit', 'already_redeemed'].includes(data?.code) ||
               (data.credit?.id != null && data.credit.id !== creditId) ||
               (data.code === 'nothing_to_reset' && (data.windows_reset > 0 || data.credit?.status === 'redeemed' || data.credit?.redeemed_at || data.credit?.redeem_started_at))) {
-            result = failure(502, 'reset_credit_outcome_unknown', { ambiguous: true });
-          } else {
-            code = data.code;
-            outcome = code === 'nothing_to_reset' ? 'retryable' : code === 'no_credit' ? 'unavailable' : 'consumed';
-            result = code === 'no_credit' ? failure(409, 'reset_credit_unavailable') : { ok: true, connectionId, requestId, code };
+              result = failure(502, 'reset_credit_outcome_unknown', { ambiguous: true,
+                diagnostic: { errorCode: 'reset_credit_outcome_unknown', errorType: 'Error', stage: 'reset_consume' } });
+            } else {
+              code = data.code;
+              outcome = code === 'nothing_to_reset' ? 'retryable' : code === 'no_credit' ? 'unavailable' : 'consumed';
+              result = code === 'no_credit' ? failure(409, 'reset_credit_unavailable') : { ok: true, connectionId, requestId, code };
+              result = { ...result, redemptionResultKnown: true, redemptionResult: code };
+            }
           }
         }
-      } catch { result = failure(502, 'reset_credit_outcome_unknown', { ambiguous: true }); }
+      } catch (error) {
+        result = failure(502, 'reset_credit_outcome_unknown', { ambiguous: true,
+          diagnostic: failureDiagnostic(error, 'reset_consume', 'reset_credit_outcome_unknown') });
+      }
       // Persist actual result BEFORE optional refresh. If storage fails the
       // pre-dispatch unknown fence remains, including across a hard restart.
       if (resetStore) {
         try { await resetStore.settle({ ...identity, outcome, code, httpStatus, error: result.error || null }); }
-        catch {
-          result = { ...result, outcomeRecorded: false, ledgerError: 'reset_credit_outcome_record_failed' };
+        catch (error) {
+          const causeDiagnostic = result.diagnostic;
+          result = { ...result, outcomeRecorded: false, ledgerError: 'reset_credit_outcome_record_failed',
+            ...(causeDiagnostic ? { causeDiagnostic } : {}),
+            diagnostic: { ...failureDiagnostic(error, 'reset_ledger_settle', 'reset_credit_outcome_record_failed'), httpStatus } };
           outcome = 'unknown';
         }
       }

@@ -96,6 +96,13 @@ const RUNTIME_CODES = new Set([
   'oidc_verified_email_required', 'oidc_email_not_allowed', 'oidc_domain_not_allowed',
   'oidc_session_invalid', 'oidc_session_authorization_changed', 'oidc_cookie_invalid',
   'oidc_network_timeout', 'oidc_network_failed', 'oidc_endpoint_invalid',
+  // openai-reset-credits-service.mjs and openai-reset-scheduler.mjs.
+  'openai_reset_poll_failed', 'openai_reset_credits_http_failed', 'openai_reset_credits_invalid_json', 'openai_reset_credits_invalid_response',
+  'openai_reset_credits_unavailable', 'openai_oauth_usage_config_missing', 'reset_credit_request_invalid', 'reset_credit_stable_identity_required',
+  'reset_credit_request_id_conflict', 'reset_credit_redemption_in_progress', 'reset_credit_replay_capacity_reached',
+  'reset_credit_outcome_unknown', 'reset_credit_ledger_unavailable', 'reset_credit_claim_unavailable',
+  'reset_credit_already_claimed', 'reset_credit_unavailable', 'reset_credit_outcome_record_failed',
+  'reset_credit_consume_failed',
 ]);
 const guardedStreams = new WeakSet();
 const REPEAT_SCOPE = ['mod', 'modId', 'ownerModId', 'provider', 'providerId', 'connection', 'connectionId', 'dependency', 'sourceId', 'skillId', 'signal'];

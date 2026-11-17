@@ -1978,7 +1978,7 @@ function closeOnlyProducer(resource) {
   let closing = null;
   return { stop() { closing ||= Promise.resolve().then(() => resource.close()); closing.catch(() => {}); }, close() { this.stop(); return closing; } };
 }
-const openaiResetScheduler = startOpenAiResetScheduler(pollExpiringResets);
+const openaiResetScheduler = startOpenAiResetScheduler(pollExpiringResets, { logger: serverLogger });
 const archiveReadProducer = closeOnlyProducer(archiveReadProcess);
 const skillSyncProducer = closeOnlyProducer(skillGitSync);
 const modDistributionProducer = closeOnlyProducer({ async close() {
