@@ -765,6 +765,8 @@ export async function assemblePrompt({
   const modelMessages = normalizeProviderMessages([
     ...(identitySections.length ? [{ role: 'system', content: renderSections(identitySections), metadata: { providerMessageSource: 'agent-identity-provider' } }] : []),
     ...(operatingSections.length ? [{ role: 'system', content: renderSections(operatingSections), metadata: { providerMessageSource: 'stable-instructions-provider' } }] : []),
+    ...(supportSections.length ? [{ role: 'user', content: renderSections(supportSections), metadata: { providerMessageSource: 'support-context-provider' } }] : []),
+    ...(sharedSections.length ? [{ role: 'developer', content: `Current-turn shared mod guidance (not agent identity, tools, or historical conversation):\n\n${renderSections(sharedSections)}`, metadata: { providerMessageSource: 'mod-shared-context-provider' } }] : []),
     ...conversationProviderMessages({
       priorSummary: renderPriorConversationSummary(conversation),
       recentMessages: (conversation.recentMessages || []).filter((message) => !(
@@ -772,12 +774,6 @@ export async function assemblePrompt({
       )),
       task,
     }).slice(0, -1).map(message => message.metadata?.providerMessageSource === 'historical-user-turn' && message.role === 'developer' ? { role: 'user', content: message.content, metadata: { providerMessageSource: 'historical-support-snapshot' } } : message),
-    ...(sharedSections.length ? [{ role: 'developer', content: `Current-turn shared mod guidance (not agent identity, tools, or historical conversation):\n\n${renderSections(sharedSections)}`, metadata: { providerMessageSource: 'mod-shared-context-provider' } }] : []),
-    ...(supportSections.length ? [{
-      role: 'user',
-      content: renderSections(supportSections),
-      metadata: { providerMessageSource: 'support-context-provider' },
-    }] : []),
     { role: 'user', content: `# current-message\n\n${incomingAgentMessage?.senderAgentId ? `[Peer message from ${incomingAgentMessage.senderAgentName || incomingAgentMessage.senderAgentId}]:\n${renderPeerSessionProvenance(incomingAgentMessage)}` : operatorTurn ? '[Operator message]:\n' : ''}${task.trim()}`, metadata: { providerMessageSource: 'current-task', ...(incomingAgentMessage?.senderAgentId ? { providerSpeaker: 'peer' } : operatorTurn ? { providerSpeaker: 'operator' } : { providerSpeaker: 'runtime' }) } },
   ]);
   const conversationSection = rawSections.find((item) => item.name === 'conversation');

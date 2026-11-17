@@ -74,11 +74,15 @@ export function applyWorkingContextEvents(context = null, events = []) {
   for (const event of events || []) {
     if (!event || typeof event !== 'object') continue;
     const normalized = normalizeWorkingContext(event);
+    const workspaceChanged = normalized.workspace?.root && next.workspace?.root
+      && path.resolve(normalized.workspace.root) !== path.resolve(next.workspace.root);
     next = normalizeWorkingContext({
       continuityScope: normalized.continuityScope || next.continuityScope,
       workspace: normalized.workspace || next.workspace,
-      targets: [...normalized.targets, ...next.targets],
-      referents: [...normalized.referents, ...next.referents],
+      // File references belong to the workspace where they were observed.
+      // Do not carry them into a different explicit workspace.
+      targets: workspaceChanged ? normalized.targets : [...normalized.targets, ...next.targets],
+      referents: workspaceChanged ? normalized.referents : [...normalized.referents, ...next.referents],
       readEvidence: mergeReadEvidence(normalized.readEvidence, next.readEvidence),
     });
   }

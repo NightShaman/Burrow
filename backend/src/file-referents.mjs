@@ -78,10 +78,17 @@ export function recentFileReferentsFromToolResults(toolResults = [], context = {
   const candidates = [];
   for (const toolResult of toolResults || []) {
     if (!toolResult?.ok) continue;
-    if (!['files_write', 'files_patch'].includes(toolResult.tool)) continue;
+    if (toolResult.tool === 'files_read') {
+      if (toolResult.filePath) candidates.push({ path: toolResult.filePath, role: 'read', source: 'tool-result' });
+      continue;
+    }
+    if (!['files_write', 'files_edit', 'files_patch'].includes(toolResult.tool)) continue;
     const role = toolResult.tool === 'files_write' && toolResult.created ? 'created' : 'changed';
-    if (Array.isArray(toolResult.touchedFiles) && toolResult.touchedFiles.length) {
-      for (const touchedPath of toolResult.touchedFiles) {
+    const touchedFiles = Array.isArray(toolResult.touchedFiles) && toolResult.touchedFiles.length
+      ? toolResult.touchedFiles
+      : Array.isArray(toolResult.changedFiles) && toolResult.changedFiles.length ? toolResult.changedFiles : [];
+    if (touchedFiles.length) {
+      for (const touchedPath of touchedFiles) {
         candidates.push({ path: touchedPath, role, source: 'tool-result' });
       }
       continue;
