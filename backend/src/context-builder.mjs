@@ -136,7 +136,6 @@ export async function buildContextForTurn({
   operatorTurn = false,
   selectedSkills = [],
   promptSkills = selectedSkills,
-  availableSkills = [],
   modelProfile = null,
   modAgentContext = null,
   sharedModContext = null,
@@ -181,7 +180,6 @@ export async function buildContextForTurn({
     operatorTurn,
     selectedSkills,
     promptSkills,
-    availableSkills,
     conversationContext: conversationContextFromEngine(context),
     modelProfile,
     modelConfig,
@@ -191,9 +189,8 @@ export async function buildContextForTurn({
     supportContext: effectiveSupportContext,
     task,
     attachments,
-    // Keep current uploads distinct from persisted references. The prompt may
-    // render both, but receipts must not pretend old reopenable artifacts were
-    // uploaded again on this turn.
+    // Only current uploads render; retained references remain in diagnostics
+    // and are separately available through the on-demand tool.
     retainedAttachmentManifest: Array.isArray(turnContext?.conversation?.attachmentManifest) ? turnContext.conversation.attachmentManifest : [],
     currentAttachmentManifest: Array.isArray(attachmentManifest) ? attachmentManifest : [],
     attachmentArtifactRoot,

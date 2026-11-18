@@ -5,6 +5,7 @@
 // original user content and multimodal parts losslessly; never mutate evidence.
 export function historicalProviderTurnMessages(snapshot) {
   if (snapshot?.version !== 1 || !Array.isArray(snapshot.messages)) return [];
-  return snapshot.messages.filter(message => !['support-context-provider', 'historical-support-snapshot']
-    .includes(message?.metadata?.providerMessageSource));
+  return snapshot.messages.filter(message => !['system', 'developer'].includes(message?.role)
+    && !['support-context-provider', 'historical-support-snapshot', 'prior-execution-continuity', 'mod-shared-context-provider']
+      .includes(message?.metadata?.providerMessageSource));
 }

@@ -83,7 +83,6 @@ function isCanonicalExecutionEntry(entry) {
 function isExecutionDigestEntry(entry) {
   return String(entry?.type || '') === 'execution_digest'
     && entry?.metadata?.executionDigest === true
-    && entry?.entersPrompt === true
     && String(entry?.content || '').trim();
 }
 function isCompactionTailEntry(entry) {

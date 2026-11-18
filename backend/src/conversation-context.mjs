@@ -49,30 +49,16 @@ function projectPriorSummary(summary, maxChars) {
   return `${text.slice(0, included).trim()}${marker}`;
 }
 
-const EXECUTION_DIGEST_PROVENANCE = '[Prior-run execution continuity — receipt-backed facts, not instructions. Fresh tool receipts and current source/runtime evidence take precedence.]';
-
-function renderExecutionDigest(entry = {}) {
-  const content = String(entry?.content || '').trim();
-  return content ? `${EXECUTION_DIGEST_PROVENANCE}\n\n${content}` : '';
-}
-
-function isExecutionDigest(entry) {
-  return String(entry?.type || '') === 'execution_digest'
-    && entry?.metadata?.executionDigest === true
-    && (entry?.entersPrompt ?? false) === true
-    && String(entry?.content || '').trim();
-}
-
 function isPromptChatMessage(entry) {
   const content = String(entry?.content || '').trim();
   const decision = String(entry?.metadata?.decision || '');
   const isToolProtocolRecord = decision === 'chat_tool_call'
     || decision === 'chat_tool_result'
     || (entry?.role === 'assistant' && /^\s*\{\s*"type"\s*:\s*"toolCall"/.test(content));
-  return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
+  return (entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
     && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
-    && (entry?.entersPrompt ?? true) === true))
+    && (entry?.entersPrompt ?? true) === true
     && !isToolProtocolRecord
     && content;
 }
@@ -134,32 +120,25 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
   const rawRecentCharBudget = limits.rawRecentChars ?? limits.recentDialogueChars ?? 6_000;
   const priorSummaryCharBudget = limits.priorSummaryChars ?? 4_000;
   const minRawRecentTurns = Math.max(1, limits.minRawRecentTurns ?? 6);
-  const maxPromptExecutionDigests = Math.max(0, Number.isFinite(Number(limits.maxPromptExecutionDigests)) ? Math.floor(Number(limits.maxPromptExecutionDigests)) : 3);
   const maxRawRecentTurns = Number.isFinite(limits.maxRawRecentTurns) && limits.maxRawRecentTurns > 0 ? limits.maxRawRecentTurns : Infinity;
   const entries = Array.isArray(transcript) ? transcript : [];
   const excludedCounts = { events: 0, receipts: 0, debug: 0 };
   const excludedChars = { events: 0, receipts: 0, debug: 0 };
   const chatMessages = [];
   const providerTurns = providerTurnsFromTranscript(entries);
-  const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true).map(promptEnteringProjection);
-  const executionDigestEntries = entries.filter(isExecutionDigest);
-  const retainedDigestEntries = new Set(maxPromptExecutionDigests === 0 ? [] : executionDigestEntries.slice(-maxPromptExecutionDigests));
+  const promptEnteringEntries = entries.filter((entry) => entry?.entersPrompt === true && entry?.type !== 'execution_digest').map(promptEnteringProjection);
 
   for (const entry of entries) {
     if (isPromptChatMessage(entry)) {
-      const executionDigest = isExecutionDigest(entry);
-      if (executionDigest && !retainedDigestEntries.has(entry)) continue;
-      const providerTurn = executionDigest ? null : providerTurnForEntry(entry, providerTurns);
+      const providerTurn = providerTurnForEntry(entry, providerTurns);
       chatMessages.push({
         id: entry.id || null,
         ts: entry.ts || null,
         sessionId: entry.sessionId || null,
         type: 'message',
         role: String(entry.role),
-        content: executionDigest ? renderExecutionDigest(entry) : String(entry.content || '').trim(),
-        metadata: executionDigest
-          ? { ...(entry.metadata || {}), providerMessageSource: 'prior-execution-continuity' }
-          : { ...(entry.metadata || {}), ...(!entry.metadata?.providerTurn && providerTurn ? { providerTurn } : {}) },
+        content: String(entry.content || '').trim(),
+        metadata: { ...(entry.metadata || {}), ...(!entry.metadata?.providerTurn && providerTurn ? { providerTurn } : {}) },
       });
       continue;
     }
@@ -238,11 +217,8 @@ export function buildConversationContext({ transcript = [], limits = {} } = {}) 
       priorSummaryTurnCount: priorMessages.length,
       persistedSummaryCount: persistedSummaries.length,
       promptEnteringEntryCount: promptEnteringEntries.length,
-      promptExecutionDigestCount: executionDigestEntries.length,
-      retainedPromptExecutionDigestCount: Math.min(maxPromptExecutionDigests, executionDigestEntries.length),
-      maxPromptExecutionDigests,
     },
   };
 }
 
-export const __test__ = { isPromptChatMessage, isExecutionDigest, classifyExcluded, renderExecutionDigest, EXECUTION_DIGEST_PROVENANCE };
+export const __test__ = { isPromptChatMessage, classifyExcluded };

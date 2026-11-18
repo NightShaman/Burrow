@@ -6,18 +6,11 @@ import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } 
 import { operationalTelemetry } from './operational-telemetry.mjs';
 import { performance } from 'node:perf_hooks';
 
-function isExecutionDigest(entry) {
-  return String(entry?.type || '') === 'execution_digest'
-    && entry?.metadata?.executionDigest === true
-    && (entry?.entersPrompt ?? false) === true
-    && String(entry?.content || '').trim();
-}
-
 function isPromptChatMessage(entry) {
-  return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
+  return (entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
     && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
-    && (entry?.entersPrompt ?? true) === true))
+    && (entry?.entersPrompt ?? true) === true
     && String(entry?.content || '').trim();
 }
 

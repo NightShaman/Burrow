@@ -5,7 +5,7 @@ import { redactValue } from './redaction.mjs';
 const labels = {
   'agent-identity-provider': 'Identity',
   'stable-instructions-provider': 'Fixed guidance',
-  'support-context-provider': 'Turn support',
+  'support-context-provider': 'Burrow runtime context',
   'current-task': 'Current message',
   'compaction-summary': 'Conversation summary',
   'raw-transcript-assistant': 'Assistant conversation',

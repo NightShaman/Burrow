@@ -20,6 +20,7 @@ import { activeModAgentProvider, executeModAgentTool } from './mod-agent-runtime
 import { executeForgeTool, forgeFailure } from './forge-agent-tools.mjs';
 import { viewForgeArtifactReference } from './forge-artifact-reference.mjs';
 import { protectToolOutput } from './protected-values.mjs';
+import { inspectRuntimeContext } from './runtime-context-inspect.mjs';
 import { executeSkillTool } from './skill-tool-executor.mjs';
 import path from 'node:path';
 
@@ -267,6 +268,17 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const { result, finishTrace } = await executeMcpTool({ action, executionContext, agentId, sessionId, conversationId, resolvedConversationId, workspaceRoot, rootDir, abortSignal, traceLogger, invokeMcp });
       toolResults.push(result);
       await finishTrace?.();
+      continue;
+    }
+
+    if (action.tool === 'runtime_context_inspect') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null, section: action.contextSection });
+      const result = await inspectRuntimeContext({ section: action.contextSection, executionContext, agentRuntime,
+        agentId: executionContext?.agentId || agentId, sessionId: executionContext?.sessionId || sessionId,
+        conversationStore: executionContext?.conversationStore || executionContext?.stores?.conversations || conversationStore, signal: abortSignal });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null,
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, error: result.error || null });
       continue;
     }
 

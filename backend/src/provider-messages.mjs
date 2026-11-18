@@ -305,8 +305,9 @@ export function replaceSharedContextMessages(messages = [], sharedMessages = [])
 
 export function conversationProviderMessages({ priorSummary = '', recentMessages = [], task = '' } = {}) {
   return normalizeProviderMessages([
-    ...(text(priorSummary) ? [{ role: 'user', content: `# prior-conversation-summary\n\n${text(priorSummary)}` }] : []),
+    ...(text(priorSummary) ? [{ role: 'developer', content: `# prior-conversation-summary\n\n${text(priorSummary)}`, metadata: { providerMessageSource: 'compaction-summary' } }] : []),
     ...recentMessages.flatMap((message) => {
+      if (message?.metadata?.providerMessageSource === 'prior-execution-continuity') return [];
       const snapshot = message?.metadata?.providerTurn;
       if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
           && !(message?.role === 'agent' && ['outbound', 'inbound'].includes(message?.metadata?.direction))) {

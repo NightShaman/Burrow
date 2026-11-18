@@ -21,7 +21,6 @@ function normalizeLimits(limits = {}) {
     priorSummaryChars: limits.priorSummaryChars ?? DEFAULT_CONTEXT_LIMITS.priorSummaryChars,
     minRawRecentTurns: limits.minRawRecentTurns,
     maxRawRecentTurns: limits.maxRawRecentTurns,
-    maxPromptExecutionDigests: limits.maxPromptExecutionDigests,
   };
 }
 

@@ -57,6 +57,7 @@ function rawFields(result = {}) {
   if (result.tool === 'session_search' || result.tool === 'memory_working_search' || result.tool === 'memory_rolling_search') return jsonField(`${result.tool} results`, result.results);
   if (result.tool === 'spawn_subagent' && result.summary) return [{ label: 'subagent summary', text: result.summary }];
   const fields = {
+    runtime_context_inspect: ['environment', 'references'],
     mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
     attachment_view: ['attachment'], forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults', 'agentReferenceImage', 'agentReferenceImages', 'operatorReferenceImage'],
     forge_create_job: ['job', 'replayed', 'attachments'], forge_list_jobs: ['jobs'],

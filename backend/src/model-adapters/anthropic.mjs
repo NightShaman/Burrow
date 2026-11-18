@@ -87,8 +87,12 @@ function anthropicMessages(messages = [], prompt = '') {
   const system = [];
   const converted = [];
   for (const message of source) {
-    const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'system' ? 'system' : 'user';
-    if (role === 'system') { system.push(String(message.content || '')); continue; }
+    if (['system', 'developer'].includes(message?.role)) {
+      const text = String(message.content || '').trim();
+      if (text) system.push({ text, stable: message.role === 'system' });
+      continue;
+    }
+    const role = message?.role === 'assistant' ? 'assistant' : 'user';
     if (message?.role === 'tool') {
       // Tool results use the same image conversion as user content; keep the
       // result nested under its paired tool_use_id.
@@ -107,7 +111,7 @@ function anthropicMessages(messages = [], prompt = '') {
     }
     converted.push({ role, content });
   }
-  return { system: system.filter(Boolean), messages: converted };
+  return { system, messages: converted };
 }
 
 function anthropicPromptCachingEnabled(config = {}) {
@@ -118,14 +122,9 @@ function anthropicCacheControl() {
   return { type: 'ephemeral' };
 }
 
-function anthropicCacheableSystem(system = '') {
-  const blocks = (Array.isArray(system) ? system : [system])
-    .map((text) => String(text || '').trim())
-    .filter(Boolean)
-    .map((text) => ({ type: 'text', text }));
-  if (!blocks.length) return undefined;
-  blocks[blocks.length - 1].cache_control = anthropicCacheControl();
-  return blocks;
+function anthropicCacheableSystem(system) {
+  const lastStable = system.findLastIndex(block => block.stable);
+  return system.map(({ text }, index) => ({ type: 'text', text, ...(index === lastStable ? { cache_control: anthropicCacheControl() } : {}) }));
 }
 
 // Anthropic rejects composition keywords on the input_schema root. This is a
@@ -559,13 +558,13 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
     if (!converted.messages.length || !converted.messages.some((message) => Array.isArray(message.content) && message.content.length)) throw new Error('prompt or messages are required');
     const resolvedTools = Array.isArray(tools) && tools.length ? tools.map(anthropicTool) : null;
     const oauthLike = ['oauth', 'token', 'bearer_token'].includes(String(config.auth?.type || '').toLowerCase());
-    const system = [oauthLike ? CLAUDE_CODE_BILLING_SYSTEM_BLOCK : null, ...converted.system].filter(Boolean);
+    const system = [...(oauthLike ? [{ text: CLAUDE_CODE_BILLING_SYSTEM_BLOCK, stable: true }] : []), ...converted.system];
     const promptCaching = anthropicPromptCachingEnabled(config);
     const thinking = anthropicThinkingConfig({ model, config, maxTokens });
     const body = {
       model,
       messages: converted.messages,
-      ...(system.length ? { system: promptCaching ? anthropicCacheableSystem(system) : system.join('\n\n') } : {}),
+      ...(system.length ? { system: promptCaching ? anthropicCacheableSystem(system) : system.map(block => block.text).join('\n\n') } : {}),
       ...(thinking.enabled || config.supportsTemperature === false || !anthropicSupportsSamplingParameters(model) ? {} : { temperature }),
       max_tokens: thinking.maxTokens,
       ...(resolvedTools ? { tools: promptCaching ? anthropicCacheableTools(resolvedTools) : resolvedTools } : {}),
@@ -606,7 +605,7 @@ export function createAnthropicMessagesModelAdapter({ config = {}, fetchImpl = g
       const providerRequestArtifact = await providerDiagnostic(() => traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(JSON.stringify(diagnosticBody)))) || null;
       const requestContextUsage = contextUsageFromRequest({ promptChars, bodyChars: serializedBody.length, imageCount, model, api: 'anthropic-messages', modelCall, clock });
       await providerCallback(() => onContextUsage?.(contextUsageCallback(requestContextUsage, requestContextUsage, { stage: 'request-estimate', ...callbackIdentity })));
-      const stablePrefixHash = serializedMessageHash({ system: body.system || null, tools: body.tools || [] });
+      const stablePrefixHash = serializedMessageHash({ system: Array.isArray(body.system) ? body.system.slice(0, body.system.findLastIndex(block => block.cache_control) + 1) : sourceTranscript.filter(message => message.role === 'system').map(message => message.content), tools: body.tools || [] });
       await providerDiagnostic(() => traceLogger?.model?.({ stage: 'model-request', providerTiming: timing.projected, ...timing.ownership, requestId, modelCall, provider: 'anthropic', api: 'anthropic-messages', model, url, headers: redactHeaders(headers), messageCount: body.messages.length, promptChars, bodyChars: serializedBody.length, continuation: false, toolCount: resolvedTools?.length || 0, toolNames: resolvedTools?.map((tool) => tool.name).filter(Boolean) || [], providerMessageManifest, stablePrefixHash, promptCaching, thinking: thinking.enabled ? { mode: thinking.mode, effort: thinking.effort || null, budgetTokens: thinking.budgetTokens || null } : null, providerRequestArtifact, ts: clock() }));
       const response = await invokeProviderFetch(fetchImpl, url, { method: 'POST', headers, body: serializedBody, ...(signal ? { signal } : {}) }, { traceLogger, requestId, provider: 'anthropic', api: 'anthropic-messages', model, modelCall, recoveryContext, clock, timing });
       const responseBody = streaming ? await readAnthropicSse(response, { signal, maxBytes: config.maxResponseBytes, onTextDelta: timing.wrap(onTextDelta, 'text'), onThoughtDelta: timing.wrap(onThoughtDelta, 'thought'), onToolDelta: () => { try { timing.stream('tool'); } catch {} } }) : await readResponseTextBounded(response, config.maxResponseBytes);

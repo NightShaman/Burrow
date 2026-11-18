@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
 
-export const ALLOWED_TOOLS = new Set(['mod_agent_tool', 'run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['mod_agent_tool', 'runtime_context_inspect', 'run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -57,6 +57,7 @@ function normalizeAction(action, index) {
     // Provider call identity is trusted runtime metadata, not a tool argument.
     toolCallId: action?.toolCallId ? String(action.toolCallId) : null,
     reason: action?.reason ? String(action.reason) : null,
+    ...(tool === 'runtime_context_inspect' ? { contextSection: action.section } : {}),
     requiresApproval: Boolean(action?.requiresApproval),
     command: action?.command ? String(action.command) : null,
     protectedBindings: action?.protectedBindings && typeof action.protectedBindings === 'object' && !Array.isArray(action.protectedBindings) ? action.protectedBindings : {},
@@ -169,6 +170,7 @@ function normalizeAction(action, index) {
   if (tool === 'files_search' && !normalized.query) errors.push('query_required');
   if (tool === 'files_edit' && (normalized.oldText === null || normalized.newText === null)) errors.push('oldText_and_newText_required');
   if ((tool === 'session_search' || tool === 'memory_working_search' || tool === 'memory_rolling_search') && !normalized.query && !(tool === 'session_search' && normalized.sourceId)) errors.push('query_required');
+  if (tool === 'runtime_context_inspect' && !['environment', 'attachments'].includes(normalized.contextSection)) errors.push('runtime_context_section_invalid');
   if (tool === 'run_evidence_search' && !normalized.query?.trim()) errors.push('query_required');
   if (tool === 'session_search' && normalized.sessionScope !== 'agent_sessions') errors.push('session_history_scope_invalid');
   if (tool === 'attachment_view' && !normalized.attachmentId) errors.push('attachmentId_required');
@@ -262,6 +264,7 @@ export function parseActionProposal(text) {
 // First-class spawn_subagent is the sole child-work surface.
 export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
   const tools = [
+    { type: 'function', function: { name: 'runtime_context_inspect', description: 'Read details for this turn: environment returns the selected host report (including available interfaces), execution workspace and configured browser target; attachments lists up to 24 recent reopenable attachments in this session without loading bytes. Pass a returned attachment ID to attachment_view.', parameters: { type: 'object', additionalProperties: false, properties: { section: { type: 'string', enum: ['environment', 'attachments'] }, reason: { type: 'string' } }, required: ['section'] } } },
     { type: 'function', function: { name: 'run_evidence_search', description: 'Explicit read-only search of this agent’s recorded historical run proof across sessions. Not current verification, recovery state, or authorization. No automatic injection. Records remain subject to existing evidence retention.', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 }, reason: { type: 'string' } }, required: ['query'] } } },
     ...['brain_search','brain_read','brain_save','brain_update','brain_remove'].map(name => ({ type:'function', function:{ name, description:'Explicit persistent agent-owned saved memory. No TTL or preload. Operator-owned records cannot be mutated by agents. Updates/removals require current revision and operator direction; never recreate removed memories. Search/read before relying on saved facts; provenance is not current verification.', parameters:{type:'object',additionalProperties:false,properties:{query:{type:'string'},cursor:{type:'string'},limit:{type:'integer',minimum:1},id:{type:'string'},title:{type:'string'},content:{type:'string'},sourceRefs:{type:'array',items:{type:'string'}},expectedRevision:{type:'integer',minimum:1},reason:{type:'string'}},required:name==='brain_search'?['query']:name==='brain_save'?['title','content']:name==='brain_update'?['id','expectedRevision','title','content']:name==='brain_remove'?['id','expectedRevision']:['id']}} })),
     ...(includeForge ? forgeToolSchemas : []),
@@ -526,6 +529,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings });
   if (tool === 'files_read') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes });
   if (tool === 'attachment_view') return normalizeNative({ tool, reason: args.reason, attachmentId: args.attachmentId || args.id });
+  if (tool === 'runtime_context_inspect') return normalizeNative({ tool, section: args.section, reason: args.reason });
   if (tool === 'run_evidence_search') return normalizeNative({ tool, query: args.query, limit: args.limit, reason: args.reason });
   if (tool === 'session_search') return normalizeNative({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit, since: args.since, until: args.until, sourceId: args.sourceId, sourceSessionId: args.sourceSessionId, neighborCount: args.neighborCount });
   if (tool === 'files_list') return normalizeNative({ tool, reason: args.reason, dirPath: args.dirPath, maxDepth: args.maxDepth, maxEntries: args.maxEntries });

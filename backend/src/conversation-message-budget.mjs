@@ -12,7 +12,9 @@ export function providerTurnsFromTranscript(entries = []) {
       const snapshot = JSON.parse(entry.content);
       if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
         && snapshot.messages.length <= 2 && snapshot.messages.length > 0
-        && snapshot.messages.every(message => message.role === 'user')
+        && snapshot.messages.at(-1)?.role === 'user'
+        && snapshot.messages.slice(0, -1).every(message => message?.role === 'user'
+          || (message?.role === 'developer' && message?.metadata?.providerMessageSource === 'support-context-provider'))
         && (typeof snapshot.messages.at(-1).content === 'string' || Array.isArray(snapshot.messages.at(-1).content))) {
         // First dispatch wins; a retry cannot rewrite historical input.
         if (!turns.has(entry.runId)) turns.set(entry.runId, snapshot);

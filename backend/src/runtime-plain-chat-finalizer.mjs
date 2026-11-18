@@ -218,12 +218,12 @@ export async function appendChatToolLoopEntries({ stores = null, agentId = 'hatc
       dataRoot,
       sessionId,
       type: 'execution_digest',
-      role: 'assistant',
+      role: null,
       content: digest,
       runId: logger.runId,
       traceDir: logger.traceDir,
       visibility: 'debug',
-      entersPrompt: true,
+      entersPrompt: false,
       metadata: { decision: 'chat_execution_digest', executionDigest: true, canonicalExecution: true, toolResultCount: loop.toolResults.length },
     });
   }

@@ -163,11 +163,6 @@ function selectedHistory(entries, limits) {
       summaries.push({ id: entry.id || null, type: 'summary', entersPrompt: false, metadata: { compressionSummary: source } });
       continue;
     }
-    if (entry?.entersPrompt === true && entry?.type === 'execution_digest' && entry.metadata?.executionDigest === true) {
-      messages.push({ id: entry.id || null, ts: entry.ts || null, sessionId: entry.sessionId || null, runId: entry.runId || null, type: 'execution_digest', role: entry.role,
-        visibility: entry.visibility || 'chat', entersPrompt: true, content: String(entry.content || ''), metadata: { executionDigest: true } });
-      continue;
-    }
     if (entry?.entersPrompt === false || (entry?.type ?? 'message') !== 'message') continue;
     if (!['user', 'assistant', 'agent'].includes(entry.role)) continue;
     if ((entry.visibility ?? 'chat') !== 'chat' && !(entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn)) continue;

@@ -1,17 +1,10 @@
 import { providerTurnsFromTranscript, providerTurnForEntry, providerTurnChars } from './conversation-message-budget.mjs';
 
-function isExecutionDigest(entry) {
-  return String(entry?.type || '') === 'execution_digest'
-    && entry?.metadata?.executionDigest === true
-    && (entry?.entersPrompt ?? false) === true
-    && String(entry?.content || '').trim();
-}
-
 function isPromptChatMessage(entry) {
-  return (isExecutionDigest(entry) || ((entry?.type ?? 'message') === 'message'
+  return (entry?.type ?? 'message') === 'message'
     && ['user', 'assistant', 'agent'].includes(String(entry?.role || ''))
     && ((entry?.visibility ?? 'chat') === 'chat' || (entry?.metadata?.steering?.status === 'delivered' && entry?.metadata?.providerTurn))
-    && (entry?.entersPrompt ?? true) === true))
+    && (entry?.entersPrompt ?? true) === true
     && String(entry?.content || '').trim();
 }
 
@@ -197,4 +190,4 @@ export function planContextCompression({ transcript = [], config = {}, contextBu
   };
 }
 
-export const __test__ = { estimateTokensFromChars, isPromptChatMessage, isExecutionDigest };
+export const __test__ = { estimateTokensFromChars, isPromptChatMessage };

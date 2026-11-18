@@ -10,13 +10,18 @@ function safeLabel(value, max = 80) {
   return value.replace(/[\x00-\x1f\x7f<>`#]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-export async function runtimeHostContext(executionContext = {}) {
+export function runtimeHostReference(executionContext = {}) {
   const selected = executionContext?.executionEnvironment && typeof executionContext.executionEnvironment === 'object'
     ? executionContext.executionEnvironment : { kind: 'local' };
   let selectedHost = 'local';
   if (selected.kind === 'remote') selectedHost = safeLabel(selected.targetId) || 'unknown';
   else if (selected.kind === 'unresolved') selectedHost = `${safeLabel(selected.targetId) || 'unknown'} (unresolved)`;
-  const context = { agentHost: safeLabel(os.hostname()), selectedHost };
+  return { agentHost: safeLabel(os.hostname()), selectedHost };
+}
+
+export async function runtimeHostContext(executionContext = {}) {
+  const context = runtimeHostReference(executionContext);
+  const selected = executionContext.executionEnvironment || {};
   if (selected.kind !== 'remote' || typeof executionContext?.processExecutionController?.describeHost !== 'function') return context;
   let timer;
   try {
@@ -39,7 +44,7 @@ export async function runtimeHostContext(executionContext = {}) {
         interfaceKind: ['lan-candidate', 'container', 'vpn', 'unknown'].includes(entry.interfaceKind) ? entry.interfaceKind : 'unknown',
         family: entry.family, address: entry.address }];
     }) : [];
-    context.hostMetadata = { hostname: safeLabel(metadata.hostname), platform: safeLabel(metadata.platform),
+    context.hostMetadata = { source: 'execution-provider-report', hostname: safeLabel(metadata.hostname), platform: safeLabel(metadata.platform),
       addresses, observedAt: new Date(observed).toISOString() };
   } catch { /* Older or offline gateways do not block prompt construction. */ }
   finally { clearTimeout(timer); }
@@ -49,7 +54,7 @@ export async function runtimeHostContext(executionContext = {}) {
 export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores = null, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, temporalContext = null, incomingAgentMessage = null, operatorTurn = false, signal = null, modAgentContext = null, sharedModContext = null } = {}) {
   signal?.throwIfAborted();
   const groupSupport = groupChannelContext?.channelId && Array.isArray(groupChannelContext.turns) ? { groupChannel: groupChannelContext } : {};
-  const hostContext = modAgentContext ? null : await runtimeHostContext(executionContext);
+  const hostContext = modAgentContext ? null : runtimeHostReference(executionContext);
   signal?.throwIfAborted();
   const contextBuild = await buildContextForTurn({
     rootDir,
@@ -64,8 +69,7 @@ export async function prepareRuntimePromptContext({ rootDir, sessionRoot, resolv
     kernel: plainChatKernel({ agentName: agentRuntime?.agent?.name || agentRuntime?.agentId || runtimeState.agentId }),
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
-    availableSkills: route.skills.catalog,
-    supportContext: modAgentContext ? { temporalContext, ...groupSupport } : { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: hostContext, temporalContext, uiTarget: agentRuntime?.contextConfig?.uiTarget || agentRuntime?.agent?.contextConfig?.uiTarget || null, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
+    supportContext: modAgentContext ? { temporalContext, ...groupSupport } : { subagents: structuredSubagents, extraEyesReview, workingContext: ambientWorkingContext, runtimeHost: hostContext, temporalContext, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, ...groupSupport },
     modelProfile: null,
     task: modelTask,
     attachments: promptAttachments,
