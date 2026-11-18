@@ -9834,6 +9834,76 @@
           }
         }
       }
+    },
+    "/api/traces/{runId}/provider-requests": {
+      "get": {
+        "tags": [
+          "Traces"
+        ],
+        "summary": "Inspect saved redacted provider requests for a run",
+        "description": "Lists physical provider requests in recorded order, without bodies. Select requestId to read one body, if available. Requires normal operator authentication or Backdoor Core API authority; scoped diagnostics bearer tokens are not accepted.",
+        "operationId": "getTraceProviderRequests",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathRunId"
+          },
+          {
+            "name": "agentId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Agent owning the run."
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Source session owning the run; defaults to default."
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of one physical provider request; omit to list metadata."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Request metadata or one selected request capture.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ProviderRequestHistory"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ProviderRequestCapture"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "401": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "403": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -22143,6 +22213,180 @@
           }
         },
         "additionalProperties": true
+      },
+      "ProviderRequestMetadata": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "ts",
+          "provider",
+          "model",
+          "api",
+          "modelCall",
+          "continuation",
+          "state"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "ts": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "api": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelCall": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "continuation": {
+            "type": "boolean",
+            "description": "The provider adapter marked this request as a native continuation. Replayed tool history can also appear in requests without this mark."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "expired",
+              "not_captured",
+              "unavailable"
+            ]
+          }
+        }
+      },
+      "ProviderRequestDetail": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "ts",
+          "provider",
+          "model",
+          "api",
+          "modelCall",
+          "continuation",
+          "state"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "ts": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "api": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelCall": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "continuation": {
+            "type": "boolean",
+            "description": "The provider adapter marked this request as a native continuation. Replayed tool history can also appear in requests without this mark."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "expired",
+              "not_captured",
+              "unavailable"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Present only for an available capture. Uses Burrow\u2019s existing redaction boundary; may contain private prompt content."
+          }
+        }
+      },
+      "ProviderRequestHistory": {
+        "type": "object",
+        "required": [
+          "ok",
+          "runId",
+          "retentionDays",
+          "requests"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "runId": {
+            "type": "string"
+          },
+          "retentionDays": {
+            "type": "integer"
+          },
+          "requests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderRequestMetadata"
+            }
+          }
+        }
+      },
+      "ProviderRequestCapture": {
+        "type": "object",
+        "required": [
+          "ok",
+          "runId",
+          "request"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "runId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ProviderRequestDetail"
+          }
+        }
       }
     },
     "securitySchemes": {

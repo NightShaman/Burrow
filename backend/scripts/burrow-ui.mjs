@@ -120,7 +120,7 @@ import { operationalEvent } from '../src/operational-log.mjs';
 import { instrumentHttpResponse, correlateHttpRun, recordHttpFailure, observeHttpResult, observeHttpRunEvent, observeModelRecovery, createCatalogRefreshDiagnostics } from '../src/http-operational-log.mjs';
 import { BASIC_SESSION_COOKIE, basicCredentials, parseCookieHeader, setBasicSessionCookie, verifyBasicSessionCookie, verifyScryptPassword, createUiAuthService } from '../src/ui-auth-service.mjs';
 import { logAuthFailure, startAuthLoginTelemetry, observeAuthEnvironmentOverride } from '../src/ui-auth-diagnostics.mjs';
-import { latestProviderRequest } from '../src/provider-request-inspection.mjs';
+import { latestProviderRequest, providerRequestHistory } from '../src/provider-request-inspection.mjs';
 import { contextReport } from '../src/context-report.mjs';
 
 import { createAgentRunCompletionDispatch } from '../src/agent-run-completion-dispatch.mjs';
@@ -385,10 +385,8 @@ function retentionPolicyScheduler() {
       const stores = postgresApplication.stores;
       const policy = await stores.albdruck.readRetention();
       await stores.workingMemory.pruneExpiredWorkingMemory();
-      if (policy.operationalDays !== null) {
-        const runtime = await runtimeConfig();
-        await runRetentionCleanup({ dataRoot: runtime.runtimeState.agentDataRoot, traceRoot: path.join(runtime.runtimeState.cacheRoot, 'traces'), retention: { traceMaxAgeDays: policy.operationalDays }, confirm: true });
-      }
+      const globalRuntime = await runtimeConfig();
+      await runRetentionCleanup({ dataRoot: globalRuntime.runtimeState.agentDataRoot, traceRoot: path.join(globalRuntime.runtimeState.cacheRoot, 'traces'), retention: { traceMaxAgeDays: policy.operationalDays }, confirm: true });
       for (const agent of await stores.agents.list({ includeDisabled: true })) {
         const runtime = await resolveAgentContext(agent.id);
         if (!runtime) continue;
@@ -758,6 +756,9 @@ function bearerToken(req) {
 function apiTokenScopeForRequest(req, url) {
   if (req.method !== 'GET') return null;
   const pathname = url.pathname;
+  // Complete prompt records are an operator or agent diagnostic action, not
+  // part of the general-purpose external diagnostics token projection.
+  if (pathname.startsWith('/api/traces/') && pathname.endsWith('/provider-requests')) return null;
   if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/metrics/provider-pools' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/brains' || pathname === '/api/diagnostics/brains/memories' || pathname === '/api/diagnostics/brains/embedding-jobs' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/calendar' || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
@@ -1039,6 +1040,20 @@ async function traceRootForRun({ rootDir, sessionId, runId, runtime, agentId } =
     }
   }
   return traceDir ? path.dirname(traceDir) : runtimeTraceRoot(runtime, sessionId, agentId);
+}
+
+async function readProviderRequestHistory({ agentId, sessionId, runId, requestId }) {
+  const runtime = await runtimeConfig(agentId);
+  const traceSessionRoot = runtimeTraceRoot(runtime, sessionId, agentId);
+  const input = { sessionId, runId, requestId };
+  const result = await providerRequestHistory({ ...input, traceSessionRoot });
+  if (result) return result;
+  // Retained runs may reference a previous trace layout. Resolve just this
+  // agent/session/run through the existing archive index, not all transcripts.
+  const source = await postgresApplication.stores.conversations.readArchiveRunSource({ agentId, sessionId, runId });
+  const traceDir = source?.entries.findLast((entry) => entry.traceDir)?.traceDir || source?.evidence?.traceDir;
+  if (!traceDir || path.basename(traceDir) !== runId || path.dirname(traceDir) === traceSessionRoot) return null;
+  return providerRequestHistory({ ...input, traceSessionRoot: path.dirname(traceDir) });
 }
 
 function runtimePolicyStatus(runtime) {
@@ -1638,7 +1653,7 @@ const archiveReadProcess = createArchiveReadProcess({ poolConfig: runtimePostgre
 const sessionRoute = createSessionRoutes({ resolveArchiveAgentRuntime: archiveAgentContext.resolveAgentRuntime, rootDir: projectRoot, readJsonBody, sendJson, resolveAgentRuntime, runtimeAgentWorkspaceRoot, runtimeDataRoot, runtimeSessionRoot, runtimeConfig, activeConversationLimits, inspectSessionContext, inspectSessionContextStatus, activeChatRuns, searchSessionEvidence, searchBurrowSessionEvidence, agentsStore, agentRuntimeContext, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveContinuityCards, archiveContinuityCardDetail, listSessions, sessionDetail, sessionWriteHandoff, sessionContinuityScope, setSessionContinuityScope, clearSessionContinuityScope, sessionReadHandoff, sessionWriteHandoffCandidate, archiveSummaryForReset, archiveSummaryForSession, supersedeSessionRuns, beginSessionAdmissionsReset, finishSessionAdmissionsReset, latestAuthorityExplanationForSession, listAuthorityExplanationsForSession, conversationStore: postgresApplication.stores.conversations });
 const brainRoute = createBrainRoutes({ store: postgresApplication.stores.brains, metadata: metadataStore(), embeddings: postgresApplication.stores.brainEmbeddings, readJsonBody, sendJson });
 const generalSettingsRoute = createGeneralSettingsRoutes({ readJsonBody, sendJson, chatIdentities, saveChatIdentity, curatorSettings, saveCuratorSettings, tiddleSettings: async (agentId) => tiddleStatus({ agentId, stores: postgresApplication.stores, }), tiddleCards: async (query) => listTiddleCards({ ...query, stores: postgresApplication.stores, }), tiddleHistory: async (query) => tiddleHistory({ ...query, stores: postgresApplication.stores, }), uiAuthSettings, saveUiAuthSettings, uiPreferences: () => uiPreferences({ metadata: metadataStore() }), saveUiPreferences: body => saveUiPreferences(body, { metadata: metadataStore() }), browserTabSettings: () => browserTabSettings({ metadata: metadataStore() }), saveBrowserTabSettings: body => saveBrowserTabSettings(body, { metadata: metadataStore() }), otelSettings: () => otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }), saveOtelSettings: async body => { let result = await saveOtelSettings(body, { store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); if (result.ok) { try { const config = await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore() }); await withProviderErrorScope(otelDiagnosticSecrets(config), async () => { await otelRuntime.apply(config); await applyOtelConfigurationToNodeGoblins(); }); } catch (error) { serverLogger.event('otel_configuration_apply_failed', { error }); return { ok: false, status: 500, error: 'opentelemetry_configuration_apply_failed', message: classifyModelFailure(error).message }; } result = await otelSettings({ store: postgresApplication.stores.opentelemetry, metadata: metadataStore(), runtimeStatus: otelRuntime.status }); } return result; }, executionBoundarySettings, saveExecutionBoundarySettings, retentionPolicySettings, saveRetentionPolicySettings, retentionCleanup });
-const observabilityRoute = createObservabilityRoutes({ providerPoolMetrics: () => postgresApplication.stores.models.providerPoolMetrics.summary(), readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
+const observabilityRoute = createObservabilityRoutes({ providerPoolMetrics: () => postgresApplication.stores.models.providerPoolMetrics.summary(), readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, readProviderRequestHistory, resolveAgentContext, conversationStore: postgresApplication.stores.conversations, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot });
 const scheduledChannelRoute = createScheduledChannelRoutes({ readJsonBody, sendJson, validateBoundaryBody, withScheduledJobs, scheduler, listGroupChannels, createGroupChannel, readGroupChannelTurns, groupChannelRuns, startGroupChannelMessage, cancelGroupChannelRun, runtimeDataRoot, conversationStore: postgresApplication.stores.conversations });
 const authRoute = createAuthRoutes({ serverLogger, runtimeConfig, oidcLoginUrl, setOidcStateCookie, completeOidcCallback, sendOidcSessionCookie, clearOidcCookies, oidcCookieClearHeader, oidcSessionFromRequest, sendJson });
 const chatRoute = createChatRoutes({ handleChat, readJsonBody, sendJson, selectedAgentRuntime, cancelChatRun, steerChatRun, listChatSteering, chatInputs });
@@ -1690,6 +1705,14 @@ const runtimeDiagnostics = Object.freeze({
     if (operation === 'session') { const runtime = await agentRuntime(input.agentId); const value = await runtimeDiagnosticSessionDetail(postgresApplication.stores.conversations, { agentId: runtime.agentId, sessionId: sessionId(), limit: input.limit, maxContentChars: input.maxContentChars }); return value ? { ok: true, session: value } : { ok: false, error: 'not_found' }; }
     if (operation === 'active-runs') return { ok: true, ...runtimeDiagnosticActiveRuns(await currentActiveChatRunSummaries({ agentId: targetAgentId(input.agentId), sessionId: input.sessionId || null })) };
     if (operation === 'traces') { const runtime = await agentRuntime(input.agentId); const config = await runtimeConfig(runtime.agentId); return { ok: true, ...await runtimeDiagnosticTraces({ traceRoot: runtimeTraceRoot(config, sessionId(), runtime.agentId), agentId: runtime.agentId, sessionId: sessionId(), limit: input.limit, cursor: input.cursor }) }; }
+    if (operation === 'provider-requests') {
+      const runtime = await resolveAgentContext(targetAgentId(input.agentId));
+      const runId = input.runId;
+      const requestId = input.requestId ?? null;
+      if (!validTraceRunId(runId)) return { ok: false, error: 'trace_run_id_invalid' };
+      if (requestId !== null && !validTraceRunId(requestId)) return { ok: false, error: 'provider_request_id_invalid' };
+      return await readProviderRequestHistory({ agentId: runtime.agentId, sessionId: sessionId(), runId, requestId }) ?? { ok: false, error: 'trace_not_found' };
+    }
     if (operation === 'trace' || operation === 'trace-authority') {
       const runtime = await agentRuntime(input.agentId); const runId = String(input.runId || '');
       if (!validTraceRunId(runId)) throw Object.assign(new Error('trace_run_id_invalid'), { statusCode: 400 });

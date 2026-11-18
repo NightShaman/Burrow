@@ -56,6 +56,7 @@ const collection = {
     { key: 'groupRunId', value: 'group-run-id' },
     { key: 'workItemId', value: 'work-item-id' },
     { key: 'traceRunId', value: 'trace-run-id' },
+    { key: 'providerRequestId', value: 'provider-request-id' },
   ],
   item: [
     folder('Status / Runtime', [
@@ -203,6 +204,8 @@ const collection = {
       req('List traces', 'GET', '/api/traces', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
       req('Get trace summary', 'GET', '/api/traces/{{traceRunId}}', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}'], ['output', 'false']] }),
       req('Get trace authority', 'GET', '/api/traces/{{traceRunId}}/authority', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
+      req('List provider requests for a trace', 'GET', '/api/traces/{{traceRunId}}/provider-requests', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),
+      req('Read a redacted provider request', 'GET', '/api/traces/{{traceRunId}}/provider-requests', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}'], ['requestId', '{{providerRequestId}}']] }),
     ]),
     folder('Continuity / Memory Review', [
       req('Get continuity scope', 'GET', '/api/session/continuity-scope', { query: [['agentId', '{{agentId}}'], ['sessionId', '{{sessionId}}']] }),

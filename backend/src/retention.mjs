@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { withTraceGuard as withRetentionLeaseGuard } from './trace-guard.mjs';
 import { randomUUID } from 'node:crypto';
+import { PROVIDER_REQUEST_RETENTION_DAYS, PROVIDER_REQUEST_RETENTION_MS, providerRequestArtifactName } from './provider-request-inspection.mjs';
 import { writeTraceRetentionState } from './trace-observability.mjs';
 
 async function traceTerminal(dir) {
@@ -23,15 +24,19 @@ function isCurrentMain(recordOrMetadata, sessionId = null) {
     || ((id === 'main' || id === 'default') && (!metadata.kind || metadata.kind === 'main'));
 }
 
-async function directoryUsage(root) {
+async function directoryUsage(root, providerCutoff) {
   let logicalBytes = 0;
   let allocatedBytes = 0;
   let latestMs = 0;
+  const expiredProviderRequests = [];
   async function walk(filePath) {
     let stat;
     try { stat = await fs.lstat(filePath); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     if (stat.isSymbolicLink()) return;
-    if (stat.isFile()) latestMs = Math.max(latestMs, stat.mtimeMs);
+    if (stat.isFile()) {
+      latestMs = Math.max(latestMs, stat.mtimeMs);
+      if (stat.mtimeMs <= providerCutoff && path.dirname(filePath) === path.join(root, 'artifacts') && providerRequestArtifactName.test(path.basename(filePath))) expiredProviderRequests.push(filePath);
+    }
     logicalBytes += stat.isFile() ? stat.size : 0;
     allocatedBytes += Number.isFinite(stat.blocks) ? stat.blocks * 512 : stat.isFile() ? stat.size : 0;
     if (!stat.isDirectory()) return;
@@ -40,16 +45,16 @@ async function directoryUsage(root) {
     for (const entry of entries) await walk(path.join(filePath, entry.name));
   }
   await walk(root);
-  return { logicalBytes, allocatedBytes, latestMs };
+  return { logicalBytes, allocatedBytes, latestMs, expiredProviderRequests };
 }
 
-async function listTraceRuns(traceRoot) {
+async function listTraceRuns(traceRoot, providerCutoff = -Infinity) {
   const runs = [];
   async function walk(dir) {
     let entries = [];
     try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     if (entries.some((entry) => entry.isFile() && entry.name === 'events.jsonl')) {
-      const usage = await directoryUsage(dir);
+      const usage = await directoryUsage(dir, providerCutoff);
       const eligible = await traceTerminal(dir);
       runs.push({ id: path.relative(traceRoot, dir) || '.', path: dir, mtimeMs: usage.latestMs, updatedAt: new Date(usage.latestMs).toISOString(), eligible, ...usage });
       return;
@@ -127,7 +132,7 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
   if (!dataRoot) throw new Error('dataRoot is required');
   const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const resolvedTraceRoot = traceRoot || path.join(dataRoot, 'traces');
-  const traces = await listTraceRuns(resolvedTraceRoot);
+  const traces = await listTraceRuns(resolvedTraceRoot, nowMs - PROVIDER_REQUEST_RETENTION_MS);
   const sessionRetentionEnabled = retention.conversationDays != null || ['mainMaxAgeDays', 'taskMaxAgeDays', 'subagentMaxAgeDays'].some((key) => retention[key] != null);
   if (sessionRetentionEnabled && !conversationStore) throw new Error('conversation_store_required');
   const sessions = sessionRetentionEnabled ? (await conversationStore.listSessions({agentId,includeArchived:true})).map(record=>({...record,id:record.sessionId})) : [];
@@ -138,7 +143,11 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
   }))).filter(Boolean);
   const traceMaxAgeDays = retention.traceMaxAgeDays ?? retention.maxAgeDays ?? null;
   const traceMaxBytes = retention.traceMaxBytes ?? null;
-  const candidates = traceCandidates(traces, { maxAgeDays: traceMaxAgeDays, maxBytes: traceMaxBytes, nowMs });
+  const candidates = traceCandidates(traces, { maxAgeDays: traceMaxAgeDays, maxBytes: traceMaxBytes, nowMs })
+    .map(({ expiredProviderRequests, ...entry }) => entry);
+  const wholeRuns = new Set(candidates.map((entry) => entry.path));
+  const providerRequests = traces.filter((entry) => !wholeRuns.has(entry.path) && entry.expiredProviderRequests.length)
+    .map((entry) => ({ runPath: entry.path, paths: entry.expiredProviderRequests }));
   const totalTraceBytes = traces.reduce((total, trace) => total + trace.allocatedBytes, 0);
   const totalTraceLogicalBytes = traces.reduce((total, trace) => total + trace.logicalBytes, 0);
   const deleteTraceBytes = candidates.reduce((total, trace) => total + trace.allocatedBytes, 0);
@@ -151,6 +160,7 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
     retention: {
       traceMaxAgeDays,
       traceMaxBytes,
+      providerRequestDays: PROVIDER_REQUEST_RETENTION_DAYS,
       legacySessionsMaxIgnored: retention.sessionsMax ?? null,
       legacyTracesMaxIgnored: retention.tracesMax ?? null,
       sessionPolicies,
@@ -162,12 +172,14 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
       traceLogicalBytes: totalTraceLogicalBytes,
       deleteSessions: sessionRetentionEnabled ? sessionCandidates.length : 0,
       deleteTraces: candidates.length,
+      deleteProviderRequests: providerRequests.reduce((sum, entry) => sum + entry.paths.length, 0),
       deleteTraceBytes,
       deleteTraceLogicalBytes,
     },
     delete: {
       sessions: sessionRetentionEnabled ? sessionCandidates : [],
       traces: candidates,
+      providerRequests,
     },
   };
 }
@@ -239,7 +251,7 @@ export async function runRetentionCleanup({ dataRoot, conversationStore, taskSto
       reason: 'already_running',
       dataRoot,
       traceRoot: resolvedTraceRoot,
-      deleted: { sessions: [], traces: [] },
+      deleted: { sessions: [], traces: [], providerRequests: [] },
     };
   }
   try {
@@ -264,12 +276,35 @@ export async function runRetentionCleanup({ dataRoot, conversationStore, taskSto
         deletedTraces.push(await rmDir(entry.path));
       });
     }
+    const deletedProviderRequests = [];
+    const providerCutoff = new Date(now).getTime() - PROVIDER_REQUEST_RETENTION_MS;
+    for (const entry of plan.delete.providerRequests) {
+      await withRetentionLeaseGuard(`${entry.runPath}.writer`, async () => {
+        try {
+          await validatedTraceRunPath(plan.traceRoot, entry.runPath);
+          const artifactsDir = path.join(entry.runPath, 'artifacts');
+          if (!(await fs.lstat(artifactsDir)).isDirectory()) return;
+          // Check real containment again under the writer guard before removal.
+          if (!isContainedPath(await fs.realpath(plan.traceRoot), await fs.realpath(artifactsDir))) return;
+          for (const file of entry.paths) {
+            try {
+              const stat = await fs.lstat(file);
+              if (stat.isFile() && stat.mtimeMs <= providerCutoff) {
+                await fs.unlink(file);
+                deletedProviderRequests.push(file);
+              }
+            } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+          }
+        } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      });
+    }
     const result = {
       ...plan,
       dryRun: false,
       deleted: {
         sessions: deletedSessions,
         traces: deletedTraces,
+        providerRequests: deletedProviderRequests,
       },
     };
     await writeTraceRetentionState(plan.traceRoot, result, now);

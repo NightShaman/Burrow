@@ -1,6 +1,6 @@
 import { validTraceRunId } from '../../src/trace-summary.mjs';
 
-export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, providerPoolMetrics, anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
+export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoundaryBody, runtimeStatus, runtimeMetrics, providerPoolMetrics, anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, currentActiveChatRunSummaries, selectedAgentRuntime, resolveAgentRuntime, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile, listTraces, runtimeConfig, traceRootForRun, readProviderRequestHistory, resolveAgentContext, conversationStore, summarizeTrace, authorityExplanationFromTraceSummary, projectRoot } = {}) {
   return async function handleObservabilityRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/anthropic/oauth/usage') { const result = await anthropicOauthUsage({ connectionId: url.searchParams.get('connectionId') || '', force: url.searchParams.get('force') === 'true' }); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/models/anthropic/reset-inventory') {
@@ -33,6 +33,22 @@ export function createObservabilityRoutes({ readJsonBody, sendJson, validateBoun
     if (req.method === 'GET' && url.pathname === '/api/workspace/file') { const agentRuntime = await selectedAgentRuntime(url.searchParams.get('agentId')); const result = await readWorkspaceFile(url.searchParams.get('path'), url.searchParams.get('scope') || 'workspaces', agentRuntime); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'POST' && url.pathname === '/api/workspace/file') { const body = validateBoundaryBody('workspace-write', await readJsonBody(req)); const result = await writeWorkspaceFile(body, await selectedAgentRuntime(body.agentId)); sendJson(res, result.ok ? 200 : (result.status || 500), result); return true; }
     if (req.method === 'GET' && url.pathname === '/api/traces') { const agentRuntime = await resolveAgentRuntime(url.searchParams.get('agentId')); sendJson(res, 200, { ok: true, traces: await listTraces(url.searchParams.get('sessionId') || 'default', agentRuntime.agentId) }); return true; }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/traces/') && url.pathname.endsWith('/provider-requests')) {
+      let runId;
+      try { runId = decodeURIComponent(url.pathname.slice('/api/traces/'.length, -'/provider-requests'.length)); } catch {}
+      if (!validTraceRunId(runId)) { sendJson(res, 400, { ok: false, error: 'trace_run_id_invalid' }); return true; }
+      const params = url.searchParams;
+      const requestId = params.get('requestId');
+      if (params.getAll('requestId').length > 1 || (requestId !== null && !validTraceRunId(requestId))) {
+        sendJson(res, 400, { ok: false, error: 'provider_request_id_invalid' }); return true;
+      }
+      const { agentId } = await resolveAgentContext(params.get('agentId'));
+      const sessionId = params.get('sessionId') || 'default';
+      const result = await readProviderRequestHistory({ agentId, sessionId, runId, requestId });
+      res.setHeader('cache-control', 'no-store');
+      sendJson(res, result?.ok ? 200 : 404, result ?? { ok: false, error: 'trace_not_found' });
+      return true;
+    }
     if (req.method === 'GET' && url.pathname.startsWith('/api/traces/')) {
       let runId;
       try { runId = decodeURIComponent(url.pathname.slice('/api/traces/'.length).replace(/\/authority$/, '')); } catch {}
