@@ -612,6 +612,19 @@ export class PostgresSessionReadStore {
     })), hasMore };
   }
 
+  async listArchiveRunSessions({ agentId: rawAgentId, runId: rawRunId, signal, deadline } = {}) {
+    const agentId = required(rawAgentId, 'agentId'), runId = required(rawRunId, 'runId');
+    // Legacy trace URLs may not name the session. Seek the two occurrence
+    // indexes by agent/run, then order only matching sessions by recency.
+    const { rows } = await sessionReadQuery(this.pool, `WITH matches AS (
+      SELECT session_id FROM conversation_entries WHERE agent_id=$1 AND run_key=$2
+      UNION
+      SELECT session_id FROM conversation_archive_entries WHERE agent_id=$1 AND run_key=$2
+    ) SELECT s.session_id FROM matches m JOIN conversation_sessions s USING(session_id)
+      WHERE s.agent_id=$1 ORDER BY s.updated_at DESC,s.session_id DESC`, [agentId, proofRunKey({ runId })], { signal, deadline });
+    return rows.map(row => row.session_id);
+  }
+
   async readArchiveRunSources({ agentId: rawAgentId, runs = [], signal, deadline } = {}) {
     const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');

@@ -873,6 +873,8 @@ export class PostgresSessionStore {
 
   async listArchiveRunDirectory(args = {}) { return this.archiveReads.listArchiveRunDirectory(args); }
 
+  async listArchiveRunSessions(args = {}) { return this.archiveReads.listArchiveRunSessions(args); }
+
   async readArchiveRunSources(args = {}) { return this.archiveReads.readArchiveRunSources(args); }
 
   async readArchiveRunSource(args = {}) { return this.archiveReads.readArchiveRunSource(args); }

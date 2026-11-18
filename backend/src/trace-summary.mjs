@@ -292,6 +292,13 @@ async function latestReceiptAuthorityEvidence({ conversationStore, agentId, runI
   if (!runId) return null;
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
+  if (typeof conversationStore.readArchiveRunSources === 'function' && typeof conversationStore.listArchiveRunSessions === 'function') {
+    const sessions = sessionId ? [sessionId] : await conversationStore.listArchiveRunSessions({ agentId, runId, ...options });
+    const sources = await conversationStore.readArchiveRunSources({ agentId, runs: sessions.map(id => ({ sessionId: id, runId })), ...options });
+    const evidence = sources.map(source => latestAuthorityFromEntries(source.entries, runId)).find(Boolean);
+    return compactAuthorityEvidence(evidence);
+  }
+  // Minimal conversation-store adapters may not implement the native index.
   const sessions = sessionId ? [{sessionId}] : await conversationStore.listSessions({agentId,includeArchived:true,...options});
   for (const session of sessions) {
     const evidence = latestAuthorityFromEntries(await evidenceTranscript({conversationStore,agentId,sessionId:session.sessionId,includeResetHistory:true,...options}), runId);

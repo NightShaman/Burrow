@@ -1024,19 +1024,19 @@ async function listTraces(sessionId = 'default', agentId = null) {
 }
 
 async function traceRootForRun({ rootDir, sessionId, runId, runtime, agentId } = {}) {
-  const findTraceDir = async (id) => {
-    const turns = (await postgresApplication.stores.conversations.exportTranscript({ agentId, sessionId: id }))?.entries || [];
-    return turns.findLast((turn) => turn.runId === runId && turn.traceDir)?.traceDir || null;
-  };
-  let traceDir = rootDir ? await findTraceDir(sessionId) : null;
-  // Legacy trace URLs do not carry sessionId. Resolve through the selected
-  // agent's session lineage rather than mixing unrelated session histories.
-  if (!traceDir && rootDir) {
-    const records = await postgresApplication.stores.conversations.listSessions({ agentId, includeArchived: true });
-    for (const record of records) {
-      if (record.sessionId === sessionId) continue;
-      traceDir = await findTraceDir(record.sessionId);
-      if (traceDir) break;
+  const store = postgresApplication.stores.conversations;
+  const readSources = sessions => store.readArchiveRunSources({ agentId, runs: sessions.map(id => ({ sessionId: id, runId })) });
+  const findTraceDir = source => source?.entries.findLast(entry => entry.traceDir)?.traceDir;
+  let traceDir = null;
+  if (rootDir) {
+    const [source] = await readSources([sessionId]);
+    traceDir = findTraceDir(source);
+    // Legacy URLs omit sessionId. Stay inside the selected agent and consult
+    // only sessions with indexed entries for the requested run.
+    if (!traceDir) {
+      const sessions = await store.listArchiveRunSessions({ agentId, runId });
+      const candidates = await readSources(sessions.filter(id => id !== sessionId));
+      traceDir = candidates.map(findTraceDir).find(Boolean);
     }
   }
   return traceDir ? path.dirname(traceDir) : runtimeTraceRoot(runtime, sessionId, agentId);
