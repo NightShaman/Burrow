@@ -4127,7 +4127,7 @@
           "Archive"
         ],
         "summary": "List archived runtime proof packets",
-        "description": "Returns runs across all enabled agents when agentId is omitted. Pages use descending completion/start time with stable identity tie-breakers; use cursor to reach older runs.",
+        "description": "Returns runs across all enabled agents when agentId is omitted. Pages use descending completion/start time with stable identity tie-breakers; use cursor to reach older runs. Search filters retained run summaries before paging.",
         "operationId": "listArchiveRuns",
         "parameters": [
           {
@@ -4135,6 +4135,15 @@
           },
           {
             "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive literal search of run IDs and displayed run summary fields (agent name, objective, and status).",
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "$ref": "#/components/parameters/Limit"
@@ -4152,6 +4161,9 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/ArchiveRunListResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
           },
           "404": {
             "$ref": "#/components/responses/ErrorResponse"

@@ -577,27 +577,38 @@ export class PostgresSessionReadStore {
       session: { id: row.archive_id, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.created_at, archivedAt: row.created_at, chatTurnCount: null } }, entries };
   }
 
-  async listArchiveRunDirectory({ agentId: rawAgentId, sessionId: rawSessionId = null, limit = 100, boundary = null, signal, deadline } = {}) {
+  async listArchiveRunDirectory({ agentId: rawAgentId, agentName = null, sessionId: rawSessionId = null, query = '', limit = 100, boundary = null, signal, deadline } = {}) {
     const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');
     const sessionId = rawSessionId == null ? null : required(rawSessionId, 'sessionId');
     const size = limitValue(limit);
     if (boundary && (typeof boundary.t !== 'string' || typeof boundary.i !== 'string')) throw new Error('archive_cursor_invalid');
-    const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp,evidence.item AS evidence
+    const search = text(query).trim().toLowerCase();
+    // Search the displayed directory status, not the detail's terminal status.
+    // The evidence conditions mirror archive-proof's failure/unresolved counts.
+    const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp,evidence.item AS evidence,summary.status
       FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
       LEFT JOIN LATERAL (SELECT item FROM jsonb_array_elements(COALESCE(s.metadata->'runEvidence','[]'::jsonb)) item WHERE item->>'runId'=r.run_id LIMIT 1) evidence ON true
+      CROSS JOIN LATERAL (SELECT CASE WHEN evidence.item IS NULL THEN 'incomplete'
+        WHEN EXISTS (SELECT 1 FROM unnest(ARRAY['observations','changes','validations','unresolved']) AS fields(key)
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(evidence.item->key)='array' THEN evidence.item->key ELSE '[]'::jsonb END) AS items(item)
+          WHERE items.item->>'status'='failed' OR items.item->>'text' ~* '^[[:space:]]*shell_exec:[[:space:]]*(command )?failed'
+          OR (key='unresolved' AND items.item->>'status'='unresolved'
+            AND COALESCE(items.item->>'text','') !~* '^[[:space:]]*(command|run|tool)?[[:space:]]*completed[.]?[[:space:]]*$')) THEN 'warning'
+        ELSE 'completed' END AS status) summary
       WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
       AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)
       AND ($3::text IS NULL OR (r.sort_timestamp,r.agent_id || ':' || r.run_id)<($3,$4))
+      AND ($6::text='' OR strpos(lower(concat_ws(' ', $7::text,COALESCE(evidence.item->>'objective',''),'',summary.status,r.run_id)), $6)>0)
       ORDER BY r.sort_timestamp DESC,r.agent_id || ':' || r.run_id DESC LIMIT $5`,
-    [agentId, sessionId, boundary?.t || null, boundary?.i || null, size + 1]);
+    [agentId, sessionId, boundary?.t ?? null, boundary?.i ?? null, size + 1, search, agentName || agentId]);
     const hasMore = rows.length > size;
     return { rows: (hasMore ? rows.slice(0, size) : rows).map(row => ({
       agentId: row.agent_id, sessionId: row.session_id, runId: row.run_id,
       startedAt: row.started_at?.toISOString?.() || row.started_at || null,
       completedAt: row.completed_at?.toISOString?.() || row.completed_at || null,
       lastActivityAt: row.last_activity_at?.toISOString?.() || row.last_activity_at || null,
-      sortTimestamp: row.sort_timestamp, evidence: row.evidence || null,
+      sortTimestamp: row.sort_timestamp, evidence: row.evidence || null, status: row.status,
     })), hasMore };
   }
 

@@ -152,7 +152,7 @@ export function createSessionRoutes({
     if (req.method === 'GET' && url.pathname === '/api/archive/runs') {
       const agentId = url.searchParams.get('agentId');
       const agentRuntime = agentId ? await resolveArchiveAgentRuntime(agentId, readOptions) : null;
-      const result = await archiveRuns({ ...readOptions, agentRuntime, sessionId: url.searchParams.get('sessionId'), limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') });
+      const result = await archiveRuns({ ...readOptions, agentRuntime, sessionId: url.searchParams.get('sessionId'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') });
       sendJson(res, 200, { ok: true, ...result });
       return true;
     }

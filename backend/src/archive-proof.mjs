@@ -553,12 +553,12 @@ export async function listArchiveRuns({ rootDir, conversationStore, dataRoot = n
   }), options);
 }
 
-export async function listArchiveRunSummariesPage({ rootDir, conversationStore, dataRoot = null, agentId, agentName = null, sessionId = null, limit = 100, boundary = null, signal, deadline } = {}) {
+export async function listArchiveRunSummariesPage({ rootDir, conversationStore, dataRoot = null, agentId, agentName = null, sessionId = null, query = '', limit = 100, boundary = null, signal, deadline } = {}) {
   if (!rootDir || !agentId) throw new Error('archive_run_scope_required');
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
   if (typeof conversationStore?.listArchiveRunDirectory !== 'function' || typeof conversationStore?.readArchiveRunSource !== 'function') return null;
-  const directory = await conversationStore.listArchiveRunDirectory({ agentId, sessionId, limit, boundary, ...options });
+  const directory = await conversationStore.listArchiveRunDirectory({ agentId, agentName, sessionId, query, limit, boundary, ...options });
   archiveReadCheckpoint(options);
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500, ...options }) : [];
   archiveReadCheckpoint(options);
@@ -567,7 +567,7 @@ export async function listArchiveRunSummariesPage({ rootDir, conversationStore, 
     const evidence = row.evidence;
     return {
       id: row.runId, runId: row.runId, agentId, agentName, sessionId: row.sessionId,
-      status: evidence ? (failureEvidence(evidence).length || unresolvedEvidence(evidence).length ? 'warning' : 'completed') : 'incomplete',
+      status: row.status,
       startedAt: row.startedAt || evidence?.createdAt || null,
       completedAt: row.completedAt || evidence?.createdAt || null,
       lastActivityAt: row.lastActivityAt || row.completedAt || row.startedAt || null,

@@ -2,13 +2,16 @@ import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-
 import { archivePage, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
 import { listArchiveRuns, listArchiveRunSummariesPage } from '../../src/archive-proof.mjs';
 
-export async function archiveRunListPage({ scopes, agentId = null, sessionId = null, limit = 100, cursor = null, signal, deadline }) {
+export async function archiveRunListPage({ scopes, agentId = null, sessionId = null, query = '', limit = 100, cursor = null, signal, deadline }) {
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
   const size = Math.max(1, Math.min(200, Number(limit) || 100));
-  const scopeKey = JSON.stringify(['runs', agentId, sessionId]);
+  const search = String(query ?? '').trim().toLowerCase();
+  const scopeKey = JSON.stringify(search ? ['runs', agentId, sessionId, search] : ['runs', agentId, sessionId]);
   const boundary = archiveCursorBoundary(cursor, { scope: scopeKey });
-  const pages = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRunSummariesPage({ ...scope, sessionId, limit: size, boundary, ...readOptions })), options);
+  // PostgreSQL text cannot contain NUL, so no stored summary can match it.
+  if (search.includes('\0')) return { runs: [], hasMore: false, nextCursor: null };
+  const pages = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRunSummariesPage({ ...scope, sessionId, query: search, limit: size, boundary, ...readOptions })), options);
   if (pages.every(page => page !== null)) {
     const ordered = pages.flatMap(page => page.runs).sort((left, right) => {
       const lt = String(left._sortTimestamp || left.completedAt || left.startedAt || ''), rt = String(right._sortTimestamp || right.completedAt || right.startedAt || '');
@@ -24,6 +27,7 @@ export async function archiveRunListPage({ scopes, agentId = null, sessionId = n
   // Compatibility for injected non-PostgreSQL stores. Production PostgreSQL
   // stores never fall back to reconstructing all conversations.
   const lists = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRuns({ ...scope, sessionId, limit: null, summaryOnly: true, ...readOptions })), options);
-  const page = archivePage(lists.flat(), { limit: size, cursor, max: 200, scope: scopeKey, timestamp: row => row.completedAt || row.startedAt, identity: row => `${row.agentId}:${row.runId}` });
+  const matches = lists.flat().filter(run => !search || `${run.agentName || run.agentId} ${run.objective || ''} ${run.finalAnswer || ''} ${run.status} ${run.runId}`.toLowerCase().includes(search));
+  const page = archivePage(matches, { limit: size, cursor, max: 200, scope: scopeKey, timestamp: row => row.completedAt || row.startedAt, identity: row => `${row.agentId}:${row.runId}` });
   return { runs: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
 }

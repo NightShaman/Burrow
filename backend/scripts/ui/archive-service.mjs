@@ -170,7 +170,7 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
     return { ok: true, card: { ...card, kind: 'continuity', agentId, agentName: agent.name }, history: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore };
   }
 
-  async function archiveRuns({ agentRuntime = null, sessionId = null, limit = 100, cursor = null, signal, deadline } = {}) {
+  async function archiveRuns({ agentRuntime = null, sessionId = null, query = '', limit = 100, cursor = null, signal, deadline } = {}) {
     const options = { signal, deadline };
     archiveReadCheckpoint(options);
     const listed = agentRuntime ? [] : await agentsStore().list({ includeDisabled: false, ...options });
@@ -190,7 +190,7 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
         agentName: agent.name,
       };
     }), options);
-    return archiveRunListPage({ scopes, agentId: agentRuntime?.agentId ?? null, sessionId, limit, cursor, ...options });
+    return archiveRunListPage({ scopes, agentId: agentRuntime?.agentId ?? null, sessionId, query, limit, cursor, ...options });
   }
 
 
