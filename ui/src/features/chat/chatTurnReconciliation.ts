@@ -11,9 +11,13 @@ export function mergeSessionActivities(
   turns: SessionTurn[],
   activities: SessionToolActivity[],
 ): SessionTurn[] {
-  const activityByRun = new Map(
-    activities.filter((activity) => activity.runId).map((activity) => [activity.runId, activity]),
-  );
+  const activitiesByRun = new Map<string, SessionToolActivity[]>();
+  for (const activity of activities) {
+    if (!activity.runId) continue;
+    const batches = activitiesByRun.get(activity.runId);
+    if (batches) batches.push(activity);
+    else activitiesByRun.set(activity.runId, [activity]);
+  }
   // Activity belongs to the run, not to every artifact delivery in that run.
   const activityOwner = new Map<string, SessionTurn>();
   for (const turn of turns) {
@@ -22,18 +26,21 @@ export function mergeSessionActivities(
   return turns.map((turn) => {
     if (turn.role !== 'assistant' || !turn.runId)
       return { ...turn, content: textFromChatValue(turn.content) };
-    const activity = activityByRun.get(turn.runId);
-    if (!activity) return { ...turn, content: textFromChatValue(turn.content) };
+    const batches = activitiesByRun.get(turn.runId);
+    if (!batches) return { ...turn, content: textFromChatValue(turn.content) };
     if (activityOwner.get(turn.runId) !== turn) {
       const { toolActivity: _activity, ...metadata } = turn.metadata ?? {};
       return { ...turn, content: textFromChatValue(turn.content), metadata };
     }
+    // Minions persist one activity record per tool batch, not one per run.
+    // Do not deduplicate by label: the same tool can run in successive batches.
+    const items = batches.flatMap((batch) => batch.items);
     const toolActivity: ToolActivity = {
-      runId: activity.runId,
-      summary: activity.summary,
-      status: activity.items.some((item) => item.status === 'error') ? 'warn' : 'ok',
-      items: activity.items.map((item, index) => ({
-        id: `${activity.runId}:${index}`,
+      runId: turn.runId,
+      ...(batches.length === 1 ? { summary: batches[0].summary } : {}),
+      status: items.some((item) => item.status === 'error') ? 'warn' : 'ok',
+      items: items.map((item, index) => ({
+        id: `${turn.runId}:${index}`,
         label: item.label,
         detail: item.detail,
         ...(typeof item.errorDetail === 'string' && item.errorDetail.trim()

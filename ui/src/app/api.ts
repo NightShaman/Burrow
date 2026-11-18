@@ -316,6 +316,8 @@ export type ToolActivity = {
   status?: 'running' | 'ok' | 'warn';
   title?: string;
   summary?: string;
+  /** Current live phase, separate from the list of actual tool calls. */
+  liveLabel?: string;
   items?: ToolActivityItem[];
 };
 export type SessionToolActivity = {
@@ -385,6 +387,7 @@ export type ActiveSubagent = MinionAncestry & {
   parentRunId?: string | null;
   lastActualActivityAt?: string | null;
   activity?: ActiveSubagentActivity | null;
+  progress?: ActiveChatRun['progress'];
   trace?:
     | { runId?: string | null; childSessionId?: string | null; traceDir?: string | null }
     | Record<string, unknown>

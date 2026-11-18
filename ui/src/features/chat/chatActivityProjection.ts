@@ -32,9 +32,15 @@ function runtimeRunProgress(run: ActiveChatRun): ProgressEntry[] {
   return thoughtProgressFromEvents(run.progress ?? [], run.runId);
 }
 
-function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
+function runtimeToolActivity({
+  runId,
+  sessionId,
+  progress,
+}: Pick<ActiveChatRun, 'runId' | 'sessionId' | 'progress'>): ToolActivity | undefined {
   const itemsById = new Map<string, ToolActivityItem>();
-  for (const [index, event] of (run.progress ?? []).entries()) {
+  for (const [index, event] of (progress ?? []).entries()) {
+    if (event.runId !== undefined && event.runId !== runId) continue;
+    if (event.sessionId !== undefined && event.sessionId !== sessionId) continue;
     if (event.type !== 'tool.started' && event.type !== 'tool.completed') continue;
     const data = event.data ?? {};
     const tool = typeof data.tool === 'string' ? data.tool.trim() : '';
@@ -48,7 +54,7 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
     const id =
       typeof data.activityId === 'string' && data.activityId
         ? data.activityId
-        : `${run.runId}:tool:${index}`;
+        : `${runId}:tool:${index}`;
     const status =
       event.type === 'tool.started'
         ? ('pending' as const)
@@ -67,7 +73,7 @@ function runtimeToolActivity(run: ActiveChatRun): ToolActivity | undefined {
   if (!items.length) return undefined;
   const hasError = items.some((item) => item.status === 'error');
   const hasPending = items.some((item) => item.status === 'pending');
-  return { runId: run.runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' };
+  return { runId, items, status: hasError ? 'warn' : hasPending ? 'running' : 'ok' };
 }
 
 function runtimeRunForSelection(
@@ -200,6 +206,8 @@ function runtimeRunForSubagent(
       : '';
   const sessionId = child.sessionId || traceChildSessionId || '';
   if (!runId || !agentId || !sessionId) return null;
+  const phase = subagentToolActivity(child, now);
+  const tools = runtimeToolActivity({ runId, sessionId, progress: child.progress });
   // /chat/active serializes a subagent's owning agent as agentId; this
   // provenance applies to its purpose, not arbitrary user turns in the session.
   return {
@@ -215,7 +223,13 @@ function runtimeRunForSubagent(
       subagentId: child.id,
     },
     progress: [],
-    toolActivity: subagentToolActivity(child, now),
+    toolActivity: tools
+      ? {
+          ...phase,
+          items: tools.items,
+          ...(child.activity?.kind !== 'tool' ? { liveLabel: phase.items?.[0]?.label } : {}),
+        }
+      : phase,
     subagent: child,
   };
 }

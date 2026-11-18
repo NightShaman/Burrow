@@ -358,3 +358,44 @@ it('shows run activity only once after an artifact and final prose', () => {
   expect(result[0].metadata?.toolActivity).toBeUndefined();
   expect(result[1].metadata?.toolActivity?.summary).toBe('3 runtime actions');
 });
+
+it('restores every recorded Minion tool batch on its matching reply, including repeated tools', () => {
+  const turns = [
+    { id: 'artifact', role: 'assistant', runId: 'minion-run' },
+    { id: 'reply', role: 'assistant', runId: 'minion-run' },
+    { id: 'followup', role: 'assistant', runId: 'followup-run' },
+  ];
+  const result = reconcileSessionTurns(
+    {
+      id: 'minion-session',
+      turns,
+      activities: [
+        {
+          runId: 'minion-run',
+          summary: 'First',
+          items: [{ label: 'Read file', status: 'error', errorDetail: 'Not found' }],
+        },
+        { runId: 'followup-run', summary: 'Unrelated', items: [{ label: 'Shell', status: 'ok' }] },
+        {
+          runId: 'minion-run',
+          summary: 'Second',
+          items: [
+            { label: 'Read file', status: 'ok' },
+            { label: 'List files', status: 'ok' },
+          ],
+        },
+      ],
+    },
+    [],
+  );
+  expect(result[0].metadata?.toolActivity).toBeUndefined();
+  expect(result[1].metadata?.toolActivity).toMatchObject({
+    status: 'warn',
+    items: [
+      { id: 'minion-run:0', label: 'Read file', status: 'error', errorDetail: 'Not found' },
+      { id: 'minion-run:1', label: 'Read file', status: 'ok' },
+      { id: 'minion-run:2', label: 'List files', status: 'ok' },
+    ],
+  });
+  expect(result[2].metadata?.toolActivity?.items?.map(({ label }) => label)).toEqual(['Shell']);
+});

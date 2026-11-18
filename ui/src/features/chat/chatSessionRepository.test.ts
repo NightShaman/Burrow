@@ -194,6 +194,44 @@ describe('active scrollback', () => {
       metadata: { resetGeneration: generation },
     },
   });
+  it('keeps complete activity for explicitly loaded older replies without duplicating overlapping batches', async () => {
+    const reply = (id: string) => ({ ...turn(id), runId: id, role: 'assistant' });
+    const activity = (runId: string, label: string) => ({
+      runId,
+      summary: label,
+      items: [{ label, status: 'ok' as const }],
+    });
+    const active = activity('new', 'new call');
+    const first = activity('old', 'first old call');
+    const second = activity('old', 'second old call');
+    request
+      .mockResolvedValueOnce({
+        session: { ...page([], 'one').session, turns: [reply('new')], activities: [active] },
+      })
+      .mockResolvedValueOnce({
+        session: {
+          ...page([], null).session,
+          turns: [reply('old'), reply('new')],
+          activities: [first, second, active],
+        },
+      })
+      .mockResolvedValueOnce({
+        session: { ...page([], 'fresh').session, turns: [reply('new')], activities: [active] },
+      })
+      .mockResolvedValueOnce({
+        session: { ...page([], null, 1).session, turns: [reply('reset')] },
+      });
+    const repo = createChatSessionRepository();
+    await repo.loadSession('agent', 'default');
+    expect((await repo.loadOlder('agent', 'default')).activities).toEqual([first, second, active]);
+    expect((await repo.loadSession('agent', 'default')).activities).toEqual([
+      first,
+      second,
+      active,
+    ]);
+    expect((await repo.loadSession('agent', 'default')).activities).toBeUndefined();
+  });
+
   it('loads older only on demand, deduplicates overlap and preserves loaded prefix on compaction refresh', async () => {
     request
       .mockResolvedValueOnce(page(['c', 'd'], 'one'))

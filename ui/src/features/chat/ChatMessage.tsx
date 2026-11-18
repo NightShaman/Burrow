@@ -827,7 +827,7 @@ export function ToolActivityCard({ activity, live }: { activity: ToolActivity; l
   }));
   const activeItem = [...items].reverse().find((item) => item.status === 'pending') ?? items.at(-1);
   const label = live
-    ? (activeItem?.label ?? 'Working through it')
+    ? (activity.liveLabel ?? activeItem?.label ?? 'Working through it')
     : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
   const keepExpandedCardInView = (event: SyntheticEvent<HTMLDetailsElement>) => {
     const card = event.currentTarget;

@@ -1764,3 +1764,86 @@ it('renders the sanitized tool failure as text beside its target after reload', 
   expect(screen.getByText('Permission denied <script> [REDACTED]')).toBeTruthy();
   expect(document.querySelector('.tool-activity script')).toBeNull();
 });
+
+it('keeps Minion tool rows in one expandable card across polls and shows the waiting phase separately', () => {
+  const runId = 'minion-run';
+  const sessionId = child.stream;
+  const toolEvent = (type: string, activityId: string, tool: string, ok?: boolean) => ({
+    type,
+    runId,
+    sessionId,
+    data: { activityId, tool, ok },
+  });
+  const read = toolEvent('tool.started', 'read-1', 'files_read');
+  const readDone = toolEvent('tool.completed', 'read-1', 'files_read', true);
+  const check = toolEvent('tool.started', 'check-1', 'shell_exec');
+  const checkDone = toolEvent('tool.completed', 'check-1', 'shell_exec', false);
+  const view = (progress: (typeof read)[], waiting = false) => {
+    const projected = projectChatActivity(
+      {
+        ok: true,
+        runs: [],
+        subagents: [
+          {
+            id: child.id,
+            agentId: parent.id,
+            sessionId,
+            runId,
+            status: 'running',
+            purpose: 'Review the layout',
+            progress,
+            activity: waiting
+              ? { kind: 'model', label: 'Waiting for model continuation' }
+              : { kind: 'tool', tool: 'shell_exec' },
+          },
+        ],
+      },
+      { agentId: parent.id, sessionId, isChildSession: true, hadRuns: true, now: 0 },
+    );
+    return (
+      <ChatTranscript
+        selected={child}
+        parent={parent}
+        operator={{ name: 'Rob', avatar: 'R' }}
+        isNewSession={false}
+        turns={[]}
+        isLoading={false}
+        error=""
+        isSending
+        activeRunId={runId}
+        liveProgress={[]}
+        liveAnswer=""
+        runtimeUserMessage={projected.runtimeRun?.latestUserMessage}
+        activeToolActivity={projected.runtimeRun?.toolActivity}
+        runtimeChildActivities={projected.childActivities}
+      />
+    );
+  };
+  const { container, rerender } = render(view([read]));
+  const card = container.querySelector<HTMLDetailsElement>('details.tool-activity')!;
+  card.open = true;
+  expect(card.querySelectorAll('.tool-dot.pending')).toHaveLength(1);
+  rerender(view([read, readDone, readDone, check]));
+  expect(card.querySelectorAll('.tool-dot.ok')).toHaveLength(1);
+  expect(card.querySelectorAll('.tool-dot.pending')).toHaveLength(1);
+  rerender(
+    view(
+      [
+        read,
+        readDone,
+        check,
+        checkDone,
+        { ...read, sessionId: 'other', data: { ...read.data, activityId: 'other' } },
+      ],
+      true,
+    ),
+  );
+  expect(container.querySelectorAll('details.tool-activity')).toHaveLength(1);
+  expect(container.querySelector('details.tool-activity')).toBe(card);
+  expect(card.open).toBe(true);
+  expect(card.querySelector('summary')?.textContent).toContain('Waiting for model continuation');
+  expect(
+    Array.from(card.querySelectorAll('.tool-activity-item strong'), (row) => row.textContent),
+  ).toEqual(['files read', 'shell exec']);
+  expect(card.querySelectorAll('.tool-dot.error')).toHaveLength(1);
+});

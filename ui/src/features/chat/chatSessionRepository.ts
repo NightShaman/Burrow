@@ -109,12 +109,24 @@ export function createChatSessionRepository(): ChatSessionRepository {
     a.metadata?.resetAt === b.metadata?.resetAt;
   const merge = (older: ChatSession, newer: ChatSession): ChatSession => {
     const ids = new Set(newer.turns?.map((turn) => turn.id).filter(Boolean));
+    const olderTurns = (older.turns ?? []).filter((turn) => turn.id && !ids.has(turn.id));
+    const olderRuns = new Set(
+      olderTurns.filter((turn) => turn.role === 'assistant').map((turn) => turn.runId),
+    );
+    const newerRuns = new Set(
+      newer.turns?.filter((turn) => turn.role === 'assistant').map((turn) => turn.runId),
+    );
+    for (const activity of newer.activities ?? []) newerRuns.add(activity.runId);
+    const olderActivities = older.activities?.filter(
+      (activity) =>
+        activity.runId && olderRuns.has(activity.runId) && !newerRuns.has(activity.runId),
+    );
     return {
       ...newer,
-      turns: [
-        ...(older.turns ?? []).filter((turn) => turn.id && !ids.has(turn.id)),
-        ...(newer.turns ?? []),
-      ],
+      turns: [...olderTurns, ...(newer.turns ?? [])],
+      ...(olderActivities?.length
+        ? { activities: [...olderActivities, ...(newer.activities ?? [])] }
+        : {}),
     };
   };
   const repository: ChatSessionRepository = {
