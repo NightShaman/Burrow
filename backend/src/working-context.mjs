@@ -48,7 +48,12 @@ export function normalizeWorkingContext(context = null) {
 }
 
 export function workingContextFromSession(session = null) {
-  return normalizeWorkingContext(session?.metadata?.workingContext || null);
+  const context = normalizeWorkingContext(session?.metadata?.workingContext || null);
+  // Older versions used this source for both real requests and defaults
+  // forwarded by A2A. Retire the ambiguous hint without changing execution
+  // settings, file evidence, or separately recorded filesystem targets.
+  if (context.workspace?.source === 'explicit_workspace_root') context.workspace = null;
+  return context;
 }
 
 export async function verifiedEventsFromTurnInput({ workspaceResolution = null } = {}) {

@@ -23,7 +23,7 @@ import { prepareRuntimeSupportContext } from './runtime-support-context.mjs';
 import './workbench-workflow.mjs';
 import { buildContinuationPlan, explicitContinueRequested } from './work-item-service.mjs';
 import { prepareRuntimeWorkItemContext } from './runtime-work-item-context.mjs';
-import { agentExecutionWorkspaceRoot, prepareRuntimeSessionContext } from './runtime-session-context.mjs';
+import { prepareRuntimeSessionContext } from './runtime-session-context.mjs';
 import { createTerminalCommitter } from './runtime-terminal-commit.mjs';
 import { createCompatibilityObserver } from './compatibility-observability.mjs';
 import { runContinuationBranch } from './runtime-continuation-branch.mjs';
@@ -424,9 +424,8 @@ async function runAskChatUnserialized({
         message: content,
         sessionId: recipientSessionId,
         runId: nestedRunId,
-        // Let the recipient resolve its own execution assignment. Passing its
-        // controller-owned data root here overrides the remote workspace.
-        workspaceRoot: agentExecutionWorkspaceRoot(recipientRuntime),
+        // No explicit target: session preparation uses the recipient's own
+        // execution assignment without recording it as a workspace request.
         json: true,
         agentRuntime: recipientRuntime,
         resolveAgentRuntime,

@@ -21,7 +21,7 @@ export function turnWorkspaceFacts({ configuredWorkspaceRoot = null, requestedWo
   return Object.freeze({
     workspaceRoot,
     resolved: Boolean(requested),
-    reason: requested ? 'explicit_workspace_root' : (configured ? 'configured_workspace_root' : 'no_workspace_root'),
+    reason: requested ? 'explicit_workspace_request' : (configured ? 'configured_workspace_root' : 'no_workspace_root'),
     candidates: [],
     previousWorkspaceRoot: configured,
     projectHint: null,
