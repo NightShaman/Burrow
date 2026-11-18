@@ -471,7 +471,7 @@ async function runAskChatUnserialized({
   const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
     agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,
     message, recoveryManifest: recoveryTurn ? continuity.recoveryManifest : null,
-    dataRoot, traceDir: logger.traceDir, signal: normalizedArgs.abort_signal, attachments: turnAttachments, noCallModel: noCallModel || normalizedArgs.no_call_model });
+    dataRoot, traceDir: logger.traceDir, signal: normalizedArgs.abort_signal, onTraceRecord, attachments: turnAttachments, noCallModel: noCallModel || normalizedArgs.no_call_model });
   if (codexFollowup) return commitTerminalResult({ branch: 'codex-followup',
     finalize: async () => ({ ...codexFollowup, mode: 'ask', command,
       runId: resolvedRunId, sessionId: resolvedSessionId, traceDir: logger.traceDir }) });

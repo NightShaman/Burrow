@@ -6,6 +6,21 @@ export function activeChatRunKey(agentId, runId) {
   return `${String(agentId)}:${String(runId)}`;
 }
 
+// Native follow-ups use the normal active-run registry. Keep their tool rows
+// independently of its rolling window of model/route events, just as a
+// spawned Minion keeps completed rows independently of its current phase.
+export function retainActiveChatProgress(record, event, nativeTool = false) {
+  if (nativeTool && ['tool.started', 'tool.completed'].includes(event.type) && event.data?.activityId) {
+    record.nativeToolProgress ||= new Map();
+    const previous = record.nativeToolProgress.get(event.data.activityId);
+    if (!previous || (previous.type === 'tool.started' && event.type === 'tool.completed')) {
+      record.nativeToolProgress.set(event.data.activityId, event);
+    }
+    return;
+  }
+  record.progress = [...(record.progress || []), event].slice(-50);
+}
+
 export function activeChatRunSummary(record = {}) {
   const cancelling = record.controller?.signal?.aborted === true || record.cancelled === true || record.phase === 'cancelling';
   return {
@@ -21,7 +36,7 @@ export function activeChatRunSummary(record = {}) {
     startedAt: record.startedAt || null,
     latestUserMessage: record.latestUserMessage || null,
     answerText: record.answerText || null,
-    progress: Array.isArray(record.progress) ? record.progress.slice(-50) : [],
+    progress: [...(Array.isArray(record.progress) ? record.progress.slice(-50) : []), ...(record.nativeToolProgress?.values() || [])],
     contextUsage: record.contextUsage || null,
     detached: record.detached === true,
     steeringReady: !cancelling && record.steeringReady === true,
@@ -94,7 +109,7 @@ export function registerActiveAgentRun(activeChatRuns, { agentId, sessionId = 'd
           if (['context.compaction.completed', 'context.compaction.failed', 'model.started'].includes(progress.type)) record.phase = 'thinking';
         }
         const event = { ...progress, runId: record.runId, sessionId: record.sessionId, ts: traceRecord?.ts || new Date().toISOString() };
-        record.progress = [...record.progress, event].slice(-50);
+        retainActiveChatProgress(record, event, traceRecord?.source === 'native-minion-tool');
         updateActivity({ progress: [...(activity?.progress || []), event].slice(-50) });
       }
     },

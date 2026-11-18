@@ -1,4 +1,4 @@
-import { createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
+import { createNativeMinionActivity, createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { createProcessDiagnostics, diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { createClaudePoolRouting } from './claude-pool-routing.mjs';
 import { createClaudeCheckpoint, claudeHandoffContext } from './claude-native-checkpoint.mjs';
@@ -103,7 +103,7 @@ function processClient(child, onEvent, redact) {
 
 /** Server-only native CLI adapter. Admission/terminal receipts remain parent-owned. */
 export async function runClaudeMinion({ id, task, target, dataRoot, childSessionId, owner = {}, modelConfig,
-  traceDir = null, parentExecutionContext = null, signal = parentExecutionContext?.abortSignal,
+  traceDir = null, parentExecutionContext = null, onTraceRecord = null, signal = parentExecutionContext?.abortSignal,
   executionPolicy = parentExecutionContext?.executionPolicy, continuation = null } = {}) {
   const cancellation = new AbortController();
   let nativeTelemetry;
@@ -135,6 +135,8 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     type: activity ? 'event' : 'message', role: activity ? null : 'assistant', content: redact(content),
     visibility: activity ? 'activity' : 'chat', entersPrompt: !activity,
     metadata: { kind: activity ? 'claude-minion-activity' : 'claude-minion-response', subagentExecution: true, provenance: 'model' } });
+  const nativeActivity = createNativeMinionActivity({ dataRoot, runId: id, sessionId: childSessionId, traceDir,
+    getAuthority: () => authority, isRecorded: () => recorded && !continuation, onTraceRecord });
   const enqueue = fn => {
     if (++pendingWrites > 32) { pendingWrites--; persistenceFailed = true; cancellation.abort(); return; }
     writes = writes.then(fn).catch(() => { persistenceFailed = true; cancellation.abort(); }).finally(() => { pendingWrites--; });
@@ -157,7 +159,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     const host = resolveProcessExecutionTarget(parentExecutionContext || {});
     const remote = host.kind === 'remote';
     nativeTelemetry = createNativeMinionTelemetry({ harness: 'claude', runId: id, telemetry: parentExecutionContext?.telemetry,
-      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact });
+      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact, onToolProgress: nativeActivity.observe });
     const boundaries = parentExecutionContext?.executionBoundaries;
     if (boundaries && (!Array.isArray(boundaries.hardBlocks) || boundaries.hardBlocks.some(rule => rule.enabled !== false))) fail('claude_execution_boundaries_unsupported');
     const policy = normalizeExecutionPolicyInput(executionPolicy);
@@ -311,5 +313,6 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     if (cleanupUnconfirmed) result = { ...result, ...base, ok: false, summary: 'Claude process cleanup could not be confirmed.', blockers: ['claude_cleanup_failed'], warnings: [], sideEffectsApplied: null };
   }
   if (client && !result.ok) attachDiagnostics(result, client.diagnostics());
+  await nativeActivity.flush();
   return { ...result, model: { requested: modelConfig?.model || null, actual: actualModel, connectionId: modelConfig?.connectionId || null, resolvedConnectionId: resolvedConnectionId || null }, spawned, cancelled: signal.aborted };
 }

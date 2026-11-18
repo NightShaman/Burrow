@@ -56,6 +56,10 @@ function subagentFile(dataRoot, id) {
   return path.join(subagentDir(dataRoot, id), 'subagent.json');
 }
 
+function subagentProgressFile(dataRoot, id) {
+  return path.join(subagentDir(dataRoot, id), 'tool-progress.json');
+}
+
 function historicalDelegatedFile(dataRoot, id) {
   return path.join(dataRoot, 'delegated-runs', safeId(id), 'delegated-work.json');
 }
@@ -92,11 +96,15 @@ export async function createSubagentRecord({ dataRoot, clock = nowIso, ...input 
   return writeSubagentFile({ dataRoot, record });
 }
 
-export async function readSubagentRecord({ dataRoot, id, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, signal, deadline } = {}) {
+export async function readSubagentRecord({ dataRoot, id, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, signal, deadline, includeProgress = false } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   if (!id) throw new Error('id is required');
   const options = { signal, deadline };
   const current = await readJson(subagentFile(dataRoot, id), options);
+  if (current && includeProgress) {
+    const progress = await readJson(subagentProgressFile(dataRoot, id), options);
+    return Array.isArray(progress) ? { ...current, progress } : current;
+  }
   if (current || !legacyDataRoot) return current;
   const legacyPath = historicalDelegatedFile(legacyDataRoot, id);
   const legacy = await readJson(legacyPath, options);
@@ -113,7 +121,7 @@ export async function findSubagentBySpawnRequestKey({ dataRoot, key, legacyDataR
   return records.find((record) => record.spawnRequest?.key === normalizedKey) || null;
 }
 
-export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, includeFinal = true, limit = 100, signal, deadline } = {}) {
+export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, compatibilityObserver = null, sessionId = null, runId = null, includeFinal = true, includeProgress = false, limit = 100, signal, deadline } = {}) {
   if (!dataRoot) throw new Error('dataRoot is required');
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
@@ -132,6 +140,10 @@ export async function listSubagentRecords({ dataRoot, legacyDataRoot = null, com
     const record = await readSubagentRecord({ dataRoot, legacyDataRoot, compatibilityObserver, sessionId, runId, id: entry.name, ...options });
     if (!record) continue;
     if (!includeFinal && isFinalSubagentStatus(record.status)) continue;
+    if (includeProgress && !isFinalSubagentStatus(record.status)) {
+      const progress = await readJson(subagentProgressFile(dataRoot, record.id), options);
+      if (Array.isArray(progress)) record.progress = progress;
+    }
     records.push(record);
   }
   if (legacyDataRoot) {
@@ -172,6 +184,35 @@ export async function updateSubagentStatus({ dataRoot, id, status, phase = null,
       updatedAt: clock(),
     });
     return { ok: true, record: await writeSubagentFile({ dataRoot, record: updated }), transition };
+  });
+}
+
+// Keep one current row per observed tool per run. The stage/status is a
+// separate projection, so a later model wait cannot erase completed calls.
+export async function appendSubagentToolProgress({ dataRoot, id, event } = {}) {
+  const { type, data = {}, ts } = event || {};
+  const { activityId, tool, label, ok, status, modToolName } = data;
+  if (!['tool.started', 'tool.completed'].includes(type) || !activityId || !tool) return;
+  // The child worker can be a separate OS process. Never rewrite the status
+  // file from an activity observer: it could resurrect a parent cancellation.
+  const file = subagentProgressFile(dataRoot, id);
+  return withRecordLock(file, async () => {
+    const record = await readSubagentRecord({ dataRoot, id });
+    if (!record || isFinalSubagentStatus(record.status)) return;
+    const existing = await readJson(file);
+    const progress = Array.isArray(existing) ? existing : [];
+    const previous = progress.findIndex(item => item.data.activityId === activityId);
+    if (previous >= 0 && (type === 'tool.started' || progress[previous].type === 'tool.completed')) return;
+    const row = { type, ts: ts || nowIso(), runId: record.trace?.runId || id, sessionId: record.trace?.childSessionId, data: {
+      ...progress[previous]?.data, activityId, tool,
+      ...(typeof label === 'string' ? { label } : {}),
+      ...(typeof modToolName === 'string' ? { modToolName } : {}),
+      ...(typeof ok === 'boolean' ? { ok } : {}),
+      ...(typeof status === 'string' ? { status } : {}),
+    } };
+    if (previous < 0) progress.push(row);
+    else progress[previous] = row;
+    await atomicWriteJson(file, redactValue(progress));
   });
 }
 

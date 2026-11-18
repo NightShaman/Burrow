@@ -19,7 +19,7 @@ import { resolveNativeFilesystemExecutionTarget } from './native-filesystem-exec
 import { createExecutionContext } from './execution-context.mjs';
 import { executionPolicyAllowsMutation, normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
-import { updateSubagentStatus } from './subagent-store.mjs';
+import { appendSubagentToolProgress, updateSubagentStatus } from './subagent-store.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { prepareNativeToolContinuationAsync } from './native-continuation-preparation.mjs';
 import { changedPathsFromToolResults, summarizeToolResults } from './runtime-result-shapes.mjs';
@@ -153,7 +153,7 @@ async function appendChildToolRound({ authority, rootDir, sessionId, runId, trac
   return sequence;
 }
 
-async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null, signal = null } = {}) {
+async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null, signal = null, onToolProgress = null } = {}) {
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   toolCalls = toolCalls.map((call, index) => ({ ...call, id: call.id || `tool-call-${index}` }));
   const proposal = proposalFromNativeToolCalls(toolCalls);
@@ -178,7 +178,7 @@ async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSes
   const execution = await executeReviewedProposalActions({
     actions: proposal.actions, reviews: reviews.reviews, workspaceRoot: target.root, rootDir: target.root,
     dataRoot, sessionId: childSessionId, traceLogger, executionPolicy, modelConfig,
-    allowMutations: executionPolicyAllowsMutation(executionPolicy),
+    allowMutations: executionPolicyAllowsMutation(executionPolicy), onToolProgress,
     observedToolResults, executionContext, abortSignal: signal,
     // Nested remote children retain this worker's live execution dependencies.
     childRunner: resolveNativeFilesystemExecutionTarget(executionContext).kind === 'remote' ? runSpawnSubagentChild : null,
@@ -687,7 +687,18 @@ async function runRegisteredSpawnSubagentChild({
     }
     await progress?.({ type: 'subagent-progress', phase: 'tool-request', id, toolCallCount: toolCalls.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-request', label: `Starting ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'}`, tool: toolCalls[0]?.name || null, counts: { toolCalls: toolCalls.length } }, 'tool_request');
-    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext, signal });
+    const activityIds = new Map();
+    const onToolProgress = async ({ phase, action, result, skipped }) => {
+      const { tool, index, modToolName } = action;
+      const activityId = activityIds.get(index) || `tool-${randomUUID()}`;
+      activityIds.set(index, activityId);
+      const type = phase === 'start' ? 'tool.started' : 'tool.completed';
+      await appendSubagentToolProgress({ dataRoot, id, event: { type, data: { tool, activityId,
+        ...(phase === 'result' ? { ok: result?.ok === true, status: result?.status || skipped?.status || null } : {}),
+        ...(tool === 'mod_agent_tool' ? { modToolName } : {}),
+      } } }).catch(() => {}); // A display failure cannot interrupt a tool or its receipt.
+    };
+    const batch = await runSubagentToolCalls({ toolCalls, target, dataRoot, childSessionId, conversationId: owner.conversationId || null, traceLogger: modelTrace, executionPolicy: executionPolicyInput, modelConfig, observedToolResults: toolResults, parentExecutionContext, signal, onToolProgress });
     const batchOk = batch.results.every((result) => result?.ok !== false);
     await progress?.({ type: 'subagent-progress', phase: 'tool-result', id, resultCount: batch.results.length });
     await recordLiveActivity({ kind: 'tool', phase: 'tool-result', label: `Finished ${batch.results.length} tool result${batch.results.length === 1 ? '' : 's'}`, status: batchOk ? 'completed' : 'error', tool: batch.results[0]?.tool || toolCalls[0]?.name || null, error: batchOk ? null : (batch.results.find((result) => result?.ok === false)?.error || 'tool_failed'), counts: { toolResults: batch.results.length } }, batchOk ? 'tool_result' : 'tool_error');

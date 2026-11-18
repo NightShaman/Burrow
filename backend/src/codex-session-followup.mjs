@@ -9,7 +9,7 @@ import { runGeminiMinion } from './gemini-minion-runner.mjs';
  * Only server-owned metadata selects the harness, target and native identity.
  */
 export async function runCodexSessionFollowup({ stores, executionContext, agentId, sessionId,
-  runId, message, recoveryManifest = null, dataRoot, traceDir, signal, attachments = [], noCallModel = false,
+  runId, message, recoveryManifest = null, dataRoot, traceDir, signal, onTraceRecord = null, attachments = [], noCallModel = false,
   runner = runCodexMinion } = {}) {
   const authority = conversationAuthority({ store: stores.conversations, agentId });
   const metadata = await authority.metadata(sessionId);
@@ -50,7 +50,7 @@ export async function runCodexSessionFollowup({ stores, executionContext, agentI
     const task = recoveryManifest ? `# Burrow runtime recovery\n\n${renderRuntimeRecovery(message, recoveryManifest)}` : message;
     result = await execute({ id: runId, task, target: native.target, modelConfig: native.modelConfig || { connectionId: native.connectionId, model: native.model },
       executionPolicy: native.executionPolicy, continuation: native, dataRoot, childSessionId: sessionId,
-      owner: { agentId }, traceDir, signal, parentExecutionContext: followupContext });
+      owner: { agentId }, traceDir, signal, onTraceRecord, parentExecutionContext: followupContext });
   }
   // Successful native responses are already durably appended by the runner.
   if (!result.ok) await authority.append({ sessionId, runId, traceDir, type: 'message', role: 'assistant',

@@ -316,14 +316,42 @@ export class PostgresSessionStore {
   // bounded canonical page has been selected.
   async readArchiveTranscriptPage(args = {}) { return this.archiveReads.readArchiveTranscriptPage(args); }
 
+  // Chat pages need all the activity for the assistant runs they display,
+  // including batches copied out of the live tail by session compaction.
+  async minionPageToolActivity({ agentId, sessionId, entries, transactionClient }) {
+    const keys = [...new Set(entries.filter(entry => entry.role === 'assistant').map(proofRunKey).filter(Boolean))];
+    if (!keys.length) return [];
+    const indexed = await this.hasProofProjection(transactionClient);
+    const runMatch = alias => indexed ? `${alias}.run_key=ANY($3::text[])`
+      : `encode(convert_to((burrow_json_members(${alias}.entry,ARRAY['runId']))[1]::text,'UTF8'),'hex')=ANY($3::text[])`;
+    const visibility = alias => `burrow_history_key((burrow_json_members(${alias}.entry,ARRAY['visibility']))[1]::text)=burrow_history_text('activity')`;
+    const { rows } = await transactionClient.query(`WITH candidates AS (
+      SELECT e.entry_id,e.sequence,e.entry FROM conversation_entries e
+      WHERE e.agent_id=$1 AND e.session_id=$2 AND ${runMatch('e')} AND ${visibility('e')}
+      UNION ALL
+      SELECT e.entry_id,e.ordinal,e.entry FROM conversation_archive_entries e
+      JOIN conversation_archives a ON a.agent_id=e.agent_id AND a.session_id=e.session_id AND a.archive_id=e.source_id
+      WHERE e.agent_id=$1 AND e.session_id=$2 AND ${runMatch('e')} AND a.kind='compacted'
+        AND a.generation>=COALESCE((SELECT (metadata->>'resetGeneration')::bigint FROM conversation_sessions
+          WHERE agent_id=$1 AND session_id=$2), (SELECT max(generation)+1 FROM conversation_archives
+          WHERE agent_id=$1 AND session_id=$2 AND kind='reset'), 0)
+        AND ${visibility('e')}
+    ) SELECT sequence,entry FROM (SELECT DISTINCT ON (entry_id) entry_id,sequence,entry
+      FROM candidates ORDER BY entry_id,sequence) deduplicated ORDER BY sequence`, [agentId, sessionId, keys]);
+    return rows.map(rowEntry).filter(entry => entry.metadata?.toolActivity);
+  }
+
   // Page, live projections and metadata must share one reset-generation snapshot.
   async readActiveSessionDisplay(args = {}) {
     return withArchiveRead(this.pool, async transactionClient => {
       const page = await readArchiveTranscriptPage(this.pool, args, transactionClient);
-      if (!page || page.archiveSnapshot || args.before) return { page, activity: [], liveChat: [] };
+      if (!page || page.archiveSnapshot) return { page, activity: [], liveChat: [] };
+      const minion = page.metadata.sessionKind === 'subagent' || page.metadata.parentChild === true;
+      const pageActivity = minion ? await this.minionPageToolActivity({ ...args, entries: page.entries, transactionClient }) : [];
+      if (args.before) return { page, activity: pageActivity, liveChat: [] };
       const activity = await this.projection({ ...args, visibility: 'activity', limit: 20, transactionClient, indexedVisibility: true });
       const liveChat = await this.projection({ ...args, visibility: 'chat', limit: 200, transactionClient, indexedVisibility: true });
-      return { page, activity, liveChat };
+      return { page, activity: minion ? [...pageActivity, ...activity.filter(entry => !entry.metadata?.toolActivity)] : activity, liveChat };
     }, args);
   }
 

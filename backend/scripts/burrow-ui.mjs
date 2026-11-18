@@ -1426,13 +1426,17 @@ async function archiveWorkbenchItem(id, agentRuntime = null) {
   return { ok: true, item };
 }
 
-async function listSubagentSummaries(agentRuntime) {
+async function listSubagentSummaries(agentRuntime, { includeProgress = false } = {}) {
   // Truncating before ancestry selection can strand a live grandchild behind
   // its older/final parent. Bound context hydration, not the projected tree.
-  const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: true, limit: Number.MAX_SAFE_INTEGER });
+  const records = await listSubagentRecords({ dataRoot: agentRuntime.agentDataRoot, includeFinal: true, includeProgress, limit: Number.MAX_SAFE_INTEGER });
   return records
     .filter(record => [record.agentId, record.owner?.agentId].every(id => !id || id === agentRuntime.agentId))
-    .map(record => ({ ...subagentVisibilitySummary(record), ...(record.minionDepth || {}) }));
+    .map(record => {
+      const summary = { ...subagentVisibilitySummary(record), ...(record.minionDepth || {}) };
+      return includeProgress && !summary.final && Array.isArray(record.progress)
+        ? { ...summary, progress: record.progress } : summary;
+    });
 }
 
 const CHILD_LIVE_FINAL_WINDOW_MS = 60 * 60 * 1000;

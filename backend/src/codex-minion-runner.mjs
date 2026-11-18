@@ -1,4 +1,4 @@
-import { createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
+import { createNativeMinionActivity, createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { projectCodexCheckpoint, codexHandoffContext, codexObservedEvidence } from './codex-native-checkpoint.mjs';
 import { createCodexPoolRouting } from './codex-pool-routing.mjs';
@@ -44,7 +44,7 @@ export async function discoverCodexExecutable(env = process.env) {
 
 /** Server-only adapter. Admission, session initialization and terminal receipts remain parent-owned. */
 export async function runCodexMinion({ id, task, target, dataRoot, childSessionId, owner = {},
-  modelConfig, traceDir = null, parentExecutionContext = null,
+  modelConfig, traceDir = null, parentExecutionContext = null, onTraceRecord = null,
   signal = parentExecutionContext?.abortSignal, executionPolicy = null, continuation = null, poolRecovery = null } = {}) {
   const cancellation = new AbortController();
   let nativeTelemetry;
@@ -93,13 +93,15 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     runId: id, traceDir, type: activity ? 'event' : 'message', role: activity ? null : 'assistant',
     content: redact(content), visibility: activity ? 'activity' : 'chat', entersPrompt: !activity,
     metadata: { kind: activity ? 'codex-minion-activity' : 'codex-minion-response', subagentExecution: true } });
+  const nativeActivity = createNativeMinionActivity({ dataRoot, runId: id, sessionId: childSessionId, traceDir,
+    getAuthority: () => authority, isRecorded: () => recorded, onTraceRecord });
   let result;
   try {
     // Check host routing before touching the target path, credentials or executable.
     const executionHost = resolveProcessExecutionTarget(parentExecutionContext || {});
     const remote = executionHost.kind === 'remote';
     nativeTelemetry = createNativeMinionTelemetry({ harness: 'codex', runId: id, telemetry: parentExecutionContext?.telemetry,
-      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact });
+      executionTarget: remote ? 'remote' : 'local', requestedModel: modelConfig?.model, redact, onToolProgress: nativeActivity.observe });
     const savedHost = continuation?.executionHost || { kind: 'local' };
     if (continuation && (savedHost.kind !== executionHost.kind || savedHost.providerId !== executionHost.providerId || savedHost.targetId !== executionHost.targetId)) fail('codex_session_host_changed');
     const remoteController = parentExecutionContext?.processExecutionController;
@@ -162,7 +164,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
       return { accessToken: resolved.token, chatgptAccountId: accountId,
         ...(identity.planType ? { chatgptPlanType: identity.planType } : {}) };
     };
-    recorded = !continuation && Boolean(await readSubagentRecord({ dataRoot, id }));
+    recorded = (!continuation || poolRecovery?.recorded === true) && Boolean(await readSubagentRecord({ dataRoot, id }));
     if (recorded) {
       cancellationPoll = setInterval(() => {
         void readSubagentRecord({ dataRoot, id }).then(record => {
@@ -355,13 +357,14 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
         blockers: ['codex_cleanup_failed'], warnings: [], sideEffectsApplied: dispatched ? null : false };
     }
   }
+  await nativeActivity.flush();
   if (client && !result.ok) attachDiagnostics(result, client.diagnostics.snapshot());
   if (poolRecovery?.originalResult && !route) {
     result = { ...poolRecovery.originalResult, warnings: [...(poolRecovery.originalResult.warnings || []), 'codex_pool_alternate_unavailable'] };
   }
   if (retry && result.blockers?.[0] !== 'codex_cleanup_failed') {
     return runCodexMinion({ id, task, target, dataRoot, childSessionId, owner, modelConfig, traceDir,
-      parentExecutionContext, signal, executionPolicy, continuation: recoveryContinuation || continuation, poolRecovery: { ...retry, originalResult: { ...result,
+      parentExecutionContext, onTraceRecord, signal, executionPolicy, continuation: recoveryContinuation || continuation, poolRecovery: { ...retry, recorded, originalResult: { ...result,
         model: { requested: modelConfig.model, actual: actualModel, connectionId },
         providerPool: { logicalConnectionId: modelConfig.connectionId, memberId: connectionId, ownerId: route.ownerId, substitute: route.substitute } } } });
   }
