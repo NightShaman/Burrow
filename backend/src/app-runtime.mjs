@@ -323,6 +323,10 @@ async function runAskChatUnserialized({
   let modContinuity = null;
   let committedTerminalResult = null;
   try {
+  const turnSourceName = incomingAgentMessage ? 'a2a' : externalTurnMetadata ? 'mod/external'
+    : completionEvent ? 'workflow-event' : chatInput ? 'queue_next'
+      : runSource || turnSource || command || 'chat';
+  const recoveryTurn = turnSourceName === 'recovery';
   const continuityAuthority = postgresContinuity({ store: stores.conversations, agentId: runtimeState.agentId });
   const continuity = await continuityAuthority.claim({
     rootDir: sessionRoot,
@@ -330,6 +334,7 @@ async function runAskChatUnserialized({
     runId: resolvedRunId,
     objective: message,
     recoveryPolicy,
+    requireRecoveryClaim: recoveryTurn,
     expectedResetGeneration: chatInput?.generation,
     chatInputId: chatInput?.id,
     // An internally delivered agent message is persisted first so it enters
@@ -465,8 +470,8 @@ async function runAskChatUnserialized({
   // Native child sessions never fall through to Burrow planning or tools.
   const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
     agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,
-    message, dataRoot, traceDir: logger.traceDir, signal: normalizedArgs.abort_signal,
-    attachments: turnAttachments, noCallModel: noCallModel || normalizedArgs.no_call_model });
+    message, recoveryManifest: recoveryTurn ? continuity.recoveryManifest : null,
+    dataRoot, traceDir: logger.traceDir, signal: normalizedArgs.abort_signal, attachments: turnAttachments, noCallModel: noCallModel || normalizedArgs.no_call_model });
   if (codexFollowup) return commitTerminalResult({ branch: 'codex-followup',
     finalize: async () => ({ ...codexFollowup, mode: 'ask', command,
       runId: resolvedRunId, sessionId: resolvedSessionId, traceDir: logger.traceDir }) });
@@ -478,7 +483,7 @@ async function runAskChatUnserialized({
     skillStore: stores?.skills || null,
   });
   const preliminaryTurnPlan = await planTurnWithModel({
-    message,
+    message, recoveryTurn,
     action: effectiveAction,
     explicitControls: { action: normalizedArgs.action ?? action ?? null, extraEyes: extraEyesRequested(normalizedArgs) },
     memoryContext: turnMemoryContext,
@@ -578,7 +583,8 @@ async function runAskChatUnserialized({
   // in-process restart or crash leaves Archive with the instruction that led
   // to the recorded activity. Agent-delivery ingress already persisted its
   // attributed source message before invoking this recipient run.
-  if (!incomingAgentMessage) {
+  // Startup recovery has a durable manifest, not a new operator turn.
+  if (!incomingAgentMessage && !recoveryTurn) {
     const earlyContinuationPlan = explicitContinue
       ? buildContinuationPlan({ item: activeWorkItem, requestedItemId, sessionId: resolvedSessionId, args: normalizedArgs, workspaceFiles })
       : null;
@@ -607,13 +613,10 @@ async function runAskChatUnserialized({
 
   const shouldCallModel = normalizedArgs.call_model || !normalizedArgs.no_call_model;
   const modelTask = message;
-  const turnSourceName = incomingAgentMessage ? 'a2a' : externalTurnMetadata ? 'mod/external'
-    : completionEvent ? 'workflow-event' : chatInput ? 'queue_next'
-      : runSource || turnSource || command || 'chat';
   const operatorTurn = isOperatorRuntimeTurn({ source: turnSourceName, incomingAgentMessage, externalTurnMetadata, completionEvent });
   let promptContext;
   try {
-    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, sharedModContext, incomingAgentMessage, operatorTurn, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
+    promptContext = await prepareRuntimePromptContext({ rootDir, sessionRoot, resolvedSessionId, preparedContext, runtimeState, runtimeConfig, agentRuntime, stores, route, ambientWorkingContext, structuredSubagents, extraEyesReview, dreamPreload, childEvidence, sessionRecall, runEvidence, albdruckRecall, groupChannelContext, promptAttachments, attachmentManifest, modelTask, logger, modelConfig, executionContext, modAgentContext, sharedModContext, incomingAgentMessage, operatorTurn, recoveryManifest: recoveryTurn ? continuity.recoveryManifest : null, signal: normalizedArgs.abort_signal, temporalContext: { turnStartedAt, lastOperatorMessageAt, timezone: await operatorTimezone(stores.metadata) } });
   } catch (error) {
     // Context preparation can reject before returning its final inspection.
     // Route that exact budget failure through the same durable blocked owner,
@@ -671,7 +674,7 @@ async function runAskChatUnserialized({
   const result = await persistPlainChatResult({
     stores, agentId: runtimeState.agentId, sessionRoot, dataRoot, logger, command, message, sessionId: resolvedSessionId, priorSession, route, selectedSkills: route.skills.selected.map((skill) => skill.id), prompt, contextEngine: turnContext, contextCompression, intent, session, workspaceRoot: resolvedWorkingRoot, artifactWorkspaceRoot: runtimeState.agentWorkspaceRoot, subjectScope: verifiedSubjectScope, backgroundWork: trackedBackgroundWork, modelTurn, turnPlan, plannerObservability, routeDecision, canonicalTurnEnvelope, runtimeTurn, subagents, structuredSubagents, extraEyesReview, fileDeicticResolution: deicticFiles, finalWorkingContext, commitTerminalResult,
     afterCommitBeforeTraceTerminal: async (committedResult) => {
-      if (modAgent || !committedResult?.ok || committedResult.decision !== 'answered' || !committedResult.answerText) return;
+      if (modAgent || recoveryTurn || !committedResult?.ok || committedResult.decision !== 'answered' || !committedResult.answerText) return;
       // Tiddle residue is advisory and must never turn a completed chat response
       // into a failure. Record it before terminal.json so the marker remains the
       // final trace write and completed traces stay retention-eligible.

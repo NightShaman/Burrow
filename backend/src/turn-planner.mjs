@@ -452,8 +452,11 @@ function applyStructuredActionsToPlan(basePlan, { actions = [], pendingAction = 
   };
 }
 
-export async function planTurnWithModel({ modelAdapter = null, modelConfig = null, traceLogger = null, ...args } = {}) {
+export async function planTurnWithModel({ modelAdapter = null, modelConfig = null, traceLogger = null, recoveryTurn = false, ...args } = {}) {
   const fallbackPlan = planTurn(args);
+  // Recovery already has a claimed objective and a model-facing checkpoint.
+  // Do not reclassify Burrow's synthetic trigger as an operator request.
+  if (recoveryTurn) return fallbackPlan;
   const pendingActions = latestPendingActionsFromConversation(args.conversationContext || {});
   const plannerConfig = modelConfig?.planner || modelConfig?.planning || null;
   const adapter = modelAdapter || (plannerConfig?.baseUrl ? createModelAdapter({ config: plannerConfig }) : null);

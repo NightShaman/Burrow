@@ -1,3 +1,4 @@
+import { renderRuntimeRecovery } from './recovery-prompt.mjs';
 import { resolveMinionProfileExecutionTarget, minionProfileAction } from './minion-profiles.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { runCodexMinion } from './codex-minion-runner.mjs';
@@ -8,14 +9,14 @@ import { runGeminiMinion } from './gemini-minion-runner.mjs';
  * Only server-owned metadata selects the harness, target and native identity.
  */
 export async function runCodexSessionFollowup({ stores, executionContext, agentId, sessionId,
-  runId, message, dataRoot, traceDir, signal, attachments = [], noCallModel = false,
+  runId, message, recoveryManifest = null, dataRoot, traceDir, signal, attachments = [], noCallModel = false,
   runner = runCodexMinion } = {}) {
   const authority = conversationAuthority({ store: stores.conversations, agentId });
   const metadata = await authority.metadata(sessionId);
   const harness = metadata?.harness;
   if (!['codex','claude','gemini'].includes(harness)) return null;
   const native = harness === 'claude' ? metadata.claudeSession : harness === 'gemini' ? metadata.geminiSession : metadata.codexSession;
-  await authority.append({ sessionId, runId, traceDir, type: 'message', role: 'user', content: message,
+  if (!recoveryManifest) await authority.append({ sessionId, runId, traceDir, type: 'message', role: 'user', content: message,
     metadata: { kind: `${harness}-minion-followup` } });
   let result;
   // A pinned profile host belongs to this session, not to the agent's current
@@ -44,7 +45,10 @@ export async function runCodexSessionFollowup({ stores, executionContext, agentI
     result = { ok: false, summary: minionProfileAction(blocker) || `${harness === 'claude' ? 'Claude' : harness === 'gemini' ? 'Gemini' : 'Codex'} follow-up cannot run in this session.`, blockers: [blocker], warnings: [] };
   } else {
     const execute = runner === runCodexMinion ? (harness === 'claude' ? runClaudeMinion : harness === 'gemini' ? runGeminiMinion : runner) : runner;
-    result = await execute({ id: runId, task: message, target: native.target, modelConfig: native.modelConfig || { connectionId: native.connectionId, model: native.model },
+    // Native CLIs accept a task string. Keep its runtime origin explicit and
+    // never project this transport input as operator dialogue in Burrow.
+    const task = recoveryManifest ? `# Burrow runtime recovery\n\n${renderRuntimeRecovery(message, recoveryManifest)}` : message;
+    result = await execute({ id: runId, task, target: native.target, modelConfig: native.modelConfig || { connectionId: native.connectionId, model: native.model },
       executionPolicy: native.executionPolicy, continuation: native, dataRoot, childSessionId: sessionId,
       owner: { agentId }, traceDir, signal, parentExecutionContext: followupContext });
   }

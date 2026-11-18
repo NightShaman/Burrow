@@ -2099,7 +2099,7 @@ server.listen(port, host, () => {
       const recoveryInstruction = continuation?.decision === 'resume'
         ? 'Continue the interrupted work using the runtime recovery record and bounded same-session transcript.'
         : 'Recover the interrupted work using the runtime recovery record. Reconcile durable state before acting; do not repeat completed work blindly.';
-      const lifecycle = registerRuntimeActiveRun({ agentId: runtime.agentId, sessionId, runId, message: `Recover interrupted run: ${manifest.objective || 'reconcile durable state'}`, objective: manifest.objective || null, source: 'recovery', parentSignal: signal });
+      const lifecycle = registerRuntimeActiveRun({ agentId: runtime.agentId, sessionId, runId, objective: manifest.objective || null, source: 'recovery', parentSignal: signal });
       try {
         return await runChatTurnFromBody({
           stores:postgresApplication.stores,

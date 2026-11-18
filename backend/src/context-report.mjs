@@ -6,6 +6,7 @@ const labels = {
   'agent-identity-provider': 'Identity',
   'stable-instructions-provider': 'Fixed guidance',
   'support-context-provider': 'Burrow runtime context',
+  'recovery-context-provider': 'Burrow recovery checkpoint',
   'current-task': 'Current message',
   'compaction-summary': 'Conversation summary',
   'raw-transcript-assistant': 'Assistant conversation',

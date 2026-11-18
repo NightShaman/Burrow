@@ -47,14 +47,16 @@ export async function appendRuntimeActivity({
 // Provider input is durable content, not bounded diagnostic metadata. The user
 // transcript remains readable; replay joins this record to its originating run.
 export async function appendRuntimeProviderTurn({ messages = [], ...scope } = {}) {
-  const currentIndex = messages.length - 1;
-  if (currentIndex < 0 || messages[currentIndex]?.role !== 'user') throw new Error('provider_turn_current_user_required');
+  const current = messages.at(-1);
+  // Recovery input is archived for diagnostics, never joined to a chat turn.
+  const recovery = current?.role === 'developer' && current?.metadata?.providerMessageSource === 'recovery-context-provider';
+  if (!recovery && current?.role !== 'user') throw new Error('provider_turn_current_user_required');
   // Select support by its provenance, not its current position. Adjacency to
   // the current user message is not a durable capture contract. Keep only the
   // current provider support pack and current task; historical snapshots and
   // replayed dialogue already have their own durable owners.
   const freshSupport = messages.filter((message) => message?.metadata?.providerMessageSource === 'support-context-provider');
-  const turnMessages = [...freshSupport, messages[currentIndex]]
+  const turnMessages = [...freshSupport, current]
     .map(({ role, content, metadata }) => ({ role, content, ...(metadata ? { metadata } : {}) }));
   return appendRuntimeSessionEntry({ ...scope, type: 'provider_history',
     content: JSON.stringify({ version: 1, messages: turnMessages }),

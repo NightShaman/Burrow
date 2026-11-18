@@ -45,7 +45,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
   },
   async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
-  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId,recoveryPolicy=null}) {
+  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId,recoveryPolicy=null,requireRecoveryClaim=false}) {
    await this.reconcile({sessionId});
    let result;
    await updateMetadata({...scope(sessionId),update:async (metadata,client)=>{
@@ -58,10 +58,11 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     // Never infer remote owner death from local PID state. Recovery must explicitly close it.
     const recovery=metadata.recoveryQueue;
     const recoveryBusy=recovery?.status==='running' && (recovery.ownerId!==ownerId || recovery.claimedByRunId!==runId);
+    const ownsCurrentRecovery=recovery?.status==='running' && recovery.ownerId===ownerId && recovery.claimedByRunId===String(runId);
+    if(requireRecoveryClaim && (!ownsCurrentRecovery || metadata.interruptedRun?.status!=='interrupted')) throw new Error('recovery_manifest_required');
     const uncertain=recoveryBusy || prior?.state==='finalizing' || (prior?.state==='running' && prior.ownerId!==ownerId);
     if(uncertain){result={...prior,current:false,reason:'active_or_abandoned_owner_requires_reconciliation'};return metadata;}
     const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(recoveryPolicy==='scheduled-task'?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
-    const ownsCurrentRecovery=recovery?.status==='running' && recovery.ownerId===ownerId && recovery.claimedByRunId===String(runId);
     const recoveryManifest=metadata.interruptedRun?.status==='interrupted' && (recovery?.status==='pending' || ownsCurrentRecovery)
      ? metadata.interruptedRun : null;
     result={...head,current:true,recoveryManifest};

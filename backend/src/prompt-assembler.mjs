@@ -1,3 +1,4 @@
+import { renderRecoveryCheckpoint, renderRuntimeRecovery } from './recovery-prompt.mjs';
 import { a2aReplyMechanics } from './a2a-reply-context.mjs';
 import { localTimestamp } from './timezone.mjs';
 import { resolveRuntimeTraceRoot } from './config.mjs';
@@ -52,6 +53,7 @@ function sourceForSection(name) {
     'attachment-manifest': 'attachment-manifest-provider',
     skills: 'skill-provider',
     'available-capabilities': 'skill-catalog-provider',
+    'Interrupted Run Recovery': 'recovery-context-provider',
     'current-message': 'current-turn-provider',
     task: 'current-turn-provider',
   };
@@ -406,13 +408,7 @@ function renderWorkingContext(context = null, maxChars = 0) {
   if (workspace?.root) lines.push(`Latest explicit target: ${workspace.root}`);
   if (targets.length) lines.push('Recent file references:', ...targets.slice(0, 6).map((item) => `- ${item}`));
   if (referents.length) lines.push('Referents:', ...referents.slice(0, 8).map((item) => `- ${item}`));
-  if (interruptedRun) {
-    lines.push('', 'Interrupted Run Recovery. This is runtime-owned durable recovery state. Reconcile it against current repository/runtime evidence before continuing; do not repeat completed work blindly.', `- Run: ${interruptedRun.runId || 'unknown'} (generation ${interruptedRun.generation ?? 'unknown'})`, `- Reason: ${interruptedRun.reason || 'unknown'}`);
-    if (interruptedRun.objective) lines.push(`- Authorized objective: ${interruptedRun.objective}`);
-    if (interruptedRun.lastCompletedStep) lines.push(`- Last durable state: ${interruptedRun.lastCompletedStep}`);
-    if (interruptedRun.changedFiles?.length) lines.push('- Changed files:', ...interruptedRun.changedFiles.slice(0, 12).map((item) => `  - ${item}`));
-    if (interruptedRun.pendingVerification?.length) lines.push('- Pending reconciliation:', ...interruptedRun.pendingVerification.slice(0, 8).map((item) => `  - ${item}`));
-  }
+  if (interruptedRun) lines.push('', `Interrupted Run Recovery. ${renderRecoveryCheckpoint(interruptedRun)}`);
   if (readEvidence.length) {
     const preamble = 'Retained ReadEvidence. Exact excerpts returned by earlier files_read calls. They are version-checked before use; this request includes only the evidence that fits its context budget. Reopen the file when you need content outside an included excerpt.';
     // No independent working-context default: this receives its allocation from
@@ -569,6 +565,7 @@ export async function assemblePrompt({
   kernel = '',
   incomingAgentMessage = null,
   operatorTurn = false,
+  recoveryManifest = null,
   selectedSkills = [],
   promptSkills = selectedSkills,
   conversationContext = null,
@@ -682,6 +679,10 @@ export async function assemblePrompt({
 
   const renderedSharedContext = sharedContext.map(entry => ({ ownerModId: entry.ownerModId, ...renderModRecords(entry.context, { ownerModId: entry.ownerModId, kind: 'shared-context', totalBudget: limits.modSharedContextChars, perFileBudget: limits.modSharedContextFileChars }) }));
 
+  const recoveryContext = recoveryManifest
+    ? renderRuntimeRecovery(task, recoveryManifest)
+    : null;
+  const workingContext = supportContext?.workingContext;
   const rawSections = [
     section('kernel', modContext ? '' : clampText(kernel, kernelLimit)),
     section('prompt-boundary', [modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] }), a2aReplyMechanics(incomingAgentMessage)].filter(Boolean).join('\n\n')),
@@ -698,7 +699,7 @@ export async function assemblePrompt({
     section('prior-conversation-summary', clampText(renderPriorConversationSummary(conversation), limits.priorSummaryChars ?? 4_000)),
     section('support-group-channel', renderGroupChannel(supportContext?.groupChannel || null, limits.groupChannelChars ?? 12_000)),
     section('support-dream-preload', modContext ? '' : renderDreamPreload(supportContext?.dreamPreload || null)),
-    section('support-working-context', modContext ? '' : renderWorkingContext(supportContext?.workingContext || null, limits.workingContextChars ?? 0)),
+    section('support-working-context', modContext ? '' : renderWorkingContext(recoveryContext && workingContext ? { ...workingContext, interruptedRun: null } : workingContext, limits.workingContextChars ?? 0)),
     ...(modContext ? [section('mod-context', renderedModContext.text, {
       ownerModId: modContext.ownerModId,
       items: renderedModContext.included.map((file) => file.name),
@@ -722,7 +723,7 @@ export async function assemblePrompt({
       omittedItems: omittedSkillIds,
       omittedChars: omittedSkillChars,
     }),
-    section('current-message', task),
+    recoveryContext ? section('Interrupted Run Recovery', recoveryContext) : section('current-message', task),
   ];
   const sections = rawSections.filter((item) => item.text);
 
@@ -740,7 +741,7 @@ export async function assemblePrompt({
   const identitySectionNames = new Set(['profile-files', 'mod-profile-files', 'profile']);
   const identitySections = staticSections.filter((item) => identitySectionNames.has(item.name));
   const operatingSections = staticSections.filter((item) => !identitySectionNames.has(item.name));
-  const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task']);
+  const conversationSectionNames = new Set(['conversation', 'prior-conversation-summary', 'current-message', 'task', 'Interrupted Run Recovery']);
   const supportSections = volatileSections.filter((item) => !conversationSectionNames.has(item.name) && !['mod-shared-context', 'attachment'].includes(item.name));
   // Operator-supplied text files belong with the current turn, not in the
   // higher-priority runtime channel. The rendered excerpt stays attributed.
@@ -760,7 +761,8 @@ export async function assemblePrompt({
     // Keep volatile support out of the speakers' dialogue and after reusable history.
     ...supportMessages,
     ...sharedModContextMessages(sharedContext, limits),
-    { role: 'user', content: `# current-message\n\n${incomingAgentMessage?.senderAgentId ? `[Peer message from ${incomingAgentMessage.senderAgentName || incomingAgentMessage.senderAgentId}]:\n${renderPeerSessionProvenance(incomingAgentMessage)}` : operatorTurn ? '[Operator message]:\n' : ''}${task.trim()}${currentAttachments}`, metadata: { providerMessageSource: 'current-task', ...(incomingAgentMessage?.senderAgentId ? { providerSpeaker: 'peer' } : operatorTurn ? { providerSpeaker: 'operator' } : { providerSpeaker: 'runtime' }) } },
+    recoveryContext ? { role: 'developer', content: `# Interrupted Run Recovery\n\n${recoveryContext}`, metadata: { providerMessageSource: 'recovery-context-provider', providerSpeaker: 'runtime' } }
+      : { role: 'user', content: `# current-message\n\n${incomingAgentMessage?.senderAgentId ? `[Peer message from ${incomingAgentMessage.senderAgentName || incomingAgentMessage.senderAgentId}]:\n${renderPeerSessionProvenance(incomingAgentMessage)}` : operatorTurn ? '[Operator message]:\n' : ''}${task.trim()}${currentAttachments}`, metadata: { providerMessageSource: 'current-task', ...(incomingAgentMessage?.senderAgentId ? { providerSpeaker: 'peer' } : operatorTurn ? { providerSpeaker: 'operator' } : { providerSpeaker: 'runtime' }) } },
   ]);
   const conversationSection = rawSections.find((item) => item.name === 'conversation');
   const priorSummarySection = rawSections.find((item) => item.name === 'prior-conversation-summary');
