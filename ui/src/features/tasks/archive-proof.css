@@ -373,3 +373,62 @@
 .proof-evidence-error p {
   margin: 0;
 }
+
+.proof-request-history-body {
+  container-type: inline-size;
+  padding-top: 12px;
+}
+.proof-request-history-body .proof-evidence-error {
+  padding-top: 0;
+}
+.proof-request-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.proof-request-toolbar [aria-pressed='true'] {
+  border-color: var(--accent-strong);
+  color: var(--text-strong);
+}
+.proof-request-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+@container (min-width: 570px) {
+  .proof-request-grid[data-comparing='true'] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.proof-request-picker,
+.proof-request-picker label {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+.proof-request-picker label {
+  color: var(--text-strong);
+  font-size: 12px;
+}
+.proof-request-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font: inherit;
+}
+.proof-request-meta {
+  overflow-wrap: anywhere;
+}
+.proof-request-meta code {
+  display: block;
+  color: var(--text);
+}

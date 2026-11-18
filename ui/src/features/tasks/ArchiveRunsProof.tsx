@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import type { ArchiveRunDetail } from '../../app/api';
 import { archiveRepository, type ArchiveRepository } from './archiveRepository';
+import { ProviderRequestHistory } from './ProviderRequestHistory';
 
 function date(value?: string | null) {
   if (!value) return 'No date';
@@ -313,6 +314,11 @@ function ProofDetail({
         <EvidenceList title="Unresolved" items={run.evidence.unresolved} />
       </div>
       <FullToolEvidence repository={repository} key={`${run.agentId}:${run.runId}`} run={run} />
+      <ProviderRequestHistory
+        key={JSON.stringify([run.agentId, run.sessionId, run.runId])}
+        run={run}
+        repository={repository}
+      />
       <section className="proof-section">
         <h3>
           Timeline<span>{run.timeline.length}</span>

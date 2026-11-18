@@ -21,6 +21,27 @@ export type ArchiveCalendarAvailability = {
 
 export type ArchiveRepository = ReturnType<typeof createArchiveRepository>;
 
+export type ProviderRequest = {
+  requestId: string;
+  ts: string | null;
+  provider: string | null;
+  model: string | null;
+  api: string | null;
+  modelCall: number | null;
+  continuation: boolean;
+  state: 'available' | 'expired' | 'not_captured' | 'unavailable';
+};
+
+type ProviderRequestHistory = { retentionDays: number; requests: ProviderRequest[] };
+type ProviderRequestDetail = ProviderRequest & { body?: unknown };
+type TraceScope = { runId: string; agentId: string; sessionId: string };
+
+function providerRequestsPath({ runId, agentId, sessionId }: TraceScope, requestId?: string) {
+  const query = new URLSearchParams({ agentId, sessionId });
+  if (requestId !== undefined) query.set('requestId', requestId);
+  return `/api/traces/${encodeURIComponent(runId)}/provider-requests?${query}`;
+}
+
 export function browserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
@@ -189,6 +210,41 @@ export function createArchiveRepository(request: typeof api = api) {
           { signal },
         )
       ).run;
+    },
+    async listProviderRequests(scope: TraceScope, signal?: AbortSignal) {
+      const response = await request<
+        | ({ ok: true; runId: string } & ProviderRequestHistory)
+        | { ok: true; trace: unknown }
+        | undefined
+      >(providerRequestsPath(scope), { signal }).catch((cause: unknown) => {
+        if (cause instanceof Error && 'status' in cause && cause.status === 404) return null;
+        throw cause;
+      });
+      // Older Core may match /provider-requests with the generic trace route.
+      if (response === null || (response && typeof response === 'object' && 'trace' in response))
+        return null;
+      if (
+        response?.ok !== true ||
+        response.runId !== scope.runId ||
+        !Number.isFinite(response.retentionDays) ||
+        !Array.isArray(response.requests)
+      )
+        throw new Error('Invalid provider request history response.');
+      return { retentionDays: response.retentionDays, requests: response.requests };
+    },
+    async loadProviderRequest(scope: TraceScope, requestId: string, signal?: AbortSignal) {
+      const response = await request<{
+        ok: true;
+        runId: string;
+        request: ProviderRequestDetail;
+      }>(providerRequestsPath(scope, requestId), { signal });
+      if (
+        response?.ok !== true ||
+        response.runId !== scope.runId ||
+        response.request?.requestId !== requestId
+      )
+        throw new Error('Invalid provider request detail response.');
+      return response.request;
     },
     async loadRunTrace(runId: string, agentId: string, sessionId: string, signal?: AbortSignal) {
       const query = new URLSearchParams({ agentId, sessionId, output: 'true' });
