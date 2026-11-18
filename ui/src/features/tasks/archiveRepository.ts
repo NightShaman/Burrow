@@ -193,9 +193,11 @@ export function createArchiveRepository(request: typeof api = api) {
       agentId = '',
       signal?: AbortSignal,
       cursor?: string | null,
+      search = '',
     ): Promise<ArchivePage<ArchiveRunListResponse['runs'][number]>> {
       const query = new URLSearchParams({ limit: '100' });
       if (agentId) query.set('agentId', agentId);
+      if (search.trim()) query.set('q', search.trim());
       if (cursor) query.set('cursor', cursor);
       const response = await request<ArchiveRunListResponse & CursorPage>(
         `/api/archive/runs?${query}`,

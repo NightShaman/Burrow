@@ -1,5 +1,5 @@
 import { minionOutcome } from '../../app/minionOutcome';
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import type { ArchiveRunDetail } from '../../app/api';
@@ -462,56 +462,56 @@ export function ArchiveRunsProof({
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [detailError, setDetailError] = useState('');
+  const query = search.trim();
   useEffect(() => {
-    detailRequest.current?.abort();
-    moreRequest.current?.abort();
+    setSelected(null);
+    setDetailLoading(false);
+    setDetailError('');
+    return () => detailRequest.current?.abort();
+  }, [selectedAgent, repository]);
+  useEffect(() => {
     const abort = new AbortController();
     setLoading(true);
     setMoreLoading(false);
     setError('');
-    setSelected(null);
-    repository
-      .listRuns(selectedAgent, abort.signal)
-      .then((page) => {
-        if (!abort.signal.aborted) {
+    setMoreError('');
+    setRuns([]);
+    setNextCursor(null);
+    setHasMore(false);
+    const load = () => {
+      void repository
+        .listRuns(selectedAgent, abort.signal, null, query)
+        .then((page) => {
+          if (abort.signal.aborted) return;
           setRuns(page.items);
           setNextCursor(page.nextCursor);
           setHasMore(page.hasMore);
-          setMoreError('');
-        }
-      })
-      .catch((cause) => {
-        if (!abort.signal.aborted)
-          setError(cause instanceof Error ? cause.message : 'Could not load archive runs.');
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
+        })
+        .catch((cause) => {
+          if (!abort.signal.aborted)
+            setError(cause instanceof Error ? cause.message : 'Could not load archive runs.');
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setLoading(false);
+        });
+    };
+    const timer = query ? window.setTimeout(load, 180) : null;
+    if (timer === null) load();
     return () => {
+      if (timer !== null) window.clearTimeout(timer);
       abort.abort();
-      detailRequest.current?.abort();
       moreRequest.current?.abort();
     };
-  }, [selectedAgent]);
-  const visible = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return runs.filter(
-      (run) =>
-        !query ||
-        `${run.agentName || run.agentId} ${run.objective || ''} ${run.finalAnswer || ''} ${run.status}`
-          .toLowerCase()
-          .includes(query),
-    );
-  }, [runs, search]);
+  }, [selectedAgent, repository, query]);
   const loadMore = () => {
-    if (!hasMore || !nextCursor || moreLoading) return;
+    if (loading || !hasMore || !nextCursor || moreLoading) return;
     const cursor = nextCursor;
     const abort = new AbortController();
     moreRequest.current = abort;
     setMoreLoading(true);
     setMoreError('');
     repository
-      .listRuns(selectedAgent, abort.signal, cursor)
+      .listRuns(selectedAgent, abort.signal, cursor, query)
       .then((page) => {
         if (abort.signal.aborted) return;
         setRuns((current) =>
@@ -558,7 +558,7 @@ export function ArchiveRunsProof({
       <section className="archive-results-pane" aria-label="Archive proof runs">
         <div className="archive-pane-heading">
           <span className="eyebrow">Runs</span>
-          <strong>{visible.length} runs</strong>
+          <strong>{runs.length} runs</strong>
         </div>
         <div className="archive-session-list">
           {loading ? (
@@ -579,7 +579,7 @@ export function ArchiveRunsProof({
               </div>
             </section>
           ) : null}
-          {!loading && !error && !visible.length ? (
+          {!loading && !error && !runs.length ? (
             <section className="archive-empty-state">
               <div className="archive-empty-mark">⌁</div>
               <div>
@@ -589,7 +589,7 @@ export function ArchiveRunsProof({
             </section>
           ) : null}
           {!loading && !error
-            ? visible.map((run) => (
+            ? runs.map((run) => (
                 <button
                   type="button"
                   className={`archive-session-card proof-run-card${selected?.runId === run.runId && selected.agentId === run.agentId ? ' selected' : ''}`}

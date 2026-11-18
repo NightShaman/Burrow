@@ -212,3 +212,60 @@ it('copies archived proof with real Markdown newlines while preserving literal r
   expect(text.replace(value.request, '')).not.toContain('\\n');
   vi.unstubAllGlobals();
 });
+
+it('searches for unloaded runs and paginates the same query, then restores browsing when cleared', async () => {
+  const latest = run('smatchet');
+  const older = { ...run('ratchet'), runId: 'default-1794944873459' };
+  const another = { ...run('ratchet'), runId: 'next-result', objective: 'Another match' };
+  const list = vi
+    .spyOn(archiveRepository, 'listRuns')
+    .mockImplementation(async (_agent, _signal, cursor, query) => {
+      if (query !== older.runId)
+        return { ...runsPage([latest]), hasMore: true, nextCursor: 'unfiltered' };
+      return cursor
+        ? runsPage([another])
+        : { ...runsPage([older]), hasMore: true, nextCursor: 'filtered' };
+    });
+  const view = render(<ArchiveRunsProof selectedAgent="" search="" />);
+  await screen.findByRole('button', { name: /smatchet objective/ });
+  view.rerender(<ArchiveRunsProof selectedAgent="" search={` ${older.runId} `} />);
+  expect(screen.queryByRole('button', { name: 'Load more runs' })).toBeNull();
+  await screen.findByRole('button', { name: /ratchet objective/ });
+  expect(list).toHaveBeenLastCalledWith('', expect.any(AbortSignal), null, older.runId);
+  fireEvent.click(screen.getByRole('button', { name: 'Load more runs' }));
+  await screen.findByRole('button', { name: /Another match/ });
+  expect(list).toHaveBeenLastCalledWith('', expect.any(AbortSignal), 'filtered', older.runId);
+  view.rerender(<ArchiveRunsProof selectedAgent="" search=" " />);
+  await screen.findByRole('button', { name: /smatchet objective/ });
+  expect(screen.queryByRole('button', { name: /ratchet objective/ })).toBeNull();
+  expect(list).toHaveBeenLastCalledWith('', expect.any(AbortSignal), null, '');
+});
+
+it('debounces typing and ignores a stale search page after the query changes', async () => {
+  const stale = run('hatchet');
+  const current = run('ratchet');
+  const list = vi.spyOn(archiveRepository, 'listRuns');
+  list.mockResolvedValueOnce(runsPage([stale]));
+  let finishOldPage!: (page: ArchivePage<ArchiveRunDetail>) => void;
+  list.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishOldPage = resolve;
+    }),
+  );
+  list.mockResolvedValueOnce(runsPage([current]));
+  const view = render(<ArchiveRunsProof selectedAgent="ratchet" search="" />);
+  await screen.findByRole('button', { name: /hatchet objective/ });
+  view.rerender(<ArchiveRunsProof selectedAgent="ratchet" search="de" />);
+  view.rerender(<ArchiveRunsProof selectedAgent="ratchet" search="default" />);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(list).toHaveBeenLastCalledWith('ratchet', expect.any(AbortSignal), null, 'default');
+  const oldSignal = list.mock.lastCall?.[1];
+  view.rerender(<ArchiveRunsProof selectedAgent="ratchet" search="default-1794944873459" />);
+  await screen.findByRole('button', { name: /ratchet objective/ });
+  expect(oldSignal?.aborted).toBe(true);
+  await act(async () => finishOldPage(runsPage([stale])));
+  expect(screen.queryByRole('button', { name: /hatchet objective/ })).toBeNull();
+});

@@ -93,6 +93,23 @@ describe('archiveRepository', () => {
     });
   });
 
+  it('encodes trimmed Proof search alongside its pagination and agent scope', async () => {
+    const signal = new AbortController().signal;
+    apiMock.mockResolvedValue({ runs: [], nextCursor: null, hasMore: false });
+    await repository.listRuns(
+      'agent/name',
+      signal,
+      'next page',
+      '  default-1794944873459 & text  ',
+    );
+    expect(apiMock).toHaveBeenCalledWith(
+      '/api/archive/runs?limit=100&agentId=agent%2Fname&q=default-1794944873459+%26+text&cursor=next+page',
+      { signal },
+    );
+    await repository.listRuns('', signal, null, '  ');
+    expect(apiMock).toHaveBeenLastCalledWith('/api/archive/runs?limit=100', { signal });
+  });
+
   it('loads complete dream groups using server search and local-day pagination', async () => {
     const abort = new AbortController();
     apiMock.mockResolvedValueOnce({
