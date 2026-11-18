@@ -3,9 +3,7 @@
 
 
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Use runtime receipts, persisted history, logs, and provider-request evidence to answer different questions. A green process or successful HTTP response is not proof that the requested work completed.
 
@@ -175,8 +173,14 @@ The changed context observations and destination layout above were checked stati
 
 ## Native Minion evidence
 
-Burrow Minions use the Core model/tool loop; native Codex and Claude Minions do not. Native activity/session linkage and sanitized reports remain visible, but their command outputs and model text are not promoted into independently verified Core tool receipts. Do not infer full native per-tool/token export or collector ingestion from a successful child report. Verify actual changes and each harness’s continuation/cleanup evidence separately. See [native Minions](../concepts/agents-minions.md#native-codex-minions).
+Burrow Minions use the Core model/tool loop; native Codex, Claude and Gemini Minions do not. Native activity/session linkage and sanitized reports remain visible, but their command outputs and model text are not promoted into independently verified Core tool receipts. Do not infer full native per-tool/token export or collector ingestion from a successful child report. Verify actual changes and each harness’s continuation/cleanup evidence separately. See [native Minions](../concepts/agents-minions.md#native-codex-minions).
 
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+## Current diagnostic boundaries and native observations
+
+Checked **17 November 2026**: operational failures retain classified error code/type/stage instead of raw parser, SQL, provider payload or filesystem-path text. Corrupt stored metadata/retention policies are errors, not absent-value defaults. Failed mod discovery is not an empty successful catalog, and malformed provider-usage envelopes do not become successful cached samples. Use correlation and the reported stage to distinguish configuration, transport, parsing and execution failures.
+
+Native Minion telemetry now reports sanitized invocation, recognized tool activity and available native usage observations through configured OpenTelemetry destinations. Unknown plugin tool names are generalized. Native stdout/tool payloads, paths, credentials, arbitrary labels and native IDs are not exported as telemetry dimensions. Requested and reported model provenance remain distinct; incomplete usage is not zero usage. These are native CLI observations, not Burrow-verified effects or evidence of collector ingestion. Process failures may retain bounded redacted stderr, error stage, exit code and signal in local diagnostics; ambiguous cleanup still prevents blind retry.

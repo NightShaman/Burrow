@@ -1,9 +1,9 @@
 # Tools and execution
 
 
+
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
-
 
 Tools are structured capabilities supplied to a model request. The model chooses a tool and arguments; the runtime normalizes the call, reviews it, dispatches it, and returns an observed result. A tool's presence does not establish that a particular invocation will succeed.
 
@@ -73,9 +73,9 @@ Inspect `truncated`, `incomplete`, `depthTruncated`, `matchBudgetExhausted` and 
 `files_write` writes complete content and can create parent directories. `files_edit` requires the exact `oldText` to occur once. `files_patch` accepts unified diff or the supported structured patch dialect and records Git evidence around the operation.
 
 
+
 !!! warning "Multi-file patches are not transactions"
     A structured patch may change earlier files before a later operation fails. Inspect the actual results and repository diff after a failure; do not assume rollback. Workspace validation is advisory, not a sandbox guarantee.
-
 
 For another project, prefer explicit absolute paths or a shell command with explicit `cwd`, as directed by the tool schema. `files_patch` is not in the remote-native filesystem routing set.
 
@@ -157,3 +157,7 @@ Scheduled-job list/run receipts preserve opaque cursors and complete producer-bo
 ## Typed Forge media and explicit resend
 
 Checked **14 November 2026**: Catalog-qualified Google video and capability-declared GIF generation use typed contracts. `forge_create_job` accepts `imageOptions`. Supported image/video models accept ordered `referenceArtifacts: [{jobId, artifactId}]` for retained successful operator-owned PNG/JPEG/WebP image artifacts. Native callers can also use `referenceAttachmentIds` for runtime-owned PNG/JPEG/WebP attachments in their trusted current agent/session; direct HTTP calls lack that trusted chat context. Read the selected model’s reference availability first. Portrait references precede artifact references, then chat images; the combined six-reference limit is a video limit, not an image-generation limit. Arbitrary paths, bytes, URLs and caller-supplied `sourceAttachments` remain unsupported. Sources are snapshotted before admission and their identity/order/digests bind idempotency. Native `forge_attach_artifact` deduplicates same-turn retries, but an explicit later-turn call resends an existing artifact without regeneration. See [media API contracts](../reference/api/artifacts.md).
+
+## Inspect runtime context on demand
+
+`runtime_context_inspect` accepts `section: "environment"` or `section: "attachments"`. Environment inspection reports the already-admitted execution host, workspace and configured UI target; it cannot retarget work. Attachment inspection lists up to 24 references from the current logical session, including compacted history but excluding reset history and side questions. It does not return file bytes or redisplay an image. Read the referenced attachment explicitly when its contents are needed. Invalid sections or unavailable attachment scope return explicit failures. This on-demand surface replaces broad always-injected runtime inventories, not current uploaded attachments.

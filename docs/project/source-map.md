@@ -6,10 +6,10 @@ The operator guide follows inspected current development implementation, without
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.16.6` | `fa4fed7c13c8ce75e45fcdb9884d212dc4e0d18b` |
-| Core / Backend | `29ca7b6cec378700503a587703adc1d82e9d6f6d` |
-| UI | `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5` |
-| Skills | `dc3586763e828052ade31700691445aa69f6f406` |
+| Assembled Burrow, build `2026.11.18.2` | `c86b52002d80163220159ffd3b83f3c97104094a` |
+| Core / Backend | `07f87f05e886c741f907d8bfeaa1de9ba5451192` |
+| UI | `0f85a6ad649d24392df87ddf49b5e06f18de9f85` |
+| Skills | `91288f15d6fa32ddb0562504b68d4d193eb28b20` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -169,3 +169,9 @@ See [the interface behavior](../concepts/interface.md#chat-polling-and-render-re
 All existing guides were rechecked against the pinned current implementation, including unchanged pages, setup and recovery, routing, APIs, operations, troubleshooting, navigation and cross-component skills. Material corrections include global/inherited Minion defaults and native Claude execution, native CLI provisioning, current storage migrations, persistent Menagerie visit sessions, Tutor host contracts and stale API/schema descriptions. Historical examples, screenshots and earlier audit sections retain their dates. Existing runtime skill instructions were reconciled separately without changing executable scripts or versions.
 
 Checks cover documentation builds, links and non-executing skill/reference structure, not live providers, model calls, OAuth, production restore, application tests or installed skill delivery. The maintenance receipt records per-page evidence and exact publication checks. A newer implementation pin is not a new public runtime release.
+
+## Ordinary delta: 17 November 2026
+
+The scheduled Tuesday pass compared the successful 15 November baseline through assembly **2026.11.18.2**, `c86b52002d80163220159ffd3b83f3c97104094a`, with Backend `07f87f05e886c741f907d8bfeaa1de9ba5451192` and UI `0f85a6ad649d24392df87ddf49b5e06f18de9f85`. Updated contracts cover explicitly requested Gemini Minions, per-harness model defaults/locks, Anthropic Full reset activation, single-batch continuation recaps, separate runtime context and scoped inspection, addressed participant shared guidance, diagnostics/native telemetry and Forge motion controls.
+
+This is source and test-definition inspection, not application/provider execution, live authentication, installed CLI compatibility, collector ingestion or runtime deployment. Unchanged material retains the Sunday full-review scope. Development source pins do not prove that public mirrors or installed builds already include these behaviors.

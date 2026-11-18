@@ -1,6 +1,7 @@
 # Runtime and context construction
 
 
+
 !!! note "Source review and historical material"
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
 
@@ -60,10 +61,10 @@ The provider-facing message projection separates:
 
 1. Identity/profile system material
 2. Stable operating instructions
-3. Support context, with provenance
-4. Prior conversation summary
-5. Recent role-preserving dialogue
-6. The current user instruction
+3. Prior conversation summary and recent role-preserving dialogue
+4. Fresh runtime/support context on its separate developer channel, with provenance
+5. Current shared mod guidance
+6. The current user instruction and current attachments
 
 This is different from the flattened diagnostic prompt and from the broad section names in the runtime contract. Prior summaries are support for continuity, not replacement source evidence. Attributed peer messages preserve their origin instead of masquerading as user instructions.
 
@@ -172,7 +173,14 @@ Pool hard eligibility failures constrain required owners as well as new turns. T
 
 Checked **7 November 2026**: under configured context pressure, native Chat Completions preparation can project older assistant prose into a lossy semantic task-state recap before the next tool continuation. It preserves system/developer messages, user tasks and steering, and recent dialogue. Repeated preparation explicitly merges the prior recap with newly eligible older prose in chronological order. Persisted originals are unchanged: this is request-local projection, not durable conversation rotation.
 
-Tool calls/results follow a separate protocol-safe budget projection, preserving paired rounds and receipt-backed recovery references. They are not semantically summarized by the recap model. Summarization can make additional tool-free model calls, including multiple chunks, adding usage and latency. Recaps are not verified execution evidence. Without a usable summary adapter/chunk budget, dialogue is retained and ordinary protocol projection is attempted. Adapter errors and cancellation propagate; invalid summary responses fail with `continuation_summary_invalid`, and irreducible requests fail with `context_preparation_prompt_over_budget` rather than silently dropping authoritative state.
+Tool calls/results follow a separate protocol-safe budget projection, preserving paired rounds and receipt-backed recovery references. They are not semantically summarized by the recap model. Preparation tries the protocol-safe tool projection first. If the request then fits the hard input allowance, dialogue remains intact even above the soft threshold. Otherwise the async path makes at most one tool-free recap request for a fitting chronological batch, seeded with the prior recap. Remaining replies stay unchanged. An individually oversized oldest reply uses disclosed start/end excerpts rather than silently dropping its middle. This extra request adds usage and latency. Recaps are not verified execution evidence. Without a usable summary adapter or batch, no recap request is made. Adapter errors and cancellation propagate; invalid summary responses fail with `continuation_summary_invalid`, and irreducible requests fail with `context_preparation_prompt_over_budget` rather than silently dropping authoritative state.
 
 Provider budget inspection also distinguishes shared input/output windows from separate input limits. A discovered public OpenAI total window reserves the request's output allowance; Anthropic and Google native input limits are not reduced by output twice. Image payload bytes are not treated as prose tokens. Unknown capacity stays unknown, while a known zero remaining input allowance fails closed. Loaded-skill and delegation receipts remain atomic through protocol projection rather than being clipped into misleading instruction or ownership fragments.
 
+## Runtime context and current authority
+
+Checked **17 November 2026**: fresh runtime support follows reusable dialogue and precedes the current request on a separate developer channel; it is not replayed as user/assistant conversation. Ordinary operator/chat and manual task-board inputs keep operator provenance through production context assembly. Peer, scheduled, mod/private-API and unknown ingress are not promoted to operator authority. Captured provider support excludes already replayed conversation.
+
+Full host inventory, browser target and retained attachment listings are available on demand through `runtime_context_inspect`, rather than injected into every conversational message. Current uploads remain attached to the current request. The scoped tool cannot select another agent, session, host or arbitrary path. Old execution digests are not fresh dialogue. Interrupted recovery support requires an interrupted state plus pending work or current ownership; recent file references are rebuilt from bounded eligible persisted turns/receipts and clear on an explicit workspace change.
+
+Shared mod context receives Core-resolved addressed participants and registry-owned tags. Outgoing A2A delivery can add a canonical peer for the sender's continuation after the tool batch; fresh shared guidance replaces its predecessor. Failed pre-ingress sends do not add participants. The next turn rebuilds its own addressed set. See [shared guidance](../development/extensions.md#enabled-mod-shared-guidance).

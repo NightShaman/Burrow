@@ -3,9 +3,7 @@
 
 
 !!! note "Source review and historical material"
-
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
-
 
 Use a registered agent for a persistent identity and configuration. Use a minion for an explicit child task. Use peer messaging when one registered agent needs another agent's response in that recipient's own context.
 
@@ -37,7 +35,7 @@ The native `spawn_subagent` tool requires:
 - `target.kind`: `filesystem`
 - `target.root`: an absolute path to an existing directory
 
-Optional fields include a short `label`, `harness` (`burrow`, `codex` or `claude`), and an exact configured `model` ID. Normal dispatch uses effective global/agent Minion settings. A configured `burrowModel` pins the connection/model; a different per-call model fails with `burrow_model_override_unsupported`. With no Burrow pair, the actual parent turn model is inherited and an explicit enabled model resolves through the parent resolver. The retained `/minion-model-selection` compatibility setting is not the normal dispatch default. Native Codex and Claude selections are independent, as described below. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
+Optional fields include a short `label`, `harness` (`burrow`, `codex`, `claude` or explicitly requested `gemini`), and an exact configured `model` ID. Normal dispatch uses effective global/agent Minion settings. A configured `burrowModel` supplies the default connection/model, not a lock. Unless `burrowModelLocked` is enabled, a per-call model may select another enabled model on that same connection. A lock rejects a differing selection with `burrow_model_locked`. With no Burrow pair, the actual parent turn model is inherited and an explicit enabled model resolves through the parent resolver. The retained `/minion-model-selection` compatibility setting is not the normal dispatch default. Native Codex, Claude and Gemini selections are independent, as described below. Tool-schema examples below illustrate agent tool arguments, not shell commands or HTTP request bodies.
 
 ```json
 {
@@ -75,9 +73,7 @@ Local minions use a separate Node process. A remote-assigned minion uses the chi
 
 
 !!! warning "Isolation is about session/process context"
-
     A minion target is not a filesystem cage. An instruction such as “do not modify files” communicates task scope, but the target directory does not remove mutation tools. Configured execution boundaries are forwarded into child review and execution; they retain the limited enforcement scope described in [Permissions](../security/permissions.md#minion-boundary-propagation).
-
 
 ### Completion and evidence
 
@@ -106,9 +102,9 @@ Identical structural spawn requests within the same parent lineage can reuse an 
 
 ## Native Codex minions
 
-Open **Settings → Agents → Global → Minions** for shared defaults, or an individual agent’s **Minions** section and enable **Override global minion settings**. Configure Burrow defaults and independent **Codex Enabled** / **Claude Enabled** model pairs, then choose **Save minion defaults**. Disabling overrides preserves saved agent values; re-enabling restores them. The compatibility API retains `defaultHarness` (unconfigured default `burrow`); an explicit `spawn_subagent.harness` selects an enabled harness for one child without changing defaults. Native enablement is independent of the default harness. Disabled native harnesses reject new dispatch but do not disable existing-session follow-ups. The receipt and child session retain the actual harness.
+Open **Settings → Agents → Global → Minions** for shared defaults, or an individual agent’s **Minions** section and enable **Override global minion settings**. Configure Burrow defaults and independent **Codex Enabled**, **Claude Enabled** and **Gemini Enabled** model pairs, then choose **Save minion defaults**. Disabling overrides preserves saved agent values; re-enabling restores them. The compatibility API retains `defaultHarness` (unconfigured default `burrow`); an explicit `spawn_subagent.harness` selects an enabled harness for one child without changing defaults. Native enablement is independent of the default harness. Disabled native harnesses reject new dispatch but do not disable existing-session follow-ups. The receipt and child session retain the actual harness.
 
-Codex has its own saved connection/model pair. Select an enabled model on a direct OpenAI OAuth connection or an eligible enabled OpenAI load balancer with enabled OAuth members supporting that model. API-key connections and other providers are not supported. Codex does not inherit the parent/Burrow Minion model; an explicit spawn `model` must match the saved Codex selection. Catalog eligibility is not proof of available quota or successful authentication.
+Codex has its own saved connection/model pair. Select an enabled model on a direct OpenAI OAuth connection or an eligible enabled OpenAI load balancer with enabled OAuth members supporting that model. API-key connections and other providers are not supported. Codex does not inherit the parent/Burrow Minion model; an unlocked explicit spawn `model` may select another enabled eligible model on the same connection or pool. Enable **Lock model** to require the saved selection for new dispatch. Catalog eligibility is not proof of available quota or successful authentication.
 
 Provision the Codex CLI on the selected execution host, or use an absolute executable `BURROW_CODEX_EXECUTABLE` override. Node Goblin's optional `--with-codex` install/update provisions the CLI on a remote host. Current compatible Node Goblin supports the private interactive app-server transport; unavailable transport fails instead of falling back to Burrow's local host. The target root must exist on that selected host.
 
@@ -122,9 +118,19 @@ Configured execution-boundary hard blocks are unsupported by this adapter and pr
 
 Pools retain their logical connection separately from the actual serving account/model. Same-account continuation resumes the native thread. A different account/member starts a fresh thread on the same host only with a complete portable native checkpoint. Current checkpoints can include terminal command results and file-change diffs, including failed attempts with possible effects; historical actions are context, not calls to execute again. Unknown items, unresolved effects, incomplete or oversized history remain account-bound. Missing required owners fail with `codex_pool_replay_unavailable`, not blind replay. At most one eligible alternate attempt is allowed after cleanup and authoritative effect reconciliation. Transport loss, cancellation, unresolved effects and partial assistant output alone do not authorize retry. A failed completed-turn history export retains a pending checkpoint; same-owner continuation must repair that export before new work or report `codex_checkpoint_repair_required`. These native checkpoints are not independently verified Burrow tool receipts.
 
+## Native Gemini minions
+
+Checked **17 November 2026**: enable Gemini and save its own connection/model pair in the existing Minion settings. Gemini is explicitly selected with `harness: "gemini"`; it is not an allowed `defaultHarness`. Only enabled direct Google Generative Language API-key connections qualify. OAuth, Vertex and load-balancer pools do not. The exact enabled catalog model is required; only the CLI argument strips a leading `models/`. An unlocked per-call model may choose another enabled model on the same connection; a configured Gemini lock rejects a different model. No parent-model or local-host fallback is used.
+
+The selected host needs Gemini CLI; `BURROW_GEMINI_EXECUTABLE` may specify an absolute executable. Managed Core integrations provision the CLI, but a remote Node Goblin gateway requires its own compatible installation. Credentials are loaded server-side for the selected connection and supplied only to the child, not stored in Minion settings or command arguments.
+
+Gemini uses native stream-JSON execution and unattended tool approval after Burrow admission. This is not an OS sandbox: inspect-only policies and unsupported hard execution boundaries fail closed. A successful terminal result and zero process exit are both required. Native model text is not independently verified Burrow evidence.
+
+Follow-ups retain the saved native session, host, target, connection and exact model. Missing identity, running/unreconciled cleanup state, attachments and no-model turns block before dispatch. Cancellation terminates the process group and retains interrupted native identity; uncertain cleanup must be reconciled before resuming.
+
 ## Native Claude minions
 
-Enable Claude and select its independent connection/model pair in the same Minion defaults. Eligible direct Anthropic OAuth connections and enabled Anthropic pools are supported; API keys and parent-model inheritance are not. `claudeEligible` is structural catalog eligibility, not available quota or successful authentication. A per-call model must match the saved native selection.
+Enable Claude and select its independent connection/model pair in the same Minion defaults. Eligible direct Anthropic OAuth connections and enabled Anthropic pools are supported; API keys and parent-model inheritance are not. `claudeEligible` is structural catalog eligibility, not available quota or successful authentication. An unlocked per-call model may select another enabled eligible model on the same connection or pool; **Lock model** requires the saved selection. Existing sessions retain their original selection.
 
 The current Claude CLI must exist on the selected host; `BURROW_CLAUDE_EXECUTABLE` can select an absolute executable. Node Goblin’s `--with-claude` option can provision the remote CLI. Core uses a private remote process transport, never a public shell credential command or a fallback to the controller host.
 

@@ -37,7 +37,7 @@ Minimal manifest:
 
 A server module exports `activate(context)`, registers only its own routes/tools and returns cleanup when needed. Validate arguments in the handler and handle cancellation. Installation, enablement, ordinary tool grants and privileged system-mod capabilities are separate concerns; a manifest cannot grant itself Core authority.
 
-The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](https://docs.goblin-kingdom.com/burrow-tutor/install/#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
+The current authoring material follows inspected development source. [Release status](../project/release-status.md) distinguishes that work from public snapshots and installed versions. Tutor’s [installation readiness](https://docs.goblin-kingdom.com/burrow-tutor/install#release-readiness) records a verified public tag; select an actual accepted tag with a matching manifest rather than inventing one from a default branch.
 
 ## Mod-owned native agents
 
@@ -53,7 +53,7 @@ Owned `referenceImages.get`, `.put` and `.remove` use the canonical agent refere
 
 ## Enabled-mod shared guidance
 
-An enabled mod may supply text to all native agents and residents, including A2A recipient turns, independently of owning an agent. Register `context.agents.context.registerShared(provider)` once during activation. The callback receives `{ agentId, sessionId }` for the logical conversation and `{ signal }`, and returns only `{ context: [{ name, content }] }`. Names must be unique non-path identifiers of at most 128 characters; at most 64 records and 1,000,000 combined UTF-8 name/content bytes are accepted. Profile, identity and tool fields are rejected.
+An enabled mod may supply text to all native agents and residents, including A2A recipient turns, independently of owning an agent. Register `context.agents.context.registerShared(provider)` once during activation. The callback receives `{ agentId, sessionId, participants }` for the logical conversation and `{ signal }`, and returns only `{ context: [{ name, content }] }`. Names must be unique non-path identifiers of at most 128 characters; at most 64 records and 1,000,000 combined UTF-8 name/content bytes are accepted. Profile, identity and tool fields are rejected.
 
 Core resolves currently published contributions in mod-ID order. Disablement, unload or replacement removes old contributions from fresh turns; a failed or malformed active provider reports `mod_agent_unavailable` rather than silently dropping guidance. Shared-only registration grants no agent ownership or tools.
 
@@ -91,7 +91,7 @@ Current Core supports the independently declared and operator-granted `core-api-
 
 Requests accept a local `/api` path and optional method, headers, and exactly one of JSON `body`, UTF-8 `bodyText` or `bodyBase64`. Responses preserve status, headers, encoding, original byte length and complete finite body; HTTP errors remain response data. Finite NDJSON is aggregated, not delivered incrementally. The default 96 MiB response allocation ceiling fails explicitly rather than returning truncated success. Response failure does not roll back an already executed mutation; reconcile before retrying.
 
-This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://docs.goblin-kingdom.com/burrow-backdoor/operator-api/) for the shipped tool surface; a skill itself grants none of these capabilities.
+This capability does not automatically grant other host interfaces or cross-agent managed diagnostics. Neither tool arguments nor headers establish trusted caller authority. Task-board mutations retain the actual agent/session/run attribution. Use [Backdoor's current API guidance](https://docs.goblin-kingdom.com/burrow-backdoor/operator-api) for the shipped tool surface; a skill itself grants none of these capabilities.
 
 ## 3 November development delta
 
@@ -136,3 +136,11 @@ Checked **12 November 2026**: Terminal `agents.turns.read` results can include `
 `context.agents.turns.readAttachment(turnId, attachmentId)` reads only an attachment listed on a receipt owned by the calling mod. It returns `{ name, mimeType, sizeBytes, encoding: "base64", content }`, with raw base64 rather than a data URL. Reads are capped at 32 MiB decoded bytes; larger descriptors can remain visible but fail with `mod_external_turn_attachment_too_large`. Missing, expired, replaced or unsafe artifact bytes fail as not found. Durable receipt metadata is not a promise of permanent byte retention.
 
 Forge delivery accepts existing database session identities, including transport/mod identities, rather than assuming a filesystem slug. Explicit artifact delivery is bound to the originating run; reusing another run’s generation identity conflicts. A terminal turn snapshot is not broadened by a late generation after cancellation. Receipt ownership does not replace the mod’s recipient authorization.
+
+## Addressed participants for shared providers
+
+Checked **17 November 2026**: `participants` is Core-owned routing data, shaped as `{agentId,tags:[]}` entries sorted by canonical agent ID. Tags come from the owning mod's optional `participantTags` agent metadata: unique lowercase identifiers, at most 32 tags of 64 characters each. They grant no additional tools or permissions.
+
+Direct operator routes include their receiving agent; A2A also includes the authenticated peer, and group routes include current channel participants. Unaddressed background work receives an empty set. Providers must not infer participation from mentions, tool prose or previous invocations.
+
+After an outgoing `agent_send_message` has actually entered its recipient's transcript, Core refreshes shared guidance for the sender's next continuation after the full tool batch. Canonical outgoing recipients are deduplicated; `outgoingRecipientIds` is included only when nonempty and is a subset of `participants`. A delivered request counts even if its reply fails, but invalid/denied/pre-ingress failures do not. Fresh shared guidance replaces the previous contribution without changing paired tool protocol, identity or grants. The next operator turn starts from its own route, not the previous turn's outgoing peers.

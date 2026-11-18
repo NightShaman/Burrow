@@ -3,9 +3,7 @@
 
 
 !!! note "Implementation and historical evidence"
-
     Reviewed against current implementation on **8 November 2026**. Historical commit links and explicitly dated examples remain historical evidence; they do not identify the current development source or certify your installed version. See [source coverage](../project/source-map.md). This is static source reconciliation, not a live application or provider test.
-
 
 Start with the installed version, exact error, expected deployment shape, and relevant agent/session/run ID. Avoid changing several settings at once or retrying an operation that may still be running.
 
@@ -328,3 +326,9 @@ Claude result text alone is not a verified receipt. Process close, cancellation/
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+## Native Minion selection and process failures
+
+For `gemini_minions_disabled`, enable Gemini deliberately in effective global/agent Minion settings. For a missing/ineligible native selection, choose the correct enabled connection and model rather than relying on the parent model. Gemini accepts direct Google API-key connections only; Codex and Claude use their respective OAuth/pool contracts. A `{harness}_model_locked` rejection means a requested model conflicts with an explicit lock. Change the request or operator configuration deliberately; do not treat it as provider downtime.
+
+Inspect native diagnostics for sanitized stage, error, exit code/signal and bounded stderr. A final text event alone is not successful process completion. After cancellation or transport loss, reconcile native session and cleanup state before replacement work or resume. An ambiguous effect is not proof nothing happened. See [native Minions](../concepts/agents-minions.md#native-gemini-minions) and [observability](observability.md#current-diagnostic-boundaries-and-native-observations).

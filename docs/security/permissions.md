@@ -62,7 +62,7 @@ The execution-policy helper filters for explicit user-configured hard blockers. 
 ## Minion boundary propagation
 
 Local Burrow-harness minion dispatch forwards the parent's `executionBoundaries` in its child payload. The child reconstructs that trusted context; its review and concrete execution receive the boundaries. In-process remote children retain the parent execution context and remote controller. Cancellation is also forwarded into child tool execution. This propagates the configured checks described above, not OS containment or a broader deny-rule interpretation.
-Native Codex and Claude Minions do not emulate Burrow hard-block rules inside their own tool engines. Their runners reject dispatch when enabled hard blocks cannot be represented (`codex_execution_boundaries_unsupported` / `claude_execution_boundaries_unsupported`). Codex selects read-only or full-access native sandbox mode from its admitted execution policy; Claude currently requires inspection and mutation capability and has no read-only sandbox bridge. Native coding tools retain their harness-specific permissions. These checks are admission contracts, not a claim that Burrow reviews each native CLI internal tool call.
+Native Codex, Claude and Gemini Minions do not emulate Burrow hard-block rules inside their own tool engines. Their runners reject dispatch when enabled hard blocks cannot be represented (`codex_execution_boundaries_unsupported` / `claude_execution_boundaries_unsupported`). Codex selects read-only or full-access native sandbox mode from its admitted execution policy; Claude currently requires inspection and mutation capability and has no read-only sandbox bridge. Native coding tools retain their harness-specific permissions. These checks are admission contracts, not a claim that Burrow reviews each native CLI internal tool call.
 
 ## MCP and mod tool grants
 
@@ -110,3 +110,7 @@ The current page was statically reconciled on **2026-11-08** against Backend `6b
 ## Bounded execution-boundary evaluation
 
 Checked **12 November 2026**: Execution-boundary rules are evaluated in a disposable worker. The default 1,000 ms budget includes startup and all rules/targets; a trusted shorter deadline or cancellation can stop it sooner. Timeout, cancellation or worker failure yields a hard policy block, and review waits for worker termination. This bounds evaluation, not the later action: it does not create operating-system isolation or change a configured rule’s meaning.
+
+### Gemini native execution
+
+Gemini requires inspection and mutation capability, and uses unattended native tool approval only after admission. Inspect-only policies and configured hard blocks without a native enforcement bridge fail closed. The target directory is not a filesystem cage, and a no-commit instruction is not OS enforcement. The selected Google API key is supplied server-side only to the admitted child; no alternate provider or local-host fallback is allowed. Resume requires the saved native identity and matching host, target, connection and exact model.

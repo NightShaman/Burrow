@@ -106,7 +106,7 @@ Signed ping is acknowledged without creating work. Accepted completed events are
 
 ## Work delegated to minions
 
-An agent may spawn a minion for part of a request. Expand the parent in the **Agents** panel to inspect each child. Configure shared defaults at **Settings → Agents → Global → Minions**. An individual agent’s **Minions** section has **Override global minion settings**; off inherits global settings while preserving saved overrides. Set Burrow provider/model or inherit the actual parent turn model, independent Codex/Claude enable flags and eligible provider/model pairs, and maximum depth. Choose **Save minion defaults**; these fields are a guarded draft, not the former independent autosaving model controls. Existing children retain their admission/session bindings. See [Agents and minions](../concepts/agents-minions.md).
+An agent may spawn a minion for part of a request. Expand the parent in the **Agents** panel to inspect each child. Configure shared defaults at **Settings → Agents → Global → Minions**. An individual agent’s **Minions** section has **Override global minion settings**; off inherits global settings while preserving saved overrides. Set Burrow provider/model or inherit the actual parent turn model, independent Codex/Claude/Gemini enable flags and eligible provider/model pairs, and maximum depth. Choose **Save minion defaults**; these fields are a guarded draft, not the former independent autosaving model controls. Existing children retain their admission/session bindings. See [Agents and minions](../concepts/agents-minions.md).
 
 [Source: child selection](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/App.tsx#L119-L132) · [Source: default minion model](https://github.com/GoblinKing-Burrow/Burrow/blob/deec39818955db1711161b5310d5822e65fda39a/ui/src/features/settings/DefaultMinionModel.tsx#L53-L71)
 
@@ -117,3 +117,7 @@ Open **Archive → Workflow Events** to search retained GitHub workflow deliveri
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+### Minion model defaults and locks
+
+Checked **17 November 2026**: a saved model is a default, not an automatic lock. Enable **Lock model** for a harness to enforce that model for new children. With the lock off, a child request can choose another enabled eligible model on the same connection or pool; it cannot silently switch connections. Clearing the model clears its lock. Existing children keep their admission bindings. Gemini is explicitly requested, rather than a default harness, and requires a direct Google API-key connection.

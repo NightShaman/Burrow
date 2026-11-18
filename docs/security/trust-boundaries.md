@@ -105,7 +105,7 @@ Do not generalize one subprocess's environment policy to another:
 | Mod child host | Inherits service environment through the default Node `fork` behavior |
 | MCP stdio provider definition | Service `PATH` plus explicitly configured provider values |
 
-Native Codex/Claude Minions have separate runner-owned CLI processes and credential/continuation handling. Their native tool engines are not wrapped by Burrow's per-tool action reviewer; unsupported configured hard-block rules stop admission rather than being silently ignored. See [Minion boundary propagation](permissions.md#minion-boundary-propagation).
+Native Codex/Claude/Gemini Minions have separate runner-owned CLI processes and credential/continuation handling. Their native tool engines are not wrapped by Burrow's per-tool action reviewer; unsupported configured hard-block rules stop admission rather than being silently ignored. See [Minion boundary propagation](permissions.md#minion-boundary-propagation).
 
 None of those environment choices alone changes the process's OS file or network permissions.
 ## Browser and runtime trust

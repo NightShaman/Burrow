@@ -214,3 +214,7 @@ The current page was statically reconciled on **2026-11-08** against Backend `6b
 ## Environment-file parsing
 
 Checked **12 November 2026**: Environment files use a non-executing assignment parser: one assignment per line, optional indentation/`export`, supported single/double quoting and shell-style escapes/comments. Interpolation, command execution, multiline values, unsupported syntax and spaces around `=` are rejected. An unquoted `#` inside a token remains literal. Parsed effective keys govern preservation; conflicting duplicate encryption-key assignments fail rather than silently selecting a different value. This is a format contract, not an instruction to rotate or expose a key.
+
+## Gemini native executable
+
+Current Core integration provisioning includes Gemini CLI. `BURROW_GEMINI_EXECUTABLE` may select an absolute executable; otherwise discovery checks supported absolute PATH entries and managed integration locations. The selected connection supplies its API key to the child; ambient Google/Gemini/Vertex variables are removed rather than allowed to select unrelated credentials. A remote execution host needs a matching Node Goblin gateway and separately provisioned CLI. Updating Core alone does not upgrade that host. See [Gemini Minions](../concepts/agents-minions.md#native-gemini-minions).

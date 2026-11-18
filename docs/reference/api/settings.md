@@ -3,10 +3,7 @@
 
 
 !!! note "Source-reviewed API reference"
-
     This reference was reconciled against current development source on **2026-11-08**. Historical public-source links below remain pinned to their stated revision; they are not proof that a public mirror or your installation has caught up. Start with the [current operator guide](../../guide/installation.md) for installation. This is static source review, not a live API compatibility test.
-
-
 
 These are privileged operator routes. They share the normal interactive authentication gate; `diagnostics:read` Bearer tokens do not authorize them. Stored settings, environment overrides and effective runtime behavior are explained in [configuration](../configuration.md).
 
@@ -58,15 +55,17 @@ Members must exist and belong to the matching provider family. OpenAI pools acce
 
 - `maxDepth`: integer 0–2, default 1.
 - `defaultHarness`: `burrow`, `codex` or `claude`, default `burrow`.
-- `burrowModel`, `codexModel`, `claudeModel`: null or a complete `{ "connectionId": "…", "model": "…" }` pair.
-- `codexEnabled`, `claudeEnabled`: booleans. New unconfigured native harnesses default disabled.
+- `burrowModel`, `codexModel`, `claudeModel`, `geminiModel`: null or a complete `{ "connectionId": "…", "model": "…" }` pair.
+- `codexEnabled`, `claudeEnabled`, `geminiEnabled`: booleans. New unconfigured native harnesses default disabled.
 - Agent-only `overrideEnabled`: whether saved agent defaults override global values.
 
 Agent GET returns saved fields plus `overrideEnabled` and `effective`; execution uses `effective`, not inactive saved overrides. Disabling overrides preserves their values. First customization seeds current global defaults; later re-enabling restores the saved snapshot. Omitted fields remain unchanged and invalid combined updates write nothing. Both pair strings must be nonempty and unknown nested fields are rejected. Native enablement and model choice are independent of `defaultHarness`; turning a harness off does not clear its pair or stop existing-session follow-ups. For migrated settings lacking enable flags, the corresponding configured native pair determines initial enablement.
 
-A null `burrowModel` inherits the actual parent turn model, not the obsolete separate `/minion-model-selection` default. A configured Burrow pair rejects a differing per-call model. Codex requires a direct OpenAI OAuth connection or eligible OpenAI pool; Claude requires direct Anthropic OAuth or an eligible Anthropic pool. Models must be enabled on the selected logical connection and an eligible member. Catalog `codexEligible` / `claudeEligible` flags are structural eligibility, not live quota or authentication proof. Native selection never inherits the parent model.
+A null `burrowModel` inherits the actual parent turn model, not the obsolete separate `/minion-model-selection` default. A configured pair is a default. The separate booleans `burrowModelLocked`, `codexModelLocked`, `claudeModelLocked` and `geminiModelLocked` default false. Unlocked explicit requests may select another enabled eligible model on the same connection/pool, without persisting that change. A lock requires a saved pair and rejects a different explicit model with `{harness}_model_locked`, including conflicting legacy profiles. Nonboolean lock values fail with `minion_model_lock_invalid`; a lock without a pair fails with `minion_model_lock_requires_model`. Clearing a pair clears its lock atomically; omitted flags preserve their values. Codex requires a direct OpenAI OAuth connection or eligible OpenAI pool; Claude requires direct Anthropic OAuth or an eligible Anthropic pool. Models must be enabled on the selected logical connection and an eligible member. Gemini requires an enabled direct Google Generative Language API-key connection, not OAuth, Vertex or a pool. `defaultHarness: "gemini"` is rejected; dispatch it explicitly. Catalog `codexEligible` / `claudeEligible` / `geminiEligible` flags are structural eligibility, not live quota or authentication proof. Native selection never inherits the parent model.
 
-Native dispatch errors include `codex_minions_disabled`, `claude_minions_disabled`, `{harness}_model_selection_required` and `{harness}_model_override_unsupported`. Invalid depth/harness/enable values return `minion_max_depth_invalid`, `minion_default_harness_invalid` or `minion_enabled_invalid`; malformed JSON returns `invalid_json`. Clearing a native pair does not change its harness or enable flag.
+Explicit compatibility profiles with a saved model retain their own pin even when the simple lock is off; a differing requested model can still return `{harness}_model_override_unsupported`.
+
+Native dispatch errors include `codex_minions_disabled`, `claude_minions_disabled`, `gemini_minions_disabled`, `{harness}_model_selection_required` and `{harness}_model_locked`. Invalid depth/harness/enable values return `minion_max_depth_invalid`, `minion_default_harness_invalid` or `minion_enabled_invalid`; malformed JSON returns `invalid_json`. Clearing a native pair does not change its harness or enable flag.
 
 Zero depth prevents children; one permits direct children; two permits grandchildren. Current settings can tighten, not expand, a resumed child’s saved lineage budget. Native grandchildren are not implemented. Legacy profile CRUD and stored profile fields remain compatibility surfaces, but ordinary dispatch does not select a stored default profile or require profile discovery. See [agents and minions](../../concepts/agents-minions.md).
 
@@ -213,3 +212,12 @@ Unknown keys, unknown top-level fields, malformed bodies, nonboolean `seedOnly`,
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+## Anthropic Full reset API
+
+Checked **17 November 2026**: these actions require the operator UI authorization boundary. Core-agent calls and scoped API tokens are rejected; authentication mode `none` retains its existing local UI behavior.
+
+- `GET /api/models/anthropic/reset-inventory?connectionId=<id>` reads fresh inventory for a manually opened confirmation dialog. It does not consume a reset and must not be polled. Successful fields include `fullResets.availableCount`, `fullResets.nearestExpiresAt` and `fetchedAt`.
+- `POST /api/models/anthropic/reset-activation` accepts `{connectionId,requestId,confirmed:true}` only after explicit operator confirmation. Use a UUID or a 1–64 character ASCII alphanumeric/underscore/hyphen request ID. Do not automatically retry with a new ID. The server selects the eligible Full grant; clients do not supply grant handles.
+
+Inspect `code` and `ambiguous`, not HTTP status alone. Outcomes include `reset`, `already_used`, `not_limited`, `cooldown`, `ineligible` and `unavailable`. `ambiguous:true` means consumption is unknown and a durable account fence blocks retry. Only production Anthropic API-origin OAuth connections qualify; custom/proxy origins fail closed. Successful consumption and a later usage-refresh failure remain separate outcomes. Stored Full inventory has independent freshness; missing/transient data retains a stale prior count, not fresh activation authority.

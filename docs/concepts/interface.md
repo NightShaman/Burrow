@@ -3,9 +3,7 @@
 
 
 !!! note "Source review and historical material"
-
     This technical reference was reconciled statically with current implementation on **8 November 2026**. Explicit historical examples, screenshots and pinned public links remain historical; they are not evidence of current runtime acceptance. Start with the [current operator guide](../guide/installation.md) for installation and check your installed build before using newer capabilities.
-
 
 For task-oriented instructions, start with [Everyday use](../guide/everyday-use.md). This page is the detailed screen, control, and browser-state reference.
 
@@ -16,9 +14,7 @@ The runtime owns durable state. The browser presents API responses and live acti
 
 
 !!! note "Development screenshots"
-
     The screenshots below show synthetic development fixtures captured on October 16, 2026. They illustrate interface layout, not verified task execution, provider generation, or saved configuration. Empty outer canvas has been cropped; application content is unchanged. Select an image to inspect it at full resolution. The source-backed behavior described in this guide remains pinned to the documented release.
-
 
 ## Find the right page
 
@@ -284,9 +280,7 @@ Migrated records show **Migrated from legacy Albdruck** and expandable **Legacy 
 
 
 !!! warning "Review before deleting memories"
-
     **Delete memory** and **Delete selected memories** issue deletion immediately; the workspace does not present the old conversation-purge confirmation. **Select page** selects only the displayed page. Bulk deletion is independent per record, not atomic: inspect every reported result, then **Reload list** before retrying conflicts. Deleting a saved memory does not erase its source conversation.
-
 
 <figure markdown="span">
 [![Brains with an Agent owner selector, saved-memory list, and an editor for a synthetic memory and source references.](../assets/screenshots/06-brains-memory.webp){ loading=lazy }](../assets/screenshots/06-brains-memory.webp)
@@ -453,7 +447,7 @@ A retained completed/failed run summary is not live activity. After its transcri
 
 ## Native Codex child controls and Forge references
 
-Current Minions settings expose Burrow defaults and independent enabled Codex/Claude defaults, with global inheritance and per-agent overrides. Existing children retain their saved harness badge and host. Native child chat supports text follow-ups; unsupported attachments, steering and parent-model controls are unavailable. A disabled control is not a successful submission. See [Minion setup and limits](agents-minions.md).
+Current Minions settings expose Burrow defaults and independent enabled Codex/Claude/Gemini defaults and optional per-harness model locks, with global inheritance and per-agent overrides. Existing children retain their saved harness badge and host. Native child chat supports text follow-ups; unsupported attachments, steering and parent-model controls are unavailable. A disabled control is not a successful submission. See [Minion setup and limits](agents-minions.md).
 
 Forge gallery/preview actions include **Copy reference** for eligible PNG/JPEG/GIF/WebP artifacts up to 20 MiB. It copies an exact `[forge:jobId:artifactId]` reference for reuse, not image bytes. **Attach to conversation** uses the current session and reports success/failure independently. **Use as video reference** is shown only for eligible artifacts and a video model advertising reference support; model reference limits include portraits and selected artifacts. These actions do not themselves start a new generation.
 
@@ -461,3 +455,7 @@ Forge gallery/preview actions include **Copy reference** for eligible PNG/JPEG/G
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+## Forge effects and motion
+
+Checked **17 November 2026**: Forge effects follow the active job and reveal the completed artifact only when it is ready. The effects control and operating-system reduced-motion preference suppress unnecessary animation; hidden/inactive surfaces stop their animation clock. Motion/pressure labels are presentation, not provider progress or execution verification. Existing gallery and job status remain the authoritative controls.

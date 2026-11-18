@@ -154,3 +154,13 @@ Accounts offers an explicit refresh with visible loading/failure state. A previo
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+### Native Gemini selection and model locks
+
+Checked **17 November 2026**: Gemini Minions use an enabled direct Google Generative Language API-key connection and an exact enabled model, not OAuth, Vertex, a pool or the parent's model. They must be explicitly requested. For all four harnesses, saved Minion models are defaults unless their **Lock model** control is enabled. An unlocked request may choose another eligible model on the same connection/pool. See [Gemini Minions](../concepts/agents-minions.md#native-gemini-minions).
+
+### Anthropic Full resets
+
+The Accounts panel can show an eligible Anthropic OAuth account's **Full** reset inventory and offer **Use reset**. Opening the confirmation dialog fetches fresh inventory; consuming a reset requires explicit confirmation. This feature has no automatic Anthropic reset scheduler. Full grants must clear both five-hour and seven-day windows; Fable grants are not substituted.
+
+A displayed retained count may be stale and has its own freshness, separate from the usage sample. It is not authority to consume a grant. If activation reports an ambiguous outcome, do not retry with a new request or bypass the locked control, even after refreshing or restarting. The durable account fence protects an unknown consumption outcome. See [reset API](../reference/api/settings.md#anthropic-full-reset-api).
