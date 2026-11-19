@@ -3,11 +3,9 @@ import { archiveRepository } from './archiveRepository';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Archive } from './ArchivePage';
-import { loadModArchives, modsChangedEvent } from '../../app/modPanels';
-vi.mock('../../app/modPanels', () => ({
-  loadModArchives: vi.fn(),
-  modsChangedEvent: 'burrow:mods-changed',
-}));
+const modArchives = [
+  { modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' },
+];
 vi.mock('./WorkflowEventsArchiveShelf', () => ({
   WorkflowEventsArchiveShelf: () => <div>Workflow shelf</div>,
 }));
@@ -34,11 +32,10 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
-it('discovers Archive contributions, passes calendar date and removes disabled destinations', async () => {
-  vi.mocked(loadModArchives).mockResolvedValue([
-    { modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' },
-  ]);
-  render(<Archive repository={archiveRepository} agents={[]} />);
+it('renders discovered Archive contributions, passes calendar date and removes disabled destinations', async () => {
+  const view = render(
+    <Archive repository={archiveRepository} agents={[]} modArchives={modArchives} />,
+  );
   fireEvent.click(await screen.findByRole('button', { name: 'Fixture archive' }));
   expect(screen.getByTestId('mod-date').textContent).toBe('all dates');
   expect(
@@ -57,17 +54,15 @@ it('discovers Archive contributions, passes calendar date and removes disabled d
   );
   fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
   expect(screen.getByTestId('mod-date').textContent).toBe('all dates');
-  vi.mocked(loadModArchives).mockResolvedValue([]);
-  window.dispatchEvent(new Event(modsChangedEvent));
+  view.rerender(<Archive repository={archiveRepository} agents={[]} modArchives={[]} />);
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Fixture archive' })).toBeNull());
   expect(screen.queryByTestId('mod-date')).toBeNull();
 });
 
 it('hides global heading filters for mods and restores them for Workflow Events', async () => {
-  vi.mocked(loadModArchives).mockResolvedValue([
-    { modId: 'fixture', name: 'Fixture archive', archiveUrl: '/api/mods/fixture/ui/archive.js' },
-  ]);
-  const { container } = render(<Archive repository={archiveRepository} agents={[]} />);
+  const { container } = render(
+    <Archive repository={archiveRepository} agents={[]} modArchives={modArchives} />,
+  );
   const tools = container.querySelector('.archive-heading-tools') as HTMLDivElement;
   expect(tools.hidden).toBe(false);
   fireEvent.click(await screen.findByRole('button', { name: 'Fixture archive' }));

@@ -24,7 +24,7 @@ export function useConversationSelection({
   setSessionId: Dispatch<SetStateAction<string>>;
   setTurns: Dispatch<SetStateAction<SessionTurn[]>>;
   setIsLoadingConversation: Dispatch<SetStateAction<boolean>>;
-  setIsNewSession: Dispatch<SetStateAction<boolean>>;
+  setIsNewSession: (value: boolean) => void;
 }) {
   const selectSession = useCallback(
     (targetSessionId: string, targetAgentId = selectedAgentId) => {

@@ -313,9 +313,9 @@ function ProofDetail({
         <EvidenceList title="Verification" items={run.evidence.verifications} />
         <EvidenceList title="Unresolved" items={run.evidence.unresolved} />
       </div>
-      <FullToolEvidence repository={repository} key={`${run.agentId}:${run.runId}`} run={run} />
+      <FullToolEvidence repository={repository} key={occurrenceKey(run)} run={run} />
       <ProviderRequestHistory
-        key={JSON.stringify([run.agentId, run.sessionId, run.runId])}
+        key={`provider-requests:${occurrenceKey(run)}`}
         run={run}
         repository={repository}
       />
@@ -441,6 +441,22 @@ function ProofDetail({
   );
 }
 
+const occurrenceKey = (run: ArchiveRunDetail) =>
+  JSON.stringify([run.agentId, run.sessionId, run.runId]);
+
+function mergeOccurrences(current: ArchiveRunDetail[], incoming: ArchiveRunDetail[]) {
+  const seen = new Set(current.map(occurrenceKey));
+  return [
+    ...current,
+    ...incoming.filter((run) => {
+      const key = occurrenceKey(run);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ];
+}
+
 export function ArchiveRunsProof({
   selectedAgent,
   search,
@@ -483,7 +499,7 @@ export function ArchiveRunsProof({
         .listRuns(selectedAgent, abort.signal, null, query)
         .then((page) => {
           if (abort.signal.aborted) return;
-          setRuns(page.items);
+          setRuns(mergeOccurrences([], page.items));
           setNextCursor(page.nextCursor);
           setHasMore(page.hasMore);
         })
@@ -514,14 +530,7 @@ export function ArchiveRunsProof({
       .listRuns(selectedAgent, abort.signal, cursor, query)
       .then((page) => {
         if (abort.signal.aborted) return;
-        setRuns((current) =>
-          current.some(
-            (item) =>
-              item.runId === page.items[0]?.runId && item.agentId === page.items[0]?.agentId,
-          )
-            ? current
-            : [...current, ...page.items],
-        );
+        setRuns((current) => mergeOccurrences(current, page.items));
         setNextCursor(page.nextCursor);
         setHasMore(page.hasMore);
       })
@@ -541,9 +550,12 @@ export function ArchiveRunsProof({
     setDetailError('');
     setDetailLoading(true);
     repository
-      .loadRun(run.runId, run.agentId, abort.signal)
+      .loadRun(run.runId, run.agentId, abort.signal, run.sessionId)
       .then((detail) => {
-        if (!abort.signal.aborted) setSelected(detail);
+        if (abort.signal.aborted) return;
+        if (occurrenceKey(detail) !== occurrenceKey(run))
+          throw new Error('Run details did not match the selected session.');
+        setSelected(detail);
       })
       .catch((cause) => {
         if (!abort.signal.aborted)
@@ -592,8 +604,8 @@ export function ArchiveRunsProof({
             ? runs.map((run) => (
                 <button
                   type="button"
-                  className={`archive-session-card proof-run-card${selected?.runId === run.runId && selected.agentId === run.agentId ? ' selected' : ''}`}
-                  key={`${run.agentId}:${run.runId}`}
+                  className={`archive-session-card proof-run-card${selected && occurrenceKey(selected) === occurrenceKey(run) ? ' selected' : ''}`}
+                  key={occurrenceKey(run)}
                   onClick={() => open(run)}
                 >
                   <div className="archive-session-main">

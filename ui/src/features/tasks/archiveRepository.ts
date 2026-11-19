@@ -205,10 +205,12 @@ export function createArchiveRepository(request: typeof api = api) {
       );
       return { items: response.runs, nextCursor: response.nextCursor, hasMore: response.hasMore };
     },
-    async loadRun(runId: string, agentId: string, signal?: AbortSignal) {
+    async loadRun(runId: string, agentId: string, signal?: AbortSignal, sessionId?: string) {
+      const query = new URLSearchParams({ agentId });
+      if (sessionId) query.set('sessionId', sessionId);
       return (
         await request<ArchiveRunResponse>(
-          `/api/archive/runs/${encodeURIComponent(runId)}?agentId=${encodeURIComponent(agentId)}`,
+          `/api/archive/runs/${encodeURIComponent(runId)}?${query}`,
           { signal },
         )
       ).run;

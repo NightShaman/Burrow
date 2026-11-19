@@ -133,7 +133,7 @@ function AppContent() {
     setPage('chat');
   };
   // Burrow is a single local runtime. Node Goblin integrations are explicit mod-owned APIs.
-  const { modPanels, modsLoaded } = useModDiscovery();
+  const { modPanels, modArchives, modsLoaded } = useModDiscovery();
   const [activeModId, setActiveModId] = useState<string | null>(null);
   const activeMod = modPanels.find((mod) => mod.modId === activeModId);
   useEffect(() => {
@@ -661,7 +661,11 @@ function AppContent() {
           ) : page === 'brains' ? (
             <Brains agents={agents} />
           ) : page === 'archive' ? (
-            <Archive agents={agents} operatorName={operatorProfile.name} />
+            <Archive
+              agents={agents}
+              operatorName={operatorProfile.name}
+              modArchives={modArchives}
+            />
           ) : page === 'forge' ? (
             <Forge
               savedProviders={savedProviders}

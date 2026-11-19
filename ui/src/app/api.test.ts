@@ -300,11 +300,10 @@ describe('API requests', () => {
     await expect(api('/api/agents')).rejects.toMatchObject({
       message: 'invalid_json_response',
       status: 200,
-      details: '{broken',
     });
   });
 
-  it('preserves a short excerpt for non-JSON error responses', async () => {
+  it('reports non-JSON HTTP failures without surfacing the response body', async () => {
     const responseBody = '<html>upstream failure</html>';
     vi.stubGlobal(
       'fetch',
@@ -317,9 +316,8 @@ describe('API requests', () => {
     );
 
     await expect(api('/api/agents')).rejects.toMatchObject({
-      message: responseBody,
+      message: 'HTTP 502',
       status: 502,
-      details: responseBody,
     });
   });
 
@@ -382,3 +380,26 @@ it.each([500, 200])(
     });
   },
 );
+
+it('bounds structured diagnostic text and retains its machine code and HTTP status', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'upstream_unavailable',
+            message: 'x'.repeat(1000),
+            details: { verbose: 'x'.repeat(5000) },
+          },
+        }),
+        { status: 502, headers: { 'content-type': 'application/json' } },
+      ),
+    ),
+  );
+  await expect(api('/api/agents')).rejects.toMatchObject({
+    message: `${'x'.repeat(500)}…`,
+    code: 'upstream_unavailable',
+    status: 502,
+  });
+});

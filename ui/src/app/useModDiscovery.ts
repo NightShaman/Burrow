@@ -1,25 +1,28 @@
 import { useEffect, useState } from 'react';
-import { loadModPanels, modsChangedEvent, type ModPanel } from './modPanels';
+import { loadModDiscovery, modsChangedEvent } from './modPanels';
 
 /** Owns discovery requests, freshness ordering, polling and listener lifetime. */
 export function useModDiscovery() {
-  const [modPanels, setModPanels] = useState<ModPanel[]>([]);
+  const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof loadModDiscovery>>>({
+    modPanels: [],
+    modArchives: [],
+  });
   const [modsLoaded, setModsLoaded] = useState(false);
   useEffect(() => {
     let live = true;
-    let sequence = 0;
+    let request: AbortController | undefined;
     const refresh = () => {
-      const current = ++sequence;
-      void loadModPanels()
-        .then((panels) => {
-          if (live && current === sequence) {
-            setModPanels(panels);
+      request?.abort();
+      const current = (request = new AbortController());
+      void loadModDiscovery(current.signal)
+        .then((result) => {
+          if (live && !current.signal.aborted) {
+            setCatalog(result);
             setModsLoaded(true);
           }
         })
         .catch(() => {
-          if (live && current === sequence) {
-            setModPanels([]);
+          if (live && !current.signal.aborted) {
             setModsLoaded(true);
           }
         });
@@ -29,9 +32,10 @@ export function useModDiscovery() {
     const interval = window.setInterval(refresh, 30000);
     return () => {
       live = false;
+      request?.abort();
       window.removeEventListener(modsChangedEvent, refresh);
       window.clearInterval(interval);
     };
   }, []);
-  return { modPanels, modsLoaded };
+  return { ...catalog, modsLoaded };
 }

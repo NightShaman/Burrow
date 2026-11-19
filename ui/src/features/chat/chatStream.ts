@@ -9,6 +9,7 @@ export type ChatStreamResult = {
 type ChatStreamOptions = {
   requestBody: unknown;
   signal: AbortSignal;
+  owner?: { runId: string; sessionId: string };
   onEvent: (event: unknown) => void;
   onAccepted?: () => void;
 };
@@ -16,6 +17,7 @@ type ChatStreamOptions = {
 export async function streamChat({
   requestBody,
   signal,
+  owner,
   onEvent,
   onAccepted,
 }: ChatStreamOptions): Promise<ChatStreamResult> {
@@ -53,9 +55,20 @@ export async function streamChat({
     } catch {
       throw new Error('The streaming response was malformed.');
     }
-    onEvent(event);
     if (!event || typeof event !== 'object') return;
-    const envelope = event as { type?: unknown; data?: { response?: unknown } };
+    const envelope = event as {
+      type?: unknown;
+      runId?: unknown;
+      sessionId?: unknown;
+      data?: { response?: unknown };
+    };
+    if (
+      owner &&
+      ((envelope.runId !== undefined && envelope.runId !== owner.runId) ||
+        (envelope.sessionId !== undefined && envelope.sessionId !== owner.sessionId))
+    )
+      return;
+    onEvent(event);
     if (
       envelope.type === 'run.completed' ||
       envelope.type === 'run.failed' ||
@@ -67,23 +80,25 @@ export async function streamChat({
     }
   };
 
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (line.trim()) handleLine(line);
-      if (terminalType) {
-        // Do not wait for transport EOF or a possibly stalled cancellation.
-        void reader.cancel().catch(() => {});
-        reader.releaseLock();
-        return { terminalType, finalResult };
+  let eof = false;
+  try {
+    while (!eof && !terminalType) {
+      const { value, done } = await reader.read();
+      eof = done;
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) handleLine(line);
+        if (terminalType) break;
       }
     }
-    if (done) break;
+    if (!terminalType && buffer.trim()) handleLine(buffer);
+    if (!terminalType) throw new Error('The stream ended without a terminal event.');
+    return { terminalType, finalResult };
+  } finally {
+    // A terminal envelope or faulty parser can end the run before transport EOF.
+    if (!eof) void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  if (buffer.trim()) handleLine(buffer);
-  if (!terminalType) throw new Error('The stream ended without a terminal event.');
-  return { terminalType, finalResult };
 }

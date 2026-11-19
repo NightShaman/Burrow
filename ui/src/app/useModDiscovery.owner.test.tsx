@@ -1,8 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { loadModPanels, modsChangedEvent, type ModPanel } from './modPanels';
+import { loadModDiscovery, modsChangedEvent, type ModPanel } from './modPanels';
 import { useModDiscovery } from './useModDiscovery';
-vi.mock('./modPanels', () => ({ loadModPanels: vi.fn(), modsChangedEvent: 'mods-changed-test' }));
+vi.mock('./modPanels', () => ({
+  loadModDiscovery: vi.fn(),
+  modsChangedEvent: 'mods-changed-test',
+}));
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => {
@@ -16,10 +19,10 @@ afterEach(() => {
 });
 it('orders overlapping initial, event and polling reads and removes listeners on unmount', async () => {
   vi.useFakeTimers();
-  const first = deferred<ModPanel[]>(),
-    second = deferred<ModPanel[]>(),
-    third = deferred<ModPanel[]>();
-  vi.mocked(loadModPanels)
+  const first = deferred<Awaited<ReturnType<typeof loadModDiscovery>>>(),
+    second = deferred<Awaited<ReturnType<typeof loadModDiscovery>>>(),
+    third = deferred<Awaited<ReturnType<typeof loadModDiscovery>>>();
+  vi.mocked(loadModDiscovery)
     .mockReturnValueOnce(first.promise)
     .mockReturnValueOnce(second.promise)
     .mockReturnValueOnce(third.promise);
@@ -27,22 +30,29 @@ it('orders overlapping initial, event and polling reads and removes listeners on
   expect(result.current.modsLoaded).toBe(false);
   act(() => window.dispatchEvent(new Event(modsChangedEvent)));
   act(() => vi.advanceTimersByTime(30000));
-  expect(loadModPanels).toHaveBeenCalledTimes(3);
+  expect(loadModDiscovery).toHaveBeenCalledTimes(3);
   const newest = [{ id: 'new' }] as unknown as ModPanel[];
   await act(async () => {
-    third.resolve(newest);
+    third.resolve({
+      modPanels: newest,
+      modArchives: [{ modId: 'new', name: 'New', archiveUrl: '/new' }],
+    });
     await third.promise;
   });
   await act(async () => {
-    first.resolve([]);
-    second.resolve([]);
+    first.resolve({ modPanels: [], modArchives: [] });
+    second.resolve({ modPanels: [], modArchives: [] });
     await Promise.all([first.promise, second.promise]);
   });
-  expect(result.current).toEqual({ modPanels: newest, modsLoaded: true });
+  expect(result.current).toEqual({
+    modPanels: newest,
+    modArchives: [{ modId: 'new', name: 'New', archiveUrl: '/new' }],
+    modsLoaded: true,
+  });
   unmount();
   act(() => {
     window.dispatchEvent(new Event(modsChangedEvent));
     vi.advanceTimersByTime(60000);
   });
-  expect(loadModPanels).toHaveBeenCalledTimes(3);
+  expect(loadModDiscovery).toHaveBeenCalledTimes(3);
 });

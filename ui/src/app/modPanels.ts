@@ -3,16 +3,22 @@ import { apiLocal } from './api';
 export type ModPanel = { modId: string; name: string; controlUrl: string; version?: string };
 export const modsChangedEvent = 'burrow:mods-changed';
 
-export async function loadModPanels(): Promise<ModPanel[]> {
-  const catalog = await apiLocal<{
-    mods?: Array<{
-      id?: unknown;
-      name?: unknown;
-      status?: unknown;
-      version?: unknown;
-      ui?: { controlUrl?: unknown };
-    }>;
-  }>('/api/mods');
+type ModCatalog = {
+  mods?: Array<{
+    id?: unknown;
+    name?: unknown;
+    status?: unknown;
+    version?: unknown;
+    ui?: { controlUrl?: unknown; archiveUrl?: unknown };
+  }>;
+};
+
+export async function loadModDiscovery(signal?: AbortSignal) {
+  const catalog = await apiLocal<ModCatalog>('/api/mods', { signal });
+  return { modPanels: modPanelsFromCatalog(catalog), modArchives: modArchivesFromCatalog(catalog) };
+}
+
+function modPanelsFromCatalog(catalog: ModCatalog): ModPanel[] {
   return (catalog.mods ?? []).flatMap((mod) => {
     if (
       typeof mod.id !== 'string' ||
@@ -41,16 +47,7 @@ export async function loadModPanels(): Promise<ModPanel[]> {
   });
 }
 
-export async function loadModArchives(): Promise<ModArchive[]> {
-  const catalog = await apiLocal<{
-    mods?: Array<{
-      id?: unknown;
-      name?: unknown;
-      status?: unknown;
-      version?: unknown;
-      ui?: { archiveUrl?: unknown };
-    }>;
-  }>('/api/mods');
+function modArchivesFromCatalog(catalog: ModCatalog): ModArchive[] {
   return (catalog.mods ?? []).flatMap((mod) => {
     if (
       typeof mod.id !== 'string' ||

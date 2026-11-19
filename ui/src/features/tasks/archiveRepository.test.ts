@@ -163,7 +163,7 @@ describe('archiveRepository', () => {
       .mockResolvedValueOnce({ run: { runId: 'run/name' } });
 
     await repository.loadContinuityCard(card);
-    await repository.loadRun('run/name', 'agent/name');
+    await repository.loadRun('run/name', 'agent/name', undefined, 'other/session');
 
     expect(apiMock).toHaveBeenNthCalledWith(
       1,
@@ -172,7 +172,7 @@ describe('archiveRepository', () => {
     );
     expect(apiMock).toHaveBeenNthCalledWith(
       2,
-      '/api/archive/runs/run%2Fname?agentId=agent%2Fname',
+      '/api/archive/runs/run%2Fname?agentId=agent%2Fname&sessionId=other%2Fsession',
       { signal: undefined },
     );
   });

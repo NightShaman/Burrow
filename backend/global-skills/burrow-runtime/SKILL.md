@@ -59,16 +59,6 @@ Never invent a path, repository, service, agent ID, provider, or recipient when 
 
 The selected execution host controls where host operations run; it does not relocate runtime-owned resources. Attachments, session history, and native scheduled jobs remain with the owning Burrow runtime. Reopen attachments with `attachment_view` using a runtime-supplied attachment reference rather than assuming their paths exist on the selected host.
 
-### Resolve Task Board project context
-
-A Task Board project can have a description, notes, and annotated path entries (label, path, optional note). Use the annotations to distinguish, for example, the source checkout from deployment or documentation paths.
-
-- **Selected chat project:** when the operator selects a project in chat, Burrow refreshes its Task Board record for the turn and includes the available fields under **Conversation active project** in Working Context.
-- **Task execution:** Task Board Execute and scheduled task runs include the task's own project and its available description, notes, and paths in the execution request. That project applies to the task run; it does not change the conversation's selected project. `tasks_list` returns task records with `projectId`, not the project's notes or paths. When executing a board task, move it to `in_progress` when starting and `review` when ready for operator acceptance; the operator owns the move from Review to Done.
-- **Look up an unselected project:** with authorized Backdoor full Core API access, call `burrow_api_request` with `{"method":"GET","path":"/api/task-board/projects"}`. Match an exact project ID (such as a task's `projectId`) or an unambiguous project name in `body.projects`, then read that record's `description`, `notes` and `pathEntries`. This is read-only and does not require the operator to select the project. If the capability is unavailable or denied, use other authorized project references or ask only for the material information you cannot establish.
-
-Project context is orientation, not authorization, a host selection, a working directory, or proof that a path still exists. Verify the applicable path on the selected execution host before acting.
-
 ## Use native tools deliberately
 
 Native tools are Burrow's direct filesystem, command, Git, continuity, task, scheduler, and agent-operation capabilities.
@@ -100,7 +90,7 @@ Use `scheduled_jobs_list`, `scheduled_jobs_read`, `scheduled_jobs_create`, `sche
 
 New prompt jobs default to the current chat session; new jobs remain disabled unless explicitly enabled. Current schemas support recurring `scheduleKind: "cron"` jobs and one-time `scheduleKind: "once"` jobs with `runAt`. All schedules use the operator timezone; legacy payload timezone is ignored. Inspect the supplied schema and preserve schedule/model validation. Creating or changing a schedule requires operator intent; available scheduler tools are not permission to invent recurring work.
 
-For an existing ToDo task assigned to you, current schemas also support `jobKind: "task"`, `taskId`, and optional saved `extraInstructions`. This schedules the canonical task execution rather than a copied prompt; task jobs use the task execution context, not an arbitrary chat-session override. Merely assigning a board task still does not dispatch it. Missing, reassigned, non-ToDo, or already-running targets can be skipped; inspect the run reason instead of claiming execution. A one-time job is consumed when claimed, including a skipped attempt or an early manual Run now; do not assume it will retry automatically. Older runtimes may lack these fields: follow their live schemas.
+For an existing ToDo task assigned to you, current schemas also support `jobKind: "task"`, `scheduledTaskId`, and optional saved `extraInstructions`. This schedules the canonical task execution rather than a copied prompt; task jobs use the task execution context, not an arbitrary chat-session override. Merely assigning a board task still does not dispatch it. Missing, reassigned, non-ToDo, or already-running targets can be skipped; inspect the run reason instead of claiming execution. A one-time job is consumed when claimed, including a skipped attempt or an early manual Run now; do not assume it will retry automatically. Older runtimes may lack these fields: follow their live schemas.
 
 On runtimes exposing `status: "parked"`, a board task remains stored and retrievable but cannot be executed or scheduled while parked. Keep it parked until the operator asks to resume it; do not treat it as an active obligation or silently move it to ToDo to dispatch work.
 

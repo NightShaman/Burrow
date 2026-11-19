@@ -90,27 +90,32 @@ export function DeclarativeSection({
   const valuesRef = useRef(values);
   valuesRef.current = values;
   const dirty = Object.keys(values).some((id) => values[id] !== baseline[id]);
-  const fields = [
-    ...(definition?.fields ?? []),
-    ...(definition?.items?.flatMap((item) => item.fields ?? []) ?? []),
+  const editing =
+    definition?.items?.find((item) => item.id === editingId) ??
+    (!definition?.fields?.length ? definition?.items?.[0] : undefined);
+  const selected =
+    definition?.items?.find((item) => item.id === selectedId) ?? definition?.items?.[0];
+  const actionGroups = [
+    { fields: definition?.fields, actions: definition?.actions },
+    ...(definition?.items ?? []),
   ];
-  const clearPasswords = (value: Record<string, string | boolean>) =>
-    Object.fromEntries(
-      Object.entries(value).map(([id, item]) => [
-        id,
-        fields.some((field) => field.id === id && field.control === 'password') ? '' : item,
-      ]),
-    );
-  const saveAction =
-    definition?.actions?.find((action) => action.tone === 'primary') ??
-    definition?.actions?.find((action) => action.tone !== 'danger') ??
-    definition?.items
-      ?.flatMap((item) => item.actions ?? [])
-      .find((action) => action.tone === 'primary');
+  const dirtyGroups = actionGroups.filter((group) =>
+    group.fields?.some((field) => values[field.id] !== baseline[field.id]),
+  );
+  const actionForGroup = (group: (typeof actionGroups)[number]) =>
+    group.actions?.find((action) => action.tone === 'primary') ??
+    group.actions?.find((action) => action.tone !== 'danger');
   useUnsavedChanges({
     dirty,
     busy: Boolean(busy),
-    save: async () => (saveAction ? requestAction(saveAction) : false),
+    save: async () => {
+      const saves = dirtyGroups.map((group) => ({ group, action: actionForGroup(group) }));
+      if (!saves.length || saves.some(({ action }) => !action)) return false;
+      for (const { group, action } of saves) {
+        if (!action || !(await requestAction(action, group.fields))) return false;
+      }
+      return true;
+    },
     discard: () => {
       setValues(baseline);
       setActionState(null);
@@ -120,42 +125,58 @@ export function DeclarativeSection({
   if (!definition) return null;
   const update = (id: string, value: string | boolean) =>
     setValues((current) => ({ ...current, [id]: value }));
-  const runAction = async (actionId: string): Promise<boolean> => {
+  const runAction = async (
+    actionId: string,
+    fields: SettingsField[] | undefined,
+    owner: object,
+  ): Promise<boolean> => {
     setActionState({ id: actionId, status: 'saving', message: 'Saving…' });
-    const actionValues = { ...defaultFieldValues(definition), ...values };
+    const actionValues = { ...defaultFieldValues(definition), ...valuesRef.current };
     try {
       if (typeof module.handleSettingsAction !== 'function')
         throw new Error('The mod does not provide an action handler.');
       await module.handleSettingsAction(actionId, actionValues);
+      if (actionOwner.current !== owner) return false;
       setActionState({ id: actionId, status: 'success', message: 'Saved.' });
-      const accepted = clearPasswords(actionValues);
-      setBaseline(accepted);
-      setValues((current) =>
-        Object.fromEntries(
-          Object.entries(current).map(([id, value]) => [
-            id,
-            value === actionValues[id] ? accepted[id] : value,
-          ]),
-        ),
+      const accepted = Object.fromEntries(
+        (fields ?? []).map((field) => [
+          field.id,
+          field.control === 'password' ? '' : actionValues[field.id],
+        ]),
       );
-      if (
-        definition.fields?.length &&
-        Object.keys(valuesRef.current).every((id) => valuesRef.current[id] === actionValues[id])
-      )
-        setEditingId(null);
-      return Object.keys(valuesRef.current).every(
+      setBaseline((current) => ({ ...current, ...accepted }));
+      setValues((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          Object.entries(accepted).filter(([id]) => current[id] === actionValues[id]),
+        ),
+      }));
+      const unchanged = Object.keys(accepted).every(
         (id) => valuesRef.current[id] === actionValues[id],
       );
+      if (
+        definition.layout === 'form-inventory' &&
+        definition.fields?.length &&
+        unchanged &&
+        fields === editing?.fields &&
+        fields
+      )
+        setEditingId(null);
+      return unchanged;
     } catch (cause) {
-      setActionState({
-        id: actionId,
-        status: 'error',
-        message: cause instanceof Error ? cause.message : 'The action could not be completed.',
-      });
+      if (actionOwner.current === owner)
+        setActionState({
+          id: actionId,
+          status: 'error',
+          message: cause instanceof Error ? cause.message : 'The action could not be completed.',
+        });
       return false;
     }
   };
-  const requestAction = async (action: SettingsAction): Promise<boolean> => {
+  const requestAction = async (
+    action: SettingsAction,
+    fields?: SettingsField[],
+  ): Promise<boolean> => {
     if (actionPending.current) return false;
     actionPending.current = true;
     setActionBusy(true);
@@ -172,13 +193,13 @@ export function DeclarativeSection({
       )
         return false;
       if (!owner || actionOwner.current !== owner) return false;
-      return await runAction(action.id);
+      return await runAction(action.id, fields, owner);
     } finally {
       actionPending.current = false;
       setActionBusy(false);
     }
   };
-  const actions = (items: SettingsAction[] | undefined) =>
+  const actions = (items: SettingsAction[] | undefined, fields?: SettingsField[]) =>
     items?.length ? (
       <div className="card-actions">
         {items.map((action) => {
@@ -191,7 +212,7 @@ export function DeclarativeSection({
               }
               disabled={busy}
               key={action.id}
-              onClick={() => void requestAction(action)}
+              onClick={() => void requestAction(action, fields)}
             >
               {saving ? 'Saving…' : action.label}
             </button>
@@ -208,9 +229,6 @@ export function DeclarativeSection({
     </p>
   );
   if (definition.layout === 'form-inventory') {
-    const editing =
-      definition.items?.find((item) => item.id === editingId) ??
-      (!definition.fields?.length ? definition.items?.[0] : undefined);
     const reset = () => {
       setEditingId(null);
       setValues(baseline);
@@ -230,7 +248,7 @@ export function DeclarativeSection({
                 aria-pressed={editing?.id === item.id}
                 disabled={busy}
                 onClick={() => {
-                  setValues(defaultFieldValues(definition));
+                  setValues(baseline);
                   setEditingId(item.id);
                   setActionState(null);
                 }}
@@ -322,6 +340,7 @@ export function DeclarativeSection({
             editing
               ? editing.actions?.filter((action) => action.tone !== 'danger')
               : definition.actions,
+            editing?.fields ?? definition.fields,
           )}
           {editing && Boolean(definition.fields?.length) && (
             <button type="button" disabled={busy} onClick={reset}>
@@ -382,13 +401,11 @@ export function DeclarativeSection({
             {field.description && <small className="settings-help">{field.description}</small>}
           </Field>
         ))}
-        {actions(definition.actions)}
+        {actions(definition.actions, definition.fields)}
         {feedback}
       </SettingSection>
     );
   if (definition.layout === 'list-detail') {
-    const selected =
-      definition.items?.find((item) => item.id === selectedId) ?? definition.items?.[0];
     const detail = selected && (
       <section className="setting-section">
         <h2>{selected.label}</h2>
@@ -432,7 +449,7 @@ export function DeclarativeSection({
             )}
           </Field>
         ))}
-        {actions(selected.actions)}
+        {actions(selected.actions, selected.fields)}
         {feedback}
       </section>
     );
@@ -478,7 +495,7 @@ export function DeclarativeSection({
               {field.description && <small className="settings-help">{field.description}</small>}
             </Field>
           ))}
-          {actions(definition.actions)}
+          {actions(definition.actions, definition.fields)}
           {!selected && feedback}
           <div className="mcp-server-selector">
             {definition.items?.map((item) => (

@@ -29,15 +29,21 @@ export function ModPanelHost({ panel }: { panel: ModPanel }) {
         /* Isolate mod cleanup. */
       }
     };
-    const timer = window.setTimeout(() => {
-      if (!disposed) {
-        disposed = true;
-        node.remove();
-        disposeSafely(cleanup);
-        setLoading(false);
-        setError('The mod panel took too long to load.');
-      }
-    }, 15000);
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      window.clearTimeout(timer);
+      node.remove();
+      disposeSafely(cleanup);
+      node.replaceChildren();
+    };
+    const fail = (message: string) => {
+      if (disposed) return;
+      dispose();
+      setLoading(false);
+      setError(message);
+    };
+    const timer = window.setTimeout(() => fail('The mod panel took too long to load.'), 15000);
     setError('');
     setLoading(true);
     const url = panel.controlUrl + (panel.version ? `?v=${encodeURIComponent(panel.version)}` : '');
@@ -62,30 +68,21 @@ export function ModPanelHost({ panel }: { panel: ModPanel }) {
             return api<T>(`/api/mods/${panel.modId}${normalized}`, init);
           },
         });
-        const dispose = typeof result === 'function' ? result : result?.unmount;
+        const release = typeof result === 'function' ? result : result?.unmount;
         if (disposed) {
-          disposeSafely(dispose);
+          disposeSafely(release);
           node.replaceChildren();
         } else {
-          cleanup = dispose;
+          cleanup = release;
           window.clearTimeout(timer);
           setLoading(false);
         }
       })
       .catch((cause) => {
-        if (!disposed) {
-          window.clearTimeout(timer);
-          setLoading(false);
-          setError(cause instanceof Error ? cause.message : 'Could not load mod panel.');
-        }
+        node.replaceChildren();
+        fail(cause instanceof Error ? cause.message : 'Could not load mod panel.');
       });
-    return () => {
-      disposed = true;
-      window.clearTimeout(timer);
-      node.remove();
-      disposeSafely(cleanup);
-      node.replaceChildren();
-    };
+    return dispose;
   }, [panel.modId, panel.controlUrl, panel.version]);
   return (
     <div className="page-view mod-panel-page" data-mod-id={panel.modId}>

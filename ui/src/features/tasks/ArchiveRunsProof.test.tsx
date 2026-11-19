@@ -105,7 +105,7 @@ it('keeps aggregate selection agent-qualified and ignores stale detail responses
   expect(firstButton.classList.contains('selected')).toBe(false);
   expect(secondButton.classList.contains('selected')).toBe(true);
   expect(screen.queryByRole('heading', { level: 2, name: 'hatchet objective' })).toBeNull();
-  expect(load).toHaveBeenLastCalledWith('shared', 'smatchet', expect.any(AbortSignal));
+  expect(load).toHaveBeenLastCalledWith('shared', 'smatchet', expect.any(AbortSignal), 'default');
   view.rerender(<ArchiveRunsProof selectedAgent="hatchet" search="" />);
   expect(screen.queryByRole('heading', { level: 2, name: 'smatchet objective' })).toBeNull();
 });
@@ -268,4 +268,24 @@ it('debounces typing and ignores a stale search page after the query changes', a
   expect(oldSignal?.aborted).toBe(true);
   await act(async () => finishOldPage(runsPage([stale])));
   expect(screen.queryByRole('button', { name: /hatchet objective/ })).toBeNull();
+});
+
+it('merges overlapping pages and opens same-run occurrences by session', async () => {
+  const first = run();
+  const second = { ...first, sessionId: 'second', objective: 'Second occurrence' };
+  const third = { ...first, runId: 'third', objective: 'Third occurrence' };
+  vi.spyOn(archiveRepository, 'listRuns')
+    .mockResolvedValueOnce({ items: [first], nextCursor: 'next', hasMore: true })
+    .mockResolvedValueOnce(runsPage([first, second, first, third]));
+  const load = vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(second);
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  fireEvent.click(await screen.findByRole('button', { name: /load more/i }));
+  const row = await screen.findByRole('button', { name: /Second occurrence/ });
+  expect(screen.getByRole('button', { name: /Third occurrence/ })).toBeTruthy();
+  const original = screen.getByRole('button', { name: /smatchet objective/ });
+  fireEvent.click(row);
+  expect(load).toHaveBeenCalledWith('shared', 'smatchet', expect.any(AbortSignal), 'second');
+  expect(row.classList.contains('selected')).toBe(true);
+  expect(original.classList.contains('selected')).toBe(false);
+  expect(await screen.findByRole('heading', { level: 2, name: 'Second occurrence' })).toBeTruthy();
 });

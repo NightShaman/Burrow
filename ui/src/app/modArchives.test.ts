@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadModArchives } from './modPanels';
+import { loadModDiscovery } from './modPanels';
 
 describe('mod archive destinations', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -35,7 +35,7 @@ describe('mod archive destinations', () => {
         ),
       ),
     );
-    await expect(loadModArchives()).resolves.toEqual([
+    await expect((await loadModDiscovery()).modArchives).toEqual([
       {
         modId: 'lore-master',
         name: 'LoreMaster',

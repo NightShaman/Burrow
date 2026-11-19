@@ -1,3 +1,4 @@
+import { UnsavedChangesProvider, useUnsavedNavigation } from '../../app/UnsavedChanges';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
 import { fireEvent, render as baseRender, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -316,4 +317,67 @@ it('uses shared confirmation for overflow actions and cancels without invoking t
   await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
   view.unmount();
   overflow.remove();
+});
+
+it('guarded Save updates the dirty inventory item instead of adding or updating another item', async () => {
+  const contribution = validateSettingsContribution({
+    sections: [
+      {
+        id: 'accounts',
+        label: 'Accounts',
+        layout: 'form-inventory',
+        fields: [{ id: 'new-name', label: 'New name' }],
+        actions: [{ id: 'add', label: 'Add', tone: 'primary' }],
+        items: ['first', 'second'].map((id) => ({
+          id,
+          label: id,
+          fields: [{ id: `name-${id}`, label: 'Name', value: id }],
+          actions: [{ id: `update-${id}`, label: 'Update', tone: 'primary' }],
+        })),
+      },
+    ],
+  })!;
+  const handler = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('Save refused'))
+    .mockResolvedValueOnce(undefined);
+  const leave = vi.fn();
+  function Leave() {
+    const navigate = useUnsavedNavigation();
+    return <button onClick={() => navigate(leave)}>Leave Settings</button>;
+  }
+  baseRender(
+    <ConfirmProvider>
+      <UnsavedChangesProvider>
+        <DeclarativeSection
+          contribution={contribution}
+          section={contribution.sections[0]}
+          module={{ handleSettingsAction: handler }}
+          overflowTarget={null}
+        />
+        <Leave />
+      </UnsavedChangesProvider>
+    </ConfirmProvider>,
+  );
+  fireEvent.click(screen.getByText('Saved accounts'));
+  fireEvent.click(screen.getByRole('button', { name: 'second' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+    target: { value: 'Second draft' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Leave Settings' }));
+  const guardedSave = () =>
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Unsaved changes' })).getByRole('button', {
+        name: 'Save',
+      }),
+    );
+  guardedSave();
+  await screen.findByText('Save refused');
+  expect(leave).not.toHaveBeenCalled();
+  expect(screen.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'Second draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Leave Settings' }));
+  guardedSave();
+  await waitFor(() => expect(leave).toHaveBeenCalledOnce());
+  expect(handler.mock.calls.map(([id]) => id)).toEqual(['update-second', 'update-second']);
+  expect(handler.mock.calls[1][1]).toMatchObject({ 'name-second': 'Second draft' });
 });

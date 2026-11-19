@@ -2,7 +2,7 @@ import { enabledAgents } from '../../app/agentCatalog';
 import { ForgeArchiveShelf } from '../forge/ForgeArchiveShelf';
 import { api } from '../../app/api';
 import type { BoardTask, Project } from './taskDomain';
-import { loadModArchives, modsChangedEvent, type ModArchive } from '../../app/modPanels';
+import type { ModArchive } from '../../app/modPanels';
 import { ModArchiveHost } from '../mods/ModArchiveHost';
 import { useEffect, useMemo, useState } from 'react';
 import type { Agent } from '../../app/types';
@@ -38,10 +38,12 @@ export function Archive({
   agents,
   operatorName = 'Operator',
   repository,
+  modArchives = [],
 }: {
   agents: Agent[];
   operatorName?: string;
   repository?: ArchiveRepository;
+  modArchives?: ModArchive[];
 }) {
   const archiveRepository = useMemo(() => {
     const base = repository ?? createArchiveRepository();
@@ -53,28 +55,9 @@ export function Archive({
     () => new Map<string, string>(JSON.parse(agentNameKey)),
     [agentNameKey],
   );
-  const [modArchives, setModArchives] = useState<ModArchive[]>([]);
   const [modId, setModId] = useState('');
   const [modHeaderRoot, setModHeaderRoot] = useState<HTMLDivElement | null>(null);
   const activeMod = modArchives.find((mod) => mod.modId === modId);
-  useEffect(() => {
-    let live = true;
-    const refresh = () => {
-      void loadModArchives()
-        .then((mods) => {
-          if (live) setModArchives(mods);
-        })
-        .catch(() => {
-          if (live) setModArchives([]);
-        });
-    };
-    refresh();
-    window.addEventListener(modsChangedEvent, refresh);
-    return () => {
-      live = false;
-      window.removeEventListener(modsChangedEvent, refresh);
-    };
-  }, []);
   const [kind, setKind] = useState<ArchiveKind>('chat');
   const [selectedAgent, setSelectedAgent] = useState('');
   useEffect(() => {
@@ -106,9 +89,12 @@ export function Archive({
   const [tasksReady, setTasksReady] = useState(false);
   const [badgeTasks, setBadgeTasks] = useState<BoardTask[]>([]);
   const [badgeProjects, setBadgeProjects] = useState<Project[]>([]);
+  const dreamsOpen = kind === 'dreams' && !activeMod;
   useEffect(() => {
-    const abort = new AbortController();
     setDreamCount(null);
+    // The open shelf reports its own loaded count; do not race it with a badge request.
+    if (dreamsOpen) return;
+    const abort = new AbortController();
     const timer = window.setTimeout(() => {
       void archiveRepository
         .listDreams(
@@ -127,7 +113,7 @@ export function Archive({
       abort.abort();
       window.clearTimeout(timer);
     };
-  }, [archiveRepository, selectedAgent, selectedDate, search]);
+  }, [archiveRepository, dreamsOpen, selectedAgent, selectedDate, search]);
   useEffect(() => {
     const abort = new AbortController();
     setTiddleCount(null);

@@ -751,6 +751,11 @@ export async function api<T>(
   }
 }
 
+function boundedApiDiagnostic(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 500 ? `${trimmed.slice(0, 500)}…` : trimmed;
+}
+
 export async function parseApiResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
 
@@ -760,7 +765,6 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
     window.dispatchEvent(new CustomEvent('burrow:auth-required'));
   const text = await response.text();
   const contentType = response.headers.get('content-type') ?? '';
-  const responseExcerpt = text.length > 500 ? `${text.slice(0, 500)}…` : text;
   let body: unknown = text;
   if (text && contentType.includes('application/json')) {
     try {
@@ -768,9 +772,8 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
     } catch {
       const error = new Error(
         response.ok ? 'invalid_json_response' : `HTTP ${response.status}`,
-      ) as Error & { status?: number; details?: unknown };
+      ) as Error & { status?: number };
       error.status = response.status;
-      error.details = responseExcerpt;
       throw error;
     }
   }
@@ -779,36 +782,34 @@ export async function parseApiResponse<T>(response: Response): Promise<T> {
     !response.ok ||
     (body && typeof body === 'object' && (body as { ok?: unknown }).ok === false)
   ) {
-    const rawError = body && typeof body === 'object' ? (body as { error?: unknown }).error : body;
-    const diagnostic =
-      body && typeof body === 'object' ? (body as { message?: unknown }).message : undefined;
-    const message =
-      typeof diagnostic === 'string' && diagnostic.trim()
-        ? diagnostic
-        : typeof rawError === 'string'
-          ? rawError
-          : rawError && typeof rawError === 'object'
-            ? (rawError as { message?: unknown; error?: unknown }).message ||
-              (rawError as { error?: unknown }).error ||
-              JSON.stringify(rawError)
-            : `HTTP ${response.status}`;
-    const error = new Error(String(message)) as Error & {
-      status?: number;
-      code?: string;
-      details?: unknown;
-    };
-    const code =
-      typeof rawError === 'string'
-        ? rawError
-        : rawError && typeof rawError === 'object'
-          ? (rawError as { code?: unknown }).code
-          : undefined;
-    if (typeof code === 'string') error.code = code;
-    error.status = response.status;
-    error.details =
+    const structured =
+      body && typeof body === 'object'
+        ? (body as { error?: unknown; message?: unknown; code?: unknown })
+        : undefined;
+    const rawError = structured?.error;
+    const nested =
       rawError && typeof rawError === 'object'
-        ? ((rawError as { details?: unknown }).details ?? responseExcerpt)
-        : responseExcerpt;
+        ? (rawError as { message?: unknown; error?: unknown; code?: unknown; details?: unknown })
+        : undefined;
+    const diagnostic = [
+      structured?.message,
+      nested?.message,
+      nested?.error,
+      rawError,
+      nested?.code,
+      structured?.code,
+    ].find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+    const error = new Error(
+      diagnostic ? boundedApiDiagnostic(diagnostic) : `HTTP ${response.status}`,
+    ) as Error & { status: number; code?: string; details?: unknown };
+    const code = [nested?.code, structured?.code, rawError, nested?.error].find(
+      (value): value is string => typeof value === 'string' && /^[a-z0-9_.:-]{1,128}$/i.test(value),
+    );
+    if (code) error.code = code;
+    // Preserve explicit structured details for API consumers, never a raw body excerpt.
+    if (nested?.details !== undefined && JSON.stringify(nested.details).length <= 4096)
+      error.details = nested.details;
+    error.status = response.status;
     throw error;
   }
   return body as T;

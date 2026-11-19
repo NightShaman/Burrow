@@ -569,6 +569,8 @@ it('prefetches navigation counts and still drops selection on leaving and return
   expect(screen.getByRole('button', { name: /^Tiddle\s*0$/ })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /Dreams/ }));
   await screen.findByText('No dreams match this shelf.');
+  await act(() => new Promise((resolve) => window.setTimeout(resolve, 200)));
+  expect(dreams).toHaveBeenCalledTimes(2); // one inactive badge + one open shelf request
   expect(cards).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button', { name: /^Chat/ }));
   await screen.findByRole('button', { name: /Selected conversation.*turns/i });

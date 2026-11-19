@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadModPanels } from './modPanels';
+import { loadModDiscovery } from './modPanels';
 
 describe('mod control destinations', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -35,7 +35,7 @@ describe('mod control destinations', () => {
         ),
       ),
     );
-    await expect(loadModPanels()).resolves.toEqual([
+    await expect((await loadModDiscovery()).modPanels).toEqual([
       {
         modId: 'lore-master',
         name: 'LoreMaster',

@@ -23,3 +23,13 @@ describe('mod panel host', () => {
     expect(screen.getByText('Missing Mod unavailable')).toBeTruthy();
   });
 });
+
+it('removes partial interactive content before showing a mount error', async () => {
+  render(
+    <ModPanelHost
+      panel={{ modId: 'fixture', name: 'Fixture', controlUrl: './modPanelAudit.fixture' }}
+    />,
+  );
+  expect((await screen.findByRole('alert')).textContent).toBe('Could not load control data');
+  expect(screen.queryByRole('button', { name: 'Partial control' })).toBeNull();
+});

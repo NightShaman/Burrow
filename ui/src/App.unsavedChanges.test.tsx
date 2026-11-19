@@ -15,7 +15,7 @@ vi.mock('./app/api', async (original) => ({
 }));
 vi.mock('./app/modPanels', async (original) => ({
   ...(await original<typeof import('./app/modPanels')>()),
-  loadModPanels: vi.fn(async () => []),
+  loadModDiscovery: vi.fn(async () => ({ modPanels: [], modArchives: [] })),
 }));
 vi.mock('./app/apiTargets', () => ({
   loadModSettingsContributions: vi.fn(async () => []),

@@ -1861,3 +1861,21 @@ it('recovers paging after a rejected reset while an older read is pending', asyn
     'current retained',
   ]);
 });
+
+it('keeps the new-session state when an older conversation accepts its send', async () => {
+  apiMock.mockImplementation(async (path, init) => {
+    if (init?.method === 'POST') return { ok: true };
+    if (path === sessionListPath) return { sessions: [{ id: sessionId }, { id: 'new-owner' }] };
+    return { session: { turns: [] } };
+  });
+  const { result } = renderHook(() => useChatSession(agentId));
+  await waitFor(() => expect(result.current.sessionId).toBe(sessionId));
+  const acceptOld = result.current.leaveNewSessionForMessage;
+  act(() => result.current.selectSession('new-owner'));
+  await act(async () => {
+    expect(await result.current.resetSession()).toBe(true);
+  });
+  act(acceptOld);
+  expect(result.current.sessionId).toBe('new-owner');
+  expect(result.current.isNewSession).toBe(true);
+});

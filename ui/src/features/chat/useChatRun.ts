@@ -426,6 +426,7 @@ export function useChatRun({
       const { terminalType, finalResult } = await streamChat({
         requestBody,
         signal: abortController.signal,
+        owner: { runId, sessionId: target.sessionId },
         onEvent: handleEvent,
         onAccepted: acceptSubmission,
       });

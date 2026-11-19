@@ -110,12 +110,20 @@ it('classifies a JSON failed result with nested ok:false even without v2 fields'
 });
 
 it('rejects malformed stream content without fabricating a terminal answer', async () => {
-  vi.mocked(fetchApi).mockResolvedValue(
-    new Response('{broken-json}\n', { headers: { 'content-type': 'application/x-ndjson' } }),
-  );
+  const cancel = vi.fn();
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{broken-json}\n'));
+    },
+    cancel,
+  });
+  const response = new Response(body, { headers: { 'content-type': 'application/x-ndjson' } });
+  vi.mocked(fetchApi).mockResolvedValue(response);
   await expect(
     streamChat({ requestBody: {}, signal: new AbortController().signal, onEvent: vi.fn() }),
   ).rejects.toThrow('streaming response was malformed');
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(response.body?.locked).toBe(false);
 });
 
 it.each([
@@ -144,3 +152,26 @@ it.each([
     expect(onAccepted).not.toHaveBeenCalled();
   },
 );
+
+it('ignores terminal events for another run or session before accepting its own', async () => {
+  const events = [
+    { type: 'run.completed', runId: 'other', sessionId: 'ours' },
+    { type: 'run.failed', runId: 'ours', sessionId: 'other' },
+    { type: 'run.completed', runId: 'ours', sessionId: 'ours', data: { response: 'right' } },
+  ];
+  const response = new Response(events.map((event) => JSON.stringify(event)).join('\n'), {
+    headers: { 'content-type': 'application/x-ndjson' },
+  });
+  vi.mocked(fetchApi).mockResolvedValue(response);
+  const onEvent = vi.fn();
+  await expect(
+    streamChat({
+      requestBody: {},
+      owner: { runId: 'ours', sessionId: 'ours' },
+      signal: new AbortController().signal,
+      onEvent,
+    }),
+  ).resolves.toEqual({ terminalType: 'run.completed', finalResult: 'right' });
+  expect(onEvent).toHaveBeenCalledExactlyOnceWith(events[2]);
+  expect(response.body?.locked).toBe(false);
+});

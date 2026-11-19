@@ -40,7 +40,12 @@ export function useChatSession(selectedAgentId: string) {
     showOlderState,
     restoreOlderState,
   } = authority;
-  const [isNewSession, setIsNewSession] = useState(false);
+  const [isNewSession, commitIsNewSession] = useState(false);
+  const isNewSessionRef = useRef(false);
+  const setIsNewSession = useCallback((next: boolean) => {
+    isNewSessionRef.current = next;
+    commitIsNewSession(next);
+  }, []);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [turns, setTurns] = useState<SessionTurn[]>([]);
   const attachmentKey = JSON.stringify([selectedAgentId, sessionId]);
@@ -75,7 +80,7 @@ export function useChatSession(selectedAgentId: string) {
   // Sending the first message of a reset session already supplies the local
   // transcript. Do not let the loader replace that optimistic turn with the
   // reset session's still-empty server snapshot.
-  const skipNextConversationLoadRef = useRef(false);
+  const skipNextConversationLoadRef = useRef<string | null>(null);
   const selectedChatRef = useRef({ agentId: selectedAgentId, sessionId });
   // State updates from an effect cannot protect the render that follows an
   // agent selection. Keep the last committed agent so consumers can treat that
@@ -268,8 +273,9 @@ export function useChatSession(selectedAgentId: string) {
       return;
     }
     if (!sessionId) return;
-    if (skipNextConversationLoadRef.current) {
-      skipNextConversationLoadRef.current = false;
+    const skipLoad = skipNextConversationLoadRef.current === attachmentKey;
+    skipNextConversationLoadRef.current = null;
+    if (skipLoad) {
       setIsLoadingConversation(false);
       return;
     }
@@ -402,9 +408,10 @@ export function useChatSession(selectedAgentId: string) {
     return true;
   }, [selectedAgentId, sessionId, sessionRepository, isAttachmentScopeCurrent, noteComposerReset]);
   const leaveNewSessionForMessage = useCallback(() => {
-    if (isNewSession) skipNextConversationLoadRef.current = true;
+    if (!isAttachmentScopeCurrent() || !isNewSessionRef.current) return;
+    skipNextConversationLoadRef.current = attachmentKey;
     setIsNewSession(false);
-  }, [isNewSession]);
+  }, [attachmentKey, isAttachmentScopeCurrent, setIsNewSession]);
   const appendTurn = useCallback((agentId: string, targetSessionId: string, turn: SessionTurn) => {
     const cacheKey = conversationCacheKey(agentId, targetSessionId);
     const nextTurns = appendLocalTurn(cacheKey, turn);
