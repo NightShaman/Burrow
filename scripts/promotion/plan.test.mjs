@@ -43,3 +43,18 @@ test('rejects mutable-looking or malformed source identities', () => {
 test('UTC boundary selects the calendar date', () => {
   assert.equal(utcReleaseDate(new Date('2026-10-18T00:00:00Z')), '2026.10.18');
 });
+
+test('missing terminal release resumes original date, SHAs and artifact even after sources advance', () => {
+  for (const candidate of [sources, { ...sources, burrow: sha('0') }]) {
+    const previous = { releaseDate: '2026.10.17', sources, promotionRunId: '12345' };
+    const plan = createPromotionPlan({ config, sources: candidate, previous, terminalComplete: false, now: new Date('2026-10-19T12:00:00Z') });
+    assert.equal(plan.publishable, true);
+    assert.equal(plan.releaseDate, previous.releaseDate);
+    assert.equal(plan.resumeRunId, '12345');
+    assert.deepEqual(plan.sources, sources);
+    assert(plan.targets.every(target => target.action === 'resume' && target.version === previous.releaseDate));
+  }
+});
+test('incomplete legacy promotion fails closed without an artifact origin', () => {
+  assert.throws(() => createPromotionPlan({ config, sources, previous: { releaseDate: '2026.10.17', sources }, terminalComplete: false }), /resume_artifact_origin_required/);
+});

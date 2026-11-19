@@ -71,3 +71,26 @@ The independent daily public promotion still runs the complete frozen-source
 test suites. Automatic dispatch requires an exact canonical source repository,
 immutable SHA, main ref, and forward-only canonical Backend/UI pins; incomplete
 SOURCE_VERSIONS metadata fails closed.
+
+## Automatic event deduplication
+
+After resolving exact forward-only pins, source events skip all build/publish
+steps when both pins and the assembly-input fingerprint match the last assembly.
+The fingerprint covers tracked `.github/` and `scripts/` tree entries (including
+modes), not generated payload or timestamps. Old metadata triggers one baseline
+build. Workflow dispatch always rebuilds, even for identical pins. Assembler-only
+changes therefore remain buildable through manual dispatch or the next source
+event, without allocating duplicate revisions for coalesced component events.
+
+## Legacy Docker mirror investigation (2026-11-18)
+
+Inspected `/mnt/local/projects/Burrow-HC/burrow-docker` at its local checkout:
+its build workflow still publishes `ghcr.io/nightshaman/burrow:latest` on main
+push/manual dispatch, overlapping this assembly's publication authority. This is
+a configured collision risk, not evidence of an actual overwrite. No mirror
+workflow was disabled or retagged: usage/authorization could not be established.
+Unauthenticated GitHub repository and Actions-run API queries both returned 404;
+`gh api` had no authenticated session. A private/moved repository cannot be
+classified as unused from those responses. Parent/operator follow-up: authenticated
+repository metadata, recent runs, workflow state and package version provenance;
+confirm ownership policy before retiring or isolating its publication tags.

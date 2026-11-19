@@ -79,3 +79,16 @@ publication gates; the workflow consumes the overall `publishable` decision
 and release date. `stage-snapshots.mjs` materializes explicit public trees.
 `publish-snapshot.sh` replaces only a destination snapshot and refuses to move an
 existing release tag.
+
+### Restart after the final snapshot push
+
+`PUBLIC_RELEASE.json` records the originating Actions run ID. A new invocation
+checks the terminal, non-draft Burrow GitHub Release before deciding sources are
+unchanged. If that release is missing, it downloads **the original validated tar
+artifact** from that run and resumes the same date; it does not rebuild from
+moving Development pins. Missing/expired artifacts fail closed (currently retained
+seven days). Recover the original run/artifact rather than minting another version.
+Legacy incomplete manifests without an origin ID also fail closed and require
+operator recovery of their original frozen artifact. A validate-only invocation
+is rejected while publication is pending, rather than claiming validation ran.
+API failures other than a definitive 404 never authorize a resume.

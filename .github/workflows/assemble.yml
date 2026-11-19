@@ -42,7 +42,15 @@ jobs:
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
         run: node assembled/scripts/assembly/resolve-revisions.mjs assembled/SOURCE_VERSIONS
+      - name: Deduplicate automatic assembly
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BACKEND_SHA: ${{ steps.revisions.outputs.backend }}
+          UI_SHA: ${{ steps.revisions.outputs.ui }}
+        run: node assembled/scripts/assembly/build-decision.mjs assembled
       - name: Require trusted component CI for exact resolved SHAs
+        if: steps.decision.outputs.required == 'true'
         env:
           GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
           COMPONENT_CI_TIMEOUT_MS: ${{ vars.COMPONENT_CI_TIMEOUT_MS || '3600000' }}
@@ -51,18 +59,21 @@ jobs:
           node assembled/scripts/assembly/component-gate.mjs NightShaman/Burrow-Backend "${{ steps.revisions.outputs.backend }}"
           node assembled/scripts/assembly/component-gate.mjs NightShaman/Burrow-UI "${{ steps.revisions.outputs.ui }}"
       - uses: actions/checkout@v4
+        if: steps.decision.outputs.required == 'true'
         with:
           repository: NightShaman/Burrow-Backend
           ref: ${{ steps.revisions.outputs.backend }}
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
           path: backend-source
       - uses: actions/checkout@v4
+        if: steps.decision.outputs.required == 'true'
         with:
           repository: NightShaman/Burrow-UI
           ref: ${{ steps.revisions.outputs.ui }}
           token: ${{ secrets.BURROW_SOURCE_TOKEN }}
           path: ui-source
       - uses: actions/setup-node@v4
+        if: steps.decision.outputs.required == 'true'
         with:
           node-version: 24
           cache: npm
@@ -70,10 +81,12 @@ jobs:
             backend-source/package-lock.json
             ui-source/package-lock.json
       - name: Install build dependencies and test assembly contracts
+        if: steps.decision.outputs.required == 'true'
         run: |
           node --test assembled/scripts/assembly/*.test.mjs
           (cd ui-source && npm ci --no-audit --no-fund)
       - name: Install PostgreSQL 17 with pgvector for owned SQL component gate
+        if: steps.decision.outputs.required == 'true'
         run: |
           set -eu
           sudo apt-get update
@@ -87,6 +100,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
       - name: Gate development assembly on real owned PostgreSQL invariants
+        if: steps.decision.outputs.required == 'true'
         env:
           BURROW_TEST_DISPOSABLE_POSTGRES: '1'
           BURROW_TEST_TIMEOUT_MS: '300000'
@@ -98,6 +112,7 @@ jobs:
             tests/postgres-http-routes.integration.test.mjs \
             tests/postgres-session-rename.integration.test.mjs)
       - name: Stamp and build generated development assembly
+        if: steps.decision.outputs.required == 'true'
         id: build
         run: |
           set -eu
@@ -112,6 +127,7 @@ jobs:
           (cd ui-source && BURROW_UI_SHA="${{ steps.revisions.outputs.ui }}" npm run build)
           printf 'version=%s\n' "$BUILD_VERSION" >> "$GITHUB_OUTPUT"
       - name: Materialize deployment payload
+        if: steps.decision.outputs.required == 'true'
         run: |
           set -eu
           cd assembled
@@ -137,9 +153,10 @@ jobs:
           cp ../backend-source/deploy/docker/compose.yml compose.yml
           cp ../backend-source/deploy/docker/.dockerignore .dockerignore
           printf '{"assembly":"%s","backend":"%s","ui":"%s"}\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" > backend/RELEASE_PROVENANCE.json
-          printf 'Burrow-Build-Version %s\nBurrow-Backend %s\nBurrow-UI %s\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" > SOURCE_VERSIONS
+          printf 'Burrow-Build-Version %s\nBurrow-Backend %s\nBurrow-UI %s\nBurrow-Assembly-Inputs %s\n' "${{ steps.build.outputs.version }}" "${{ steps.revisions.outputs.backend }}" "${{ steps.revisions.outputs.ui }}" "${{ steps.decision.outputs.inputs }}" > SOURCE_VERSIONS
           grep -R "${{ steps.revisions.outputs.ui }}" ui/dist/assets >/dev/null
       - name: Verify assembled payload shape
+        if: steps.decision.outputs.required == 'true'
         run: |
           set -eu
           node --test assembled/scripts/assembly/*.test.mjs
@@ -147,6 +164,7 @@ jobs:
           test -f assembled/ui/dist/index.html
           grep -R "${{ steps.revisions.outputs.ui }}" assembled/ui/dist/assets >/dev/null
       - name: Build development image
+        if: steps.decision.outputs.required == 'true'
         uses: docker/build-push-action@v6
         with:
           context: assembled
@@ -156,8 +174,10 @@ jobs:
             BURROW_UI_SHA=${{ steps.revisions.outputs.ui }}
           tags: burrow-development:tested
       - name: Smoke development image
+        if: steps.decision.outputs.required == 'true'
         run: node assembled/scripts/assembly/packaged-smoke.mjs burrow-development:tested assembled
       - name: Commit generated assembly
+        if: steps.decision.outputs.required == 'true'
         id: publish
         run: |
           set -eu
@@ -174,12 +194,14 @@ jobs:
           fi
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Authenticate to GitHub Container Registry
+        if: steps.decision.outputs.required == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish tested development image
+        if: steps.decision.outputs.required == 'true'
         run: |
           set -eu
           for tag in latest dev "sha-${{ steps.publish.outputs.commit }}"; do
@@ -187,6 +209,7 @@ jobs:
             docker push "ghcr.io/nightshaman/burrow:$tag"
           done
       - name: Publish NightShaman release for tested assembly
+        if: steps.decision.outputs.required == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_VERSION: ${{ steps.build.outputs.version }}

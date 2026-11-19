@@ -185,7 +185,15 @@ async function main() {
   if (!rootsFile || !outputRoot || !releaseDate || !sourcesFile) throw new Error('usage: node stage-snapshots.mjs ROOTS_JSON OUTPUT_ROOT RELEASE_DATE SOURCES_JSON');
   const roots = JSON.parse(fs.readFileSync(path.resolve(rootsFile), 'utf8'));
   const sources = JSON.parse(fs.readFileSync(path.resolve(sourcesFile), 'utf8'));
-  stageSnapshots({ roots, outputRoot, releaseDate, sources });
+  const staged = stageSnapshots({ roots, outputRoot, releaseDate, sources });
+  if (process.env.GITHUB_RUN_ID) {
+    if (!/^[1-9][0-9]*$/.test(process.env.GITHUB_RUN_ID)) throw new Error('promotion_run_id_invalid');
+    for (const root of Object.values(staged)) {
+      const file = path.join(root, 'PUBLIC_RELEASE.json');
+      const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeJson(file, { ...manifest, promotionRunId: process.env.GITHUB_RUN_ID });
+    }
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => {

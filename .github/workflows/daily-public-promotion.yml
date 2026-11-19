@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: public-promotion
@@ -28,6 +29,7 @@ jobs:
       publishable: ${{ steps.plan.outputs.publishable }}
       validation_required: ${{ steps.plan.outputs.validation_required }}
       release_date: ${{ steps.plan.outputs.release_date }}
+      artifact_run_id: ${{ steps.plan.outputs.artifact_run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,26 +81,47 @@ jobs:
             404) printf 'null\n' > previous.json ;;
             *) echo "public manifest HTTP $status" >&2; exit 1 ;;
           esac
+      - name: Check terminal Burrow release evidence
+        run: |
+          set -eu
+          complete=true
+          if [ "$(node -p "require('./previous.json') !== null")" = true ]; then
+            version=$(node -p "require('./previous.json').releaseDate")
+            status=$(curl --silent --show-error --retry 3 "https://api.github.com/repos/$PUBLIC_OWNER/Burrow/releases/tags/v$version" --output terminal.json --write-out '%{http_code}')
+            case "$status" in
+              200) node -e "const r=require('./terminal.json'); if(r.draft || r.prerelease) process.exit(1)" ;;
+              404) complete=false ;;
+              *) echo "terminal release HTTP $status" >&2; exit 1 ;;
+            esac
+          fi
+          printf 'PROMOTION_TERMINAL_COMPLETE=%s\n' "$complete" >> "$GITHUB_ENV"
       - name: Build immutable promotion plan
         id: plan
         run: |
           node orchestrator/scripts/promotion/plan.mjs orchestrator/scripts/promotion/targets.json sources.json previous.json > plan.json
           cat plan.json
+          resume_run=$(node -p "require('./plan.json').resumeRunId || ''")
+          if [ -n "$resume_run" ] && [ "${{ inputs.validate_only }}" = true ]; then
+            echo 'Pending publication must be resumed before validate-only can freeze newer sources' >&2
+            exit 1
+          fi
+          printf 'artifact_run_id=%s\n' "${resume_run:-${{ github.run_id }}}" >> "$GITHUB_OUTPUT"
           publishable=$(node -p "require('./plan.json').publishable")
           validation_required="$publishable"
+          printf 'resume=%s\n' "$(node -p "Boolean(require('./plan.json').resumeRunId)")" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.validate_only }}" = "true" ]; then validation_required=true; publishable=false; fi
           printf 'publishable=%s\n' "$publishable" >> "$GITHUB_OUTPUT"
           printf 'validation_required=%s\n' "$validation_required" >> "$GITHUB_OUTPUT"
           printf 'release_date=%s\n' "$(node -p "require('./plan.json').releaseDate")" >> "$GITHUB_OUTPUT"
       - name: Expose frozen SHAs for checkouts
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         id: frozen
         run: |
           for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard; do
-            printf '%s=%s\n' "$key" "$(node -p "require('./sources.json').$key")" >> "$GITHUB_OUTPUT"
+            printf '%s=%s\n' "$key" "$(node -p "require('./plan.json').sources.$key")" >> "$GITHUB_OUTPUT"
           done
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow
           ref: ${{ steps.frozen.outputs.burrow }}
@@ -106,7 +129,7 @@ jobs:
           path: sources/Burrow
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Backend
           ref: ${{ steps.frozen.outputs.burrowBackend }}
@@ -114,7 +137,7 @@ jobs:
           path: sources/Burrow-Backend
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-UI
           ref: ${{ steps.frozen.outputs.burrowUi }}
@@ -122,7 +145,7 @@ jobs:
           path: sources/Burrow-UI
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Node-Goblin
           ref: ${{ steps.frozen.outputs.nodeGoblin }}
@@ -130,7 +153,7 @@ jobs:
           path: sources/Node-Goblin
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Goblin-Secret-Store
           ref: ${{ steps.frozen.outputs.goblinSecretStore }}
@@ -138,7 +161,7 @@ jobs:
           path: sources/Goblin-Secret-Store
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Skills
           ref: ${{ steps.frozen.outputs.burrowSkills }}
@@ -146,7 +169,7 @@ jobs:
           path: sources/Burrow-Skills
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Backdoor
           ref: ${{ steps.frozen.outputs.burrowBackdoor }}
@@ -154,7 +177,7 @@ jobs:
           path: sources/Burrow-Backdoor
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Tutor
           ref: ${{ steps.frozen.outputs.burrowTutor }}
@@ -162,7 +185,7 @@ jobs:
           path: sources/Burrow-Tutor
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Theater
           ref: ${{ steps.frozen.outputs.burrowTheater }}
@@ -170,7 +193,7 @@ jobs:
           path: sources/Burrow-Theater
           fetch-depth: 0
       - uses: actions/checkout@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           repository: NightShaman/Burrow-Switchboard
           ref: ${{ steps.frozen.outputs.burrowSwitchboard }}
@@ -178,7 +201,7 @@ jobs:
           path: sources/Burrow-Switchboard
           fetch-depth: 0
       - name: Install PostgreSQL 17 and pgvector for critical release validation
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         run: |
           set -eu
           sudo apt-get update
@@ -190,7 +213,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-17 postgresql-client-17 postgresql-17-pgvector
       - name: Run critical frozen-source test suites
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         env:
           BURROW_TEST_TIMEOUT_MS: '600000'
           BURROW_TEST_DISPOSABLE_POSTGRES: '1'
@@ -208,7 +231,7 @@ jobs:
           (cd sources/Burrow-Switchboard && npm run build && node --test test/server.test.mjs test/discord.test.mjs test/room-history.test.mjs test/ui.test.mjs && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run test:core)
           find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
       - name: Stage allowlisted public trees and release notes
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         env:
           RELEASE_DATE: ${{ steps.plan.outputs.release_date }}
         run: |
@@ -225,7 +248,7 @@ jobs:
             cat "release-notes/$target.md"
           done
       - name: Verify staged release trees
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         run: |
           set -eu
           node --test orchestrator/scripts/promotion/*.test.mjs
@@ -236,7 +259,7 @@ jobs:
         env:
           VERSION: ${{ steps.plan.outputs.release_date }}
       - name: Build and smoke the public Burrow image
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         run: |
           set -euo pipefail
           docker build --build-arg BURROW_UI_SHA="$(node -p "require('./sources.json').burrowUi")" \
@@ -257,7 +280,7 @@ jobs:
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
       - name: Build and verify Node Goblin release asset from the frozen staged source
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         env:
           VERSION: ${{ steps.plan.outputs.release_date }}
         run: |
@@ -266,7 +289,7 @@ jobs:
           SOURCE_DATE_EPOCH=0 sh staged/Node-Goblin/gateway/deploy/build-release.sh release-assets/nodeGoblin
           node orchestrator/scripts/promotion/verify-node-goblin-asset.mjs staged release-assets/nodeGoblin "$VERSION"
       - name: Bundle validated snapshots with executable permissions
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         run: |
           set -eu
           test -x staged/Burrow/install.sh
@@ -276,7 +299,7 @@ jobs:
           # Tar preserves the entire already-allowlisted tree across that boundary.
           tar -cpf public-promotion.tar staged sources.json plan.json release-notes release-assets executable-modes.json tested-image.json tested-image.tar.gz tested-image.tar.gz.sha256
       - uses: actions/upload-artifact@v4
-        if: steps.plan.outputs.validation_required == 'true'
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         with:
           name: public-promotion-${{ steps.plan.outputs.release_date }}
           path: public-promotion.tar
@@ -290,6 +313,7 @@ jobs:
     environment: public-promotion
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -297,13 +321,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: public-promotion-${{ needs.stage.outputs.release_date }}
+          run-id: ${{ needs.stage.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
       - name: Restore snapshots and verify executable permissions before publishing
+        env:
+          EXPECTED_DATE: ${{ needs.stage.outputs.release_date }}
+          EXPECTED_RUN: ${{ needs.stage.outputs.artifact_run_id }}
         run: |
           set -eu
           tar -xpf public-promotion.tar
+          node -e "const m=require('./staged/Burrow/PUBLIC_RELEASE.json'), p=require('./plan.json'); if(m.releaseDate !== process.env.EXPECTED_DATE || String(m.promotionRunId) !== process.env.EXPECTED_RUN || p.releaseDate !== m.releaseDate || !require('node:util').isDeepStrictEqual(p.sources, m.sources)) throw Error('promotion_artifact_identity_mismatch')"
           node orchestrator/scripts/promotion/executable-modes.mjs verify staged executable-modes.json
           test -x staged/Burrow/install.sh
           test -x staged/Node-Goblin/install.sh

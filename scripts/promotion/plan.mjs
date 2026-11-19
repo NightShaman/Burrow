@@ -19,14 +19,20 @@ function normalizedSources(value = {}) {
   }));
 }
 
-export function createPromotionPlan({ config, sources, previous = null, now = new Date() } = {}) {
+export function createPromotionPlan({ config, sources, previous = null, terminalComplete = true, now = new Date() } = {}) {
   if (!config || config.schemaVersion !== 1 || !config.targets) throw new Error('promotion_config_invalid');
-  const releaseDate = utcReleaseDate(now);
-  const frozenSources = normalizedSources(sources);
+  let releaseDate = utcReleaseDate(now);
+  let frozenSources = normalizedSources(sources);
   const priorSources = previous?.sources ? normalizedSources(previous.sources) : {};
   const changed = JSON.stringify(frozenSources) !== JSON.stringify(priorSources);
   const publishedToday = previous?.releaseDate === releaseDate;
-  const action = !changed ? 'skip-unchanged' : publishedToday ? 'defer-next-utc-day' : 'stage';
+  const resume = previous && !terminalComplete;
+  if (resume) {
+    if (!/^\d{4}\.\d{2}\.\d{2}$/.test(previous.releaseDate) || !/^[1-9][0-9]*$/.test(String(previous.promotionRunId))) throw new Error('promotion_resume_artifact_origin_required');
+    releaseDate = previous.releaseDate;
+    frozenSources = priorSources;
+  }
+  const action = resume ? 'resume' : !changed ? 'skip-unchanged' : publishedToday ? 'defer-next-utc-day' : 'stage';
   const targets = Object.entries(config.targets).map(([id, target]) => {
     const selected = Object.fromEntries((target.dependsOn || []).map((name) => {
       if (!frozenSources[name]) throw new Error(`promotion_source_missing:${id}:${name}`);
@@ -49,7 +55,8 @@ export function createPromotionPlan({ config, sources, previous = null, now = ne
     publicOwner: config.publicOwner,
     sources: frozenSources,
     targets,
-    publishable: action === 'stage'
+    resumeRunId: resume ? String(previous.promotionRunId) : null,
+    publishable: action === 'stage' || action === 'resume'
   };
 }
 
@@ -61,6 +68,7 @@ async function main() {
     config: await read(configPath),
     sources: await read(sourcesPath),
     previous: previousPath ? await read(previousPath) : null,
+    terminalComplete: process.env.PROMOTION_TERMINAL_COMPLETE !== 'false',
     now: process.env.PROMOTION_NOW ? new Date(process.env.PROMOTION_NOW) : new Date()
   });
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);

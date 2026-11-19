@@ -101,3 +101,13 @@ esac
     assert.ok(workflow.indexOf('      - name: Publish Burrow snapshot and coordinated release last') > start);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('new invocations check terminal evidence and download original frozen artifact on resume', () => {
+  assert.match(workflow, /releases\/tags\/v\$version/);
+  assert.match(workflow, /404\) complete=false/);
+  assert.match(workflow, /terminal release HTTP \$status.*exit 1/);
+  assert.match(workflow, /run-id: \$\{\{ needs.stage.outputs.artifact_run_id \}\}/);
+  assert.match(workflow, /github-token: \$\{\{ github.token \}\}/);
+  assert.match(workflow, /promotion_artifact_identity_mismatch/);
+  assert.match(workflow, /steps.plan.outputs.resume != 'true'/);
+});
