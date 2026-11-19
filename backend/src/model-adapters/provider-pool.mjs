@@ -184,6 +184,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
         throw retainSecondary(error, routedReceipt(originalReceipt, originalRoute, diagnostic));
       }
       let visible = false;
+      let parsedOutput = false;
       let callbackFailed = false;
       let callbackInvoked = false;
       const callArgs = { ...(useReplay ? replay : args) };
@@ -198,8 +199,9 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
             if (metric.lastAccountId && metric.lastAccountId !== selection.memberId) metric.failovers++;
             metric.lastAccountId = selection.memberId;
           }
-        } else if (type === 'provider-first-content' && payload.first === true && metric.ttftMs === undefined) {
-          metric.ttftMs = Math.max(0, payload.monotonicMs - metric.monotonicStarted);
+        } else if (type === 'provider-first-content') {
+          parsedOutput = true;
+          if (payload.first === true && metric.ttftMs === undefined) metric.ttftMs = Math.max(0, payload.monotonicMs - metric.monotonicStarted);
         } else if (type === 'provider-completed') {
           const dispatch = fetchState.dispatches.find(entry => entry.providerRequestId === payload.requestId);
           if (dispatch) dispatch.durationMs = payload.durationMs;
@@ -341,10 +343,20 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
       // A secondary fault can never authorize another dispatch, even when the
       // preserved provider receipt was an otherwise retryable HTTP status.
       if (result.recoveryFailure) return receipt;
-      const retryable = !result.ok && ([401, 403, 429].includes(Number(result.status)) || (Number(result.status) >= 500 && Number(result.status) <= 599));
+      const status = Number(result.status);
+      const failoverStatus = value => [401, 403, 429].includes(value) || (value >= 500 && value <= 599);
+      // An OpenAI response can carry a real account failure inside HTTP 200.
+      // Use the adapter's structured classification, not prose or the generic
+      // generation-failure retry category. Keep the same replay and dispatch gates.
+      const failure = classifyModelFailure(result, { signal: args.signal });
+      const structuredStatus = family === 'openai' && status >= 200 && status < 300 && !parsedOutput && !visible && !callbackFailed
+        && failure.origin === 'upstream' && failure.retryable
+        && (failure.code === 'provider_rate_limited' ? 429 : failure.code === 'provider_unavailable' ? 503 : failoverStatus(failure.status) ? failure.status : null);
+      const cooldownStatus = !result.ok && (failoverStatus(status) ? status : structuredStatus);
+      const retryable = Boolean(cooldownStatus);
       if (retryable) {
         try {
-          const health = await cooldown(selection.memberId, `http_${result.status}`, args, metric, result.retryNotBefore, selection.diagnostics);
+          const health = await cooldown(selection.memberId, `http_${cooldownStatus}`, args, metric, result.retryNotBefore, selection.diagnostics);
           const until = health?.cooldown_until instanceof Date ? health.cooldown_until.getTime() : Date.parse(health?.cooldown_until);
           if (continuation && !canReplay && Number.isFinite(until) && until > now()) {
             result = { ...result, retryNotBefore: Math.max(result.retryNotBefore || 0, until) };

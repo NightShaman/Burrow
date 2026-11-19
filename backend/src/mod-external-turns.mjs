@@ -36,45 +36,72 @@ export function publicExternalTurn(turn) {
   };
 }
 
-export function createModExternalTurnDispatcher({ store, stores, resolveAgentRuntime, rootDir, executeTurn = runChatTurnFromBody, createRunId = createChatTurnRunId, registerActiveRun = null, telemetry = null, logger = console } = {}) {
+export function createModExternalTurnDispatcher({ store, stores, resolveAgentRuntime, rootDir, executeTurn = runChatTurnFromBody, createRunId = createChatTurnRunId, registerActiveRun = null, telemetry = null, logger = console, receiptRetryMs = 1000 } = {}) {
   if (!store || !stores || typeof resolveAgentRuntime !== 'function' || typeof executeTurn !== 'function') throw new Error('mod_external_turn_dispatcher_dependencies_required');
   if (registerActiveRun !== null && typeof registerActiveRun !== 'function') throw new Error('mod_external_turn_lifecycle_required');
   const lifecycle = createBackgroundLifecycle({ name: 'mod_external_turn_dispatcher', logger });
   const report = (type, turn, error) => operationalEvent(logger, type, { turnId: operationalId(turn.id), ownerModId: operationalId(turn.ownerModId), errorCode: infrastructureErrorCode(error, 'receipt_storage_failed') }, { level: 'error', component: 'mod-external-turn' });
-  function receiptWriter(turn) {
-    let persistenceReported = false;
-    async function complete(patch) {
-      try { return await store.complete(turn.id, patch); }
-      catch (error) {
-        // The failed terminal write may be retried by run()'s catch. It is the
-        // same receipt operation, not a second incident. Claims log separately.
-        if (!persistenceReported) { persistenceReported = true; report('mod_external_turn_receipt_persistence_failed', turn, error); }
-        throw error;
+  const controllers = new Map(), receipts = new Map();
+  let retryTimer = null, closing = null;
+
+  async function flushReceipt(id) {
+    const receipt = receipts.get(id);
+    if (!receipt) return null;
+    receipt.writing ||= (async () => {
+      try {
+        const completed = await store.complete(id, receipt.patch);
+        receipts.delete(id);
+        return completed;
+      } catch (error) {
+        if (error?.message === 'mod_external_turn_receipt_fenced') receipts.delete(id);
+        else if (!receipt.reported) {
+          receipt.reported = true;
+          report('mod_external_turn_receipt_persistence_failed', receipt.turn, error);
+        }
+        return null;
       }
-    }
-    return { complete, interrupt: () => complete({ status: 'interrupted', error: 'service_shutdown' }) };
+    })().finally(() => { receipt.writing = null; });
+    return receipt.writing;
   }
-
-  const controllers = new Map();
-
-  async function interrupt(turn) {
-    return receiptWriter(turn).interrupt();
+  async function flushReceipts() {
+    for (const id of receipts.keys()) await flushReceipt(id);
+  }
+  function scheduleRetry() {
+    if (retryTimer || lifecycle.stopped || !receipts.size) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (!lifecycle.stopped) void lifecycle.track(flushReceipts, 'receipt_retry').finally(scheduleRetry).catch(() => {});
+    }, Math.max(1, receiptRetryMs));
+    retryTimer.unref?.();
+  }
+  async function persistReceipt(turn, patch) {
+    receipts.set(turn.id, { turn, patch });
+    const completed = await flushReceipt(turn.id);
+    scheduleRetry();
+    return completed;
   }
 
   async function run(turn) {
-    const receipt = receiptWriter(turn);
     const controller = controllers.get(turn.id);
     const dispatchSignal = AbortSignal.any([lifecycle.signal, controller.signal]);
     let signal = dispatchSignal;
     let activeRun = null;
     const cancellationError = () => lifecycle.stopped ? 'service_shutdown' : controller.signal.aborted ? 'cancelled_by_mod' : 'cancelled';
     const runId = createRunId({ sessionId: turn.sessionId, prefix: 'external' });
+    let patch, claimedRunId = null;
     try {
-      if (lifecycle.stopped) { await receipt.interrupt(); return; }
+      if (lifecycle.stopped) throw lifecycle.signal.reason;
       let claimed;
-      try { claimed = await store.markRunning(turn.id, runId); } catch (error) { report('mod_external_turn_receipt_claim_failed', turn, error); throw error; }
+      try { claimed = await store.markRunning(turn.id, runId); }
+      catch (error) {
+        // The claim may have committed before acknowledgement. No turn has run.
+        patch = { status: 'failed', error: 'agent_turn_failed', runId, allowQueued: true };
+        report('mod_external_turn_receipt_claim_failed', turn, error);
+        throw error;
+      }
       if (!claimed) return;
-      if (lifecycle.stopped) { await receipt.interrupt(); return; }
+      claimedRunId = runId;
+      if (lifecycle.stopped) throw lifecycle.signal.reason;
       // Register before runtime resolution/session admission, so queued turns are
       // visible and individually stoppable too. Shared lifecycle owns progress,
       // cancellation deadlines and fencing; dispatcher still owns mod/shutdown drain.
@@ -112,17 +139,20 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
       });
       const attachments = await externalTurnOutputAttachments({ conversations: stores.conversations, agentWorkspaceRoot: agentRuntime.agentWorkspaceRoot, agentId: turn.agentId, sessionId: turn.sessionId, runId });
       const outcome = classifyRuntimeOutcome(result, { cancelled: signal.aborted });
-      await receipt.complete({
+      patch = {
+        runId,
         status: signal.aborted ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
         result: boundedResult(result, attachments),
         error: signal.aborted ? cancellationError() : outcome.ok ? null : 'agent_turn_failed',
-      });
+      };
     } catch {
-      try { await receipt.complete({ status: signal.aborted ? 'interrupted' : 'failed', error: signal.aborted ? cancellationError() : 'agent_turn_failed' }); }
-      catch { /* The receipt writer reported once; startup reconciliation repairs it. */ }
+      patch ||= { runId: claimedRunId, status: signal.aborted ? 'interrupted' : 'failed', error: signal.aborted ? cancellationError() : 'agent_turn_failed' };
     } finally {
-      try { activeRun?.finish?.(); }
-      finally { controllers.delete(turn.id); }
+      try { if (patch) await persistReceipt(turn, patch); }
+      finally {
+        try { activeRun?.finish?.(); }
+        finally { controllers.delete(turn.id); }
+      }
     }
   }
 
@@ -131,37 +161,38 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
     void lifecycle.track(() => run(turn), 'dispatch').catch(() => {});
   }
 
+  function stop(reason) { clearTimeout(retryTimer); retryTimer = null; lifecycle.stop(reason); }
   return Object.freeze({
     async replay(input) {
       if (typeof store.getByIdempotency !== 'function') return null;
       const turn = await store.getByIdempotency(input.ownerModId, input.idempotencyKey);
       if (!turn) return null;
       if (!sameExternalTurnInput(turn, input)) throw new Error('mod_external_turn_idempotency_conflict');
-      return { turn: publicExternalTurn(turn), replayed: true };
+      return { turn: publicExternalTurn(await flushReceipt(turn.id) || turn), replayed: true };
     },
     async submit(input) {
       if (lifecycle.stopped) throw new Error('mod_external_turn_dispatcher_stopped');
       const created = await store.create(input);
       if (!created.replayed && created.turn.status === 'queued') {
         if (lifecycle.stopped) {
-          const interrupted = await interrupt(created.turn);
+          const interrupted = await persistReceipt(created.turn, { status: 'interrupted', error: 'service_shutdown' });
           return { turn: publicExternalTurn(interrupted || created.turn), replayed: false };
         }
         launch(created.turn);
       }
-      return { turn: publicExternalTurn(created.turn), replayed: created.replayed };
+      return { turn: publicExternalTurn((created.replayed && await flushReceipt(created.turn.id)) || created.turn), replayed: created.replayed };
     },
     async cancel(ownerModId, id) {
       const turn = await store.getOwned(ownerModId, id);
       if (!turn) return null;
       const controller = controllers.get(id);
-      const cancellationRequested = Boolean(controller && !controller.signal.aborted && ['queued', 'running'].includes(turn.status));
+      const cancellationRequested = Boolean(controller && !receipts.has(id) && !controller.signal.aborted && ['queued', 'running'].includes(turn.status));
       if (cancellationRequested) controller.abort(new Error('cancelled_by_mod'));
       return { turn: publicExternalTurn(turn), cancellationRequested };
     },
     async read(ownerModId, id) {
       const turn = await store.getOwned(ownerModId, id);
-      return turn ? publicExternalTurn(turn) : null;
+      return turn ? publicExternalTurn(await flushReceipt(id) || turn) : null;
     },
     async readAttachment(ownerModId, id, attachmentId) {
       const turn = await store.getOwned(ownerModId, id);
@@ -174,9 +205,9 @@ export function createModExternalTurnDispatcher({ store, stores, resolveAgentRun
       if (!result) throw new Error('mod_external_turn_attachment_not_found');
       return result;
     },
-    stop: (reason) => lifecycle.stop(reason),
-    close: (reason) => lifecycle.close(reason),
-    health: () => lifecycle.health(),
+    stop,
+    close(reason) { stop(reason); return closing ||= lifecycle.close(reason).then(flushReceipts); },
+    health: () => ({ ...lifecycle.health(), terminalReceipts: receipts.size }),
     pendingCount: () => lifecycle.health().pending,
   });
 }

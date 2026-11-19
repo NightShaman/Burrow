@@ -6,6 +6,7 @@ import { fetchGitSkill, skillFilesHash } from './git-skill-fetch.mjs';
 import { withPostgresTransaction, postgresTransactionContext } from './postgres-foundation.mjs';
 import { PostgresSkillSources, skillLock, skillSourceError, normalizeSkillSource } from './postgres-skill-sources.mjs';
 import { PostgresSkillSettingsStore } from './postgres-skill-settings-store.mjs';
+import { checkedSkillPackagePath, skillPackagePath } from './skill-package-path.mjs';
 import { nextCronOccurrence } from './scheduled-job-store.mjs';
 
 export async function installedSkillFiles(root) {
@@ -64,7 +65,7 @@ export class SkillGitSync {
    try {
     if(fetchError)throw fetchError;
     if(old.content_owner==='git') {
-     const files=old.storage==='filesystem'?await installedSkillFiles(old.installed_path):[{path:'SKILL.md',bytes:Buffer.from(old.content),mode:0o644}];
+     const files=old.storage==='filesystem'?await installedSkillFiles(await checkedSkillPackagePath(this.packageRoot, old)):[{path:'SKILL.md',bytes:Buffer.from(old.content),mode:0o644}];
      if(skillFilesHash(files)!==old.installed_hash)throw skillSourceError('skill_local_changes',409);
     }
     ({hash,status,publishedPath}=await this.publish(c,id,old,fetched,p=>{createdPath=p;}));
@@ -116,7 +117,7 @@ export class SkillGitSync {
    await c.query('SAVEPOINT skill_import');
    try {
     const context=postgresTransactionContext(c);
-    const skills=new PostgresSkillSettingsStore({pool:context,clock:this.clock});
+    const skills=new PostgresSkillSettingsStore({pool:context,clock:this.clock,packageRoot:this.packageRoot});
     const sources=new PostgresSkillSources({pool:context,clock:this.clock});
     await skills.create({id,name:fetched.name,description:fetched.description,content:fetched.content,lifecycle:input.lifecycle,global:input.global});
     await sources.save(id,input);
@@ -134,6 +135,7 @@ export class SkillGitSync {
    }
   });
  }
+ async packagePath(skill) { return checkedSkillPackagePath(this.packageRoot, skill); }
  async publish(c,id,old,fetched,onCreated=()=>{}) {
     const hash=fetched.storage==='postgres'?skillFilesHash([{path:'SKILL.md',bytes:Buffer.from(fetched.content),mode:0o644}]):fetched.contentHash;
     let status, publishedPath=null;
@@ -142,17 +144,23 @@ export class SkillGitSync {
      if(fetched.storage==='filesystem') {
       const staging=path.join(this.packageRoot,'.staging-'+id+'-'+randomUUID());
       publishedPath=path.join(this.packageRoot,id,hash.replace('sha256:',''));
-      await fs.mkdir(staging,{recursive:true});
+      await fs.mkdir(this.packageRoot,{recursive:true});
+      if(!(await fs.lstat(this.packageRoot)).isDirectory())throw skillSourceError('skill_local_changes',409);
+      await fs.mkdir(path.dirname(publishedPath),{recursive:true});
+      if(!(await fs.lstat(path.dirname(publishedPath))).isDirectory())throw skillSourceError('skill_local_changes',409);
+      await fs.mkdir(staging);
       try {
        for(const file of fetched.files){const destination=path.join(staging,file.path);await fs.mkdir(path.dirname(destination),{recursive:true});await fs.writeFile(destination,file.bytes,{mode:file.mode});await fs.chmod(destination,file.mode);}
-       await fs.mkdir(path.dirname(publishedPath),{recursive:true});
        try {await fs.rename(staging,publishedPath);onCreated(publishedPath);}catch(e){if(!['EEXIST','ENOTEMPTY'].includes(e.code))throw e;if(skillFilesHash(await installedSkillFiles(publishedPath))!==hash)throw skillSourceError('skill_local_changes',409);}
       } finally {await fs.rm(staging,{recursive:true,force:true}).catch(error=>this.cleanupFailure(error,id));}
      }
      await c.query('DELETE FROM skill_package_files WHERE skill_id=$1',[id]);
      if(fetched.storage==='filesystem')for(const file of fetched.files)await c.query('INSERT INTO skill_package_files(skill_id,file_path,bytes,executable) VALUES($1,$2,$3,$4)',[id,file.path,file.bytes.length,file.mode===0o755]);
      await c.query("UPDATE skills SET name=$2,description=$3,content=$4,storage=$5,content_owner='git',installed_path=$6,installed_hash=$7,updated_at=$8 WHERE id=$1",[id,fetched.name||id,fetched.description,fetched.content,fetched.storage,publishedPath,hash,this.clock()]);
-     if(old.installed_path && old.installed_path!==publishedPath) await fs.utimes(old.installed_path,new Date(this.clock()),new Date(this.clock())).catch(error=>{if(error?.code!=='ENOENT')this.cleanupFailure(error,id);});
+     const oldPath=skillPackagePath(this.packageRoot, old);
+     if(oldPath && oldPath!==publishedPath) await checkedSkillPackagePath(this.packageRoot,old)
+      .then(target=>fs.utimes(target,new Date(this.clock()),new Date(this.clock())))
+      .catch(error=>{if(error?.code!=='ENOENT'&&error?.message!=='skill_local_changes')this.cleanupFailure(error,id);});
      status='updated';
     }
     return {hash,status,publishedPath};
@@ -161,6 +169,7 @@ export class SkillGitSync {
   // Grace covers catalogs already returned to an in-flight turn. History records
   // preserve revisions; obsolete extracted trees are not an unbounded archive.
   await fs.mkdir(this.packageRoot,{recursive:true});
+  if(!(await fs.lstat(this.packageRoot)).isDirectory())throw skillSourceError('skill_local_changes',409);
   const ids=await fs.readdir(this.packageRoot,{withFileTypes:true});
   for(const item of ids) {
    if(!item.isDirectory())continue;
@@ -170,7 +179,8 @@ export class SkillGitSync {
    }
    await withPostgresTransaction(this.pool,async c=>{
     try {await skillLock(c,item.name,{tryOnly:true});}catch(e){if(e.message==='skill_sync_running')return;throw e;}
-    const installed=(await c.query('SELECT installed_path FROM skills WHERE id=$1',[item.name])).rows[0]?.installed_path;
+    const row=(await c.query('SELECT id,storage,content_owner,installed_hash FROM skills WHERE id=$1',[item.name])).rows[0];
+    const installed=skillPackagePath(this.packageRoot,row);
     const root=path.join(this.packageRoot,item.name);
     for(const entry of await fs.readdir(root,{withFileTypes:true})) {
      if(!entry.isDirectory()||! /^[0-9a-f]{64}$/.test(entry.name))continue;

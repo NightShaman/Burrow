@@ -10,7 +10,11 @@ const keyFor = id => migrationLockKey(`burrow-continuity-owner:${id}`);
 export function continuityOwner(pool, label = 'runtime') {
   let registry = owners.get(pool);
   if (!registry) { registry = new Map(); owners.set(pool, registry); }
-  if (registry.has(label)) return registry.get(label);
+  const previous = registry.get(label);
+  if (previous && !previous.lost) return previous;
+  // Existing authorities retain their identity, and a terminal guard holds its
+  // own shared lock independently of this dedicated connection.
+  if (previous) void previous.close().catch(() => {});
   const owner = createContinuityOwner(pool);
   registry.set(label, owner);
   return owner;
@@ -23,9 +27,10 @@ export function createContinuityOwner(pool) {
   let lost = false;
   client.on('error', () => { lost = true; });
   client.on('end', () => { lost = true; });
-  let starting;
+  let starting, closing;
   const owner = {
     id,
+    get lost() { return lost; },
     async ready() {
       if (lost) throw new Error('continuity_owner_connection_lost');
       starting ||= (async () => {
@@ -68,7 +73,7 @@ export function createContinuityOwner(pool) {
         finally { await connection.end(); }
       }
     },
-    async close() { lost = true; if (starting) { await starting.catch(() => {}); await client.end(); } },
+    close() { lost = true; return closing ||= (async () => { if (starting) { await starting.catch(() => {}); await client.end(); } })(); },
   };
   return owner;
 }

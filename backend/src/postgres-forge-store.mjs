@@ -122,6 +122,7 @@ function publicJob(job) {
     legacySourceAgentId,
     ownerToken,
     ownerId,
+    providerDispatchState,
     modOwnerId,
     referenceImage,
     referenceImages,
@@ -178,13 +179,37 @@ export class PostgresForgeStore {
     this.videoAdapterFactory = videoAdapterFactory;
     this.ownerId = ownerId;
     this.pending = new Set();
+    this.admissions = new Set();
+    this.accepting = true;
+    this.cleanupTimer = null;
+    this.cleaning = null;
+    this.closing = null;
     this.backgroundFailures = new Map();
   }
   async init() {
     return this;
   }
-  async close() {
-    if (this.ownsPool) await closePostgresPool(this.pool);
+  stop() {
+    this.accepting = false;
+    clearInterval(this.cleanupTimer);
+    this.cleanupTimer = null;
+  }
+  close() {
+    this.stop();
+    return this.closing ||= (async () => {
+      await Promise.allSettled([...this.admissions]);
+      await Promise.allSettled([...this.pending, this.cleaning]);
+      if (this.ownsPool) await closePostgresPool(this.pool);
+    })();
+  }
+  startArtifactCleanup({ intervalMs = 30_000, onError = () => {} } = {}) {
+    if (!this.accepting || this.cleanupTimer) return;
+    const sweep = () => void this.cleanupArtifacts().then(result => {
+      if (result.failed) onError();
+    }, () => onError());
+    this.cleanupTimer = setInterval(sweep, intervalMs);
+    this.cleanupTimer.unref?.();
+    sweep();
   }
   async connectionList(agentId = null) {
     return await (typeof this.connections === "function"
@@ -420,8 +445,8 @@ export class PostgresForgeStore {
   async createGalleryFolder(body) { return createForgeGalleryFolder(this, body); }
   async moveGalleryImage(jobId, artifactId, body) { return moveForgeGalleryImage(this, jobId, artifactId, body); }
   async deleteGalleryImage(jobId, artifactId) {
-    const owner = await this.owner();
-    return withPostgresTransaction(this.pool, async client => {
+    await this.owner();
+    const result = await withPostgresTransaction(this.pool, async client => {
       // Serialize generated-file reference mutations, including legacy shared
       // files, with job deletion/admission while deciding whether bytes are owned.
       await client.query('LOCK TABLE forge_jobs IN SHARE ROW EXCLUSIVE MODE');
@@ -434,12 +459,6 @@ export class PostgresForgeStore {
       if (!retained.rowCount) fail('forge_archive_missing', 409);
       const source = { ...job };
       if (!source.legacySourceAgentId && row.agent_id !== '__operator__') source.legacySourceAgentId = source.agentId || row.agent_id;
-      const root = await this.sourceRoot(source, owner);
-      if (!root) fail('forge_artifact_not_found', 404);
-      const shared = await client.query(`SELECT 1 FROM forge_jobs j,
-        LATERAL jsonb_array_elements(j.record->'artifacts') a
-        WHERE a->>'storageReference'=$1 AND NOT (j.id=$2 AND a->>'id'=$3) LIMIT 1`,
-        [artifact.storageReference, jobId, artifactId]);
       const storageReference = artifact.storageReference;
       // Retain original outcome/count for the Archive trigger; remove the file
       // locator and suppress tombstones from public media projections.
@@ -447,11 +466,50 @@ export class PostgresForgeStore {
       artifact.deletedAt = at();
       await client.query('UPDATE forge_jobs SET record=$2 WHERE id=$1', [jobId, JSON.stringify(job)]);
       await client.query('DELETE FROM forge_gallery_placements WHERE job_id=$1 AND artifact_id=$2', [jobId, artifactId]);
-      // Perform all SQL work before irreversible cleanup, as in the existing
-      // generated-artifact lifecycle. PostgreSQL and unlink are not atomic.
-      if (!shared.rowCount) await deleteGeneratedArtifact({ agentWorkspaceRoot: root, storageReference });
+      await this.enqueueArtifactCleanup(client, source, storageReference);
       return { jobId, artifactId };
     });
+    await this.cleanupArtifacts().catch(() => {});
+    return result;
+  }
+  async enqueueArtifactCleanup(client, job, reference) {
+    if (!reference) return;
+    await client.query(`INSERT INTO forge_artifact_cleanup(source_agent_id,storage_reference) VALUES($1,$2)
+      ON CONFLICT(source_agent_id,storage_reference) DO NOTHING`, [job.legacySourceAgentId || '', reference]);
+  }
+  cleanupArtifacts() {
+    return this.cleaning ||= this.sweepArtifactCleanup().finally(() => { this.cleaning = null; });
+  }
+  async sweepArtifactCleanup({ limit = 100 } = {}) {
+    const { rows } = await this.pool.query('SELECT id FROM forge_artifact_cleanup ORDER BY last_attempt_at NULLS FIRST,id LIMIT $1', [limit]);
+    let failed = 0;
+    for (const { id } of rows) {
+      try {
+        await withPostgresTransaction(this.pool, async client => {
+          // The deletion intent was already committed. Serialize rechecks and
+          // unlink with changes to DB references; a failed ack only retries GC.
+          await client.query('LOCK TABLE forge_jobs IN SHARE ROW EXCLUSIVE MODE');
+          const { rows: [intent] } = await client.query('SELECT * FROM forge_artifact_cleanup WHERE id=$1 FOR UPDATE', [id]);
+          if (!intent) return;
+          const shared = await client.query("SELECT 1 FROM forge_jobs WHERE record->'artifacts' @> $1::jsonb LIMIT 1", [JSON.stringify([{ storageReference: intent.storage_reference }])]);
+          if (!shared.rowCount) {
+            const owner = intent.source_agent_id ? null : await this.owner();
+            const root = await this.sourceRoot({ legacySourceAgentId: intent.source_agent_id }, owner);
+            if (!root) throw new Error('forge_artifact_root_unavailable');
+            await deleteGeneratedArtifact({ agentWorkspaceRoot: root, storageReference: intent.storage_reference });
+            await client.query('DELETE FROM forge_artifact_cleanup WHERE id=$1', [id]);
+          } else {
+            // Keep this intent: the same relative locator can exist under more
+            // than one legacy owner, and cleanup must wait for the last ref.
+            await client.query('UPDATE forge_artifact_cleanup SET last_attempt_at=now() WHERE id=$1', [id]);
+          }
+        });
+      } catch {
+        failed++;
+        await this.pool.query('UPDATE forge_artifact_cleanup SET last_attempt_at=now() WHERE id=$1', [id]);
+      }
+    }
+    return { failed };
   }
   async archive() {
     await this.owner();
@@ -459,8 +517,9 @@ export class PostgresForgeStore {
     return result.rows.map(row => parse(row.record));
   }
   async delete(id) {
-    const owner = await this.owner();
+    await this.owner();
     await withPostgresTransaction(this.pool, async client => {
+      await client.query('LOCK TABLE forge_jobs IN SHARE ROW EXCLUSIVE MODE');
       const result = await client.query('SELECT record,agent_id FROM forge_jobs WHERE id=$1 FOR UPDATE', [id]);
       if (!result.rows[0]) fail('forge_job_not_found', 404);
       const row = result.rows[0];
@@ -471,20 +530,11 @@ export class PostgresForgeStore {
       if (!retained.rowCount) fail('forge_archive_missing', 409);
       if (job.agentId && !job.legacySourceAgentId) job.legacySourceAgentId = job.agentId;
       if (!job.legacySourceAgentId && row.agent_id !== '__operator__') job.legacySourceAgentId = row.agent_id;
-      const root = await this.sourceRoot(job, owner);
-      for (const artifact of job.artifacts || []) {
-        if (!artifact.storageReference) continue;
-        // Legacy imports may share generated files with other jobs. Chat delivery
-        // writes a separate attachment copy and is never a deletion target.
-        const shared = await client.query(`SELECT 1 FROM forge_jobs WHERE id<>$1 AND
-          record->'artifacts' @> $2::jsonb LIMIT 1`,
-          [id, JSON.stringify([{ storageReference: artifact.storageReference }])]);
-        if (shared.rowCount) continue;
-        if (root) await deleteGeneratedArtifact({ agentWorkspaceRoot: root, storageReference: artifact.storageReference });
-      }
+      for (const artifact of job.artifacts || []) await this.enqueueArtifactCleanup(client, job, artifact.storageReference);
       await client.query('DELETE FROM forge_jobs WHERE id=$1', [id]);
     });
     this.backgroundFailures.delete(id);
+    await this.cleanupArtifacts().catch(() => {});
   }
   async save(job, client = this.pool) {
     job.updatedAt = at();
@@ -535,7 +585,14 @@ export class PostgresForgeStore {
           )))
     );
   }
-  async create(body, {agentId = null, sessionId = null, ownerModId = null, referenceImages: privateReferences = null, chatDelivery = null} = {}) {
+  async create(body, options) {
+    if (!this.accepting) fail('forge_unavailable', 503);
+    const admission = this.admit(body, options);
+    this.admissions.add(admission);
+    try { return await admission; }
+    finally { this.admissions.delete(admission); }
+  }
+  async admit(body, {agentId = null, sessionId = null, ownerModId = null, referenceImages: privateReferences = null, chatDelivery = null} = {}) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       fail("forge_request_invalid");
     if ("attachments" in body || "sourceAttachments" in body)
@@ -731,6 +788,7 @@ export class PostgresForgeStore {
           ownerId: this.ownerId,
           kind: model.kind,
           status: "queued",
+          providerDispatchState: "not_started",
           createdAt: at(),
           updatedAt: at(),
           error: null,
@@ -891,6 +949,7 @@ export class PostgresForgeStore {
         ? this.googleAdapterFactory({ config })
         : this.adapterFactory({ config });
       stage = "provider";
+      job.providerDispatchState = 'may_have_started';
       job.calls = [{ connectionId: job.connectionId, modelId: job.modelId, startedAt: at(), status: 'running' }];
       if (!(await this.save(job))) return;
       const result = await adapter.complete({ prompt: dispatch?.prompt ?? job.prompt, ...(dispatch?.sourceImages ? { sourceImages: dispatch.sourceImages } : {}) });
@@ -939,26 +998,21 @@ export class PostgresForgeStore {
         job.calls[0].status = 'failed';
         job.calls[0].completedAt = at();
       }
-      const retained = [];
-      for (const a of job.artifacts) {
-        try {
-          const root = await this.sourceRoot(job, owner);
-          const x =
-            root &&
-            (await resolveGeneratedArtifact({
-              agentWorkspaceRoot: root,
-              storageReference: a.storageReference,
-            }));
-          if (x) await fs.rm(x.filePath, { force: true });
-        } catch {
-          retained.push(a);
-        }
-      }
-      job.artifacts = retained;
+      const discard = job.artifacts;
+      job.artifacts = [];
       job.status = "failed";
       job.error = "generation_failed";
       job.errorDetails = diagnostic(error, stage, config);
-      await this.save(job);
+      if (discard.length) {
+        await withPostgresTransaction(this.pool, async client => {
+          await client.query('LOCK TABLE forge_jobs IN SHARE ROW EXCLUSIVE MODE');
+          await this.save(job, client);
+          for (const artifact of discard) await this.enqueueArtifactCleanup(client, job, artifact.storageReference);
+        });
+        await this.cleanupArtifacts().catch(() => {});
+      } else {
+        await this.save(job);
+      }
     }
     if (job.status === 'succeeded' && job.chatDelivery) {
       // Background delivery survives a cancelled/disconnected model waiter.
@@ -1045,6 +1099,16 @@ export class PostgresForgeStore {
     const a = entry.metadata.attachments[0];
     return { id: a.artifactPath, ...a, sessionId: body.sessionId };
   }
+  async reconcileAbandonedRuntimeJobs({ assertOwned }) {
+    // Only the exclusive UI runtime can establish that previous runtime owners
+    // are gone. Standalone stores never infer that from initializing a pool.
+    await assertOwned();
+    const result = await this.pool.query(`UPDATE forge_jobs SET updated_at=$2::text::timestamptz,
+      record=record || jsonb_build_object('status','interrupted','updatedAt',$2::text,
+        'error',CASE WHEN status='queued' OR record->>'providerDispatchState'='not_started' THEN 'generation_interrupted' ELSE 'generation_outcome_unknown' END)
+      WHERE owner_id IS DISTINCT FROM $1 AND status IN ('queued','running') RETURNING id`, [this.ownerId, at()]);
+    return { recovered: result.rowCount };
+  }
   async recover({ ownerId, ownerToken } = {}) {
     if (
       typeof ownerId !== "string" ||
@@ -1056,7 +1120,7 @@ export class PostgresForgeStore {
       fail("forge_recovery_invalid");
     const timestamp = at();
     const r = await this.pool.query(
-      `UPDATE forge_jobs SET updated_at=$3::text::timestamptz, record=record || jsonb_build_object('status','interrupted','error','generation_interrupted','updatedAt',$3::text) WHERE owner_id=$1 AND owner_token=$2 AND status IN ('queued','running') RETURNING id`,
+      `UPDATE forge_jobs SET updated_at=$3::text::timestamptz, record=record || jsonb_build_object('status','interrupted','error',CASE WHEN status='queued' OR record->>'providerDispatchState'='not_started' THEN 'generation_interrupted' ELSE 'generation_outcome_unknown' END,'updatedAt',$3::text) WHERE owner_id=$1 AND owner_token=$2 AND status IN ('queued','running') RETURNING id`,
       [ownerId, ownerToken, timestamp],
     );
     return { recovered: r.rowCount };

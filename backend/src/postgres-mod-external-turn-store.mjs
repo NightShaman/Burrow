@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { sameExternalTurnInput } from './mod-external-turn-attachments.mjs';
@@ -87,10 +88,17 @@ export class PostgresModExternalTurnStore {
     return row(result.rows[0]);
   }
 
-  async complete(id, { status, result = null, error = null }) {
+  async complete(id, { status, result = null, error = null, runId = null, allowQueued = false }) {
     const now = this.clock();
-    const updated = await this.pool.query("UPDATE mod_external_turns SET status=$2,result=$3,error=$4,completed_at=$5,updated_at=$5 WHERE id=$1 AND status IN ('queued','running') RETURNING *", [id, status, result === null ? null : JSON.stringify(result), error, now]);
-    return row(updated.rows[0]);
+    const payload = result === null ? null : JSON.stringify(result);
+    const updated = await this.pool.query(`UPDATE mod_external_turns SET status=$2,result=$3,error=$4,completed_at=$5,updated_at=$5
+      WHERE id=$1 AND ((status='queued' AND ($6::text IS NULL OR $7)) OR (status='running' AND run_id=$6)) RETURNING *`, [id, status, payload, error, now, runId, allowQueued]);
+    if (updated.rows[0]) return row(updated.rows[0]);
+    const prior = row((await this.pool.query('SELECT * FROM mod_external_turns WHERE id=$1', [id])).rows[0]);
+    if (!prior || (prior.runId !== runId && !(allowQueued && prior.runId === null)) || prior.status !== status || prior.error !== error || !isDeepStrictEqual(prior.result, parse(payload))) {
+      throw new Error('mod_external_turn_receipt_fenced');
+    }
+    return prior;
   }
 
   async interruptIncomplete(reason = 'core_restart_before_completion') {

@@ -41,7 +41,7 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
           if (receipts.get(id) === receipt) receipts.delete(id);
           continue;
         }
-        lifecycle.reportFailure(error, 'terminal_persistence'); return;
+        lifecycle.reportFailure(error, 'terminal_persistence');
       }
     }
   }
@@ -114,12 +114,13 @@ export function createChatInputRunner({ store, stores, rootDir, resolveAgentRunt
     if (!started || lifecycle.stopped) return Promise.resolve();
     if (pumping) return pumping;
     pumping = lifecycle.track(async () => {
-      await store.reconcileInterrupted(); initialized = true;
+      await store.reconcileInterrupted({ onScopeFailure: error => lifecycle.reportFailure(error, 'input_reconciliation') }); initialized = true;
       const blockedScopes = await store.pendingMainScopes?.() || [];
       for (const scope of blockedScopes) {
-        let authority=reconciliation.get(scope.agentId);
-        if (!authority) { authority=postgresContinuity({store:stores.conversations,agentId:scope.agentId,ownerId:`${ownerId}:reconcile:${scope.agentId}`}); reconciliation.set(scope.agentId,authority); }
-        await authority.reconcile({sessionId:scope.sessionId});
+        const authority = postgresContinuity({ store: stores.conversations, agentId: scope.agentId, ownerId: `${ownerId}:reconcile:${scope.agentId}` });
+        reconciliation.set(scope.agentId, authority);
+        try { await authority.reconcile({ sessionId: scope.sessionId }); }
+        catch (error) { lifecycle.reportFailure(error, 'continuity_reconciliation'); }
       }
       // Reuse normal recovery claims; do not replay uncertain work in this
       // dispatcher. Recovery remains asynchronous to independent side answers.

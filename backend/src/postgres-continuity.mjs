@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { migrationLockKey } from './postgres-foundation.mjs';
 import { RECOVERY_TRANSCRIPT_MAX_MESSAGES, assessInterruptedRunRecovery } from './recovery-resume-policy.mjs';
@@ -7,11 +8,16 @@ import { continuityOwner } from './postgres-continuity-owner.mjs';
 
 // Runtime identity is not a PID: independent hosts may reuse the same PID.
 const runtimeOwner = 'runtime';
+const repairsByPool = new WeakMap();
 export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clock = () => new Date().toISOString() }) {
  const state = continuityStateStore(store, agentId, clock);
  const owner = continuityOwner(store.pool, ownerId);
+ let repairs=repairsByPool.get(store.pool);
+ if(!repairs){repairs=new Map();repairsByPool.set(store.pool,repairs);}
+ const repairKey=sessionId=>JSON.stringify([agentId,sessionId]);
  ownerId = owner.id;
  const scope = sessionId => ({agentId,sessionId});
+ const boundary = sessionId => migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sessionId])}`);
  const matches = (head,args,state='running') => head?.state===state && head.runId===String(args.runId) && Number(head.generation)===Number(args.generation) && head.ownerId===ownerId;
  const updateMetadata = async args => {
   await owner.ready();
@@ -24,9 +30,16 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
   async close() { await owner.close(); },
   async reconcile({sessionId}) {
    const transcript=(await store.projection({...scope(sessionId),visibility:'chat',limit:RECOVERY_TRANSCRIPT_MAX_MESSAGES,predicate:isChatMessage})).filter(isChatMessage);
-   await updateMetadata({...scope(sessionId),update:async metadata=>{
+   const key=repairKey(sessionId), repair=repairs.get(key);
+   const reconciled=await updateMetadata({...scope(sessionId),update:async (metadata,client)=>{
     const head=metadata.continuityHead, queue=metadata.recoveryQueue;
-    const abandoned=head && ['running','finalizing'].includes(head.state) && head.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(head.ownerId));
+    // A finalizer owns the session boundary throughout its callback and receipt.
+    // Probe without waiting while holding the session row: a current finalizer
+    // may need that row. A missing guard permits repair even with a live owner.
+    const finalizing=head?.state==='finalizing' && head.ownershipProtocol==='postgres-session-lock-v1';
+    const needsRepair=finalizing && repair && head.finalizationId===repair;
+    const abandoned=needsRepair || (head && (finalizing || head.state==='running') && head.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(head.ownerId)));
+    if(finalizing && (!abandoned || !(await client.query('SELECT pg_try_advisory_xact_lock($1::bigint) AS acquired',[boundary(sessionId)])).rows[0].acquired)) return metadata;
     const abandonedQueue=queue?.status==='running' && queue.ownershipProtocol==='postgres-session-lock-v1' && !(await owner.alive(queue.ownerId));
     if(!abandoned && !abandonedQueue)return metadata;
     // A recovery attempt is never promoted into a fresh interrupted objective.
@@ -39,9 +52,12 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     }
     const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',...(head.recoveryPolicy?{recoveryPolicy:head.recoveryPolicy}:{}),reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
     if(!manifest)return metadata;
-    const assessment=await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
+    const assessment=finalizing && head.finalizationId
+     ? {action:'needs_user_input',autoResume:false,reason:'terminal_receipt_requires_repair',transcriptMessages:transcript.length}
+     : await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${manifest.runId}:${manifest.generation}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,autoResume:assessment.autoResume,transcriptMessages:assessment.transcriptMessages,queuedAt:clock(),attempts:Number(queue?.attempts||0)},...(abandoned?{continuityHead:{...head,state:'interrupted',interruptedAt:clock()}}:{})};
    }});
+   if(repair && repairs.get(key)===repair && (reconciled.continuityHead?.state!=='finalizing' || reconciled.continuityHead.finalizationId!==repair)) repairs.delete(key);
   },
   async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
@@ -80,10 +96,13 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${args.runId}:${args.generation ?? 'unknown'}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,transcriptMessages:assessment.transcriptMessages,autoResume:assessment.autoResume,queuedAt:manifest.interruptedAt,attempts:0},continuityHead:{...head,state:'interrupted',interruptedAt:manifest.interruptedAt}};
    }});return manifest;
   },
-  async pending({limit=100}={}) {
-   let sessions=await state.sessions();
-   for(const session of sessions) await this.reconcile({sessionId:session.sessionId});
-   sessions=await state.sessions({pending:true,limit});
+  async pending({limit=100,onReconcileFailure=error=>console.warn('continuity_reconciliation_failed',error?.code || error?.name)}={}) {
+   const blocked=new Set();
+   for(const session of await state.sessions()) {
+    try { await this.reconcile({sessionId:session.sessionId}); }
+    catch(error) { blocked.add(session.sessionId); onReconcileFailure(error); }
+   }
+   const sessions=(await state.sessions({pending:true,limit})).filter(session=>!blocked.has(session.sessionId));
    return sessions.map(session=>({sessionId:session.sessionId,manifest:session.interruptedRun,continuation:session.recoveryQueue})).filter(item=>item.manifest?.status==='interrupted' && item.continuation?.autoResume && item.continuation.status==='pending').sort((a,b)=>String(a.continuation.queuedAt).localeCompare(String(b.continuation.queuedAt))).slice(0,limit);
   },
   async claimRecovery({sessionId,recoveryRunId}) {
@@ -125,36 +144,60 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
      return {...metadata,continuityHead:outcome.head,interruptedRun:manifest,recoveryQueue:continuation};
     }});
     return outcome;
-   }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,sessionId])}`));
+   }, boundary(sessionId));
   },
   async commit(args) {
-   return owner.guard(async () => {
-   let head,claimed=false;
-   await updateMetadata({...scope(args.sessionId),update:metadata=>{
-    head=metadata.continuityHead;
-    if(!matches(head,args))return metadata;
-    claimed=true;head={...head,state:'finalizing',finalizationStartedAt:clock()};return {...metadata,continuityHead:head};
-   }});
+   const finalizationId=randomUUID();
+   let claimed=false;
+   try { return await owner.guard(async () => {
+   let head;
+   const isFinalization=(candidate,status)=>matches(candidate,args,status) && candidate.finalizationId===finalizationId;
+   try {
+    await updateMetadata({...scope(args.sessionId),update:metadata=>{
+     head=metadata.continuityHead;
+     if(!matches(head,args))return metadata;
+     claimed=true;head={...head,state:'finalizing',finalizationId,finalizationStartedAt:clock()};return {...metadata,continuityHead:head};
+    }});
+   } catch(error) {
+    // Do not start the callback unless the exact fence transition is durable.
+    head=await this.read(args);
+    if(!isFinalization(head,'finalizing'))throw error;
+   }
    if(!claimed)return {ok:false,stale:true,head,value:null};
    let value;
    try {value=typeof args.commit==='function'?await args.commit(head):null;}
    catch(error){await this.interrupt({...args,reason:'terminal_finalization_failed'});throw error;}
-   let completed=false, completionEvent=null;
-   await updateMetadata({...scope(args.sessionId),update:async (metadata,client)=>{
-    if(!matches(metadata.continuityHead,args,'finalizing')){head=metadata.continuityHead;return metadata;}
-    const at=clock();
-    // Completion receipt and continuity terminal share a single transaction.
-    // A rollback leaves neither one visible to consumers.
-    if (args.onCompleted) completionEvent = await args.onCompleted(client,value,at);
-    head={...metadata.continuityHead,state:'completed',latestRunId:String(args.runId),completedAt:at};completed=true;
-    const manualRecovery=metadata.recoveryQueue?.manualInputId && metadata.recoveryQueue.claimedByRunId===String(args.runId);
-    const recovered=classifyRuntimeOutcome(value || {}).ok;
-    return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at,...(manualRecovery ? {
-      recoveryQueue:{...metadata.recoveryQueue,status:recovered?'completed':'failed',autoResume:false,completedAt:at,result:value?.decision || (recovered?'completed':'failed')},
-      ...(recovered && metadata.interruptedRun ? {interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:String(args.runId)}} : {})} : {})};
-   }});
-   return {ok:completed,stale:!completed,head,value,completionEvent};
-   }, migrationLockKey(`burrow-session-boundary:${JSON.stringify([agentId,args.sessionId])}`));
+   const at=clock();
+   for(let attempt=0; ; attempt++) {
+    let completed=false,completionEvent=null;
+    try {
+     await updateMetadata({...scope(args.sessionId),update:async (metadata,client)=>{
+      head=metadata.continuityHead;
+      if(!isFinalization(head,'finalizing'))return metadata;
+      // Only transactional receipt writes can be retried; never re-enter commit().
+      if (args.onCompleted) completionEvent = await args.onCompleted(client,value,at);
+      head={...head,state:'completed',latestRunId:String(args.runId),completedAt:at};completed=true;
+      const manualRecovery=metadata.recoveryQueue?.manualInputId && metadata.recoveryQueue.claimedByRunId===String(args.runId);
+      const recovered=classifyRuntimeOutcome(value || {}).ok;
+      return {...metadata,continuityHead:head,completedAt:at,retentionEligibleAt:at,...(manualRecovery ? {
+       recoveryQueue:{...metadata.recoveryQueue,status:recovered?'completed':'failed',autoResume:false,completedAt:at,result:value?.decision || (recovered?'completed':'failed')},
+       ...(recovered && metadata.interruptedRun ? {interruptedRun:{...metadata.interruptedRun,status:'recovered',recoveredByRunId:String(args.runId)}} : {})} : {})};
+     }});
+     return {ok:completed,stale:!completed,head,value,completionEvent};
+    } catch(error) {
+     // Read under the same guard before retrying a possibly committed receipt.
+     // If retries exhaust, reconciliation can retire this head for manual repair
+     // once the guard is gone, without ever rerunning the terminal effects.
+     head=await this.read(args);
+     if(completed && isFinalization(head,'completed'))return {ok:true,stale:false,head,value,completionEvent};
+     if(attempt || owner.lost || !isFinalization(head,'finalizing'))throw error;
+    }
+   }
+   }, boundary(args.sessionId)); }
+   catch(error) {
+    if(claimed) repairs.set(repairKey(args.sessionId),finalizationId);
+    throw error;
+   }
   },
  };
 }

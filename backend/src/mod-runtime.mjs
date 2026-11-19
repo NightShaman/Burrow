@@ -130,13 +130,13 @@ function failedMod({ id, name, root, error }) {
   return { id: id || path.basename(root), name: name || id || path.basename(root), root, manifest: null, server: null, ui: {}, contributions: {}, routes: [], store: null, status: 'failed', error: manifestErrorCode(error), diagnostic: boundaryDiagnostic(error, 'manifest_read') };
 }
 
-export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow', logger = console } = {}) {
+export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow', logger = console, createDirectory = true } = {}) {
   const modsRoot = path.join(runtimeRoot, 'mods');
-  try { await fs.mkdir(modsRoot, { recursive: true }); }
+  try { if (createDirectory) await fs.mkdir(modsRoot, { recursive: true }); }
   catch (error) { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode:'mod_directory_unavailable', causeCode:boundaryDiagnostic(error, 'discovery').errorCode, stage:'discovery' }, 'warn'); throw boundaryFailure('mod_directory_unavailable', error, 'discovery'); }
   let entries;
   try { entries = await fs.readdir(modsRoot, { withFileTypes: true }); }
-  catch (error) { emitModEvent(logger, 'mod_discovery_unavailable', { errorCode:'mod_directory_unreadable', causeCode:boundaryDiagnostic(error, 'discovery').errorCode, stage:'discovery' }, 'warn'); throw boundaryFailure('mod_directory_unreadable', error, 'discovery'); }
+  catch (error) { if (!createDirectory && error?.code === 'ENOENT') return []; emitModEvent(logger, 'mod_discovery_unavailable', { errorCode:'mod_directory_unreadable', causeCode:boundaryDiagnostic(error, 'discovery').errorCode, stage:'discovery' }, 'warn'); throw boundaryFailure('mod_directory_unreadable', error, 'discovery'); }
   const mods = [];
   const seen = new Map();
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {

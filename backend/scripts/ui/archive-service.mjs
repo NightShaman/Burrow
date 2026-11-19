@@ -194,7 +194,7 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
   }
 
 
-  async function archiveRunDetailForAgent({ agentRuntime, runId, signal, deadline } = {}) {
+  async function archiveRunDetailForAgent({ agentRuntime, runId, sessionId, signal, deadline } = {}) {
     const options = { signal, deadline };
     archiveReadCheckpoint(options);
     const agent = await agentsStore().resolve(agentRuntime.agentId, options) || { id: agentRuntime.agentId, name: agentRuntime.agentId };
@@ -208,21 +208,21 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
       resolveTraceRoot: (actualSessionId) => runtimeTraceRoot(runtime, actualSessionId, agentRuntime.agentId),
       agentId: agentRuntime.agentId,
       agentName: agent.name,
-      runId,
+      runId, sessionId,
       ...options,
     });
   }
 
-  async function archiveRunDetail({ agentRuntime = null, runId, signal, deadline } = {}) {
+  async function archiveRunDetail({ agentRuntime = null, runId, sessionId, signal, deadline } = {}) {
     const options = { signal, deadline };
     archiveReadCheckpoint(options);
-    if (agentRuntime) return archiveRunDetailForAgent({ agentRuntime, runId, ...options });
+    if (agentRuntime) return archiveRunDetailForAgent({ agentRuntime, runId, sessionId, ...options });
     const agents = await agentsStore().list({ includeDisabled: false, ...options });
     archiveReadCheckpoint(options);
     for (const agent of agents) {
       const runtime = await resolveAgentRuntime(agent.id, options);
       archiveReadCheckpoint(options);
-      const run = await archiveRunDetailForAgent({ agentRuntime: runtime, runId, ...options });
+      const run = await archiveRunDetailForAgent({ agentRuntime: runtime, runId, sessionId, ...options });
       if (run) return run;
     }
     return null;

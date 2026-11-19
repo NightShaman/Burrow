@@ -459,11 +459,11 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       return { ...row, status: 'failed', error: message };
     }
   }
-  async function list() {
+  async function list({ refreshStale = true } = {}) {
     await ready;
     const db = await repositoryFactory();
     try {
-      const discovered = await discoverMods({ runtimeRoot, logger });
+      const discovered = await discoverMods({ runtimeRoot, logger, createDirectory: refreshStale });
       const installed = new Map((await db.installationRows()).map((row) => [row.mod_id, row]));
       const lifecycle = new Map((await db.lifecycleRows()).map((row) => [row.mod_id, row]));
       const sources = await db.sourceRows();
@@ -478,7 +478,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
-      if (refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch(() => {}); });
+      if (refreshStale && refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch(() => {}); });
       return { ok: true, restartRequired: false, sourceRefresh: { enabled: Boolean(refreshConfig.enabled), intervalMs: refreshConfig.intervalMs, staleMs: refreshConfig.staleMs, concurrency: refreshConfig.concurrency, maxBackoffMs: refreshConfig.maxBackoffMs, refreshing: Boolean(refreshPromise), failures: failureCount }, mods, sources: sources.map((row) => ({ id: row.id, url: row.url, status: row.status, credential: { configured: [true, 1].includes(row.credential_configured) }, ...(row.error ? { error: row.error } : {}), ...(row.last_checked_at ? { lastCheckedAt: row.last_checked_at } : {}) })) };
     } finally { await db.close(); }
   }
@@ -709,7 +709,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   const pollingReady = ready.then(() => schedulePoll());
   void pollingReady.catch(error => backgroundFailure('polling', error));
-  return { ready, list, sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
+  return { ready, list, readInventory: () => list({ refreshStale: false }), sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {

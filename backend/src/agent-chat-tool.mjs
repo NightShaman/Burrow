@@ -16,13 +16,26 @@ const replyQueues = new Map();
 async function serializeRecipientReply({ rootDir, sessionId, operation, abortSignal = null }) {
   const key = `${String(rootDir)}:${String(sessionId)}`;
   const previous = replyQueues.get(key) || Promise.resolve();
+  let admitted = false;
+  let onAbort;
   const current = previous.catch(() => {}).then(() => {
     abortSignal?.throwIfAborted();
+    admitted = true;
     return operation();
   });
+  // The queue tail remains chained to its predecessor even if the waiting
+  // caller leaves immediately. Never race cancellation against admitted work.
   replyQueues.set(key, current);
-  try { return await current; }
-  finally { if (replyQueues.get(key) === current) replyQueues.delete(key); }
+  const clear = () => { if (replyQueues.get(key) === current) replyQueues.delete(key); };
+  current.then(clear, clear);
+  if (!abortSignal) return current;
+  const cancelled = new Promise((_, reject) => {
+    onAbort = () => { if (!admitted) reject(abortSignal.reason); };
+    abortSignal.addEventListener('abort', onAbort, { once: true });
+    if (abortSignal.aborted) onAbort();
+  });
+  try { return await Promise.race([current, cancelled]); }
+  finally { abortSignal.removeEventListener('abort', onAbort); }
 }
 
 // Track waits before entering either reply/session queue. This includes independent

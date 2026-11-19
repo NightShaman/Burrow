@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createTraceLogger } from './trace-logger.mjs';
 import { resolveModelConfig, resolveRuntimeTraceRoot } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
+import { providerErrorSecrets, sanitizeProviderMessage } from './model-failure.mjs';
 import './scheduled-job-store.mjs';
 import './dream-cycle-state.mjs';
 import { appendPreferenceSignalAsync, preferenceConversationContext, PREFERENCE_INTENT_INSTRUCTIONS } from './preference-learning.mjs';
@@ -311,6 +312,11 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
   let lifecycle = null;
   let settings = null;
   let startedAt = null;
+  let resolvedDreamModel = modelConfig;
+  const safeError = error => sanitizeProviderMessage(
+    typeof error === 'string' ? error : error?.message,
+    providerErrorSecrets(resolvedDreamModel || {}),
+  )?.slice(0, 500) || 'dream_cycle_failed';
   try {
     startedAt = now();
     settings = await dreamSettings.get(id);
@@ -346,7 +352,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     }
     await progress({ phase: null, step: 'preparing', request: null });
     const soul = (await profileStore.get(id, 'SOUL'))?.markdown || '';
-    let dreamAdapter = modelAdapter; let resolvedDreamModel = modelConfig;
+    let dreamAdapter = modelAdapter;
     if (!dreamAdapter && !resolvedDreamModel) {
       const resolverArgs = settings?.modelConnectionId && settings?.model
         ? { modelConnectionId: settings.modelConnectionId, model: settings.model }
@@ -377,7 +383,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       await progress({ phase, step: 'extraction', batch: null, request: null, sourceMessages: phaseWindows[phase].length, sourceChars: phaseWindows[phase].reduce((sum, item) => sum + item.content.length, 0) });
       const messages = phaseWindows[phase]; let extraction; let extractionError = null; let extractionDiagnostics = [];
       try { extraction = extractionState ? await extractIncrementalDreamCandidates({ store: stores.dreamExtractions, agentId: id, state: extractionState, messages, generatedAt, onProgress: progress, extract: (uncovered, onBatch) => extractPhaseCandidates({ phase, messages: uncovered, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, onBatch }) }) : await extractPhaseCandidates({ phase, messages, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); extractionDiagnostics = extraction.diagnostics; }
-      catch (error) { extraction = { memories: [], preferences: [], chunks: extraction?.chunks || error.completedChunks || 0, diagnostics: [], reusedCoverage: extraction?.reusedCoverage ?? 0, newCoverage: extraction?.newCoverage ?? 0, extractionMessages: extraction?.extractionMessages ?? messages.length, ...(error.coverage || {}) }; extractionError = clamp(error?.message || error, 500); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
+      catch (error) { extraction = { memories: [], preferences: [], chunks: extraction?.chunks || error.completedChunks || 0, diagnostics: [], reusedCoverage: extraction?.reusedCoverage ?? 0, newCoverage: extraction?.newCoverage ?? 0, extractionMessages: extraction?.extractionMessages ?? messages.length, ...(error.coverage || {}) }; extractionError = safeError(error); extractionDiagnostics = [...extractionDiagnostics, ...(error?.diagnostics || [])]; }
       if (phase === 'rem') windowCandidates.push(...extraction.memories);
       const userRefs = new Set(messages.filter((message) => message.role === 'user' && message.operatorInput !== false).map((message) => message.sourceRef));
       for (const candidate of extraction.preferences) {
@@ -401,7 +407,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
       const diaryItems = extractionError && phase === 'light'
         ? messages.map((message) => ({ content: message.content }))
         : extraction.memories;
-      try { if (extractionError && phase !== 'light') throw new Error(extractionError); if (!needsProcessing && settings.quietDayDreams === false) throw new Error('dream_quiet_day_disabled'); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: diaryItems, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { if (error?.message !== 'dream_quiet_day_disabled') diaryError = clamp(error?.message || error, 500); }
+      try { if (extractionError && phase !== 'light') throw new Error(extractionError); if (!needsProcessing && settings.quietDayDreams === false) throw new Error('dream_quiet_day_disabled'); diaryNarrative = await generateOperatorDiary({ phase, settings, soul, items: diaryItems, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress }); } catch (error) { if (error?.message !== 'dream_quiet_day_disabled') diaryError = safeError(error); }
       if (diaryNarrative) pendingDiaries.push({ entryDate: generatedAt.slice(0, 10), phase, narrative: diaryNarrative, sourceRefs: (extractionError && phase === 'light' ? messages.map((message) => message.sourceRef) : selected.flatMap((item) => item.sourceRefs || [])).slice(0, 16) });
       phaseResults.push({ phase, reusedCoverage: extraction.reusedCoverage ?? 0, newCoverage: extraction.newCoverage ?? 0, extractionMessages: extraction.extractionMessages ?? messages.length, extractionChunks: extraction.chunks, windowDays: PHASE_WINDOWS_DAYS[phase], inspected: messages.length, recorded: selected.length, selected: selected.length, summary: `${phase.toUpperCase()} pass inspected ${messages.length} persisted chat message${messages.length === 1 ? '' : 's'} in its ${PHASE_WINDOWS_DAYS[phase]}-day window and selected ${selected.length} candidate${selected.length === 1 ? '' : 's'}.`, chunks: extraction.chunks, modelResponses: extractionDiagnostics, ...(extractionError ? { extractionError } : {}), ...(diaryError ? { diaryError } : {}), windowStart: phaseWindowStart({ phase, generatedAt }), windowEnd: generatedAt, earliestAt: messages[0]?.at || null, latestAt: messages.at(-1)?.at || null });
       lifecycle.phases = [...phaseResults];
@@ -430,7 +436,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
         dreamChanges = synthesis.changes || [];
         for (const change of dreamChanges) if (change.action === 'review' || change.action === 'noop') countChange(change.action, change.reason);
       } catch (error) {
-        remResult.reconciliationError = clamp(error?.message || error, 500);
+        remResult.reconciliationError = safeError(error);
         remResult.modelResponses.push(...(error.diagnostics || []));
       }
     }
@@ -464,7 +470,8 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     await progress({ step: 'preferences' });
     // Preference pending work is independent of the memory/diary fingerprint.
     // A quiet window still retries conflicts and newly arrived Tiddle signals.
-    const preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, cycleStore, sourceMessages: phaseWindows.rem });
+    let preferences = await adjudicatePreferencesAsync({ agentId: id, profileStore, metadataStore, generatedAt, modelAdapter: dreamAdapter, modelConfig: resolvedDreamModel, traceLogger, onProgress: progress, cycleStore, sourceMessages: phaseWindows.rem });
+    if (preferences.disposition === 'failed' && preferences.reason) preferences = { ...preferences, reason: safeError(preferences.reason) };
     await progress({ step: 'saving_diaries', request: null });
     for (const entry of pendingDiaries) { const saved = await diaryStore.append(id, entry); const phase = phaseResults.find((result) => result.phase === entry.phase); if (phase) phase.diaryId = saved.id; }
     await progress({ step: 'finalizing' });
@@ -479,7 +486,7 @@ export async function runDreamCycle({ agentId, rootDir = null, generatedAt = now
     await cycleStore.write(receipt, completedAt); return receipt;
   } catch (error) {
     if (lifecycle) {
-      const completedAt = now(); const receipt = { ...lifecycle, ok: false, status: 'failed', error: String(error?.message || error), completedAt };
+      const completedAt = now(); const receipt = { ...lifecycle, ok: false, status: 'failed', error: safeError(error), completedAt };
       try { await cycleStore.write(receipt, completedAt); } catch {}
     }
     throw error;

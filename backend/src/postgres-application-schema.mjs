@@ -293,4 +293,13 @@ ALTER TABLE github_workflow_watches ADD COLUMN conclusions TEXT[] NOT NULL DEFAU
 CREATE TABLE anthropic_coordination_state (key TEXT PRIMARY KEY, state_json JSONB NOT NULL);
 ` },
   { version: 104, name: 'mcp-connection-tls-verification', sql: POSTGRES_MCP_VERIFY_TLS_SQL },
+  { version: 105, name: 'forge-durable-artifact-cleanup', sql: `
+CREATE TABLE forge_artifact_cleanup (
+ id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ source_agent_id TEXT NOT NULL,
+ storage_reference TEXT NOT NULL,
+ last_attempt_at TIMESTAMPTZ,
+ UNIQUE (source_agent_id, storage_reference)
+);
+` },
 ]);

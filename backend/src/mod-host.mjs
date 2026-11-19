@@ -287,7 +287,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       child.send({ type: "capability-result", requestId, error: message.method === 'requestCoreApi' ? 'core_api_caller_required' : message.method.startsWith('management') ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
     }
     if (!parentRequired && parentInvocationId && !invocation) { child.send({ type: "capability-result", requestId, error: "mod_capability_cancelled" }, () => {}); return; }
-    if (activeCapabilities.size >= 4 || !capabilities || !["requestCoreApi", "managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listOwnedAgents", "createOwnedAgent", "readOwnedAgent", "updateOwnedAgent", "getOwnedAgentReferenceImage", "putOwnedAgentReferenceImage", "removeOwnedAgentReferenceImage", "listAgents", "listAgentRunCompletions", "readAgentRunActivity", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "submitExternalTurn", "readExternalTurn", "readExternalTurnAttachment", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "getForgeReferenceImage", "putForgeReferenceImage", "removeForgeReferenceImage", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    if (!capabilities || !["requestCoreApi", "managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listOwnedAgents", "createOwnedAgent", "readOwnedAgent", "updateOwnedAgent", "getOwnedAgentReferenceImage", "putOwnedAgentReferenceImage", "removeOwnedAgentReferenceImage", "listAgents", "listAgentRunCompletions", "readAgentRunActivity", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "submitExternalTurn", "readExternalTurn", "readExternalTurnAttachment", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "getForgeReferenceImage", "putForgeReferenceImage", "removeForgeReferenceImage", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
@@ -338,6 +338,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const rejectSystemProcesses = (code = 'remote_process_controller_unavailable') => {
     const error = hostError(code);
     for (const entry of pendingSystemProcess.values()) {
+      clearTimeout(entry.dispatchTimer);
       clearTimeout(entry.watchdogTimer);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       entry.reject(error);
@@ -524,6 +525,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       const entry = pendingSystemProcess.get(requestId);
       if (!entry || message.operationId !== entry.operationId || message.targetId !== entry.targetId) return;
       pendingSystemProcess.delete(requestId);
+      clearTimeout(entry.dispatchTimer);
       clearTimeout(entry.watchdogTimer);
       entry.abortSignal?.removeEventListener?.('abort', entry.cancel);
       if (message.ok !== true) entry.reject(hostError(safeSystemControllerError(message.error, 'remote_process_failed')));
@@ -744,6 +746,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
           const cancel = () => {
             const entry = pendingSystemProcess.get(requestId);
             if (!entry || entry.watchdogTimer) return;
+            clearTimeout(entry.dispatchTimer);
             entry.watchdogTimer = setTimeout(() => {
               if (pendingSystemProcess.get(requestId) !== entry) return;
               pendingSystemProcess.delete(requestId);
@@ -753,17 +756,23 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
             entry.watchdogTimer.unref?.();
             if (child.connected) child.send({ type: 'system-controller-process-cancel', protocol: systemCapability, controllerInstanceId, requestId, operationId, targetId }, () => {});
           };
-          pendingSystemProcess.set(requestId, { operationId, targetId, resolve, reject, abortSignal, cancel, watchdogTimer: null });
           if (abortSignal?.aborted) {
-            pendingSystemProcess.delete(requestId);
             reject(hostError('remote_process_aborted'));
             return;
           }
+          const grace = finiteTimeout(systemProcessWatchdogGraceMs, SYSTEM_PROCESS_WATCHDOG_GRACE_MS);
+          // Allow a normally timed-out command to deliver its own terminal
+          // receipt before demanding cancellation. A lost reply enters the
+          // same cancellation/grace path as Stop, including unknown outcome.
+          const dispatchTimer = setTimeout(cancel, Math.min(2_147_483_647, finiteTimeout(request.process.timeoutMs, 30_000) + grace));
+          dispatchTimer.unref?.();
+          pendingSystemProcess.set(requestId, { operationId, targetId, resolve, reject, abortSignal, cancel, dispatchTimer, watchdogTimer: null });
           abortSignal?.addEventListener?.('abort', cancel, { once: true });
           child.send({ type: 'system-controller-process-execute', protocol: systemCapability, controllerInstanceId, requestId, operation }, (error) => {
             const entry = pendingSystemProcess.get(requestId);
             if (!error || !entry) return;
             pendingSystemProcess.delete(requestId);
+            clearTimeout(entry.dispatchTimer);
             clearTimeout(entry.watchdogTimer);
             abortSignal?.removeEventListener?.('abort', cancel);
             reject(hostError('remote_process_send_failed'));

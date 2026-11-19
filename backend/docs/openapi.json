@@ -4180,7 +4180,7 @@
           "Archive"
         ],
         "summary": "Read one archived runtime proof packet",
-        "description": "Searches enabled agents when agentId is omitted and preserves the matched run's agent identity. When agentId is supplied, lookup is scoped to that agent.",
+        "description": "Searches enabled agents when agentId is omitted and preserves the matched run's agent identity. When agentId is supplied, lookup is scoped to that agent. Supply sessionId to select an exact run occurrence.",
         "operationId": "getArchiveRun",
         "parameters": [
           {
@@ -4188,6 +4188,9 @@
           },
           {
             "$ref": "#/components/parameters/AgentId"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
           }
         ],
         "responses": {

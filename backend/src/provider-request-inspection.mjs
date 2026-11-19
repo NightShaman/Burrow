@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { redactStructuredJsonText } from './redaction.mjs';
 import { validTraceRunId } from './trace-summary.mjs';
@@ -27,12 +27,19 @@ function isInternalRequest(record) {
 function capturePath(runDir, record, history) {
   const pointer = record.payload?.providerRequestArtifact;
   if (typeof pointer !== 'string' || !pointer) return null;
-  const artifactPath = path.resolve(pointer);
-  if (path.dirname(artifactPath) !== path.resolve(runDir, 'artifacts')) return null;
-  // Historical access only opens the actual request artifact for this record,
-  // never another diagnostic file or a path supplied by the caller.
-  if (history && path.basename(artifactPath) !== `provider-request-${record.payload.requestId}.json`) return null;
-  return artifactPath;
+  const name = path.basename(pointer);
+  const artifactsDir = path.resolve(runDir, 'artifacts');
+  const requestId = record.payload.requestId;
+  // Legacy absolute pointers are identity evidence, not paths to open. Only
+  // rebase an exact request filename under the same run's artifacts suffix.
+  if (typeof requestId === 'string' && validTraceRunId(requestId) && name === `provider-request-${requestId}.json`) {
+    if (pointer === `artifacts/${name}` || (path.isAbsolute(pointer) && path.normalize(pointer) === pointer
+        && path.dirname(pointer).endsWith(`${path.sep}${path.basename(runDir)}${path.sep}artifacts`))) return path.join(artifactsDir, name);
+  }
+  // Older live-context traces had nonstandard filenames. Keep in-place reads
+  // for those, but never infer a relocated identity from them.
+  if (!history && path.dirname(path.resolve(pointer)) === artifactsDir) return path.join(artifactsDir, name);
+  return null;
 }
 
 async function captureForRecord(runDir, record, { includeBody, nowMs, history = false }) {
@@ -42,19 +49,26 @@ async function captureForRecord(runDir, record, { includeBody, nowMs, history = 
   const cutoff = nowMs - PROVIDER_REQUEST_RETENTION_MS;
   if (Number.isFinite(capturedAt) && capturedAt <= cutoff) return { state: 'expired' };
   try {
-    if (!(await fs.lstat(path.dirname(artifactPath))).isDirectory()) return { state: 'unavailable' };
-    const stat = await fs.lstat(artifactPath);
-    if (!stat.isFile()) return { state: 'unavailable' };
-    if (!Number.isFinite(capturedAt) && stat.mtimeMs <= cutoff) return { state: 'expired' };
-    if (!includeBody) return { state: 'available' };
-    const raw = await fs.readFile(artifactPath, 'utf8');
+    const directory = await fs.open(path.dirname(artifactPath), fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW);
+    let raw;
+    try {
+      const target = `/proc/self/fd/${directory.fd}/${path.basename(artifactPath)}`;
+      const file = await fs.open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile()) return { state: 'unavailable' };
+        if (!Number.isFinite(capturedAt) && stat.mtimeMs <= cutoff) return { state: 'expired' };
+        raw = await file.readFile('utf8');
+      } finally { await file.close(); }
+    } finally { await directory.close(); }
     // Reapply today's structured redaction to historical captures. Parse first
     // so blank/partial/corrupt artifacts never appear as captured requests.
     const body = JSON.parse(raw);
     if (!body || typeof body !== 'object' || Array.isArray(body)) return { state: 'unavailable' };
+    if (!includeBody) return { state: 'available' };
     return { state: 'available', artifactPath, body: history ? JSON.parse(redactStructuredJsonText(raw)) : body };
   } catch (error) {
-    if (error?.code === 'ENOENT' || error instanceof SyntaxError) return { state: 'unavailable' };
+    if (['ENOENT', 'ENOTDIR', 'ELOOP', 'EACCES', 'EPERM'].includes(error?.code) || error instanceof SyntaxError) return { state: 'unavailable' };
     throw error;
   }
 }
@@ -111,7 +125,7 @@ export async function latestProviderRequest({ traceSessionRoot, sessionId = 'def
   for (const run of runs) {
     if (runId && run.name !== runId) continue;
     const requests = (await readJsonLines(path.join(run.runDir, 'model.jsonl')))
-      .filter((record) => record?.sessionId === sessionId && record?.payload?.stage === 'model-request' && !isInternalRequest(record) && (!requestId || record.payload?.requestId === requestId))
+      .filter((record) => record?.runId === run.name && record?.sessionId === sessionId && record?.payload?.stage === 'model-request' && !isInternalRequest(record) && (!requestId || record.payload?.requestId === requestId))
       .reverse();
     for (const record of requests) {
       const capture = await captureForRecord(run.runDir, record, { includeBody: true, nowMs });

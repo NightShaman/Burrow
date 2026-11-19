@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { PostgresAgentRunFeed } from './postgres-agent-run-feed.mjs';
 import { createSessionRecallBackfillWorker } from './postgres-session-recall-backfill.mjs';
 import { PostgresConversationEmbeddings } from './postgres-conversation-embeddings.mjs';
@@ -95,7 +96,7 @@ export async function createPostgresApplication({
     workingMemory: new PostgresWorkingMemoryStore({ ...common, retention: retention || (client => workingMemoryRetention.read(client)), ...(clock ? { clock } : {}) }),
     apiTokens: new PostgresApiTokenStore({ pool: sharedPool, ...(clock ? { clock } : {}) }),
     skillSources: new PostgresSkillSources({ ...common, ...(clock ? { clock } : {}) }),
-    skills: new PostgresSkillSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
+    skills: new PostgresSkillSettingsStore({ ...common, ...(runtimeRoot ? { packageRoot: path.join(runtimeRoot, 'skill-packages') } : {}), ...(clock ? { clock } : {}) }),
     setupState: new PostgresSetupStateStore({ ...common, ...(clock ? { clock } : {}) }),
     retentionSettings: new PostgresRetentionSettingsStore({ ...common, ...(clock ? { clock } : {}) }),
     workingMemoryRetention,
@@ -137,6 +138,7 @@ export async function createPostgresApplication({
         () => stores.sessionRecallBackfill.close(),
         () => stores.conversationEmbeddings.close(),
         () => stores.brainEmbeddings.close(),
+        () => stores.forge.close(),
         () => stores.models.close(),
         () => stores.chatInputs.close(),
         () => stores.conversations.close(),

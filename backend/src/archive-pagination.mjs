@@ -31,6 +31,24 @@ export function archivePage(rows, { limit = 100, cursor = null, scope = '', time
   return { items: page.map(({ row }) => row), hasMore, nextCursor: hasMore ? archiveCursor({ scope, timestamp: last.t, identity: last.i }) : null };
 }
 
+// The run directory seeks by this tuple in SQL and uses the same tuple
+// to merge pages across agents. JSON encoding only transports the tuple.
+export const archiveRunOccurrence = ({ runId, sessionId, agentId }) => [runId, sessionId, agentId];
+export function archiveRunBoundary(identity) {
+  try {
+    const tuple = JSON.parse(identity);
+    if (Array.isArray(tuple) && tuple.length === 3 && tuple.every(value => typeof value === 'string' && value.length && !value.includes('\0'))) return tuple;
+  } catch {}
+  throw new Error('archive_cursor_invalid');
+}
+export function compareArchiveRunPosition(left, right) {
+  for (let index = 0; index < left.length; index++) {
+    const compared = Buffer.compare(Buffer.from(left[index]), Buffer.from(right[index]));
+    if (compared) return -compared;
+  }
+  return 0;
+}
+
 export function archiveUtcDay(value) {
   const date = String(value || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) throw new Error('archive_date_invalid');

@@ -266,13 +266,20 @@ export async function restorePortableInstall({ archive, home = process.env.HOME 
     if (process.getuid?.() !== plan.owner.uid || process.getgid?.() !== plan.owner.gid) await applyOwnership(stagedRoot, plan.owner);
     const previousRoot = path.join(staging, 'previous-install');
     let previousMoved = false;
-    if (plan.targetExists) {
-      await fs.rename(plan.target, previousRoot);
-      previousMoved = true;
+    if (plan.replace) {
+      try {
+        await fs.rename(plan.target, previousRoot);
+        previousMoved = true;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
+    // Without --replace, rename itself atomically refuses a nonempty target.
+    // Do not move the target aside based on a stale preflight observation.
     try {
       await fs.rename(stagedRoot, plan.target);
     } catch (activationError) {
+      if (!plan.replace && ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR'].includes(activationError.code)) {
+        throw new Error(`restore target exists: ${plan.target}; pass --replace with --confirm to replace it`, { cause: activationError });
+      }
       if (previousMoved) {
         try { await fs.rename(previousRoot, plan.target); }
         catch (rollbackError) {

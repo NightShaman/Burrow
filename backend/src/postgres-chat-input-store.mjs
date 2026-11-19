@@ -477,7 +477,7 @@ export class PostgresChatInputStore {
       return rows.map(row => publicRow(row));
     });
   }
-  async reconcileInterrupted({ ownerId } = {}) {
+  async reconcileInterrupted({ ownerId, onScopeFailure = null } = {}) {
     if (ownerId !== undefined) required(ownerId, 'ownerId');
     const probe = createContinuityOwner(this.pool);
     try {
@@ -487,7 +487,13 @@ export class PostgresChatInputStore {
         const startedAt = performance.now();
         // The shared reset boundary serializes death probing against active
         // terminal guards and against reset while examining session state.
-        const value = await probe.guard(() => withPostgresTransaction(this.pool, async client => {
+        const value = await withPostgresTransaction(this.pool, async client => {
+          const key = migrationLockKey(`burrow-session-boundary:${JSON.stringify([candidate.agent_id, candidate.session_id])}`);
+          // A current finalizer may own this boundary for a long time. Retry
+          // this candidate on the next wake without stalling unrelated claims.
+          if (!(await client.query('SELECT pg_try_advisory_xact_lock($1::bigint) AS acquired', [key])).rows[0].acquired) return null;
+          const locked = await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE SKIP LOCKED', [candidate.agent_id, candidate.session_id]);
+          if (!locked.rowCount) return null;
           const now = nowIso(this.clock), current = await sessionLock(client, [candidate.agent_id, candidate.session_id], now);
           const row = (await client.query('SELECT * FROM chat_inputs WHERE id=$1 FOR UPDATE', [candidate.id])).rows[0];
           if (!row || row.status !== 'running' || (ownerId !== undefined && row.owner_id !== ownerId) || await probe.alive(row.owner_lock_id)) return null;
@@ -495,7 +501,11 @@ export class PostgresChatInputStore {
             terminal_owner_id=owner_id,terminal_owner_lock_id=owner_lock_id,owner_id=NULL,owner_lock_id=NULL WHERE id=$1 RETURNING *`, [row.id, now])).rows[0];
           if (Number(row.generation) === current) await lifecycle(client, done, now);
           return publicRow(done);
-        }), migrationLockKey(`burrow-session-boundary:${JSON.stringify([candidate.agent_id,candidate.session_id])}`));
+        }).catch(error => {
+          if (!onScopeFailure) throw error;
+          onScopeFailure(error);
+          return null;
+        });
         if (value) {
           interrupted.push(value);
           operationalTelemetry('run-interrupted', { sessionId: value.sessionId, runId: value.runId, source: value.intent === 'side_question' ? 'side_question' : 'main',

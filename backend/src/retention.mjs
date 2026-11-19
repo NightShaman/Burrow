@@ -143,6 +143,7 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
   }))).filter(Boolean);
   const traceMaxAgeDays = retention.traceMaxAgeDays ?? retention.maxAgeDays ?? null;
   const traceMaxBytes = retention.traceMaxBytes ?? null;
+  const unmarkedTraces = traces.filter(trace => !trace.eligible);
   const candidates = traceCandidates(traces, { maxAgeDays: traceMaxAgeDays, maxBytes: traceMaxBytes, nowMs })
     .map(({ expiredProviderRequests, ...entry }) => entry);
   const wholeRuns = new Set(candidates.map((entry) => entry.path));
@@ -170,6 +171,8 @@ export async function planRetentionCleanup({ dataRoot, conversationStore, taskSt
       traces: traces.length,
       traceBytes: totalTraceBytes,
       traceLogicalBytes: totalTraceLogicalBytes,
+      unmarkedTraces: unmarkedTraces.length,
+      unmarkedTraceBytes: unmarkedTraces.reduce((sum, trace) => sum + trace.allocatedBytes, 0),
       deleteSessions: sessionRetentionEnabled ? sessionCandidates.length : 0,
       deleteTraces: candidates.length,
       deleteProviderRequests: providerRequests.reduce((sum, entry) => sum + entry.paths.length, 0),
@@ -267,13 +270,24 @@ export async function runRetentionCleanup({ dataRoot, conversationStore, taskSto
       if (result?.deleted !== false) deletedSessions.push(entry.id);
     }
     const deletedTraces = [];
+    const nowMs = new Date(now).getTime();
+    const traceAgeCutoff = ageCutoffMs(plan.retention.traceMaxAgeDays, nowMs);
     for (const entry of plan.delete.traces) {
       await withRetentionLeaseGuard(`${entry.path}.writer`, async () => {
-        await validatedTraceRunPath(plan.traceRoot, entry.path);
+        try { await validatedTraceRunPath(plan.traceRoot, entry.path); }
+        catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+        if (!isContainedPath(await fs.realpath(plan.traceRoot), await fs.realpath(entry.path))) return;
         if (!await traceTerminal(entry.path)) return;
-        const current = (await listTraceRuns(plan.traceRoot));
-        if (!traceCandidates(current, { maxAgeDays: plan.retention.traceMaxAgeDays, maxBytes: plan.retention.traceMaxBytes, nowMs: new Date(now).getTime() }).some(run => run.path === entry.path)) return;
-        deletedTraces.push(await rmDir(entry.path));
+        // Age is candidate-local, so recheck just this tree while holding the
+        // same guard as its writer. Quota depends on all current retained bytes.
+        if (traceAgeCutoff !== null && (await directoryUsage(entry.path, -Infinity)).latestMs < traceAgeCutoff) {
+          deletedTraces.push(await rmDir(entry.path));
+        } else if (finitePositive(plan.retention.traceMaxBytes)) {
+          const current = await listTraceRuns(plan.traceRoot);
+          if (traceCandidates(current, { maxAgeDays: plan.retention.traceMaxAgeDays, maxBytes: plan.retention.traceMaxBytes, nowMs }).some(run => run.path === entry.path)) {
+            deletedTraces.push(await rmDir(entry.path));
+          }
+        }
       });
     }
     const deletedProviderRequests = [];

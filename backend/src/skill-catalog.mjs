@@ -133,7 +133,7 @@ export async function loadEffectiveSkillCatalog({ workspaceRoot, agentId, agentR
   let databaseSkills = [];
   if (skillStore) {
     databaseSkills = (await skillStore.effective(resolvedAgentId)).map((skill) => ({
-      ...skill, priority: 0, path: skill.storage === 'filesystem' ? 'SKILL.md' : null, sourcePath: null, absolutePath: skill.storage === 'filesystem' ? path.join(skill.installedPath,'SKILL.md') : null,
+      ...skill, priority: 0, path: skill.storage === 'filesystem' ? 'SKILL.md' : null, sourcePath: null, absolutePath: skill.storage === 'filesystem' && skill.installedPath ? path.join(skill.installedPath,'SKILL.md') : null,
       sourceExists: true, owner: { scope: skill.global ? 'global' : 'agent', agentId: skill.global ? null : resolvedAgentId },
       ownership: { scope: skill.storage || 'postgres', agentId: skill.global ? null : resolvedAgentId, contentOwner: skill.contentOwner, storage: skill.storage || 'postgres' },
       portability: { memoryIndexable: true, memoryStoresBody: false },

@@ -581,18 +581,18 @@ export async function listArchiveRunSummariesPage({ rootDir, conversationStore, 
   return { runs, hasMore: directory.hasMore };
 }
 
-export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, runId, signal, deadline } = {}) {
+export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, runId, signal, deadline } = {}) {
   if (!rootDir || !agentId || !runId) throw new Error('archive_run_target_required');
   const options = { signal, deadline };
   archiveReadCheckpoint(options);
   const subagentRecords = dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500, ...options }) : [];
   if (typeof conversationStore?.readArchiveRunSource === 'function') {
-    const source = await conversationStore.readArchiveRunSource({ agentId, runId, ...options });
+    const source = await conversationStore.readArchiveRunSource({ agentId, sessionId, runId, ...options });
     archiveReadCheckpoint(options);
     if (!source) return null;
     return proofDetail({ conversationStore, agentId, agentName, sessionId: source.sessionId, runId, entries: source.entries, evidence: source.evidence, subagentRecords, traceRoot: traceRootFor({ traceRoot, resolveTraceRoot, sessionId: source.sessionId }), ...options });
   }
-  for (const session of await recordsFor(conversationStore, agentId, null, options)) {
+  for (const session of await recordsFor(conversationStore, agentId, sessionId, options)) {
     const [entries, evidence] = await archiveReadTasks([
       readOptions => evidenceTranscript({ conversationStore, agentId, sessionId: session.id, includeResetHistory: true, ...readOptions }),
       readOptions => readRunEvidence({ conversationStore, agentId, rootDir, sessionId: session.id, limit: MAX_RUNS, ...readOptions }),

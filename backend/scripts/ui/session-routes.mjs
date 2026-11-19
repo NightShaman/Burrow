@@ -161,7 +161,7 @@ export function createSessionRoutes({
       if (!runId) { sendJson(res, 400, { ok: false, error: 'archive_run_target_required' }); return true; }
       const agentId = url.searchParams.get('agentId');
       const agentRuntime = agentId ? await resolveArchiveAgentRuntime(agentId, readOptions) : null;
-      const run = await archiveRunDetail({ ...readOptions, agentRuntime, runId });
+      const run = await archiveRunDetail({ ...readOptions, agentRuntime, runId, sessionId: url.searchParams.get('sessionId') });
       sendJson(res, run ? 200 : 404, run ? { ok: true, run } : { ok: false, error: 'archive_run_not_found' });
       return true;
     }

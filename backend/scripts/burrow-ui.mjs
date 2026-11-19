@@ -242,6 +242,11 @@ const otelRuntime = createReconfigurableOtelRuntime({ serviceVersion: releaseVer
 await otelRuntime.apply(await readOtelRuntimeConfig({ store: postgresApplication.stores.opentelemetry, metadata: postgresApplication.stores.metadata }));
 await runtimeConfig();
 await runtimeOwnership.reconcileModJobs(postgresApplication.stores);
+await postgresApplication.stores.forge.reconcileAbandonedRuntimeJobs(runtimeOwnership);
+// The exclusive UI runtime reconciles previous occurrences before mod or HTTP
+// callers can admit a new Run Now. Missed recurrences also need loaded mod IDs.
+await postgresApplication.stores.tasks.reconcileInterruptedExecutions();
+await postgresApplication.stores.scheduledJobs.markMissedRuns();
 const generationDispatcher = createModGenerationDispatcher({ logger: serverLogger, store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
 const {
   modelConnections, startClaudeCodeLoginApi, claudeCodeLoginStatus,
@@ -699,8 +704,11 @@ async function agentDreamCycle(agentId, body = null, query = {}) {
     if (context.agent?.modAgent) return { ok:false, status:409, error:'agent_dream_managed_by_mod' };
     return { ok: true, result: await runDreamCycle({ agentId, rootDir: context?.agentWorkspaceRoot || null, limit: body.limit, generatedAt: body.generatedAt, stores: postgresApplication.stores || undefined }) };
   } catch (error) {
-    const message = String(error?.message || error);
-    return { ok: false, status: message === 'agent_not_found' ? 404 : 400, error: message };
+    if (error?.message === 'agent_not_found') return { ok: false, status: 404, error: 'agent_not_found' };
+    // The runner persists a bounded, redacted receipt. Do not echo raw
+    // exceptions from runtime resolution, model config, or storage here.
+    const code = error?.message === 'dream_cycle_disabled' ? 'dream_cycle_disabled' : 'dream_cycle_unavailable';
+    return { ok: false, status: 400, error: code };
   }
 }
 
@@ -1681,7 +1689,7 @@ const runtimeDiagnostics = Object.freeze({
     }
     if (operation === 'metrics') return runtimeMetrics();
     if (operation === 'inventory') {
-      const modInventory = await modDistribution.list();
+      const modInventory = await modDistribution.readInventory();
       const installed = modInventory.mods.filter((mod) => mod.status === 'installed');
       return { ok: true, inventory: { mcp: { configured: (await mcpStore().list()).length }, mods: { installed: installed.length, enabled: installed.filter((mod) => mod.enabled === true).length } } };
     }
@@ -1890,7 +1898,7 @@ async function handleRequest(req, res) {
     }
     if (req.method === 'GET' && url.pathname === '/api/diagnostics/inventory') {
       const mcpConfigured = (await mcpStore().list()).length;
-      const modInventory = await modDistribution.list();
+      const modInventory = await modDistribution.readInventory();
       const installedMods = modInventory.mods.filter((mod) => mod.status === 'installed');
       return sendJson(res, 200, {
         ok: true,
@@ -2008,6 +2016,7 @@ function closeOnlyProducer(resource) {
 const openaiResetScheduler = startOpenAiResetScheduler(pollExpiringResets, { logger: serverLogger });
 const archiveReadProducer = closeOnlyProducer(archiveReadProcess);
 const skillSyncProducer = closeOnlyProducer(skillGitSync);
+const forgeProducer = postgresApplication.stores.forge;
 const modDistributionProducer = closeOnlyProducer({ async close() {
   // Drain durable work while hosts and PostgreSQL remain alive. Host teardown
   // must not cancel a submitted operation, including manager self-updates.
@@ -2021,7 +2030,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, forgeProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
@@ -2086,6 +2095,9 @@ server.listen(port, host, () => {
       disabled: modLifecycle.getMods().filter(mod => mod.status === 'disabled').length, failed: modLifecycle.getMods().filter(mod => mod.status === 'failed').length },
   });
   await serverLogger.event('listener_started', { host, port, pid: process.pid, version: releaseVersion });
+  forgeProducer.startArtifactCleanup({ onError: () => {
+    void serverLogger.event('forge_artifact_cleanup_failed', {}, { level: 'warn', component: 'forge' }).catch(() => {});
+  } });
   const forgeDelivery = await postgresApplication.stores.forge.reconcileChatDeliveries();
   if (forgeDelivery.failed) await serverLogger.event('forge_delivery_recovery_failed', forgeDelivery, { level: 'warn', component: 'forge' });
   await postgresApplication.stores.dreamCycles.reconcileInterrupted();
@@ -2093,8 +2105,7 @@ server.listen(port, host, () => {
   if (backgroundSchedulersEnabled()) {
     void managedSkillSynchronizer.start().catch(() => {}); // Synchronizer owns failure/recovery diagnostics.
     void skillGitSync.start().catch(error => serverLogger.event('skill_sync_startup_failed',{ error }, { level: 'warn', component: 'skills' }));
-    const store = postgresApplication.stores.scheduledJobs;
-    try { await postgresApplication.stores.tasks.reconcileInterruptedExecutions(); await store.markMissedRuns(); await store.markMissedSchedules({ activeOwnerModIds: modLifecycle.getMods().filter((mod) => mod.status === 'loaded').map((mod) => mod.id) }); } finally { /* Shared application store remains open. */ }
+    await postgresApplication.stores.scheduledJobs.markMissedSchedules({ activeOwnerModIds: modLifecycle.getMods().filter((mod) => mod.status === 'loaded').map((mod) => mod.id) });
     if (shuttingDown) return;
     await completionEventRunner.start();
     await chatInputRunner.start();

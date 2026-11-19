@@ -148,23 +148,27 @@ export function createBoardTaskExecutor({
         completionEvidence: result.completionEvidence || null,
       };
       const receipt = { agentId: agentRuntime.agentId, sessionId, runId, decision: result.decision || null, ...outcome, executedAt: new Date().toISOString(), traceDir: result.traceDir || null, error: outcome.ok ? null : (result.error || result.blockedReason || result.decision || outcome.status), result: taskResult };
-      let recorded;
-      try { recorded = await withTaskBoard(store => store.recordExecution(task.id, receipt, { actor: { type: 'agent', id: agentRuntime.agentId } })); }
-      catch (error) {
-        // A COMMIT acknowledgement can fail after the task receipt persisted.
-        // Reconcile only this exact owner; never turn uncertain persistence into
-        // a contradictory failed task or a second execution.
-        const current = await withTaskBoard(store => store.getTask(task.id));
-        if (current?.execution?.runId !== runId || current.execution.agentId !== agentRuntime.agentId || current.execution.sessionId !== sessionId || !['completed','failed','cancelled'].includes(current.execution.status)) throw error;
-        recorded = current;
-      }
-      if (recorded === null) {
-        const current = await withTaskBoard(store => store.getTask(task.id));
-        if (current?.execution?.runId !== runId || !['completed','failed','cancelled'].includes(current.execution.status)) return { ok:false, status:'failed', decision:'superseded', runId, error:'task_execution_owner_changed' };
-        recorded = current;
-      }
-      const canonical = recorded?.execution || receipt;
-      return { ...result, ...canonical.result, status:canonical.status, ok:canonical.ok, decision:canonical.decision, error:canonical.error, traceDir:canonical.traceDir, runId };
+      const persistTerminal = async () => {
+        let recorded;
+        try { recorded = await withTaskBoard(store => store.recordExecution(task.id, receipt, { actor: { type: 'agent', id: agentRuntime.agentId } })); }
+        catch (error) {
+          // A COMMIT acknowledgement can fail after the exact task receipt persisted.
+          const current = await withTaskBoard(store => store.getTask(task.id));
+          if (current?.execution?.runId !== runId || current.execution.agentId !== agentRuntime.agentId || current.execution.sessionId !== sessionId || !['completed','failed','cancelled'].includes(current.execution.status)) throw error;
+          recorded = current;
+        }
+        if (recorded === null) {
+          const current = await withTaskBoard(store => store.getTask(task.id));
+          if (current?.execution?.runId !== runId || !['completed','failed','cancelled'].includes(current.execution.status)) return { ok:false, status:'failed', decision:'superseded', runId, error:'task_execution_owner_changed' };
+          recorded = current;
+        }
+        const canonical = recorded?.execution || receipt;
+        return { ...result, ...canonical.result, status:canonical.status, ok:canonical.ok, decision:canonical.decision, error:canonical.error, traceDir:canonical.traceDir, runId };
+      };
+      // A scheduled caller can retain the exact task receipt's write operation
+      // if this attempt throws; it must never rerun the board turn.
+      options.onTerminalReceipt?.(persistTerminal);
+      return persistTerminal();
     }).finally(() => {
       options.abortSignal?.removeEventListener('abort', abort);
       if (activeChatRuns.get(activeChatRunKey(agentRuntime.agentId, runId)) === record) activeChatRuns.delete(activeChatRunKey(agentRuntime.agentId, runId));

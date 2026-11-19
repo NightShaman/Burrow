@@ -407,10 +407,10 @@ export class PostgresScheduledJobStore {
   // Persist the canonical terminal outcome in the existing run row before
   // completing it. A restart can reconcile it without invoking the prompt.
   async stageRunResult(runId, terminal) {
-    if (!['completed', 'failed', 'cancelled'].includes(terminal?.status)) throw new Error('scheduled_job_run_status_invalid');
+    if (!['completed', 'failed', 'cancelled', 'skipped'].includes(terminal?.status)) throw new Error('scheduled_job_run_status_invalid');
     return this.pool.query(
-      "UPDATE scheduled_job_runs SET result_json=$1::jsonb,updated_at=$2 WHERE id=$3 AND status='running'",
-      [json({ scheduledTerminal: terminal }), timestamp(this.clock), id(runId, 'scheduled_job_run_id')],
+      "UPDATE scheduled_job_runs SET result_json=$1::jsonb,updated_at=$2 WHERE id=$3 AND status='running' AND NOT (result_json ? 'scheduledTerminal') AND (run_id IS NULL OR run_id=$4)",
+      [json({ scheduledTerminal: terminal }), timestamp(this.clock), id(runId, 'scheduled_job_run_id'), terminal.runId || null],
     );
   }
   // Only a completed continuity transition plus the exact runtime-owned
@@ -450,10 +450,10 @@ export class PostgresScheduledJobStore {
         const task = row.task_execution;
         const taskTerminal = task && row.run_id && task.runId === row.run_id && task.agentId === row.agent_id && task.sessionId === row.session_id && ['completed','failed','cancelled'].includes(task.status);
         const staged = parseJson(row.result_json).scheduledTerminal;
-        const stagedTerminal = staged && staged.runId === row.run_id && ['completed','failed','cancelled'].includes(staged.status) ? staged : null;
+        const stagedTerminal = staged && (!row.run_id || staged.runId === row.run_id) && ['completed','failed','cancelled','skipped'].includes(staged.status) ? staged : null;
         const terminal = stagedTerminal || (taskTerminal ? { ...task, ...classifyRuntimeOutcome(task) } : await this.completedChatTerminal(client, row));
-        const outcome = terminal ? classifyRuntimeOutcome(terminal) : { status: 'missed', ok: false };
-        await client.query('UPDATE scheduled_job_runs SET status=$1,ok=$2,completed_at=$3,error=$4,trace_dir=$5,decision=$6,result_json=$7::jsonb,updated_at=$3 WHERE id=$8', [outcome.status,outcome.ok,when,terminal ? terminal.error || null : 'scheduler_restart_before_completion',terminal ? terminal.traceDir || null : null,terminal ? terminal.decision || null : null,json(terminal ? terminal.result : {}),row.id]);
+        const outcome = terminal?.status === 'skipped' ? { status: 'skipped', ok: false } : terminal ? classifyRuntimeOutcome(terminal) : { status: 'missed', ok: false };
+        await client.query('UPDATE scheduled_job_runs SET status=$1,ok=$2,completed_at=$3,error=$4,trace_dir=$5,decision=$6,result_json=$7::jsonb,updated_at=$3,run_id=COALESCE(run_id,$9),dispatched_at=COALESCE(dispatched_at,$10) WHERE id=$8', [outcome.status,outcome.ok,when,terminal ? terminal.error || null : 'scheduler_restart_before_completion',terminal ? terminal.traceDir || null : null,terminal ? terminal.decision || null : null,json(terminal ? terminal.result : {}),row.id,terminal?.runId || null,terminal?.dispatchedAt || null]);
       }
       return rows.length;
     });
@@ -603,6 +603,10 @@ export class PostgresScheduledJobStore {
       );
       const current = runRow(result.rows[0]);
       if (!current || current.status !== "running") return current;
+      if (input.runId && current.runId && input.runId !== current.runId) throw new Error('scheduled_job_receipt_fenced');
+      // A previously staged outcome is authoritative, including after a lost
+      // acknowledgement. Never replace it with the caller's subsequent patch.
+      input = current.result.scheduledTerminal || input;
       if (input.status && (!["completed", "failed", "cancelled", "skipped"].includes(text(input.status)))) throw new Error("scheduled_job_run_status_invalid");
       const outcome = input.status === 'skipped' ? { status: 'skipped', ok: false } : classifyRuntimeOutcome(input);
       const status = outcome.status;

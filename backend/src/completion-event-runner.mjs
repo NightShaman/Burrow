@@ -43,6 +43,7 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
   let started = false;
   let starting = null;
   let closing = null;
+  let flushing = null;
 
   async function run(event) {
     let activeRun;
@@ -84,18 +85,20 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
     finally { activeRun?.finish?.(); }
   }
 
-  async function flushReceipts() {
-    for (const [id, receipt] of terminalReceipts) {
-      try {
-        await store.complete(id, receipt);
-        if (terminalReceipts.get(id) === receipt) terminalReceipts.delete(id);
-      } catch (error) {
-        lifecycle.reportFailure(error, 'terminal_persistence');
-        // Do not spin on a dead database. The next local wake retries this same
-        // receipt before new admission, including ambiguous committed writes.
-        return;
+  function flushReceipts() {
+    flushing ||= (async () => {
+      for (const [id, receipt] of terminalReceipts) {
+        try {
+          await store.complete(id, receipt);
+          terminalReceipts.delete(id);
+        } catch (error) {
+          if (error?.message === 'completion_event_owner_fenced') terminalReceipts.delete(id);
+          else lifecycle.reportFailure(error, 'terminal_persistence');
+          // One stale or temporarily unwritable receipt never hides the next.
+        }
       }
-    }
+    })().finally(() => { flushing = null; });
+    return flushing;
   }
 
   function wake() {
@@ -108,17 +111,18 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
         initialized = true;
       }
       await flushReceipts();
-      while (!lifecycle.stopped && active.size + terminalReceipts.size < maxConcurrent) {
+      while (!lifecycle.stopped && new Set([...active, ...terminalReceipts.keys()]).size < maxConcurrent) {
         const event = await store.claim({ ownerId });
         if (!event) break;
         if (lifecycle.stopped) {
-          await store.complete(event.id, { ownerId, ownerLockId: event.ownerLockId, status: 'interrupted', error: 'service_shutdown' });
+          terminalReceipts.set(event.id, { ownerId, ownerLockId: event.ownerLockId, status: 'interrupted', error: 'service_shutdown' });
+          await flushReceipts();
           break;
         }
         const execution = lifecycle.track(() => run(event), 'dispatch');
-        active.add(execution);
+        active.add(event.id);
         execution.finally(() => {
-          active.delete(execution);
+          active.delete(event.id);
           // Let the claim pump finish before a very fast turn schedules another.
           queueMicrotask(() => { if (!lifecycle.stopped) void wake().catch(() => {}); });
         }).catch(() => {});

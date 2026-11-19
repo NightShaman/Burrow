@@ -42,7 +42,7 @@ export function createSkillSourceRoutes({sources,skills,sync,pool,readJsonBody,s
      const known=(await pool.query('SELECT 1 FROM skill_package_files WHERE skill_id=$1 AND file_path=$2',[id,relative])).rowCount;
      if(skill.storage!=='filesystem'||!known)throw skillSourceError('skill_file_not_found',404);
      // Reject local symlink tampering, including parent directories.
-     let target=skill.installedPath;if((await fs.lstat(target)).isSymbolicLink())throw skillSourceError('skill_local_changes',409);
+     let target=await sync.packagePath(skill);
      for(const part of relative.split('/')){target=path.join(target,part);if((await fs.lstat(target)).isSymbolicLink())throw skillSourceError('skill_local_changes',409);}
      const bytes=await fs.readFile(target);
      // Download only: never execute repo-provided HTML/scripts in the application origin.
