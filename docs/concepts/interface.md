@@ -459,3 +459,11 @@ This page was fully reconciled statically against the [current implementation ba
 ## Forge effects and motion
 
 Checked **17 November 2026**: Forge effects follow the active job and reveal the completed artifact only when it is ready. The effects control and operating-system reduced-motion preference suppress unnecessary animation; hidden/inactive surfaces stop their animation clock. Motion/pressure labels are presentation, not provider progress or execution verification. Existing gallery and job status remain the authoritative controls.
+
+## Minion activity and retained Proof search
+
+Checked **18 November 2026**: Minion tool activity stays visible during execution and in retained chat history, including after a page reload or opening the child conversation. Native Codex, Claude and Gemini activity uses observed tool events with bounded safe labels; arbitrary MCP tools use a generic label. Interrupted, blocked or unobserved completion is not displayed as successful execution. Activity rows do not enter the model's dialogue, and display persistence is separate from native session/checkpoint writes.
+
+**Archive → Proof** searches retained server-side run summaries, rather than only the first page already loaded in the browser. Search can match a run ID, displayed agent name (or ID when unnamed), objective or status. **Load more** continues the same search and scope. This is summary search, not full-text search of every raw tool output.
+
+Open a run's **Redacted provider requests** section to list recorded requests and select a body. **Compare requests** opens two independent selectors; choose the actual before/after requests rather than assuming they are automatically paired. Bodies are retained for three days. Expired, not captured, unavailable and an empty request list are distinct states. Review these private contents before sharing, even after redaction.

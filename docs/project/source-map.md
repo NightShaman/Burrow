@@ -2,14 +2,16 @@
 
 The operator guide follows inspected current development implementation, without waiting for the daily public-source mirror. The Sunday reconciliation on **15 November 2026** compared every Burrow and Skills page with source for its setup, configuration, API, operations, troubleshooting, and historical scope. This is static documentation reconciliation, not a runtime acceptance test.
 
+The **18 November** ordinary delta review reconciled recovery-message attribution, selected project context, native Minion activity, provider request diagnostics and Archive Proof search. Unchanged pages retain their dated full-review coverage. No live agent task tests were run.
+
 ## Current implementation baseline
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.18.2` | `c86b52002d80163220159ffd3b83f3c97104094a` |
-| Core / Backend | `07f87f05e886c741f907d8bfeaa1de9ba5451192` |
-| UI | `0f85a6ad649d24392df87ddf49b5e06f18de9f85` |
-| Skills | `91288f15d6fa32ddb0562504b68d4d193eb28b20` |
+| Assembled Burrow, build `2026.11.18.11` | `d2ce0ae1e48674abaaf413f975a758b7805b2a7b` |
+| Core / Backend | `706b9d4de5d540bdf2233027915421e0a9511eb0` |
+| UI | `170fb6a4b4dc114489b2db451dc3c8c06b4a7b4f` |
+| Skills | `0a5305aff455291f54224710ca3cdcd8c26f90c3` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -175,3 +177,4 @@ Checks cover documentation builds, links and non-executing skill/reference struc
 The scheduled Tuesday pass compared the successful 15 November baseline through assembly **2026.11.18.2**, `c86b52002d80163220159ffd3b83f3c97104094a`, with Backend `07f87f05e886c741f907d8bfeaa1de9ba5451192` and UI `0f85a6ad649d24392df87ddf49b5e06f18de9f85`. Updated contracts cover explicitly requested Gemini Minions, per-harness model defaults/locks, Anthropic Full reset activation, single-batch continuation recaps, separate runtime context and scoped inspection, addressed participant shared guidance, diagnostics/native telemetry and Forge motion controls.
 
 This is source and test-definition inspection, not application/provider execution, live authentication, installed CLI compatibility, collector ingestion or runtime deployment. Unchanged material retains the Sunday full-review scope. Development source pins do not prove that public mirrors or installed builds already include these behaviors.
+

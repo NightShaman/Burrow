@@ -64,7 +64,7 @@ The provider-facing message projection separates:
 3. Prior conversation summary and recent role-preserving dialogue
 4. Fresh runtime/support context on its separate developer channel, with provenance
 5. Current shared mod guidance
-6. The current user instruction and current attachments
+6. The current user instruction and current attachments, or runtime-owned developer recovery context for a claimed restart recovery turn
 
 This is different from the flattened diagnostic prompt and from the broad section names in the runtime contract. Prior summaries are support for continuity, not replacement source evidence. Attributed peer messages preserve their origin instead of masquerading as user instructions.
 
@@ -184,3 +184,9 @@ Checked **17 November 2026**: fresh runtime support follows reusable dialogue an
 Full host inventory, browser target and retained attachment listings are available on demand through `runtime_context_inspect`, rather than injected into every conversational message. Current uploads remain attached to the current request. The scoped tool cannot select another agent, session, host or arbitrary path. Old execution digests are not fresh dialogue. Interrupted recovery support requires an interrupted state plus pending work or current ownership; recent file references are rebuilt from bounded eligible persisted turns/receipts and clear on an explicit workspace change.
 
 Shared mod context receives Core-resolved addressed participants and registry-owned tags. Outgoing A2A delivery can add a canonical peer for the sender's continuation after the tool batch; fresh shared guidance replaces its predecessor. Failed pre-ingress sends do not add participants. The next turn rebuilds its own addressed set. See [shared guidance](../development/extensions.md#enabled-mod-shared-guidance).
+
+## Recovery attribution and execution-root provenance
+
+Checked **18 November 2026**: a restart recovery turn requires a durable recovery claim. Its synthetic instruction and checkpoint enter the provider request as runtime-owned developer context, not a new operator message. The trigger is not appended to ordinary operator dialogue, reclassified by the planner, or used as fresh conversational residue. Checkpoint details are evidence to reconcile within the original objective, not permission for new work. This also applies when recovery resumes a native child.
+
+A peer A2A delivery uses the recipient's configured execution assignment without recording that default as an explicit project/workspace request. Explicit structured targets still take precedence. Ambiguous older workspace hints are retired without erasing separate file evidence or changing execution settings. The workspace resolver does not inspect the filesystem, infer a project from prose, or look up project metadata.

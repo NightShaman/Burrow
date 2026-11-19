@@ -67,7 +67,7 @@ The current UI allows 120 seconds for reset instead of the ordinary 30-second JS
 | `/api/archive/calendar` | `kind`, `month`, `timezone`, `agentId` |
 | `/api/archive/sessions` | `archived` (default included), `q`, `agentId`, `date`, `timezone`, `limit` (default 200), `cursor` |
 | Session detail | `limit` (default 100), `before`, `from`, `to` |
-| `/api/archive/runs` | `agentId`, `sessionId`, `limit` (default 100), `cursor` |
+| `/api/archive/runs` | `agentId`, `sessionId`, `query`, `limit` (default 100), `cursor` |
 | `/api/archive/dreams` | `agentId`, `date`, `timezone`, `phase`, `limit` (default 200), `cursor` |
 | `/api/archive/continuity/cards` | `agentId`, `scope`, `limit` (default 200), `cursor` |
 
@@ -174,3 +174,7 @@ Session rename/fork destination conflicts return HTTP 409 with the specific conf
 ## 15 November 2026 static API reconciliation
 
 Reviewed this page against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d` and UI `171b19da7ce074fbcb19fa1ed20dfd58e9133cb5`, including mounted routes and their relevant stores/UI callers. Corrections above describe implementation, not a live API, database or provider test. Earlier dated receipts remain historical.
+
+## Retained Proof search
+
+Checked **18 November 2026**: `GET /api/archive/runs` accepts optional `query` to search retained run summaries on the server, including run ID, displayed agent name (or ID when unnamed), objective and status. Matching is case-insensitive literal substring search after trimming the query. It is not a raw-tool-output search. The opaque cursor is bound to the query and agent/session scope; begin a fresh page sequence when those change. The default page size remains 100, capped at 200.

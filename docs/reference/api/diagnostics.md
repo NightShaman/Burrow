@@ -126,3 +126,11 @@ Changed contracts above were checked statically against Backend `4057b50a5d5a9b1
 ## 15 November full static review
 
 Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.
+
+## Historical provider requests
+
+Checked **18 November 2026**: `GET /api/traces/{runId}/provider-requests` accepts `agentId`, `sessionId` (default `default`) and optional `requestId`. Without `requestId`, it returns `{ok, runId, retentionDays, requests}` in recorded order. Metadata includes request ID/time, provider, model, API, model call, continuation flag and capture state. With `requestId`, it returns `{ok, runId, request}` and includes `body` only for an available saved capture.
+
+Bodies expire after **3 days**. States are `available`, `expired`, `not_captured` and `unavailable`. An empty request list is not a reconstructed body. The reader checks recorded run/session identity and reads only the matching request artifact; historical body reads reapply current structured redaction. Private prompt/profile/tool contents can remain, so redaction does not make this a public-safe export. Responses set `Cache-Control: no-store`.
+
+An invalid run ID returns 400 `trace_run_id_invalid`; invalid or repeated `requestId` returns 400 `provider_request_id_invalid`. Missing/mismatched trace scope returns 404 `trace_not_found`; an absent requested record returns 404 `provider_request_not_found`. Use the actual recorded run and request identities rather than filesystem paths.

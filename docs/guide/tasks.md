@@ -121,3 +121,7 @@ This page was fully reconciled statically against the [current implementation ba
 ### Minion model defaults and locks
 
 Checked **17 November 2026**: a saved model is a default, not an automatic lock. Enable **Lock model** for a harness to enforce that model for new children. With the lock off, a child request can choose another enabled eligible model on the same connection or pool; it cannot silently switch connections. Clearing the model clears its lock. Existing children keep their admission bindings. Gemini is explicitly requested, rather than a default harness, and requires a direct Google API-key connection.
+
+## Keep project context separate from an execution directory
+
+Checked **18 November 2026**: a configured local/remote execution workspace says where tools run; it is not an explicit project choice. Peer A2A delivery uses the recipient's execution assignment without converting it into an active project claim. For a known project, use the existing `$project` picker above or put the relevant project notes, explicit paths, host and verification expectations in the delegated task. Do not tell a Minion to use an invented native project-metadata lookup tool: the structural workspace resolver performs no such lookup. Named paths and supplied notes remain context, not access grants or proof that a path exists.
