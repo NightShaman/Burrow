@@ -4,7 +4,7 @@
 // structured field is known to be sensitive, or when an exact protected value is
 // supplied by the credential/tool boundary.
 const SECRET_BLOCK = /<secret(?:\s+[^>]*)?>[\s\S]*?<\/secret>/gi;
-const SENSITIVE_FIELD = /^(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|client[_-]?secret|password|passwd|credential|credentials|private[_-]?key|auth|authorization)$/i;
+const SENSITIVE_FIELD = /^(?:token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|client[_-]?secret|password|passwd|credential|credentials|private[_-]?key|auth|authorization|encrypted_content)$/i;
 
 function isSensitiveField(key) {
   return SENSITIVE_FIELD.test(String(key || ''));

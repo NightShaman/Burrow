@@ -1,9 +1,13 @@
+import { isResponsesReasoning } from './openai-reasoning.mjs';
 import { chatToolContinuationMessages } from './adapter-primitives.mjs';
 import { isPreparedPoolReplay } from '../pool-replay-attestation.mjs';
 import { normalizeProviderMessages } from '../provider-messages.mjs';
 
 const fail = (reason) => { throw new Error(`provider_pool_replay_${reason}`); };
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const MESSAGE_KEYS = ['role', 'content', 'tool_calls', 'tool_call_id', 'continuationRecap'];
+const validReplayFields = (message, family) => Object.keys(message).every(key => MESSAGE_KEYS.includes(key) ||
+  (key === 'responsesReasoning' && family === 'openai' && message.role === 'assistant' && isResponsesReasoning(message.responsesReasoning)));
 
 // Only the actual adapter's returned request transcript proves what the old
 // account saw. A caller-supplied suffix (even a perfectly paired suffix) does
@@ -15,7 +19,7 @@ export function portablePoolReplay(args, family) {
       !Array.isArray(baseMessages) || !baseMessages.length || !Array.isArray(preparedMessages) || !preparedMessages.length ||
       !Array.isArray(toolCalls) || !toolCalls.length || !Array.isArray(toolResults) || toolResults.length !== toolCalls.length) fail('incomplete_history');
   for (const message of [...previousModel.nativeTranscript, ...baseMessages, ...preparedMessages]) {
-    if (!message || typeof message !== 'object' || Object.keys(message).some(key => !['role', 'content', 'tool_calls', 'tool_call_id', 'continuationRecap'].includes(key))) fail('nonportable_history');
+    if (!message || typeof message !== 'object' || !validReplayFields(message, family)) fail('nonportable_history');
   }
   const priorCalls = previousModel.choice?.toolCalls;
   if (!Array.isArray(priorCalls) || priorCalls.length !== toolCalls.length ||
@@ -53,7 +57,9 @@ export function portableReplayMessages(messages, family) {
     if (!message || typeof message !== 'object') fail('nonportable_history');
     if (Object.hasOwn(message, 'continuationRecap') && message.continuationRecap !== true) fail('nonportable_history');
     if (!['system', 'developer', 'user', 'assistant', 'tool'].includes(message.role) ||
-        Object.keys(message).some(key => !['role', 'content', 'tool_calls', 'tool_call_id', 'continuationRecap'].includes(key))) fail('nonportable_history');
+        !validReplayFields(message, family)) fail('nonportable_history');
+    // OpenAI Responses reasoning is omitted from the outbound copy below,
+    // after the original, unsanitized history has been proven.
     // Anthropic thinking/signatures are bound to the account that produced
     // them. The proof above compares the ORIGINAL transcript first; only the
     // outbound copy may omit those opaque blocks. Visible text, tool calls and

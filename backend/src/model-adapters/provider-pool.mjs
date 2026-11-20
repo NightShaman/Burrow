@@ -87,7 +87,7 @@ export function createProviderPoolModelAdapter(options, createMemberAdapter) {
     const memberConfig = resolved?.model && typeof resolved.model === 'object' ? resolved.model : resolved;
     if (!memberConfig || memberConfig.providerPool || /-lb$/.test(memberConfig.api || memberConfig.apiType || '')) throw new Error('provider_pool_invalid_member_config');
     if (!fresh && cached && cached.authToken === memberConfig.apiKey && now() - cached.usedAt < AFFINITY_CACHE_TTL_MS) { cached.usedAt = now(); return { adapter: cached.adapter, identity: providerIdentity(memberConfig) }; }
-    const adapter = createMemberAdapter({ ...options, fetchImpl: memberFetch, providerPool: null, config: { ...memberConfig, model: config.model, temperature: config.temperature, maxTokens: config.maxTokens, extra: config.extra, reasoningEffort: config.reasoningEffort, codexSessionId: threadKey, codexThreadId: threadKey, providerPool: null } });
+    const adapter = createMemberAdapter({ ...options, fetchImpl: memberFetch, providerPool: null, config: { ...memberConfig, connectionId: memberConfig.connectionId ?? memberId, model: config.model, temperature: config.temperature, maxTokens: config.maxTokens, extra: config.extra, reasoningEffort: config.reasoningEffort, codexSessionId: threadKey, codexThreadId: threadKey, providerPool: null } });
     // Native turn-state is isolated by both thread AND account, never copied.
     for (const [oldKey, value] of adapters) if (now() - value.usedAt >= AFFINITY_CACHE_TTL_MS) adapters.delete(oldKey);
     if (adapters.size >= 1000) adapters.delete(adapters.keys().next().value);

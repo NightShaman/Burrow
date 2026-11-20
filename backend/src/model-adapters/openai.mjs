@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto';
 import { providerIdentity, providerUsageValues } from './provider-responsiveness.mjs';
 import { invokeProviderFetch, providerTiming, settleProviderDiagnostics, providerDiagnostic, providerCallback } from './provider-fetch.mjs';
 import { providerErrorSecrets, classifyModelFailure, markProviderEnvelopeFailure, providerFailureResult } from '../model-failure.mjs';
 import { apiMode, isChatGptBackendBaseUrl, isCodexBackendConfig, responsesUrl, completionUrl } from './openai-transport.mjs';
 import { toolNames, responseApiTool, messagesToResponsesInput, readResponseSseBounded, normalizeResponseChoice, normalizeChoice, openAIEnvelopeError } from './openai-transport.mjs';
-import { redactStructuredJsonText } from '../redaction.mjs';
+import { responseReasoningMessage, isResponsesReasoning } from './openai-reasoning.mjs';
+import { redactStructuredJsonText, redactProtectedText } from '../redaction.mjs';
 import { googleCompatibleWireModel } from './google-wire.mjs';
-import { readResponseTextBounded, chatToolContinuationMessages, buildProviderMessageManifest, serializedMessageHash, providerInputAccounting, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, redactHeaders, boundedText, randomUUID } from './adapter-primitives.mjs';
+import { readResponseTextBounded, chatToolContinuationMessages, buildProviderMessageManifest, serializedMessageHash, providerInputAccounting, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, redactHeaders, boundedText, randomUUID, nativeToolCall } from './adapter-primitives.mjs';
 
 export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
@@ -15,6 +17,22 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   const url = mode === 'openai-responses' ? responsesUrl(config) : completionUrl(config);
   const model = config.model;
   const wireModel = googleCompatibleWireModel(config);
+  const ENCRYPTED_INCLUDE = 'reasoning.encrypted_content';
+  const configuredIncludes = Array.isArray(config.extra?.include) ? config.extra.include : [];
+  let publicOpenAI = false;
+  try { publicOpenAI = new URL(url).hostname === 'api.openai.com'; } catch {}
+  const nativeResponses = mode === 'openai-responses' && (chatGptBackend || publicOpenAI);
+  const reasoningEnabled = nativeResponses || (mode === 'openai-responses' && configuredIncludes.includes(ENCRYPTED_INCLUDE));
+  // Use the resolved connection identity (not a display label or rotating
+  // credential), the endpoint, and the model requested on the wire. A direct
+  // adapter without a configured account may only reuse its own state.
+  const reasoningOwner = reasoningEnabled ? createHash('sha256').update(JSON.stringify([config.connectionId || randomUUID(), url, config.extra?.model ?? wireModel])).digest('hex') : null;
+  const compatibleTranscript = (transcript, estimate = false) => transcript?.map(message => {
+    if (!message || !Object.hasOwn(message, 'responsesReasoning') || (isResponsesReasoning(message.responsesReasoning) &&
+        (estimate || message.responsesReasoning.owner === reasoningOwner))) return message;
+    const { responsesReasoning: _opaque, ...plain } = message;
+    return plain;
+  });
   // GPT-6.1 deployments reject temperature, including values inherited from
   // connection extras. Enforce the model contract at the final wire boundary.
   const rejectsTemperature = /(?:^|\/)gpt-6[.-]1(?:-|$)/i.test(String(model || ''));
@@ -42,7 +60,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     return total + contentChars + nativeChars + callChars;
   }, 0);
 
-  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', toolContinuation = null, streaming = false } = {}) => {
+  const buildRequest = ({ prompt, messages, temperature = config.temperature ?? 0.2, maxTokens = config.maxTokens, tools = null, toolChoice = 'auto', toolContinuation = null, streaming = false, estimate = false } = {}) => {
     const resolvedMessages = messages || [{ role: 'user', content: String(prompt || '') }];
     const isToolContinuation = Boolean(toolContinuation?.toolCalls?.length && toolContinuation?.toolResults?.length);
     if (!isToolContinuation && (!resolvedMessages.length || !resolvedMessages.some((message) => message.content))) throw new Error('prompt or messages are required');
@@ -62,24 +80,25 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     // Replay the budget-prepared transcript on every Responses continuation.
     // Codex upstream rejects previous_response_id, and proxies can hoist system
     // messages into non-inherited instructions. Replay preserves both rules and calls.
-    const continuationInput = messagesToResponsesInput(providerContinuationMessages);
-    const continuationMessages = isToolContinuation && mode !== 'openai-responses'
-      ? providerContinuationMessages
+    const transcript = compatibleTranscript(providerContinuationMessages || resolvedMessages, estimate);
+    const responseInput = mode === 'openai-responses'
+      ? ((!isToolContinuation && !messages?.length) ? String(prompt || '') : messagesToResponsesInput(transcript, prompt, reasoningOwner, estimate))
       : null;
+    const continuationMessages = isToolContinuation && mode !== 'openai-responses' ? transcript : null;
     const body = mode === 'openai-responses'
       ? {
           model: wireModel,
-          input: isToolContinuation ? continuationInput : messagesToResponsesInput(messages, prompt),
+          input: responseInput,
           ...(chatGptBackend || config.supportsTemperature === false ? {} : { temperature }),
           ...(resolvedTools ? { tools: resolvedTools.map(responseApiTool), tool_choice: toolChoice } : {}),
           ...(maxTokens ? { max_output_tokens: maxTokens } : {}),
           ...(config.extra || {}),
-          ...(chatGptBackend ? { store: false } : {}),
+          ...(reasoningEnabled ? { store: false } : {}),
           ...(streaming ? { stream: true } : {}),
         }
       : {
           model: wireModel,
-          messages: continuationMessages || resolvedMessages,
+          messages: transcript,
           ...(config.supportsTemperature === false ? {} : { temperature }),
           ...(resolvedTools ? { tools: resolvedTools, tool_choice: toolChoice } : {}),
           ...(maxTokens ? { max_tokens: maxTokens } : {}),
@@ -88,7 +107,8 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         };
     if (mode === 'openai-responses') {
       // Connection extras must not replace the authoritative replay or re-enable chaining.
-      body.input = isToolContinuation ? continuationInput : messagesToResponsesInput(messages, prompt);
+      body.input = responseInput;
+      if (nativeResponses && !configuredIncludes.includes(ENCRYPTED_INCLUDE)) body.include = [...configuredIncludes, ENCRYPTED_INCLUDE];
       delete body.previous_response_id;
     }
     // ChatGPT's account/Codex backend is not the public Responses API.
@@ -110,11 +130,11 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       : String(providerMessages || '').length)
       + providerInputAccounting([body.tools, body.instructions, body.response_format, body.text]).promptChars;
     const serializedBody = JSON.stringify(body);
-    return { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash: serializedMessageHash(stablePrefixMessage), continuation: isToolContinuation, nativeTranscript: continuationMessages || providerContinuationMessages || (mode === 'openai-responses' ? resolvedMessages : null) };
+    return { body, providerMessages, providerMessageCount, providerMessageManifest, providerPromptChars, serializedBody, resolvedTools, resolvedToolNames, stablePrefixHash: serializedMessageHash(stablePrefixMessage), continuation: isToolContinuation, nativeTranscript: mode === 'openai-responses' ? transcript : continuationMessages };
   };
 
   const estimateRequest = (options = {}) => {
-    const request = buildRequest({ ...options, streaming: chatGptBackend || Boolean(options.streaming) });
+    const request = buildRequest({ ...options, streaming: chatGptBackend || Boolean(options.streaming), estimate: true });
     return { ...contextUsageFromRequest({ promptChars: request.providerPromptChars, bodyChars: request.serializedBody.length, imageCount: imageCountFor(request.providerMessages), model, api: mode, continuation: request.continuation, modelCall: options.modelCall, clock }), requestedOutputTokens: Number(request.body.max_output_tokens || request.body.max_completion_tokens || request.body.max_tokens) || 0 };
   };
 
@@ -124,6 +144,8 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     const identity = providerIdentity(config);
     const callbackIdentity = { requestId, modelCall, provider: 'openai-compatible', providerName: identity.accountName, connectionId: identity.accountId };
     const timing = providerTiming({ identity, traceLogger, requestId, provider: 'openai-compatible', api: mode, model, modelCall, contextBudgetTokens: config.contextTokens ?? config.contextWindow, clock });
+    const protectedReasoning = (toolContinuation?.preparedMessages || toolContinuation?.baseMessages || messages || [])
+      .flatMap(message => isResponsesReasoning(message?.responsesReasoning) ? message.responsesReasoning.items.map(item => item.encrypted_content) : []);
     return settleProviderDiagnostics(traceLogger, async (recordResult) => {
       const headers = {
         'content-type': 'application/json',
@@ -145,7 +167,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       // Provider bodies contain the complete prompt, including the current operator
       // turn. Persist only a redacted debugger projection; the raw body is sent to
       // the provider but must not become a durable trace artifact.
-      const providerRequestArtifact = await providerDiagnostic(() => traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(serializedBody))) || null;
+      const providerRequestArtifact = await providerDiagnostic(() => traceLogger?.artifact?.(`provider-request-${requestId}.json`, redactStructuredJsonText(serializedBody, { protectedValues: protectedReasoning }))) || null;
       const requestContextUsage = contextUsageFromRequest({
         promptChars: providerPromptChars,
         bodyChars: serializedBody.length,
@@ -175,7 +197,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         toolNames: resolvedToolNames,
         toolChoice: resolvedTools ? toolChoice : null,
         stablePrefixHash,
-        providerMessageManifest,
+        providerMessageManifest: providerMessageManifest.map(entry => ({ ...entry, preview: redactProtectedText(entry.preview, protectedReasoning) })),
         providerRequestArtifact,
         ts: clock(),
       }));
@@ -208,6 +230,12 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       const envelopeError = (!streaming || providerReturnedJson) ? openAIEnvelopeError(data, mode) : null;
       if (envelopeError) data = { ...data, error: { message: envelopeError } };
       const ok = Boolean(response.ok) && responseBody.ok && !envelopeError;
+      const choice = ok ? (mode === 'openai-responses' ? normalizeResponseChoice(data) : normalizeChoice(data)) : null;
+      const opaqueAssistant = ok && reasoningEnabled ? responseReasoningMessage(data.output, reasoningOwner, {
+        role: 'assistant',
+        content: choice.toolCalls.length ? '' : choice.text,
+        ...(choice.toolCalls.length ? { tool_calls: choice.toolCalls.map(nativeToolCall) } : {}),
+      }) : null;
       const result = {
         ok,
         requestId,
@@ -216,7 +244,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         api: mode,
         model,
         status: response.status,
-        choice: ok ? (mode === 'openai-responses' ? normalizeResponseChoice(data) : normalizeChoice(data)) : null,
+        choice,
         responseId: ok ? providerResponseIdentifier(data?.id) : null,
         responseModel: providerResponseModel(data?.model),
         usage: data?.usage || null,
@@ -231,10 +259,9 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         raw: ok
           ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: responseBody.streamedTextChars || 0, streamFallback: providerReturnedJson } : {}) }
           : { error: { message: responseBody.error || data?.error?.message || `HTTP ${response.status}`, ...((responseBody.errorDetails || data?.error) ? { details: responseBody.errorDetails || { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), ...(data?.error?.param ? { param: boundedText(data.error.param, 128) } : {}), status: response.status } } : {}) } },
-        // Chat Completions has no server-side previous-response chain. Return
-        // this bounded, protocol-native transcript so the caller can append
-        // the next call/result pair instead of forgetting prior tool rounds.
-        nativeTranscript,
+        // Replay the submitted transcript plus any pending opaque assistant;
+        // preparation will pair its calls with the next tool outputs.
+        nativeTranscript: opaqueAssistant ? [...nativeTranscript, opaqueAssistant] : nativeTranscript,
       };
 
       // Capture parser/HTTP provenance before response diagnostics can throw.
@@ -273,7 +300,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       }));
 
       return settledResult;
-    }, { timing, signal, protectedValues: providerErrorSecrets(config) });
+    }, { timing, signal, protectedValues: [...providerErrorSecrets(config), ...protectedReasoning] });
   };
 
   return {
@@ -284,11 +311,10 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     supportsVision: Boolean(config.supportsVision || config.vision || config.multimodal || config.capabilities?.vision || config.capabilities?.images),
     estimateRequest,
     complete,
-    async continueWithToolResults({ previousModel = null, baseMessages = [], toolCalls = [], toolResults = [], preparedMessages = null, ...options } = {}) {
+    async continueWithToolResults({ previousModel: _previousModel, baseMessages = [], toolCalls = [], toolResults = [], preparedMessages = null, ...options } = {}) {
       return complete({
         ...options,
         toolContinuation: {
-          previousResponseId: previousModel?.responseId || null,
           baseMessages,
           toolCalls,
           toolResults,

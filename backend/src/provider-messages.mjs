@@ -3,6 +3,7 @@
 // boundary. Keep dialogue roles meaningful; provenance belongs in receipts, not
 // in fake `user:` / `assistant:` content prefixes.
 import { createHash } from 'node:crypto';
+import { isResponsesReasoning } from './model-adapters/openai-reasoning.mjs';
 import { historicalProviderTurnMessages } from './provider-turn-replay.mjs';
 
 const PROVIDER_ROLES = new Set(['system', 'developer', 'user', 'assistant', 'tool']);
@@ -61,6 +62,7 @@ export function normalizeProviderMessage(message = {}) {
   }
   if (role === 'tool' && message.tool_call_id) normalized.tool_call_id = String(message.tool_call_id).slice(0, 256);
   if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) normalized.tool_calls = message.tool_calls;
+  if (role === 'assistant' && isResponsesReasoning(message.responsesReasoning)) normalized.responsesReasoning = message.responsesReasoning;
   return normalized;
 }
 

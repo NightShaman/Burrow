@@ -1,3 +1,4 @@
+import { responseReasoningItem, isResponsesReasoning } from './openai-reasoning.mjs';
 import { DEFAULT_MAX_RESPONSE_BYTES, MAX_MODEL_TEXT_CHARS, MAX_SSE_CARRY_CHARS, MAX_SSE_EVENT_CHARS, boundedText, normalizeToolCall, jsonText, providerResponseModel, providerResponseIdentifier } from './adapter-primitives.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
 import { readProviderChunk } from './provider-fetch.mjs';
@@ -78,9 +79,7 @@ function textFromResponses(data = {}) {
 }
 
 function normalizeResponseToolCalls(data = {}) {
-  return (data.output || [])
-    .filter((item) => item?.type === 'function_call' || item?.type === 'tool_call')
-    .map(normalizeToolCall);
+  return compactResponseToolOutput(data.output).map(normalizeToolCall);
 }
 
 function compactResponseToolOutput(output = []) {
@@ -91,7 +90,7 @@ function compactResponseToolOutput(output = []) {
       type: item.type === 'tool_call' ? 'tool_call' : 'function_call',
       id: boundedText(item.call_id || item.id || `tool-call-${index}`, 256),
       call_id: boundedText(item.call_id || item.id || `tool-call-${index}`, 256),
-      providerItemId: boundedText(item.id || item.call_id || `tool-call-${index}`, 256),
+      providerItemId: boundedText(item.providerItemId || item.id || item.call_id || `tool-call-${index}`, 256),
       name: boundedText(item.name || item.function?.name, 256),
       arguments: typeof item.arguments === 'string' ? item.arguments : jsonText(item.arguments !== undefined ? item.arguments : item.function?.arguments),
     }));
@@ -154,12 +153,21 @@ function messageContentToResponses(content) {
   return content.map(contentPartToResponses);
 }
 
-function messagesToResponsesInput(messages, prompt) {
+function messagesToResponsesInput(messages, prompt, reasoningOwner = null, estimate = false) {
   if (!messages?.length) return String(prompt || '');
   const input = [];
   for (const message of messages) {
+    const state = message?.role === 'assistant' && message.responsesReasoning;
+    const items = isResponsesReasoning(state) && (estimate || (reasoningOwner !== null && state.owner === reasoningOwner)) ? state.items : [];
+    let reasoningIndex = 0;
+    const emitReasoning = (position) => {
+      while (items[reasoningIndex]?.position === position) {
+        input.push(responseReasoningItem({ ...items[reasoningIndex++], type: 'reasoning' }));
+      }
+    };
+    emitReasoning(0);
     if (message?.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
-      for (const call of message.tool_calls) {
+      for (const [index, call] of message.tool_calls.entries()) {
         const fn = call.function || call;
         input.push({
           type: 'function_call',
@@ -167,6 +175,7 @@ function messagesToResponsesInput(messages, prompt) {
           name: String(fn.name || call.name || '').slice(0, 256),
           arguments: typeof fn.arguments === 'string' ? fn.arguments : jsonText(fn.arguments ?? call.arguments ?? {}),
         });
+        emitReasoning(index + 1);
       }
       continue;
     }
@@ -248,8 +257,8 @@ function mergeStreamToolCall(calls, fragment = {}) {
 
 // OpenAI-compatible servers commonly use SSE for both Chat Completions and
 // Responses. Output text becomes the persisted assistant answer. Provider
-// reasoning is a separate, transient work stream for the active chat only;
-// neither it nor raw vendor events enter the transcript or retained response.
+// thought deltas are transient and separate from the encrypted items used
+// exclusively by the native continuation transcript.
 function compactUsage(usage) {
   if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
   // Usage is telemetry, not provider output. Retain the bounded token counters
@@ -319,6 +328,15 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   let chatResponseId = null;
   const toolCalls = [];
   const responseToolCalls = [];
+  const responseReasoning = new Map();
+  const collectReasoning = (item, index) => {
+    const reasoning = responseReasoningItem(item);
+    if (!reasoning || !Number.isInteger(index) || index < 0) return;
+    // Item snapshots repeat across added/done/completed. A terminal that
+    // omits encrypted content must not erase the earlier complete item.
+    const prior = responseReasoning.get(reasoning.id);
+    responseReasoning.set(reasoning.id, { index: prior?.index ?? index, item: reasoning });
+  };
   let toolCallFailure = null;
   const recordToolCallFailure = (failure) => {
     if (!toolCallFailure && failure) toolCallFailure = failure;
@@ -362,6 +380,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       }
       if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') await emit(event.delta);
       if ((event?.type === 'response.reasoning.delta' || event?.type === 'response.reasoning_summary_text.delta') && typeof event.delta === 'string') await emitThought(event.delta);
+      if (event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') collectReasoning(event.item, event.output_index);
       if ((event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') && (event.item?.type === 'function_call' || event.item?.type === 'tool_call')) {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
@@ -390,11 +409,15 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
         if (!finalData.id && responsesId) finalData.id = responsesId;
         usage = finalData.usage || usage;
         if (!text && finalData.output_text) await emit(finalData.output_text, true);
-        for (const call of (finalData.output || [])) {
+        let callIndex = 0;
+        for (const [index, item] of (Array.isArray(event.response.output) ? event.response.output : []).entries()) {
+          collectReasoning(item, index);
+          if (!['function_call', 'tool_call'].includes(item?.type)) continue;
+          const call = finalData.output[callIndex++];
           const prior = responseToolCalls.find((item) => item?.call_id === call.call_id);
           if (prior && ((prior.name && prior.name !== call.name) || (prior.arguments && prior.arguments !== call.arguments))) {
             recordToolCallFailure('model_tool_call_conflict');
-          } else if (!mergeResponseFunctionCall(responseToolCalls, { ...call, output_index: responseToolCalls.length })) recordToolCallFailure('model_tool_call_conflict');
+          } else if (!mergeResponseFunctionCall(responseToolCalls, { ...call, output_index: responseToolCalls[index] ? responseToolCalls.length : index })) recordToolCallFailure('model_tool_call_conflict');
         }
       }
       if (event?.type === 'response.incomplete') {
@@ -517,8 +540,12 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
     const failure = { ok: false, bytes, error: streamError, errorDetails: streamErrorDetails, data: null, streamedTextChars: text.length };
     return providerErrorEnvelope ? markProviderEnvelopeFailure(failure, providerErrorEnvelope) : failure;
   }
+  const orderedResponseOutput = mode === 'openai-responses' ? [
+    ...Object.keys(responseToolCalls).map(index => ({ index: Number(index), item: responseToolCalls[index] })),
+    ...responseReasoning.values(),
+  ].sort((a, b) => a.index - b.index).map(entry => entry.item) : null;
   const data = mode === 'openai-responses'
-    ? (finalData ? { ...finalData, ...(text ? { output_text: text } : {}), ...(responseToolCalls.length ? { output: responseToolCalls.filter(Boolean) } : finalData.output ? { output: finalData.output } : {}) } : { status: streamError ? 'failed' : 'completed', output_text: text, output: responseToolCalls.filter(Boolean) })
+    ? { ...finalData, ...(text ? { output_text: text } : {}), output: orderedResponseOutput }
     : { choices: [{ index: 0, finish_reason: finishReason, message: { role: 'assistant', content: text, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) } }], usage,
       ...(chatResponseModel ? { model: chatResponseModel } : {}), ...(chatResponseId ? { id: chatResponseId } : {}) };
   // Streaming must apply the same terminal semantic contract as one-shot

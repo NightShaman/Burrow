@@ -375,7 +375,7 @@ function attachmentViewUserMessage(result = {}, call = {}, index = 0, attachment
   };
 }
 
-function nativeToolCall(call = {}, index = 0) {
+export function nativeToolCall(call = {}, index = 0) {
   const rawArguments = typeof call?.rawArguments === 'string'
     ? call.rawArguments
     : jsonText(call?.arguments ?? {});
@@ -421,7 +421,16 @@ function nativeToolRound({ toolCalls = [], toolResults = [] } = {}) {
 function chatToolContinuationMessages({ baseMessages = [], toolCalls = [], toolResults = [] } = {}) {
   // Structure only: normalize roles and preserve every complete assistant call
   // ↔ tool-result pair. Context preparation owns every semantic reduction.
-  return normalizeProviderMessages([...baseMessages, ...nativeToolRound({ toolCalls, toolResults })]);
+  const round = nativeToolRound({ toolCalls, toolResults });
+  const pending = baseMessages.at(-1);
+  // Responses may return a pending assistant with encrypted reasoning around
+  // its calls. Attach the outputs to that assistant rather than replaying the
+  // same calls a second time. Other protocols keep their existing projection.
+  if (pending?.responsesReasoning && pending.tool_calls?.length && round.length &&
+      JSON.stringify(pending.tool_calls) === JSON.stringify(round[0].tool_calls)) {
+    return normalizeProviderMessages([...baseMessages, ...round.slice(1)]);
+  }
+  return normalizeProviderMessages([...baseMessages, ...round]);
 }
 
 function messageContentChars(content) {
