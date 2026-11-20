@@ -59,12 +59,10 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(document.querySelector('.forge-home-atmosphere')?.getAttribute('aria-hidden')).toBe(
     'true',
   );
-  expect(document.querySelector('.forge-home-constellation')).not.toBeNull();
   expect(document.querySelectorAll('.forge-home-ember')).toHaveLength(0);
   expect(crest.getAttribute('src')).toBe('/forge.png');
   expect(crest.getAttribute('width')).toBe('1254');
   expect(crest.getAttribute('height')).toBe('1254');
-  expect(document.querySelectorAll('.forge-home-constellation svg')).toHaveLength(0);
   expect(screen.queryByLabelText('Creation shortcuts')).toBeNull();
   expect(screen.queryByText(/Choose a medium/)).toBeNull();
   expect(screen.queryByRole('heading', { name: 'The Phantasm Forge' })).toBeNull();
@@ -79,6 +77,15 @@ it('defaults to Home without mounting private job previews or history', async ()
   expect(screen.queryByText('Make something extraordinary.')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Image' })).toBeNull();
   expect(screen.queryByRole('checkbox', { name: 'Forge effects' })).toBeNull();
+});
+it('keeps the ambient schematic without a cursor-effects canvas on Home', async () => {
+  const { container } = home();
+  await waitFor(() =>
+    expect(api.mock.calls.some(([path]) => path === '/api/forge/jobs')).toBe(true),
+  );
+  const surface = container.querySelector('.forge-home-active');
+  expect(surface?.querySelector('.forge-schematic')).not.toBeNull();
+  expect(surface?.querySelector('canvas')).toBeNull();
 });
 it.each(['Image', 'Video', 'Speech', 'Music'])(
   'opens the existing %s creation flow from Home',

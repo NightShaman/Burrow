@@ -1,5 +1,4 @@
 import { ForgeSchematic } from './ForgeSchematic';
-import { ForgeConstellation } from './ForgeConstellation';
 import { useConfirm } from '../../app/ConfirmDialog';
 import { rovingKeys } from '../../app/keyboardWidgets';
 import { useOwnedApi } from '../../app/useOwnedApi';
@@ -814,7 +813,6 @@ export function Forge({
         <>
           <div className="forge-home-atmosphere" aria-hidden="true" />
           <ForgeSchematic enabled={motion.enabled} />
-          <ForgeConstellation enabled={motion.enabled} />
         </>
       )}
       <header className="forge-heading">
