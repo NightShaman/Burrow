@@ -190,3 +190,11 @@ Shared mod context receives Core-resolved addressed participants and registry-ow
 Checked **18 November 2026**: a restart recovery turn requires a durable recovery claim. Its synthetic instruction and checkpoint enter the provider request as runtime-owned developer context, not a new operator message. The trigger is not appended to ordinary operator dialogue, reclassified by the planner, or used as fresh conversational residue. Checkpoint details are evidence to reconcile within the original objective, not permission for new work. This also applies when recovery resumes a native child.
 
 A peer A2A delivery uses the recipient's configured execution assignment without recording that default as an explicit project/workspace request. Explicit structured targets still take precedence. Ambiguous older workspace hints are retired without erasing separate file evidence or changing execution settings. The workspace resolver does not inspect the filesystem, infer a project from prose, or look up project metadata.
+
+## Terminal receipt and recovery repair
+
+Checked **19 November 2026**: terminal finalization uses an exact finalization identity. A transient receipt-write failure may retry the transactional receipt, but must not re-enter the completed action callback. An abandoned finalizing owner with that identity requires receipt repair and does not auto-resume the work. If a recovery attempt itself loses its owner, Core retains the original interruption and marks that recovery lineage failed instead of creating recovery-of-recovery work. Reconcile durable effects before an explicit retry.
+
+Scheduled tasks and mod-submitted external turns likewise retain the first known outcome while retrying its terminal receipt, rather than rerunning the task/turn or converting a successful result into a failure merely because persistence failed. Receipt recovery is not an exactly-once guarantee for external effects. A failed scope's reconciliation is isolated so independent queued/recovery work can continue.
+
+For native OpenAI pools, a structured upstream rate-limit or unavailable response inside HTTP 2xx can now qualify for account cooldown/failover only before parsed or visible output and without a callback failure. Existing dispatch budgets and replay/ownership gates still apply; arbitrary error prose does not authorize failover.

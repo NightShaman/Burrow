@@ -8,10 +8,10 @@ The **18 November** ordinary delta review reconciled recovery-message attributio
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.18.11` | `d2ce0ae1e48674abaaf413f975a758b7805b2a7b` |
-| Core / Backend | `706b9d4de5d540bdf2233027915421e0a9511eb0` |
-| UI | `170fb6a4b4dc114489b2db451dc3c8c06b4a7b4f` |
-| Skills | `0a5305aff455291f54224710ca3cdcd8c26f90c3` |
+| Assembled Burrow, build `2026.11.19.2` | `c2885ba0ea513c62744e2d42454e021c26227dad` |
+| Core / Backend | `79bab77973a24f57c717a71cdd3d575e7367eca0` |
+| UI | `666827a13da2500cb981357088a6f273bb4e9632` |
+| Skills | `f0cfb02aeaa7aca2941811b788f1a30ba448950e` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -178,3 +178,8 @@ The scheduled Tuesday pass compared the successful 15 November baseline through 
 
 This is source and test-definition inspection, not application/provider execution, live authentication, installed CLI compatibility, collector ingestion or runtime deployment. Unchanged material retains the Sunday full-review scope. Development source pins do not prove that public mirrors or installed builds already include these behaviors.
 
+## Ordinary delta: 19 November 2026
+
+Compared the last verified source pins through assembly **2026.11.19.2**. Reviewed changes cover terminal receipt repair and recovery ownership, Forge interruption and durable artifact cleanup, exact Archive Proof occurrences/cursors, portable restore and relocated capture/package identities, provider-pool failover gates, mod capability lifecycle and scope-safe UI updates. Prior documentation-only commits were excluded from the substantive behavior delta.
+
+This is static source and regression-definition inspection, with documentation build/link checks, not application/database/provider execution, a production restore, installed-runtime acceptance or public release promotion. Unchanged sections retain the Sunday **15 November** reconciliation and subsequent dated deltas. Approved artwork and layout are unchanged.

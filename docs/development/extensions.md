@@ -144,3 +144,9 @@ Checked **17 November 2026**: `participants` is Core-owned routing data, shaped 
 Direct operator routes include their receiving agent; A2A also includes the authenticated peer, and group routes include current channel participants. Unaddressed background work receives an empty set. Providers must not infer participation from mentions, tool prose or previous invocations.
 
 After an outgoing `agent_send_message` has actually entered its recipient's transcript, Core refreshes shared guidance for the sender's next continuation after the full tool batch. Canonical outgoing recipients are deduplicated; `outgoingRecipientIds` is included only when nonempty and is a subset of `participants`. A delivered request counts even if its reply fails, but invalid/denied/pre-ingress failures do not. Fresh shared guidance replaces the previous contribution without changing paired tool protocol, identity or grants. The next operator turn starts from its own route, not the previous turn's outgoing peers.
+
+## Capability admission and external-turn receipts
+
+Checked **19 November 2026**: the mod host no longer imposes a shared four-request capability concurrency quota. Active requests are still tracked for cancellation, lifecycle ownership and diagnostics. Per-capability validation, grants, provider bounds and any explicitly configured deadlines remain; removing a shared quota does not broaden authority.
+
+External-turn terminal persistence retries the known receipt without executing the submitted turn again. An idempotent replay/read can flush that pending receipt; it does not grant a new execution. Remote process replies have a dispatch watchdog in addition to cancellation grace. A lost reply follows cancellation/unknown-outcome handling, not an assumption that the process stopped or succeeded.

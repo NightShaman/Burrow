@@ -467,3 +467,11 @@ Checked **18 November 2026**: Minion tool activity stays visible during executio
 **Archive → Proof** searches retained server-side run summaries, rather than only the first page already loaded in the browser. Search can match a run ID, displayed agent name (or ID when unnamed), objective or status. **Load more** continues the same search and scope. This is summary search, not full-text search of every raw tool output.
 
 Open a run's **Redacted provider requests** section to list recorded requests and select a body. **Compare requests** opens two independent selectors; choose the actual before/after requests rather than assuming they are automatically paired. Bodies are retained for three days. Expired, not captured, unavailable and an empty request list are distinct states. Review these private contents before sharing, even after redaction.
+
+## Scope-safe chat and Archive refresh
+
+Checked **19 November 2026**: Chat ignores streaming envelopes explicitly attributed to a different run/session. A malformed stream or one ending without a terminal event remains an error; transport cleanup is not successful completion. The first message after reset retains its optimistic turn only for that exact selected conversation, not another agent/session opened during the request.
+
+Archive Proof identifies an occurrence by **agent, session and run**, so matching run IDs in different sessions remain distinct. Opening a card scopes detail, full tool evidence and provider requests to that occurrence. A mismatched detail response is an error, not substituted evidence. Mod panel and Archive discovery share one current catalogue; a transient discovery failure retains the last accepted catalogue rather than pretending every mod disappeared. A failed/timed-out panel removes partial controls and releases its mount.
+
+In declarative mod Settings, each action marks only its own fields saved. The unsaved-change guard saves dirty groups through their respective actions and stays put if a required save cannot complete. Password-field clearing follows the accepted group, not unrelated drafts.

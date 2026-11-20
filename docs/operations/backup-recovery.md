@@ -126,3 +126,9 @@ Canonical agent, operator and Mod-character reference photos use PostgreSQL link
 ## Archive path validation
 
 Checked **12 November 2026**: Archive traversal rejection checks actual `..` path components, not harmless filenames containing consecutive dots. Absolute paths, links, unsupported entry types and single-root validation remain subject to their existing protections.
+
+## Restore activation and relocated package identities
+
+Checked **19 November 2026**: restore without replacement permission does not move a newly appeared nonempty destination aside based on an earlier preflight check. If activation finds a conflicting target, it stops and requires deliberate `--replace --confirm`. Existing replacement staging and rollback safeguards remain; inspect any failure before retrying.
+
+Git-owned filesystem skills resolve their content-addressed package from the current runtime package root, skill ID and installed hash, rather than following a saved absolute path into an old installation. Package-root, skill and revision directories must be real directories, not symlinks; missing or invalid packages report `skill_local_changes`. Restore the corresponding package bytes as well as database metadata. Provider-request captures similarly resolve only a matching run/request artifact under the current trace root, within their existing retention window.

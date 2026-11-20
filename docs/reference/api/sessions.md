@@ -178,3 +178,7 @@ Reviewed this page against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d` an
 ## Retained Proof search
 
 Checked **18 November 2026**: `GET /api/archive/runs` accepts optional `query` to search retained run summaries on the server, including run ID, displayed agent name (or ID when unnamed), objective and status. Matching is case-insensitive literal substring search after trimming the query. It is not a raw-tool-output search. The opaque cursor is bound to the query and agent/session scope; begin a fresh page sequence when those change. The default page size remains 100, capped at 200.
+
+## Exact Proof occurrences
+
+Checked **19 November 2026**: `GET /api/archive/runs/{runId}` accepts `sessionId` alongside `agentId` to select an exact occurrence. Use all three recorded identities when following a list entry: the same run ID can appear in different sessions. List ordering and cursors now include session identity. Older run-list cursors do not identify this occurrence boundary and are rejected; restart pagination without the old cursor rather than editing it. Query and agent/session scope still bind each cursor.
