@@ -24,7 +24,7 @@ const providers = ['a', 'b', 'OpenAI', 'Azure OpenAI'].map((id) => ({
   apiType: id === 'OpenAI' ? 'openai-responses' : id === 'Azure OpenAI' ? 'azure-openai' : 'ollama',
   url: '',
   apiKey: '',
-  models: ['chat-only'],
+  models: id === 'OpenAI' ? ['chat-only', 'text-embedding-3-large'] : ['chat-only'],
 })) as SavedProvider[];
 const conversationStatus = {
   enabled: true,
@@ -267,6 +267,34 @@ describe('Conversation embedding settings', () => {
     );
     expect(screen.getByText(/Conversations disabled/)).toBeTruthy();
     expect(screen.getByText('Reindex memories and conversations')).toHaveProperty('disabled', true);
+  });
+  it('selects a discovered OpenAI embedding without typing or testing a manual ID', async () => {
+    const id = 'text-embedding-3-large';
+    mocked.mockImplementation(async (path) =>
+      path === `${root}/models?connectionId=OpenAI`
+        ? {
+            ...discover('OpenAI'),
+            provider: 'openai',
+            models: [{ id, name: id }],
+            capabilityDisclosure: 'Enabled OpenAI embedding models are listed.',
+          }
+        : status,
+    );
+    await mount();
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'OpenAI' } });
+    expect(await screen.findByRole('option', { name: id })).toHaveProperty('value', id);
+    expect(screen.queryByRole('option', { name: 'chat-only' })).toBeNull();
+    expect(screen.queryByText(/No embedding models advertised/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: id } });
+    fireEvent.click(screen.getByLabelText(toggle));
+    expect(screen.getByLabelText('Model')).toHaveProperty('value', id);
+    expect(screen.getByLabelText(manualLabel)).toHaveProperty('value', id);
+    expect(screen.getByRole('button', { name: 'Save embedding settings' })).toHaveProperty(
+      'disabled',
+      false,
+    );
+    expect(mocked.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
   });
   it.each(['OpenAI', 'Azure OpenAI'])(
     'selects %s and saves a tested manual model/deployment with Brains off',
