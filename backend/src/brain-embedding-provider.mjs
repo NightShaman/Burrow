@@ -1,5 +1,8 @@
 import { sanitizeProviderMessage, providerErrorSecrets } from './model-failure.mjs';
 import { googleNativeBase, discoverGoogleModels } from './model-adapters/google-native-catalog.mjs';
+// Saved model metadata has no embedding modality/capability contract. Use exact
+// OpenAI embedding IDs, not text/chat modalities or a name substring heuristic.
+const OPENAI_EMBEDDING_MODELS = new Set(['text-embedding-3-large','text-embedding-3-small','text-embedding-ada-002']);
 export function embeddingTimeout(value=process.env.BURROW_BRAIN_EMBEDDING_TIMEOUT_MS) {
  const n=Number(value ?? 30000);
  if(!Number.isSafeInteger(n) || n<1 || n>300000) throw new Error('brain_embedding_timeout_invalid');
@@ -56,7 +59,7 @@ export function embeddingVector(value) {
 }
 export class BrainEmbeddingProvider {
  constructor({models,fetchImpl=fetch,timeoutMs=embeddingTimeout()}) { this.models=models; this.fetch=fetchImpl; this.timeoutMs=embeddingTimeout(timeoutMs); }
- async context(connectionId,signal) {
+ async context(connectionId,signal,{discovery=false}={}) {
   let connection;
   try { connection=await this.models.get(connectionId); } catch(error) { throw providerFailure('brain_embedding_provider_request_failed',true,error); }
   if (!connection) throw new Error('brain_embedding_connection_missing');
@@ -66,7 +69,7 @@ export class BrainEmbeddingProvider {
   if (u.hostname==='chatgpt.com' && u.pathname.startsWith('/backend-api')) throw new Error('brain_embedding_provider_unsupported');
   let auth=null;
   const authSecrets=[];
-  if(kind!=='ollama' && this.models.auth) {
+  if(kind!=='ollama' && (!discovery || kind==='google') && this.models.auth) {
    try {
     auth=await this.models.auth(connectionId);
     authSecrets.push(...providerErrorSecrets({...connection,auth}));
@@ -137,7 +140,9 @@ export class BrainEmbeddingProvider {
  }
  async discover(connectionId,{signal}={}) {
   signal?.throwIfAborted();
-  const c=await this.context(connectionId,signal),models=[];
+  // Saved OpenAI models and Azure manual fallback need no credentials or OAuth
+  // refresh. Context still validates the endpoint before returning any models.
+  const c=await this.context(connectionId,signal,{discovery:true}),models=[];
   signal?.throwIfAborted();
   if(c.kind==='google') {
    const discovered = await discoverGoogleModels({ baseUrl:c.base, apiKey:c.headers['x-goog-api-key'] }, { signal, fetchImpl:(url,options) => this.fetch(url,{...options,redirect:'error',signal:options.signal ? AbortSignal.any([options.signal,AbortSignal.timeout(this.timeoutMs)]) : AbortSignal.timeout(this.timeoutMs)}) }).catch(error => { throw providerFailure('brain_embedding_provider_request_failed',true,error,c.protectedValues); });
@@ -149,10 +154,14 @@ export class BrainEmbeddingProvider {
     if(show.capabilities?.includes('embedding')) models.push({id:m.name,name:m.name});
    }
   }
-  // OpenAI-compatible model catalogs do not reliably disclose embedding support;
-  // Azure deployment lists often require management permissions. Never claim chat
-  // models are embedding-capable. The operator can enter and test a model/deployment.
-  const capabilityDisclosure=c.kind==='ollama'?'Only installed models explicitly advertising embedding via /api/show are listed. Older Ollama versions may not advertise capabilities; manual model selection requires a successful embedding test.':c.kind==='google'?'Only models advertising embedContent are listed; chat model catalogs are not used.':'Embedding capability cannot be established from this provider\'s model catalog. Enter a model or deployment manually and test it.';
+  if(c.kind==='openai') {
+   for(const m of c.connection.models || []) {
+    if(m.selected!==false && OPENAI_EMBEDDING_MODELS.has(m.id)) models.push({id:m.id,name:m.displayName || m.id});
+   }
+  }
+  // Unknown compatible models and Azure deployment aliases remain manual/test-only.
+  // Listing a recognized ID is not a claim that this endpoint can serve it.
+  const capabilityDisclosure=c.kind==='ollama'?'Only installed models explicitly advertising embedding via /api/show are listed. Older Ollama versions may not advertise capabilities; manual model selection requires a successful embedding test.':c.kind==='google'?'Only models advertising embedContent are listed; chat model catalogs are not used.':c.kind==='openai'?'Only enabled, saved models with recognized OpenAI embedding IDs are listed; chat and unknown/custom models are excluded. Enter other models manually and test them. Use Test to verify this endpoint can serve the selected model.':'Embedding capability cannot be established from this provider\'s model catalog. Enter a model or deployment manually and test it.';
   return {connectionId,provider:c.kind,models,capabilityDisclosure};
  }
 }
