@@ -71,6 +71,25 @@ export function modelSupportsTemperature({ provider = '', api = '', model = '', 
   if (isAnthropicMessagesConnection({ provider, apiType: api })) return anthropicSupportsTemperature(model);
   return true;
 }
+// Model config is rebuilt per turn; usage samples belong to the application
+// model store, not that short-lived config. Fetch identity isolates injected
+// transports. Weak keys release both services and samples with their owner.
+const poolUsageServices = new WeakMap();
+function poolUsageService(store, fetchImpl) {
+  let transports = poolUsageServices.get(store);
+  if (!transports) poolUsageServices.set(store, transports = new WeakMap());
+  let service = transports.get(fetchImpl);
+  if (!service) {
+    service = createProviderUsageService({
+      modelLookup: () => store, authSecretToken: auth => auth?.token || auth?.accessToken || auth?.apiKey,
+      fetchImpl,
+      ...(store?.pool ? { anthropicCoordinationStore: createPostgresAnthropicCoordinationStore(store.pool) } : {}),
+    });
+    transports.set(fetchImpl, service);
+  }
+  return service;
+}
+
 // Internal capability: only a pool resolver may bypass direct-selection flags.
 const POOL_MEMBER_MODEL = Symbol('pool-member-model');
 async function resolveInjectedModel(connectionId, modelId, args = {}) {
@@ -170,11 +189,7 @@ export async function resolveModelConfig(args = {}) {
   if (isProviderPool(connection)) {
     const store = args.modelSettings || args.stores?.models || args.runtimeStores?.models;
     if (!connection.pool?.enabled) throw new Error('provider_pool_disabled');
-    const usageService = args.providerUsageService || createProviderUsageService({
-      modelLookup: () => store, authSecretToken: auth => auth?.token || auth?.accessToken || auth?.apiKey,
-      fetchImpl: args.fetchImpl || fetch,
-      ...(store?.pool ? { anthropicCoordinationStore: createPostgresAnthropicCoordinationStore(store.pool) } : {}),
-    });
+    const usageService = args.providerUsageService || poolUsageService(store, args.fetchImpl || fetch);
     result.providerPool = {
       connection, store, usageService,
       refreshConnection: async () => {

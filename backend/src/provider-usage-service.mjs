@@ -90,7 +90,7 @@ function anthropicConnectionCandidate(connection = {}) {
       const authProvider = String(auth.provider || '').toLowerCase();
       if (authProvider && authProvider !== 'openai') continue;
       const token = authSecretToken(auth);
-      if (token) return { token, accountId: auth.accountId || null, connectionId: connection.id, provider: connection.provider || 'OpenAI', expiresAt: auth.expiresAt || null };
+      if (token) return { token, accountId: auth.accountId || null, baseUrl: connection.baseUrl || null, connectionId: connection.id, provider: connection.provider || 'OpenAI', expiresAt: auth.expiresAt || null };
     }
     return null;
   }
@@ -352,9 +352,12 @@ function anthropicConnectionCandidate(connection = {}) {
     if (cacheGeneration !== openaiUsageGeneration) { openaiOauthUsageCache.clear(); cacheGeneration = openaiUsageGeneration; }
     const cacheKey = source.connectionId;
     const fetchGeneration = openaiUsageGeneration;
+    // Resolve current auth/config before reuse; never carry a quota sample to
+    // a replacement credential/account under the same connection ID.
+    const sourceFingerprint = createHash('sha256').update(JSON.stringify([source.token, source.accountId, source.baseUrl, source.provider])).digest('hex');
     const cached = openaiOauthUsageCache.get(cacheKey);
     const nowMs = clock();
-    if (!force && cached && nowMs - cached.fetchedAtMs < OPENAI_OAUTH_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, OPENAI_OAUTH_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
+    if (!force && cached?.sourceFingerprint === sourceFingerprint && nowMs - cached.fetchedAtMs < OPENAI_OAUTH_USAGE_CACHE_MS) return { ...cached.result, cached: true, cacheTtlMs: Math.max(0, OPENAI_OAUTH_USAGE_CACHE_MS - (nowMs - cached.fetchedAtMs)) };
     try {
       const headers = { accept: 'application/json', authorization: `Bearer ${source.token}`, originator: 'burrow', 'user-agent': 'burrow/dev' };
       if (source.accountId) headers['ChatGPT-Account-Id'] = source.accountId;
@@ -384,7 +387,7 @@ function anthropicConnectionCandidate(connection = {}) {
         fetchedAt: new Date(nowMs).toISOString(),
         usage,
       };
-      if (fetchGeneration === openaiUsageGeneration) openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, result });
+      if (fetchGeneration === openaiUsageGeneration) openaiOauthUsageCache.set(cacheKey, { fetchedAtMs: nowMs, sourceFingerprint, result });
       return result;
     } catch (error) {
       return { ok: false, status: 502, error: error instanceof SyntaxError ? 'openai_oauth_usage_invalid' : 'openai_oauth_usage_unavailable', usage: null, diagnostic: boundaryDiagnostic(error, 'usage_fetch') };
