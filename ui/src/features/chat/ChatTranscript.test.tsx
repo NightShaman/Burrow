@@ -1847,3 +1847,63 @@ it('keeps Minion tool rows in one expandable card across polls and shows the wai
   ).toEqual(['files read', 'shell exec']);
   expect(card.querySelectorAll('.tool-dot.error')).toHaveLength(1);
 });
+
+it('waits for the matching visible local submission before showing the live reply', () => {
+  const prompt: SessionTurn = {
+    type: 'message',
+    role: 'user',
+    runId: 'local-run',
+    content: 'Where did he go?',
+  };
+  const prior = { ...prompt, runId: 'prior-run' };
+  const props = {
+    selected: parent,
+    parent,
+    operator: { name: 'Rob', avatar: 'R' },
+    isNewSession: false,
+    isLoading: false,
+    error: '',
+    isSending: true,
+    activeRunId: 'local-run',
+    submittedMessage: 'Where did he go?',
+    liveProgress: [],
+    liveAnswer: '',
+    liveStage: 'dispatched' as const,
+  };
+  const { rerender } = render(<ChatTranscript {...props} turns={[prior]} />);
+  expect(screen.queryByRole('status')).toBeNull();
+  rerender(<ChatTranscript {...props} turns={[prior]} liveAnswer="Live answer" />);
+  expect(screen.queryByText('Live answer')).toBeNull();
+  rerender(<ChatTranscript {...props} turns={[prior, prompt]} />);
+  const currentPrompt = screen.getAllByText('Where did he go?')[1];
+  expect(currentPrompt.compareDocumentPosition(screen.getByRole('status'))).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  rerender(<ChatTranscript {...props} turns={[prior, prompt]} liveAnswer="Live answer" />);
+  expect(screen.getByText('Live answer')).toBeTruthy();
+
+  // Attachment-only sends still have an operator turn. Hidden commands and
+  // background runs don't require one.
+  rerender(<ChatTranscript {...props} turns={[]} submittedMessage="" />);
+  expect(screen.queryByRole('status')).toBeNull();
+  rerender(
+    <ChatTranscript
+      {...props}
+      submittedMessage=""
+      turns={[
+        {
+          ...prompt,
+          content: '',
+          metadata: { attachments: [{ name: 'map.txt', type: 'text/plain' }] },
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toBe('Model request dispatched…');
+  rerender(<ChatTranscript {...props} turns={[]} submittedMessage="/context full" />);
+  expect(screen.getByRole('status')).toBeTruthy();
+  rerender(<ChatTranscript {...props} turns={[]} submittedMessage="/compact" />);
+  expect(screen.queryByRole('status')).toBeNull();
+  rerender(<ChatTranscript {...props} turns={[]} submittedMessage={undefined} />);
+  expect(screen.getByRole('status')).toBeTruthy();
+});

@@ -21,8 +21,9 @@ import {
 
 export type OperatorProfile = { name: string; avatar: string };
 
-function isChatCommand(value: string) {
-  return /^\/[A-Za-z][A-Za-z0-9_-]*(?:\s+.*)?$/u.test(value.trim());
+function isHiddenChatCommand(value: string) {
+  const text = value.trim();
+  return /^\/[A-Za-z][A-Za-z0-9_-]*(?:\s+.*)?$/u.test(text) && !/^\/compact$/i.test(text);
 }
 
 type ChatTranscriptProps = {
@@ -45,6 +46,7 @@ type ChatTranscriptProps = {
   onDismissError?: () => void;
   isSending: boolean;
   activeRunId: string;
+  submittedMessage?: string;
   activeToolActivity?: ToolActivity;
   liveProgress: ProgressEntry[];
   liveAnswer: string;
@@ -72,6 +74,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onDismissError,
   isSending,
   activeRunId,
+  submittedMessage,
   activeToolActivity,
   liveProgress,
   liveAnswer,
@@ -109,10 +112,21 @@ export const ChatTranscript = memo(function ChatTranscript({
       !(
         turn.role === 'user' &&
         !turn.metadata?.chatInput &&
-        isChatCommand(textFromChatValue(turn.content)) &&
-        !/^\/compact$/i.test(textFromChatValue(turn.content).trim())
+        isHiddenChatCommand(textFromChatValue(turn.content))
       ),
   );
+  // A locally sent chat should show the operator turn before its live reply.
+  // Background runs and commands whose input is intentionally hidden need no bubble.
+  const waitingForUserTurn =
+    submittedMessage !== undefined &&
+    !isHiddenChatCommand(submittedMessage) &&
+    !messages.some(
+      (turn) =>
+        turn.role === 'user' &&
+        turn.runId === activeRunId &&
+        !turn.metadata?.chatInput &&
+        !turn.metadata?.steering,
+    );
   // Provider role=user is not speaker identity. Workflow and delegation
   // provenance (including legacy saved markers) identify non-operator input.
   const userIdentity = (metadata?: SessionTurn['metadata']) => {
@@ -341,6 +355,7 @@ export const ChatTranscript = memo(function ChatTranscript({
               </section>
             )}
             {isSending &&
+              !waitingForUserTurn &&
               !messages.some(
                 (turn) =>
                   turn.role === 'assistant' &&

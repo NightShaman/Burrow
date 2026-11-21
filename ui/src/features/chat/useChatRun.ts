@@ -23,6 +23,7 @@ type ActiveRun = {
   runId: string;
   agentId: string;
   sessionId: string;
+  submittedMessage: string;
   stage?: ChatLiveStage;
   projection?: LiveStageProjection;
 };
@@ -211,7 +212,7 @@ export function useChatRun({
     streamAbortRef.current[targetKey] = abortController;
     setActiveRuns((current) => ({
       ...current,
-      [targetKey]: { runId, ...target, stage: 'accepted' },
+      [targetKey]: { runId, ...target, submittedMessage: message, stage: 'accepted' },
     }));
     setLiveProgressByRun((current) => ({ ...current, [targetKey]: [] }));
     setLiveAnswerByRun((current) => ({ ...current, [targetKey]: '' }));

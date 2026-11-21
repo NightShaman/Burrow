@@ -40,6 +40,7 @@ export function Chat({
   isSending,
   steeringReady,
   activeRunId,
+  submittedMessage,
   activeToolActivity,
   runtimeChildActivities,
   liveProgress,
@@ -73,6 +74,7 @@ export function Chat({
   isSending: boolean;
   steeringReady?: boolean;
   activeRunId: string;
+  submittedMessage?: string;
   activeToolActivity?: ToolActivity;
   runtimeChildActivities?: ToolActivity[];
   liveProgress: ProgressEntry[];
@@ -356,6 +358,7 @@ export function Chat({
         onDismissError={onDismissError}
         isSending={isSending}
         activeRunId={activeRunId}
+        submittedMessage={submittedMessage}
         activeToolActivity={activeToolActivity}
         liveProgress={liveProgress}
         liveAnswer={liveAnswer}

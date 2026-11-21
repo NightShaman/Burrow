@@ -814,6 +814,7 @@ function AppContent() {
                       runtimeRun.steeringReady,
                   )}
                   activeRunId={displayedRun?.runId ?? ''}
+                  submittedMessage={activeRunForSelection?.submittedMessage}
                   activeToolActivity={
                     activeRunForSelection
                       ? toolActivityForRun(activeRunForSelection.runId)
