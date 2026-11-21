@@ -8,10 +8,10 @@ The **18 November** ordinary delta review reconciled recovery-message attributio
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.19.2` | `c2885ba0ea513c62744e2d42454e021c26227dad` |
-| Core / Backend | `79bab77973a24f57c717a71cdd3d575e7367eca0` |
-| UI | `666827a13da2500cb981357088a6f273bb4e9632` |
-| Skills | `f0cfb02aeaa7aca2941811b788f1a30ba448950e` |
+| Assembled Burrow, build `2026.11.21.2` | `46ae4a611574c44782807c98482799f0a21e191b` |
+| Core / Backend | `c0e08ada700be88a8cdf71f7959c81b22b3a7b42` |
+| UI | `bf1f6f0ea95a9209b70562c6abb0c02785e5da6e` |
+| Skills | `4db878b2b736575ccc60bc1eb96ff0511f430232` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
 
@@ -183,3 +183,7 @@ This is source and test-definition inspection, not application/provider executio
 Compared the last verified source pins through assembly **2026.11.19.2**. Reviewed changes cover terminal receipt repair and recovery ownership, Forge interruption and durable artifact cleanup, exact Archive Proof occurrences/cursors, portable restore and relocated capture/package identities, provider-pool failover gates, mod capability lifecycle and scope-safe UI updates. Prior documentation-only commits were excluded from the substantive behavior delta.
 
 This is static source and regression-definition inspection, with documentation build/link checks, not application/database/provider execution, a production restore, installed-runtime acceptance or public release promotion. Unchanged sections retain the Sunday **15 November** reconciliation and subsequent dated deltas. Approved artwork and layout are unchanged.
+
+## Ordinary delta: 20 November 2026
+
+Compared the last verified source pins through assembly **2026.11.21.2**. Reviewed changes cover encrypted OpenAI Responses continuation and compatible account affinity, usage sample reuse, OpenAI embedding picker, submitted chat ordering, and removal of Forge Home cursor effects. Included development documentation is based on static source and regression-definition inspection, not a live provider or application test. Historical full-review scope and approved layout and artwork are unchanged.

@@ -96,7 +96,7 @@ Memories you create or edit through the operator interface are operator-owned; a
 
 Checked **5 November 2026**: open **Settings → General → Continuity** to configure optional background embeddings. **Enable Brains embeddings globally** and **Index conversation history for session search** are separate switches. Conversation indexing is off by default, including upgrades. Both indexes share the selected provider and embedding model or deployment ID; enabling one does not enable the other.
 
-Google and Ollama remain supported. Current Core also supports compatible OpenAI embeddings endpoints and Azure deployment IDs; a working chat connection alone does not prove embedding support. Discover a supported embedding model, or enter its exact manual model/deployment ID and test it successfully before enabling indexing. Save the coupled embedding settings explicitly.
+Google and Ollama remain supported. Checked **20 November 2026**: the OpenAI-compatible picker lists enabled, saved models with the exact IDs `text-embedding-3-large`, `text-embedding-3-small` and `text-embedding-ada-002` when present. Chat models, disabled entries and unrecognized compatible IDs are not listed. Enter custom model IDs and Azure deployment IDs manually. A listed or manually entered model does not prove the endpoint can serve embeddings; use **Test** before enabling indexing, then save the coupled settings explicitly.
 
 Enabling a remote provider sends saved memory text and, when conversation indexing is enabled, saved conversation passages to that provider. Choose the provider and each opt-in with the sensitivity of that content in mind. Embeddings help retrieve original dialogue; they do not verify current facts or grant authorization.
 
@@ -131,3 +131,4 @@ Open **Archive → Dreams** for agent/day groups containing narratives and separ
 ## Skill metadata parsing
 
 Checked **12 November 2026**: Optional skill frontmatter starts with a first-line `---` and, once opened, requires a closing delimiter. Core parses a YAML mapping using the JSON schema; `name`, `description` and `version`, when supplied, must be strings. Invalid, unclosed, nonmapping or incorrectly typed metadata fails explicitly rather than falling back to regex extraction. This validates metadata only; loading a skill does not authorize its instructions or tools.
+

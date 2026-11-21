@@ -99,7 +99,7 @@ flowchart LR
     F --> G
 ```
 
-OpenAI Responses continuations replay prepared context rather than relying on `previous_response_id`. Anthropic preserves opaque signed thinking blocks when continuing a tool exchange; a signature-specific rejection can trigger one retry without those thinking blocks. Tool arguments/results still need valid pairing and a supported provider contract.  
+OpenAI Responses continuations replay prepared context rather than relying on `previous_response_id`. Checked **20 November 2026**: native OpenAI Responses requests ask for encrypted reasoning items and set `store: false`. Burrow retains the opaque items only for the current continuation, keeping their original order relative to tool calls. Replay requires the same resolved connection, endpoint and wire model. A proven portable pool handoff omits the old owner’s encrypted items from the alternate request, while preserving visible text and paired tool calls/results. Request diagnostics redact encrypted content. This does not change the existing cache-affinity controls or prove a cache hit. Anthropic preserves opaque signed thinking blocks when continuing a tool exchange; a signature-specific rejection can trigger one retry without those thinking blocks. Tool arguments/results still need valid pairing and a supported provider contract.  
 
 ## Context capacity and the meter
 
@@ -148,3 +148,4 @@ User and tool-result image parts support data URLs and HTTP(S) image URLs. Tool-
 ## Responses text completeness
 
 Checked **12 November 2026**: Responses adapters aggregate all returned text content parts. Exceeding the total text budget is an explicit failure, not a completed answer containing only a silently clipped prefix.
+

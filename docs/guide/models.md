@@ -164,3 +164,7 @@ Checked **17 November 2026**: Gemini Minions use an enabled direct Google Genera
 The Accounts panel can show an eligible Anthropic OAuth account's **Full** reset inventory and offer **Use reset**. Opening the confirmation dialog fetches fresh inventory; consuming a reset requires explicit confirmation. This feature has no automatic Anthropic reset scheduler. Full grants must clear both five-hour and seven-day windows; Fable grants are not substituted.
 
 A displayed retained count may be stale and has its own freshness, separate from the usage sample. It is not authority to consume a grant. If activation reports an ambiguous outcome, do not retry with a new request or bypass the locked control, even after refreshing or restarting. The durable account fence protects an unknown consumption outcome. See [reset API](../reference/api/settings.md#anthropic-full-reset-api).
+
+## Pool usage sample reuse
+
+Checked **20 November 2026**: rebuilding model configuration for a turn no longer creates a fresh pool usage cache. OpenAI OAuth routing can reuse a still-fresh sample within the same application model store and transport. A change to the resolved credential, account, endpoint or provider invalidates that sample even if the connection ID is unchanged. Explicit refresh and existing freshness/eligibility rules still apply. This quota-sample cache is separate from provider prompt caching and does not measure cache hits.
