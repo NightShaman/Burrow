@@ -14,15 +14,21 @@ const MODES = new Set(['deliver', 'request_reply', 'request_reply_complete']);
 // nested reply execution for that session; concurrent A2A deliveries remain
 // attributed transcript ingress, but cannot supersede each other's replies.
 const replyQueues = new Map();
-async function serializeRecipientReply({ rootDir, sessionId, operation, abortSignal = null }) {
+async function serializeRecipientReply({ rootDir, sessionId, executionSessionId = null, operation, abortSignal = null }) {
   const key = `${String(rootDir)}:${String(sessionId)}`;
   const previous = replyQueues.get(key) || Promise.resolve();
   let admitted = false;
   let onAbort;
-  const current = previous.catch(() => {}).then(() => {
+  const current = previous.catch(() => {}).then(async () => {
     abortSignal?.throwIfAborted();
     admitted = true;
-    return operation();
+    // A room history lane is held by one isolated execution until it returns.
+    // Expose that dependency so longer chains cannot queue behind their ancestor.
+    const releaseOwner = executionSessionId ? beginReplyWait(
+      replySessionKey(rootDir, sessionId), replySessionKey(rootDir, executionSessionId),
+    ) : null;
+    try { return await operation(); }
+    finally { releaseOwner?.(); }
   });
   // The queue tail remains chained to its predecessor even if the waiting
   // caller leaves immediately. Never race cancellation against admitted work.
@@ -252,6 +258,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
     ? conversationStore.executeAgentMessageDelivery(ownership, work) : work();
   return execute(async () => {
     let releaseWait;
+    let releaseLaneWait;
     let exchange;
     try {
       // Ingress is part of the recipient reply transaction. Appending a second
@@ -264,9 +271,14 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         replySessionKey(senderRuntime.agentWorkspaceRoot, room ? sourceSessionId || 'default' : source),
         replySessionKey(recipientRuntime.agentWorkspaceRoot, room ? implicitReplySession || executionSession || session : session),
       );
+      if (room) releaseLaneWait = beginReplyWait(
+        replySessionKey(senderRuntime.agentWorkspaceRoot, sourceSessionId || 'default'),
+        replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
+      );
       exchange = await serializeRecipientReply({
         rootDir: recipientRuntime.agentWorkspaceRoot,
         sessionId: session,
+        executionSessionId: room ? executionSession : null,
         abortSignal,
         operation: async () => {
           abortSignal?.throwIfAborted();
@@ -358,6 +370,6 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       // If persistence acknowledged an earlier terminal result, the store returns
       // that exact winner. If it is unavailable, propagate rather than invent one.
       return await complete(failed);
-    } finally { releaseWait?.(); }
+    } finally { releaseLaneWait?.(); releaseWait?.(); }
   });
 }
