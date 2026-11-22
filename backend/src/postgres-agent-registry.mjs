@@ -348,6 +348,13 @@ export class PostgresAgentRegistryStore {
       [id, connectionId, model, at]);
   }
   async delete(id) {
+    return this.deleteIdentity(id);
+  }
+  async deleteOwned(id, { ownerModId, activeAgentRuns = null } = {}) {
+    if (typeof ownerModId !== 'string' || !ownerModId) throw Error('mod_owned_agent_owner_required');
+    return this.deleteIdentity(id, ownerModId, activeAgentRuns);
+  }
+  async deleteIdentity(id, ownerModId = null, activeAgentRuns = null) {
     let storageReference;
     const deleted = await withPostgresTransaction(this.pool, async (c) => {
       const locked = await c.query(
@@ -355,10 +362,41 @@ export class PostgresAgentRegistryStore {
         [text(id)],
       );
       const current = row(locked.rows[0]);
-      if (!current) throw Error("agent_not_found");
+      if (!current) {
+        if (ownerModId) return null;
+        throw Error("agent_not_found");
+      }
+      if (ownerModId ? current.modAgent?.ownerModId !== ownerModId : Boolean(current.modAgent)) {
+        throw Object.assign(new Error(ownerModId ? 'mod_owned_agent_not_found' : 'agent_managed_by_mod'), { statusCode: ownerModId ? 404 : 409 });
+      }
+      if (ownerModId) {
+        if ([...(activeAgentRuns?.values?.() || [])].some(run => run.agentId === current.id)) {
+          throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
+        }
+        // A registered or queued turn must finish before its identity disappears.
+        for (const [table, statuses] of [
+          ['chat_inputs', ['queued', 'held', 'running']],
+          ['mod_external_turns', ['queued', 'running']],
+          ['scheduled_job_runs', ['running']],
+          ['github_completion_events', ['pending', 'running']],
+        ]) {
+          const active = await c.query(`SELECT 1 FROM ${table} WHERE agent_id=$1 AND status=ANY($2::text[]) LIMIT 1`, [current.id, statuses]);
+          if (active.rows[0]) throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
+        }
+        const forge = await c.query("SELECT 1 FROM forge_jobs WHERE agent_id=$1 AND record->>'status' IN ('queued','running') LIMIT 1", [current.id]);
+        if (forge.rows[0]) throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
+      }
       if (this.referenceImages) {
         const image = await c.query('SELECT storage_reference FROM agent_reference_images WHERE agent_id=$1', [text(id)]);
         storageReference = image.rows[0]?.storage_reference;
+      }
+      if (ownerModId) {
+        // These native records do not have cascading agent foreign keys.
+        await c.query("DELETE FROM github_completion_events WHERE agent_id=$1", [current.id]);
+        await c.query("DELETE FROM github_workflow_watches WHERE agent_id=$1", [current.id]);
+        await c.query("DELETE FROM mod_external_turns WHERE agent_id=$1", [current.id]);
+        await c.query("DELETE FROM conversation_sessions WHERE agent_id=$1", [current.id]);
+        await c.query("DELETE FROM chat_identities WHERE kind='agent' AND id=$1", [current.id]);
       }
       await c.query("DELETE FROM agents WHERE id=$1", [text(id)]);
       return current;

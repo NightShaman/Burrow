@@ -369,6 +369,14 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       if (patch.avatar !== undefined) await injected.models.saveIdentity({ kind: 'agent', id, avatar: patch.avatar });
       return projectOwned(agent);
     },
+    async removeOwnedAgent(input) {
+      const value = exactKeys(plain(input), ['agentId']);
+      const id = bounded(value.agentId, 96);
+      if (id !== id.trim()) invalid();
+      if (typeof injected.agents.deleteOwned !== 'function') throw new Error('mod_owned_agents_unavailable');
+      const agent = await injected.agents.deleteOwned(id, { ownerModId: schedulerOwner(), activeAgentRuns });
+      return { agentId: id, removed: Boolean(agent) };
+    },
     async getOwnedAgentReferenceImage(input) {
       const value = exactKeys(plain(input), ['agentId']);
       const id = bounded(value.agentId, 96);

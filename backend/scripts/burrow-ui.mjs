@@ -618,7 +618,7 @@ async function updateAgent(id, body = {}) {
 
 async function deleteAgent(id) {
   try { return { ok: true, agent: await agentsStore().delete(id) }; }
-  catch (error) { return { ok: false, status: String(error?.message || error) === 'agent_not_found' ? 404 : 400, error: String(error?.message || error) }; }
+  catch (error) { return { ok: false, status: error?.message === 'agent_managed_by_mod' ? 409 : (String(error?.message || error) === 'agent_not_found' ? 404 : 400), error: String(error?.message || error) }; }
 }
 
 async function agentProfileDocuments(agentId, body = null) {
