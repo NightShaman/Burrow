@@ -83,7 +83,7 @@ There is no prompt-cache switch, retention selector, cache-key field, or cache-c
 
 - **Anthropic:** the adapter enables prompt caching by default. It adds `cache_control: { type: "ephemeral" }` to the final system block and final tool definition, when present. It does not add message-history cache breakpoints or request an explicit TTL. At the adapter level, `anthropicPromptCaching: false` or `promptCaching: false` disables those annotations; the standard connection editor does not expose these flags.
 - **OpenAI-compatible requests:** the normal request builder does not generate a `prompt_cache_key` or request cache retention. It can merge internal `config.extra` fields, but the standard model-connection UI is not an editor for those fields. Provider caching is not guaranteed by saving a connection.
-- **ChatGPT/Codex backend:** the adapter sends session/thread affinity headers when identifiers are available, and reuses a returned turn-state token within that adapter instance. This is separate from public API caching and is not a promise of cross-run cache hits.
+- **ChatGPT/Codex backend:** the adapter sends session/thread affinity headers when identifiers are available, and reuses a returned turn-state token within that adapter instance. This is separate from public API caching and is not a promise of cross-run cache hits. Checked **21 November 2026**: for direct ChatGPT backend Responses, moving the fresh runtime support after the current user item puts the intact user item before that volatile support in the outbound prefix. Follow-on tool requests preserve that order. This does not add or change a cache key, disclose reasoning, or guarantee provider-reported cached tokens.
 - **Diagnostics:** provider-reported cached-token usage is evidence of reuse for a response. Stable-prefix hashes and wire fingerprints help compare request content; matching hashes alone do not prove a cache hit. A fingerprint's `cacheIdentity` can be the hash of an absent/null key.
 ## Tool continuations
 
@@ -148,4 +148,5 @@ User and tool-result image parts support data URLs and HTTP(S) image URLs. Tool-
 ## Responses text completeness
 
 Checked **12 November 2026**: Responses adapters aggregate all returned text content parts. Exceeding the total text budget is an explicit failure, not a completed answer containing only a silently clipped prefix.
+
 

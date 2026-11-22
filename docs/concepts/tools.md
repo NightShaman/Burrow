@@ -161,3 +161,11 @@ Checked **14 November 2026**: Catalog-qualified Google video and capability-decl
 ## Inspect runtime context on demand
 
 `runtime_context_inspect` accepts `section: "environment"` or `section: "attachments"`. Environment inspection reports the already-admitted execution host, workspace and configured UI target; it cannot retarget work. Attachment inspection lists up to 24 references from the current logical session, including compacted history but excluding reset history and side questions. It does not return file bytes or redisplay an image. Read the referenced attachment explicitly when its contents are needed. Invalid sections or unavailable attachment scope return explicit failures. This on-demand surface replaces broad always-injected runtime inventories, not current uploaded attachments.
+
+## Choose the tool by the evidence you need
+
+Checked **21 November 2026**: Core's native tool descriptions now make these distinctions explicit. These are tool-selection hints, not changes to dispatch or permissions.
+
+- Use `brain_search` for saved facts, preferences or decisions; `session_search` for what was said, exact wording and reset history; and `run_evidence_search` for what a prior run actually recorded. None verifies current mutable state.
+- Use working-memory search for temporary blockers or unfinished operations. Session handoffs mark where to resume, not whether the work is still outstanding.
+- For Forge, `forge_catalog` is a lookup, not generation. After an interrupted wait or uncertain delivery, inspect the existing job with `forge_inspect_job` before retrying paid generation. Do not reattach an artifact already delivered by `forge_create_job`.

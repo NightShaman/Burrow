@@ -8,9 +8,9 @@ The **18 November** ordinary delta review reconciled recovery-message attributio
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.21.2` | `46ae4a611574c44782807c98482799f0a21e191b` |
-| Core / Backend | `c0e08ada700be88a8cdf71f7959c81b22b3a7b42` |
-| UI | `bf1f6f0ea95a9209b70562c6abb0c02785e5da6e` |
+| Assembled Burrow, build `2026.11.22.2` | `8580cd87237ccea3696c8d30db95379299fe5b55` |
+| Core / Backend | `36faf155d07c899cc415c5392d0c5e5cfcc044e7` |
+| UI | `58fefb64b4b60ee798808b34c546233b24e68742` |
 | Skills | `4db878b2b736575ccc60bc1eb96ff0511f430232` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -187,3 +187,7 @@ This is static source and regression-definition inspection, with documentation b
 ## Ordinary delta: 20 November 2026
 
 Compared the last verified source pins through assembly **2026.11.21.2**. Reviewed changes cover encrypted OpenAI Responses continuation and compatible account affinity, usage sample reuse, OpenAI embedding picker, submitted chat ordering, and removal of Forge Home cursor effects. Included development documentation is based on static source and regression-definition inspection, not a live provider or application test. Historical full-review scope and approved layout and artwork are unchanged.
+
+## Ordinary delta: 21 November 2026
+
+Compared the last verified source pins through assembly **2026.11.22.2**. Reviewed direct ChatGPT backend Responses support ordering, clarified native tool descriptions, and latest-message behavior on conversation switches. Prior documentation-only changes were excluded from the implementation delta. This was static source and regression-definition inspection plus documentation checks, not an application or provider test. Unchanged pages retain their earlier review scope; approved artwork and layout are unchanged.

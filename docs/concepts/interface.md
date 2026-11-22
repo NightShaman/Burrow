@@ -481,3 +481,7 @@ In declarative mod Settings, each action marks only its own fields saved. The un
 Checked **20 November 2026**: for a locally submitted chat turn, the live assistant reply waits to appear until the matching submitted operator message is visible. Background runs and commands whose inputs are intentionally hidden are exempt. This is display ordering, not a change to dispatch, persistence or completion evidence.
 
 Forge Home retains its schematic/ambient presentation under the existing motion controls, but no longer renders the cursor-following constellation. Active job stages and completion/artifact controls are unchanged.
+
+## Start switched conversations at the latest message
+
+Checked **21 November 2026**: switching the selected agent or session opens the transcript following its latest message. Updates to the same conversation preserve the reader's scroll position when they are away from the bottom; **Jump to latest message** remains available.

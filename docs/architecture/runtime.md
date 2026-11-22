@@ -57,7 +57,7 @@ Important failure categories include uncovered history, unavailable compression,
 
 ### Provider-ready order
 
-The provider-facing message projection separates:
+Before provider-specific serialization, the assembled message projection separates:
 
 1. Identity/profile system material
 2. Stable operating instructions
@@ -67,6 +67,8 @@ The provider-facing message projection separates:
 6. The current user instruction and current attachments, or runtime-owned developer recovery context for a claimed restart recovery turn
 
 This is different from the flattened diagnostic prompt and from the broad section names in the runtime contract. Prior summaries are support for continuity, not replacement source evidence. Attributed peer messages preserve their origin instead of masquerading as user instructions.
+
+Checked **21 November 2026**: on the direct OpenAI OAuth/ChatGPT backend Responses path, the adapter moves only the tagged fresh runtime-support developer item immediately after the intact current user item on the wire. Shared mod guidance stays before the user item. Historical context and source roles do not change, and an untagged transcript or a recovery turn with no current user item does not trigger this reorder. Public OpenAI and compatible proxy Responses paths retain the assembled order. See [provider caching](../concepts/models.md#what-caching-currently-means).
 
 ### Budgets and current-message integrity
 
@@ -179,7 +181,7 @@ Provider budget inspection also distinguishes shared input/output windows from s
 
 ## Runtime context and current authority
 
-Checked **17 November 2026**: fresh runtime support follows reusable dialogue and precedes the current request on a separate developer channel; it is not replayed as user/assistant conversation. Ordinary operator/chat and manual task-board inputs keep operator provenance through production context assembly. Peer, scheduled, mod/private-API and unknown ingress are not promoted to operator authority. Captured provider support excludes already replayed conversation.
+Checked **17 November 2026**: fresh runtime support follows reusable dialogue and precedes the current request in assembly on a separate developer channel; it is not replayed as user/assistant conversation. Ordinary operator/chat and manual task-board inputs keep operator provenance through production context assembly. Peer, scheduled, mod/private-API and unknown ingress are not promoted to operator authority. Captured provider support excludes already replayed conversation.
 
 Full host inventory, browser target and retained attachment listings are available on demand through `runtime_context_inspect`, rather than injected into every conversational message. Current uploads remain attached to the current request. The scoped tool cannot select another agent, session, host or arbitrary path. Old execution digests are not fresh dialogue. Interrupted recovery support requires an interrupted state plus pending work or current ownership; recent file references are rebuilt from bounded eligible persisted turns/receipts and clear on an explicit workspace change.
 
@@ -198,3 +200,4 @@ Checked **19 November 2026**: terminal finalization uses an exact finalization i
 Scheduled tasks and mod-submitted external turns likewise retain the first known outcome while retrying its terminal receipt, rather than rerunning the task/turn or converting a successful result into a failure merely because persistence failed. Receipt recovery is not an exactly-once guarantee for external effects. A failed scope's reconciliation is isolated so independent queued/recovery work can continue.
 
 For native OpenAI pools, a structured upstream rate-limit or unavailable response inside HTTP 2xx can now qualify for account cooldown/failover only before parsed or visible output and without a callback failure. Existing dispatch budgets and replay/ownership gates still apply; arbitrary error prose does not authorize failover.
+
