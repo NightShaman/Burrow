@@ -98,11 +98,11 @@ export async function appendGroupChannelTurn(options = {}) {
   return withGroupChannelAdmission(options, ({ appendTurn }) => appendTurn(options));
 }
 
-async function appendTurnUnlocked({ rootDir, conversationStore = null, channelId, role, content, runId = null, metadata = {} } = {}) {
+async function appendTurnUnlocked({ rootDir, conversationStore = null, channelId, role, content, runId = null, metadata = {}, idempotencyKey = null } = {}) {
   const channel = await readGroupChannel({ rootDir, id: channelId });
   if (!channel) throw new Error('group_channel_not_found');
   if (!conversationStore) throw new Error('conversation_store_required');
-  const entry = await conversationAuthority({ store: conversationStore, agentId: 'group-channel' }).append({ sessionId: channelId, type: 'message', role, content, runId, metadata: { kind: 'group-channel', channelId, ...metadata }, visibility: 'chat', entersPrompt: false });
+  const entry = await conversationAuthority({ store: conversationStore, agentId: 'group-channel' }).append({ sessionId: channelId, type: 'message', role, content, runId, metadata: { kind: 'group-channel', channelId, ...metadata }, visibility: 'chat', entersPrompt: false }, { idempotencyKey });
   try {
     await updateMetadata(rootDir, channelId, entry.ts);
     return { ...entry, persistence: { message: 'persisted', metadata: 'updated' } };

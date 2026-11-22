@@ -411,7 +411,7 @@ async function runAskChatUnserialized({
         } : null,
     onCompletionCommitted: event => { completionState.event = event; },
     onTerminal: (result) => { committedTerminalResult = result; rememberTelemetryTerminal(result); }, testHooks });
-  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentTraceContext = null, parentSignal = null }) => {
+  const runAgentReply = async ({ recipientRuntime, recipientSessionId, content, senderAgentId, sourceSessionId, sourceRunId, messageMode = 'request_reply', inboundEntryId, contextBoundary = null, parentTraceContext = null, parentSignal = null, groupChannelContext = null }) => {
     // Ingress is already durable/idempotent before this callback. Each distinct
     // exchange needs a distinct run, while replays retain the same identity.
     if (!inboundEntryId) throw new Error('agent_message_inbound_identity_required');
@@ -436,6 +436,7 @@ async function runAskChatUnserialized({
         resolveAgentRuntime,
         contextBoundary,
         incomingAgentMessage: { senderAgentId, sourceSessionId, sourceRunId, messageMode, inboundEntryId },
+        groupChannelContext,
         registerNestedAgentRun,
         stores: historyStores,
         onTraceRecord: lifecycle?.onTraceRecord || null,
@@ -466,7 +467,7 @@ async function runAskChatUnserialized({
     agentRuntime: agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } },
     sessionId: historySessionId, route: sharedRoute, resolveAgentRuntime, signal: normalizedArgs.abort_signal,
   });
-  const executionContext = createRuntimeExecutionContext({ sharedContextContinuation: sharedContinuation, minionDepth, minionProfiles, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
+  const executionContext = createRuntimeExecutionContext({ groupChannelContext, sharedContextContinuation: sharedContinuation, minionDepth, minionProfiles, agentMessageReplyTo, stores, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId: resolvedRunId, traceContext: telemetryRun ? telemetry.traceContextForRun?.(resolvedRunId) : null, telemetry: telemetryRun ? telemetry : null, abortSignal: normalizedArgs.abort_signal || null, skillOverrides: scopedSkillsConfig });
   // Native child sessions never fall through to Burrow planning or tools.
   const codexFollowup = await runCodexSessionFollowup({ stores, executionContext,
     agentId: runtimeState.agentId, sessionId: resolvedSessionId, runId: resolvedRunId,

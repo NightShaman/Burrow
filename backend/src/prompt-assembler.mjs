@@ -524,7 +524,7 @@ export function renderTurnTimeContext(context = null) {
 function renderGroupChannel(group = null, budget = 12_000) {
   if (!group?.channelId || !Array.isArray(group.turns) || !group.turns.length) return '';
   budget = Math.max(0, Math.floor(Number(budget) || 0));
-  const header = `Shared operator group room: ${group.channelName || group.channelId}\nThese are shared room messages from the operator and participating agents. They are separate from this agent's private session transcript.`;
+  const header = `Shared operator group room: ${group.channelName || group.channelId}\nThese are shared room messages from the operator and participating agents. They are separate from this agent's private session transcript. Address another room member with agent_send_message. Your message and their reply are shared here, not in their private inbox; omit targetSessionId.`;
   const omitted = '[older group turns omitted]';
   const truncated = '[group turn truncated]';
   const lines = [];
@@ -532,7 +532,10 @@ function renderGroupChannel(group = null, budget = 12_000) {
   for (const turn of group.turns.slice(-80).reverse()) {
     const metadata = turn.metadata || {};
     const speaker = turn.role === 'user' ? 'Operator' : metadata.fromAgentName || metadata.fromAgentId || turn.role || 'Participant';
-    const line = `[${speaker}] ${String(turn.content || '').trim()}`;
+    const attribution = JSON.stringify({ entryId: turn.id, sequence: turn.sequence, speaker, fromAgentId: metadata.fromAgentId || null,
+      recipientAgentIds: metadata.recipientAgentIds || null, delivery: metadata.delivery || null,
+      messageMode: metadata.messageMode || null, replyToEntryId: metadata.replyToEntryId || null });
+    const line = `[${attribution}] ${String(turn.content || '').trim()}`;
     if (line.length + 1 > remaining) {
       if (!lines.length && remaining > truncated.length + 1) lines.push(line.slice(0, remaining - truncated.length - 1) + truncated);
       break;

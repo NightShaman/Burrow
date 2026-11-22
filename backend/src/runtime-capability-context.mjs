@@ -32,7 +32,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores, agentRuntime
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [], sharedContextContinuation = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, groupChannelContext = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [], sharedContextContinuation = null } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   const context = createExecutionContext({
@@ -81,5 +81,6 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
       recipientAgentId: agentMessageReplyTo.recipientAgentId,
       sessionId: agentMessageReplyTo.sessionId,
     }) : null, enumerable: false },
+    groupChannelContext: { value: groupChannelContext, enumerable: false },
   }));
 }

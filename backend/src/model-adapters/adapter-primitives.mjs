@@ -273,6 +273,7 @@ function nativeToolReceipt(result = {}) {
   if (result?.tool === 'agent_send_message' && result?.reply && typeof result.reply === 'object') {
     receipt.recipientReply = {
       ok: result.reply.ok === true,
+      ...(result.reply.roomEntryId ? { roomEntryId: result.reply.roomEntryId, fromAgentId: result.recipientAgentId } : {}),
       content: typeof result.reply.content === 'string' ? result.reply.content : null,
       error: typeof result.reply.error === 'string' ? result.reply.error : null,
     };

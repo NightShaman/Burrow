@@ -4,6 +4,7 @@ import { conversationAuthority } from './conversation-authority.mjs';
 import { assertModAgentAvailable } from './mod-agent-runtime.mjs';
 import { chatTerminalStatus } from './chat-result-metadata.mjs';
 import { projectModelFailure } from './model-recovery-projection.mjs';
+import { assertTrustedGroupChannelContext, assertGroupChannelMembers, refreshGroupChannelContext, appendGroupChannelA2A } from './group-channel-a2a.mjs';
 
 const ID = /^[a-zA-Z0-9._-]{1,96}$/;
 const MAX_MESSAGE = 20_000;
@@ -133,7 +134,7 @@ async function appendAgentMessage({ conversationStore, agentId: transcriptAgentI
 // user turn; attribution identifies where the message came from.
 // parentTraceContext is runtime-only transport: never add it to delivery identity,
 // persisted requests, transcript provenance, or model-visible content.
-export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null, onAddressedParticipant = null } = {}) {
+export async function sendAgentMessage({ conversationStore = null, senderRuntime, resolveRecipientRuntime, runRecipientReply = null, recipientAgentId, targetSessionId = null, replyTo = null, content, messageMode = 'request_reply', runId = null, sourceSessionId = null, parentTraceContext = null, abortSignal = null, onAddressedParticipant = null, groupChannelContext = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   const sender = agentId(senderRuntime?.agentId, 'agent_message_sender');
   assertA2AParticipant(senderRuntime?.agent);
@@ -150,6 +151,8 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   if (sender === recipient) throw new Error('agent_message_self_send_forbidden');
   await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
   await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
+  if (groupChannelContext) assertTrustedGroupChannelContext(groupChannelContext);
+  const room = groupChannelContext?.participantAgentIds.includes(recipient) ? groupChannelContext : null;
   // Only runtime-attested exchange context supplies an implicit return address.
   // Resolve agent aliases first, and never infer routes from transcript/prose.
   const implicitReplySession = replyTo?.recipientAgentId === recipient ? replyTo.sessionId : null;
@@ -157,14 +160,17 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
   const incomingSession = separateInbox ? `a2a-${sender}` : 'default';
   const explicitSession = text(targetSessionId);
   const requestedSession = sessionId(explicitSession || implicitReplySession || incomingSession);
-  const session = separateInbox && requestedSession === 'default' ? incomingSession : requestedSession;
-  const peerInbox = separateInbox && ((!explicitSession && !implicitReplySession) || requestedSession === 'default');
+  // Room replies have their own history lane: broadcast participants may both
+  // be running and must never wait for each other's operator session to drain.
+  const session = room ? `room-a2a-${createHash('sha256').update(JSON.stringify([room.rootDir, room.channelId])).digest('hex')}`
+    : separateInbox && requestedSession === 'default' ? incomingSession : requestedSession;
+  const peerInbox = !room && separateInbox && ((!explicitSession && !implicitReplySession) || requestedSession === 'default');
   const sourceMetadata = await conversationStore.getMetadata({ agentId: sender, sessionId: sourceSessionId || 'default' });
   const source = sessionId(sourceMetadata?.contextIsolation?.historySessionId || sourceSessionId || 'default');
-  const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body])).digest('hex');
+  const deliveryId = createHash('sha256').update(JSON.stringify([sender, recipient, source, session, runId || null, resolvedMode, body, ...(room ? [room.rootDir, room.channelId] : [])])).digest('hex');
   // A runtime-attested return is part of the original conversation, not a
   // new independent A2A ingress (even when that agent has a dedicated inbox).
-  const contextBoundary = session !== implicitReplySession && session !== 'default' && recipientRuntime.agent?.contextConfig?.a2aInDefault === false
+  const contextBoundary = room ? { key: `room-a2a:${sender}:${source}:${runId || deliveryId}` } : session !== implicitReplySession && session !== 'default' && recipientRuntime.agent?.contextConfig?.a2aInDefault === false
     ? { key: `a2a:${sender}:${source}:${runId || deliveryId}` } : null;
   const executionSession = contextBoundary ? contextSessionId({ agentId: recipient, historySessionId: session, key: contextBoundary.key }) : null;
   const deliveryRequest = { sender, recipient, sourceSessionId: source, targetSessionId: session, runId: runId || null, messageMode: resolvedMode, content: body };
@@ -175,6 +181,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
     await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
     await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
     abortSignal?.throwIfAborted();
+    if (room) await assertGroupChannelMembers(room, sender, recipient);
     // Only automatic ingress owns peer-inbox metadata. Labels are presentation,
     // never routing keys; a display-name change cannot create another lane.
     // Materialize on contact, not on the preference toggle, and retain unrelated
@@ -197,6 +204,11 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       sender, senderRuntime, recipient, sourceSessionId: source, sourceRunId: runId,
       messageMode: resolvedMode, direction: 'outbound', deliveryId, replyToEntryId: recipientEntry.id,
     });
+    const roomEntry = room ? await appendGroupChannelA2A(room, { conversationStore, sender, recipient,
+      role: 'agent', content: body, runId, idempotencyKey: `${deliveryId}:room-request`,
+      metadata: { fromAgentId: sender, fromAgentName: senderRuntime.agent?.name || sender,
+        recipientAgentIds: [recipient], delivery: 'targeted', messageMode: resolvedMode,
+        deliveryId, recipientEntryId: recipientEntry.id } }) : null;
     return {
       recipientEntry,
       sourceEntry,
@@ -204,6 +216,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         tool: 'agent_send_message', ok: true, messageMode: resolvedMode,
         deliveryId, senderAgentId: sender, recipientAgentId: recipient, sourceSessionId: source, targetSessionId: session,
         sourceEntryId: sourceEntry.id, recipientEntryId: recipientEntry.id, deliveredAt: recipientEntry.ts,
+        ...(roomEntry ? { roomEntryId: roomEntry.id, channelId: room.channelId } : {}),
         autoExecuted: false,
       },
     };
@@ -245,9 +258,11 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
       // A2A message while the first recipient run owns this session advances the
       // transcript underneath it and makes the first terminal commit stale. Queue
       // both delivery and execution per recipient session instead.
+      // Room recipients execute in isolated sessions. A nested return targets
+      // its waiting sender identity, while independent broadcast turns do not.
       releaseWait = beginReplyWait(
-        replySessionKey(senderRuntime.agentWorkspaceRoot, source),
-        replySessionKey(recipientRuntime.agentWorkspaceRoot, session),
+        replySessionKey(senderRuntime.agentWorkspaceRoot, room ? sourceSessionId || 'default' : source),
+        replySessionKey(recipientRuntime.agentWorkspaceRoot, room ? implicitReplySession || executionSession || session : session),
       );
       exchange = await serializeRecipientReply({
         rootDir: recipientRuntime.agentWorkspaceRoot,
@@ -267,7 +282,8 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           await assertOwner();
           await assertFreshA2AParticipant(senderRuntime, resolveRecipientRuntime);
           const currentRecipientRuntime = await assertFreshA2AParticipant(recipientRuntime, resolveRecipientRuntime);
-          const response = await runRecipientReply({ recipientRuntime: currentRecipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentTraceContext, parentSignal: abortSignal });
+          const response = await runRecipientReply({ recipientRuntime: currentRecipientRuntime, recipientSessionId: session, content: body, senderAgentId: sender, sourceSessionId: room ? sourceSessionId || 'default' : source, sourceRunId: runId, messageMode: resolvedMode, inboundEntryId: delivery.recipientEntry.id, contextBoundary, parentTraceContext, parentSignal: abortSignal,
+            groupChannelContext: room ? await refreshGroupChannelContext(room, { conversationStore, sender, recipient }) : null });
           return { ...delivery, reply: response };
         },
       });
@@ -300,6 +316,13 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
         messageMode: 'reply', direction: 'inbound', deliveryId: `${deliveryId}:reply`, replyToEntryId: sourceEntry.id,
         entersPrompt: !failedPartial, replyOutcome: { decision: replyDecision, terminalStatus: replyDecision === 'blocked' ? 'blocked' : replyStatus, ...(failedPartial ? { modelFailure: projectModelFailure(reply?.modelFailure || { code: replyDecision || 'model_failed' }) } : {}) },
       });
+      const roomReply = room ? await appendGroupChannelA2A(room, { conversationStore, sender, recipient,
+        role: 'agent', content: replyText, runId: reply.runId || null, idempotencyKey: `${deliveryId}:room-reply`,
+        metadata: { fromAgentId: recipient, fromAgentName: recipientRuntime.agent?.name || recipient,
+          recipientAgentIds: [sender], delivery: 'targeted-reply', messageMode: 'reply', deliveryId,
+          replyToEntryId: receipt.roomEntryId, replyEntersPrompt: !failedPartial,
+          decision: replyDecision, terminalStatus: replyDecision === 'blocked' ? 'blocked' : replyStatus,
+          ...(failedPartial ? { modelFailure: projectModelFailure(reply?.modelFailure || { code: replyDecision || 'model_failed' }) } : {}) } }) : null;
       const result = {
         ...receipt,
         ok: reply?.ok !== false && !failedPartial && replyDecision !== 'blocked',
@@ -309,6 +332,7 @@ export async function sendAgentMessage({ conversationStore = null, senderRuntime
           error: reply?.error || null,
           runId: reply.runId || null,
           entryId: replyEntry.id,
+          ...(roomReply ? { roomEntryId: roomReply.id } : {}),
           recipientReplyEntryId: reply.recipientReplyEntryId || null,
           // This bounded reply is the explicit result of the sender's tool call,
           // so it must reach the sender's continuation as well as its transcript.

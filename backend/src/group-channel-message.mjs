@@ -1,3 +1,4 @@
+import { createGroupChannelContext } from './group-channel-a2a.mjs';
 import { readGroupChannel, appendGroupChannelTurn, readGroupChannelTurns, withGroupChannelAdmission } from './group-channel-store.mjs';
 import { resolveGroupMentionTargets } from './group-channel-routing.mjs';
 import { createChatTurnRunId } from './chat-turn-controller.mjs';
@@ -48,7 +49,7 @@ export function createGroupChannelMessageStarter({ runtimeDataRoot, resolveAgent
           attachmentInput: attachments,
           body: { message, attachments, sessionId, runId, abortSignal: controller.signal }, rootDir: projectRoot, agentRuntime, stores, resolveAgentRuntime,
           telemetry, runSource: 'group-channel',
-          groupChannelContext: { channelId, channelName: channel.name, participantAgentIds: [...channel.participantAgentIds], turns: room?.turns || [] },
+          groupChannelContext: createGroupChannelContext({ channelId, channelName: channel.name, participantAgentIds: [...channel.participantAgentIds], turns: (room?.turns || []).filter(turn => turn.metadata?.replyEntersPrompt !== false), rootDir }),
         }).then(async (result) => {
           if (!controller.signal.aborted && (result?.answerText || result?.assistantTurn?.metadata?.outputArtifacts?.length)) await appendGroupChannelTurn({ rootDir, conversationStore, channelId, role: 'agent', content: result.answerText || '', runId, metadata: { attachmentAgentId: agentId, outputArtifacts: result?.assistantTurn?.metadata?.outputArtifacts || [], fromAgentId: agentId, fromAgentName: agentRuntime.agent?.name || agentId, recipient: 'group', participantSessionId: sessionId } });
         }).catch(async (error) => {
