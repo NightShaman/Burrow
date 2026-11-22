@@ -130,6 +130,33 @@ function failedMod({ id, name, root, error }) {
   return { id: id || path.basename(root), name: name || id || path.basename(root), root, manifest: null, server: null, ui: {}, contributions: {}, routes: [], store: null, status: 'failed', error: manifestErrorCode(error), diagnostic: boundaryDiagnostic(error, 'manifest_read') };
 }
 
+// Public Core releases are date-only; Development adds a dotted revision.
+export function parseCoreRelease(version) {
+  const match = typeof version === 'string' && /^(\d{4})\.(\d{2})\.(\d{2})(?:\.([1-9]\d*))?$/.exec(version);
+  if (!match) return null;
+  const [, year, month, day, revision = '0'] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return date.toISOString().slice(0, 10) === `${year}-${month}-${day}` ? [year, month, day, revision].map(BigInt) : null;
+}
+
+// Shared by installed discovery and distribution staging. Parsing never starts a host.
+export async function parseModManifest(root, expectedId) {
+  const manifest = JSON.parse(await fs.readFile(path.join(root, 'burrow.mod.json'), 'utf8'));
+  const id = String(manifest?.id || '').trim();
+  const name = String(manifest?.name || '').trim();
+  if (!MOD_ID.test(id) || id !== expectedId || id === MOD_DATA_DIRECTORY) throw new Error(`mod_id_invalid:${expectedId}`);
+  if (!name) throw new Error(`mod_name_required:${id}`);
+  if (manifest.minCoreVersion !== undefined && !parseCoreRelease(manifest.minCoreVersion)) throw new Error(`mod_min_core_version_invalid:${id}`);
+  if (manifest.restartRequired !== undefined && typeof manifest.restartRequired !== 'boolean') throw new Error(`mod_restart_required_invalid:${id}`);
+  const systemCapabilities = manifestSystemCapabilities(id, manifest);
+  const server = manifest.server ? safeRelative(manifest.server, `mod_server_invalid:${id}`) : null;
+  if (systemCapabilities.length && !server) throw new Error(`system_mod_server_required:${id}`);
+  const ui = manifestUi(id, root, manifest.ui);
+  const contributions = manifestContributions(id, manifest.contributions, ui);
+  const managedSkills = manifestManagedSkills(id, manifest.managedSkills);
+  return { id, name, root, manifest, systemCapabilities, managedSkills, server: server ? inside(root, server) : null, ui, contributions };
+}
+
 export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_ROOT || '/mnt/local/burrow', logger = console, createDirectory = true } = {}) {
   const modsRoot = path.join(runtimeRoot, 'mods');
   try { if (createDirectory) await fs.mkdir(modsRoot, { recursive: true }); }
@@ -142,27 +169,14 @@ export async function discoverMods({ runtimeRoot = process.env.BURROW_RUNTIME_RO
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === MOD_DATA_DIRECTORY || MOD_LIFECYCLE_DIRECTORY.test(entry.name)) continue;
     const root = path.join(modsRoot, entry.name);
-    let manifest = null;
-    let manifestId = '';
     try {
-      manifest = JSON.parse(await fs.readFile(path.join(root, 'burrow.mod.json'), 'utf8'));
-      manifestId = String(manifest.id || '').trim();
-      const id = manifestId;
-      const name = String(manifest.name || '').trim();
-      if (!MOD_ID.test(id) || id !== entry.name) throw new Error(`mod_id_invalid:${entry.name}`);
-      if (!name) throw new Error(`mod_name_required:${id}`);
+      const mod = await parseModManifest(root, entry.name);
+      const id = mod.id;
       if (seen.has(id)) {
         const previous = seen.get(id);
         previous.status = 'failed'; previous.error = 'mod_id_duplicate';
         throw new Error(`mod_id_duplicate:${id}`);
       }
-      const systemCapabilities = manifestSystemCapabilities(id, manifest);
-      const server = manifest.server ? safeRelative(manifest.server, `mod_server_invalid:${id}`) : null;
-      if (systemCapabilities.length && !server) throw new Error(`system_mod_server_required:${id}`);
-      const ui = manifestUi(id, root, manifest.ui);
-      const contributions = manifestContributions(id, manifest.contributions, ui);
-      const managedSkills = manifestManagedSkills(id, manifest.managedSkills);
-      const mod = { id, name, root, manifest, systemCapabilities, managedSkills, server: server ? inside(root, server) : null, ui, contributions };
       seen.set(id, mod); mods.push(mod);
     } catch (error) {
       mods.push(failedMod({ id: entry.name, root, error }));

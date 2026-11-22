@@ -46,7 +46,7 @@ import { POSTGRES_FORGE_NATIVE_SCHEMA_SQL } from './postgres-forge-native-schema
 import { POSTGRES_ROLLING_CONTINUITY_SCHEMA_SQL } from './postgres-rolling-continuity-store.mjs';
 import { POSTGRES_DREAM_EXTRACTION_SCHEMA_SQL } from './postgres-dream-extraction-store.mjs';
 import { POSTGRES_ALBDRUCK_SCHEMA_SQL } from './postgres-albdruck-store.mjs';
-import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL, POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
+import { POSTGRES_MOD_DISTRIBUTION_SCHEMA_SQL, POSTGRES_MOD_MANAGEMENT_SCHEMA_SQL, POSTGRES_MOD_AUTO_UPDATE_SCHEMA_SQL } from './postgres-mod-distribution-repository.mjs';
 import { POSTGRES_MOD_SCHEMA_SQL } from './postgres-mod-store.mjs';
 import { POSTGRES_AGENT_REGISTRY_SCHEMA_SQL } from './postgres-agent-registry.mjs';
 import { POSTGRES_AGENT_PROFILE_SCHEMA_SQL } from './postgres-agent-profile-store.mjs';
@@ -302,4 +302,5 @@ CREATE TABLE forge_artifact_cleanup (
  UNIQUE (source_agent_id, storage_reference)
 );
 ` },
+  { version: 106, name: 'per-mod-auto-update', sql: POSTGRES_MOD_AUTO_UPDATE_SCHEMA_SQL },
 ]);

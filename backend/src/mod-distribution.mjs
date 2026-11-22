@@ -1,13 +1,15 @@
 import { boundaryFailure, boundaryDiagnostic } from './diagnostic-boundary.mjs';
 import { operationalEvent, infrastructureErrorCode, operationalId } from './operational-log.mjs';
 import { approveOperatorExecutionProvider, executionProviderEligibility, isOperatorModAction } from './execution-provider-approval.mjs';
+import { coreApiCaller } from './core-api-dispatch.mjs';
 import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, spawn } from 'node:child_process';
-import { discoverMods, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
+import { discoverMods, parseCoreRelease, parseModManifest, MOD_DATA_DIRECTORY } from './mod-runtime.mjs';
+import { releaseVersion } from './release-version.mjs';
 import { settingsKeyFromEnvironment } from './settings-key.mjs';
 import { isSecretReference } from './secret-references.mjs';
 
@@ -68,6 +70,25 @@ function compareVersions(a, b) {
     else return left < right ? -1 : 1;
   }
   return 0;
+}
+function newerVersion(candidate, installed) {
+  return Boolean(candidate && installed && VERSION.test(candidate) && VERSION.test(installed) && compareVersions(candidate, installed) > 0);
+}
+function autoUpdateError(error) {
+  const code = String(error?.message || 'mod_auto_update_failed');
+  if (code.startsWith('system_mod_capability_unsupported:')) return 'mod_auto_update_core_incompatible';
+  if (code === 'secret_reference_provider_unavailable') return code;
+  const manifestCode = code.split(':')[0];
+  return /^mod_[a-z0-9_]{1,72}$/.test(manifestCode) ? manifestCode : infrastructureErrorCode(error, 'mod_auto_update_failed');
+}
+function coreVersionSatisfied(minimum) {
+  const current = parseCoreRelease(releaseVersion);
+  const required = parseCoreRelease(minimum);
+  if (!current || !required) return false;
+  for (let index = 0; index < 4; index += 1) {
+    if (current[index] !== required[index]) return current[index] > required[index];
+  }
+  return true;
 }
 
 export function normalizeModSourceUrl(value) {
@@ -267,8 +288,8 @@ async function findPreparedMod(extractRoot) {
   if (found.length !== 1) throw new Error(found.length ? 'mod_archive_multiple_manifests' : 'mod_archive_manifest_missing');
   const manifest = JSON.parse(await fs.readFile(path.join(found[0], 'burrow.mod.json'), 'utf8'));
   const id = String(manifest?.id || '').trim();
-  if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id)) || !String(manifest?.name || '').trim()) throw new Error('mod_manifest_invalid');
-  return { root: found[0], manifest, id, name: String(manifest.name).trim() };
+  if (id === MOD_DATA_DIRECTORY || !MOD_ID.test(id)) throw new Error('mod_manifest_invalid');
+  return parseModManifest(found[0], id);
 }
 
 async function syncDirectory(directoryPath) {
@@ -305,7 +326,7 @@ async function removeDurably(filePath) {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
-export function createModDistribution({ runtimeRoot, restart = null, onLifecycleChange = null, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = null, resolveSecretReference = null } = {}) {
+export function createModDistribution({ runtimeRoot, restart = null, onLifecycleChange = null, isLifecycleReady = () => true, logger = console, settingsKey = null, archiveResources = {}, removePath = fs.rm, renamePath = fs.rename, copyPath = fs.cp, cleanupPath = fs.rm, repositoryPreparation = prepareRepository, repositoryFactory = null, resolveSecretReference = null } = {}) {
   if (!runtimeRoot || typeof repositoryFactory !== 'function') throw new Error('mod_distribution_configuration_required');
   const modsRoot = path.join(runtimeRoot, 'mods');
   const archivePolicy = {
@@ -469,13 +490,16 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       const sources = await db.sourceRows();
       const sourceByMod = new Map(sources.filter((row) => row.mod_id).map((row) => [row.mod_id, row]));
       const mods = discovered.map((mod) => {
-        const record = installed.get(mod.id); const source = sourceByMod.get(mod.id) || (record?.source_id ? sources.find((item) => item.id === record.source_id) : null);
+        const record = installed.get(mod.id); const boundSource = record?.source_id ? sources.find((item) => item.id === record.source_id) : null;
+        const source = record?.source_id ? boundSource : sourceByMod.get(mod.id);
         const version = record?.version || normalizeVersion(mod.manifest?.version || '') || undefined;
         const latestVersion = source?.latest_version || undefined;
         const enabled = [true, 1].includes(lifecycle.get(mod.id)?.enabled);
-        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, systemCapabilities: [...(mod.systemCapabilities || [])], source: source?.url, latestVersion, updateAvailable: Boolean(version && latestVersion && VERSION.test(version) && VERSION.test(latestVersion) && compareVersions(latestVersion, version) > 0), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
+        const autoUpdateAvailable = Boolean(record?.source_id && boundSource?.mod_id === mod.id && boundSource.status === 'ready');
+        const autoUpdateReason = record?.auto_update_reason || (record?.auto_update_enabled && !autoUpdateAvailable ? 'mod_auto_update_source_unavailable' : null);
+        return { id: mod.id, name: mod.name, version, status: mod.status === 'failed' ? 'failed' : 'installed', enabled, system: mod.manifest?.system === true, systemCapabilities: [...(mod.systemCapabilities || [])], source: source?.url, latestVersion, updateAvailable: newerVersion(latestVersion, version), autoUpdateEnabled: [true, 1].includes(record?.auto_update_enabled), autoUpdateAvailable, ...(autoUpdateReason ? { autoUpdateReason } : {}), canInstall: source?.status === 'ready', ...(source?.error ? { reason: source.error } : {}) };
       });
-      for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
+      for (const source of sources) if (source.mod_id && !mods.some((mod) => mod.id === source.mod_id)) mods.push({ id: source.mod_id, name: source.mod_name || source.mod_id, status: 'available', source: source.url, latestVersion: source.latest_version || undefined, autoUpdateEnabled: false, autoUpdateAvailable: false, canInstall: source.status === 'ready', ...(source.error ? { reason: source.error } : {}) });
       const refreshConfig = await refreshSettings(db);
       const stale = sources.some((row) => !row.last_checked_at || Date.now() - Date.parse(row.last_checked_at) >= refreshConfig.staleMs);
       if (refreshStale && refreshConfig.enabled && stale && !refreshPromise) queueMicrotask(() => { void refresh().catch(() => {}); });
@@ -510,6 +534,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
           try { const result = await refreshSource(workerDb, row); failed ||= result.status === 'failed'; } finally { await workerDb.close(); }
         }
       }));
+      if (isLifecycleReady()) await runAutoUpdates();
       failureCount = failed ? failureCount + 1 : 0;
       const result = await list();
       if (refreshUnavailable) report('mod_source_refresh_restored', {}, 'info');
@@ -522,15 +547,68 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
     await ready; const db = await repositoryFactory(); try { const removed = (await db.removeSource(String(id))).changes > 0; return { ok: removed, removed }; } finally { await db.close(); } }
   async function removeSourceCredential(id) {
     await ready; const db = await repositoryFactory(); try { const removed = (await db.removeCredential(String(id))).changes > 0; return { ok: true, removed }; } finally { await db.close(); } }
-  async function install(modId, requestedVersion = null, { operatorInitiated = false } = {}) {
+  async function setAutoUpdate(modId, enabled) {
+    await ready;
+    const id = String(modId || '').trim();
+    if (id === MOD_DATA_DIRECTORY || !MOD_ID.test(id)) throw Object.assign(new Error('mod_id_invalid'), { statusCode: 400 });
+    if (typeof enabled !== 'boolean') throw Object.assign(new Error('mod_auto_update_enabled_invalid'), { statusCode: 400 });
+    if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
+    locks.add(id);
+    let db;
+    try {
+      db = await repositoryFactory();
+      const record = await db.installation(id);
+      if (!record) throw Object.assign(new Error('mod_not_found'), { statusCode: 404 });
+      if (enabled) {
+        const source = record.source_id && await db.sourceById(record.source_id);
+        if (!source || source.mod_id !== id || source.status !== 'ready') throw Object.assign(new Error('mod_auto_update_source_unavailable'), { statusCode: 409 });
+      }
+      const changed = await db.setAutoUpdate(id, enabled, record.source_id);
+      if (!changed.changes) throw Object.assign(new Error('mod_auto_update_source_changed'), { statusCode: 409 });
+      return { ok: true, autoUpdateEnabled: enabled };
+    } finally { try { await db?.close(); } finally { locks.delete(id); } }
+  }
+  async function runAutoUpdates() {
+    const db = await repositoryFactory();
+    let candidates;
+    try {
+      const [installations, sources] = await Promise.all([db.installationRows(), db.sourceRows()]);
+      const byId = new Map(sources.map(row => [row.id, row]));
+      candidates = installations.filter(row => [true, 1].includes(row.auto_update_enabled)).map(row => ({ row, source: byId.get(row.source_id) }));
+    } finally { await db.close(); }
+    for (const { row, source } of candidates) {
+      const reason = !source || source.mod_id !== row.mod_id || source.status !== 'ready'
+        ? source?.error || 'mod_auto_update_source_unavailable'
+        : !VERSION.test(source.latest_version || '') || !VERSION.test(row.version || '') ? 'mod_auto_update_version_unavailable'
+          : !newerVersion(source.latest_version, row.version) ? null : undefined;
+      if (reason !== undefined) {
+        const reasonDb = await repositoryFactory();
+        try { await reasonDb.setAutoUpdateReason(row.mod_id, row.source_id, reason); } finally { await reasonDb.close(); }
+        continue;
+      }
+      try { await install(row.mod_id, source.latest_version, { autoSourceId: source.id }); }
+      catch (error) {
+        const reasonDb = await repositoryFactory();
+        try { await reasonDb.setAutoUpdateReason(row.mod_id, row.source_id, autoUpdateError(error)); } finally { await reasonDb.close(); }
+      }
+    }
+  }
+  async function install(modId, requestedVersion = null, { operatorInitiated = false, autoSourceId = null } = {}) {
     await ready;
     const id = String(modId || '').trim(); if ((id === MOD_DATA_DIRECTORY || !MOD_ID.test(id))) throw new Error('mod_id_invalid');
     if (locks.has(id)) throw Object.assign(new Error('mod_install_in_progress'), { statusCode: 409 });
     locks.add(id); let db = null; let scratch;
     try {
       db = await repositoryFactory();
-      let source = await db.sourceByMod(id);
+      const boundInstallation = typeof db.installation === 'function' ? await db.installation(id) : null;
+      let source = autoSourceId ? await db.sourceById(autoSourceId)
+        : boundInstallation?.source_id ? await db.sourceById(boundInstallation.source_id) : await db.sourceByMod(id);
       if (!source) throw new Error('mod_source_not_resolved');
+      if (boundInstallation?.source_id && source.mod_id !== id) throw new Error('mod_source_not_resolved');
+      if (autoSourceId) {
+        const current = await db.installation(id);
+        if (!current?.auto_update_enabled || current.source_id !== autoSourceId || source.id !== autoSourceId || source.status !== 'ready' || !newerVersion(requestedVersion, current.version)) throw new Error('mod_auto_update_source_changed');
+      }
       scratch = await fs.mkdtemp(path.join(runtimeRoot, `.mod-staging-${process.pid}-`));
       const archive = path.join(scratch, 'mod.tar.gz'); const extract = path.join(scratch, 'extract');
       const inspected = await repositoryPreparation(source.url, await sourceCredential(db, source.id), { archivePath: archive, archiveReserve: { root: scratch, reserveBytes: archivePolicy.reserveBytes, checkIntervalMs: archivePolicy.checkIntervalMs } });
@@ -543,6 +621,21 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
       await extractArchiveWithBudget(archive, extract, budget, archivePolicy);
       const prepared = await findPreparedMod(extract);
       if (prepared.id !== id && source.mod_id) throw new Error('mod_manifest_id_mismatch');
+      if (prepared.manifest.minCoreVersion !== undefined && !coreVersionSatisfied(prepared.manifest.minCoreVersion)) throw new Error(autoSourceId ? 'mod_auto_update_core_incompatible' : 'mod_core_incompatible');
+      if (autoSourceId) {
+        const current = await db.installation(id);
+        const bound = await db.sourceById(autoSourceId);
+        if (!current?.auto_update_enabled || current.source_id !== autoSourceId || bound?.mod_id !== id || bound.status !== 'ready' || !newerVersion(version, current.version)) throw new Error('mod_auto_update_source_changed');
+        if (prepared.manifest.restartRequired === true || restart) throw new Error('mod_auto_update_restart_required');
+        const existing = (await discoverMods({ runtimeRoot, logger })).find(mod => mod.id === id);
+        if (!existing || existing.status === 'failed') throw new Error('mod_auto_update_incompatible');
+        const previousCapabilities = new Set(existing.systemCapabilities || []);
+        const newCapabilities = prepared.systemCapabilities.filter(capability => !previousCapabilities.has(capability));
+        if (newCapabilities.length) {
+          const authority = await db.readModAuthority(id);
+          if (newCapabilities.some(capability => !authority?.grants?.includes(capability))) throw new Error('mod_auto_update_approval_required');
+        }
+      }
       const target = path.join(modsRoot, prepared.id); const digest = await archiveSha256(archive);
       const wasInstalled = Boolean(await db.installationExists(prepared.id));
       const enabled = [true, 1].includes((await db.lifecycle(prepared.id))?.enabled);
@@ -592,7 +685,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
         throw error;
       }
       restart?.();
-      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(restart || (installationApproval && wasInstalled && enabled)) };
+      return { ok: true, modId: prepared.id, version, archiveSha256: digest, restartRequired: Boolean(prepared.manifest.restartRequired || restart || (installationApproval && wasInstalled && enabled)) };
     } finally {
       try { await db?.close(); } finally {
         try { if (scratch) await fs.rm(scratch, { recursive: true, force: true }); } finally { locks.delete(id); }
@@ -709,7 +802,7 @@ export function createModDistribution({ runtimeRoot, restart = null, onLifecycle
   }
   const pollingReady = ready.then(() => schedulePoll());
   void pollingReady.catch(error => backgroundFailure('polling', error));
-  return { ready, list, readInventory: () => list({ refreshStale: false }), sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
+  return { ready, list, readInventory: () => list({ refreshStale: false }), sourceRefreshConfig, saveSourceRefreshConfig, addSource, refresh, removeSource, removeSourceCredential, setAutoUpdate, install, enable: (id, options) => setEnabled(id, true, options), disable: (id) => setEnabled(id, false), uninstall, async close() { closed = true; clearPoll(); try { await ready; await pollingReady; await refreshPromise; } catch {} } };
 }
 
 export function createModManagementRoute({ distribution, readJsonBody, sendJson } = {}) {
@@ -724,6 +817,13 @@ export function createModManagementRoute({ distribution, readJsonBody, sendJson 
     if (match && req.method === 'DELETE') { const result = await distribution.removeSourceCredential(decodeURIComponent(match[1])); sendJson(res, 200, result); return true; }
     match = url.pathname.match(/^\/api\/mod-management\/sources\/([^/]+)$/);
     if (match && req.method === 'DELETE') { const result = await distribution.removeSource(decodeURIComponent(match[1])); sendJson(res, result.ok ? 200 : 404, result); return true; }
+    match = url.pathname.match(/^\/api\/mod-management\/([^/]+)\/auto-update$/);
+    if (match && req.method === 'PUT') {
+      if (!isOperatorModAction(req) || coreApiCaller(req) || req?.burrowApiToken) { sendJson(res, 403, { ok: false, error: 'operator_authentication_required' }); return true; }
+      const body = await readJsonBody(req);
+      sendJson(res, 200, await distribution.setAutoUpdate(decodeURIComponent(match[1]), body?.enabled));
+      return true;
+    }
     match = url.pathname.match(/^\/api\/mod-management\/([^/]+)\/(install|enable|disable|uninstall)$/);
     if (match && req.method === 'POST') {
       const id = decodeURIComponent(match[1]);

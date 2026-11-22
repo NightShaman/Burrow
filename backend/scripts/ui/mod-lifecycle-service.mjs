@@ -146,6 +146,7 @@ export function createModLifecycleService({
     getMods,
     initialize,
     markReady,
+    isReady: () => !starting,
     transition,
     reconcileManagedSkills: reconcileRuntimeManagedSkills,
     setCoreManagedSkills,

@@ -1772,6 +1772,7 @@ const modDistribution = createModDistribution({
   runtimeRoot: modsRuntimeRoot,
   repositoryFactory: postgresApplication.modDistributionRepositoryFactory,
   onLifecycleChange: modLifecycle.transition,
+  isLifecycleReady: modLifecycle.isReady,
   resolveSecretReference: reference => resolveSecretReference(modLifecycle.getMods(), reference),
 });
 // Complete durable uninstall reconciliation before accepting requests. The
