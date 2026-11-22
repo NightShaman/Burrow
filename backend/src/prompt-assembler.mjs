@@ -524,7 +524,7 @@ export function renderTurnTimeContext(context = null) {
 function renderGroupChannel(group = null, budget = 12_000) {
   if (!group?.channelId || !Array.isArray(group.turns) || !group.turns.length) return '';
   budget = Math.max(0, Math.floor(Number(budget) || 0));
-  const header = `Shared operator group room: ${group.channelName || group.channelId}\nThese are shared room messages from the operator and participating agents. They are separate from this agent's private session transcript. Address another room member with agent_send_message. Your message and their reply are shared here, not in their private inbox; omit targetSessionId.`;
+  const header = `Shared operator group room: ${group.channelName || group.channelId}\nThese are shared room messages from the operator and participating agents. They are separate from this agent's private session transcript. Address another room member with agent_send_message. Your message and their reply are shared here, not in their private inbox; omit targetSessionId. The addressed member answers directly in the room. If their answer resolves the request, use finish_group_reply when offered. Send a follow-up only when you have something substantive to add.`;
   const omitted = '[older group turns omitted]';
   const truncated = '[group turn truncated]';
   const lines = [];
@@ -688,7 +688,7 @@ export async function assemblePrompt({
   const workingContext = supportContext?.workingContext;
   const rawSections = [
     section('kernel', modContext ? '' : clampText(kernel, kernelLimit)),
-    section('prompt-boundary', [modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] }), a2aReplyMechanics(incomingAgentMessage)].filter(Boolean).join('\n\n')),
+    section('prompt-boundary', [modContext ? renderModPromptBoundary(modContext.ownerModId) : renderPromptBoundary({ availableModels: modelConfig?.availableModels || [] }), a2aReplyMechanics(incomingAgentMessage, supportContext?.groupChannel)].filter(Boolean).join('\n\n')),
     section(modContext ? 'mod-profile-files' : 'profile-files', renderedProfileFiles.text, {
       items: renderedProfileFiles.included.map((file) => file.name),
       omittedItems: renderedProfileFiles.omitted.map((file) => file.name),
