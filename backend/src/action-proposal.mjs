@@ -100,7 +100,7 @@ function normalizeAction(action, index) {
     importance: Number.isFinite(Number(action?.importance)) ? Number(action.importance) : null,
     confidence: Number.isFinite(Number(action?.confidence)) ? Number(action.confidence) : null,
     content: action?.content === undefined || action?.content === null ? null : String(action.content),
-    profileToolsContent: action?.content === undefined || action?.content === null ? null : String(action.content),
+    profileToolsContent: typeof action?.content === 'string' ? action.content : null,
     patch: action?.patch ? String(action.patch) : null,
     profile: action?.profile || action?.workerProfile ? String(action.profile || action.workerProfile) : null,
     purpose: action?.purpose || action?.task ? String(action.purpose || action.task) : null,
@@ -193,7 +193,7 @@ function normalizeAction(action, index) {
   if (tool === 'tasks_update' && !normalized.taskId) errors.push('taskId_required');
   if (tool === 'tasks_assign' && (!normalized.taskId || !normalized.assignedAgentId)) errors.push('taskId_and_assignedAgentId_required');
   if (tool === 'tasks_delete' && !normalized.taskId) errors.push('taskId_required');
-  if (tool === 'agent_update_tools_profile' && normalized.profileToolsContent === null) errors.push('content_required');
+  if (tool === 'agent_update_tools_profile' && !normalized.profileToolsContent?.trim()) errors.push('content_required');
   if (['scheduled_jobs_read', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now'].includes(tool) && !normalized.jobId) errors.push('jobId_required');
   if (tool === 'scheduled_jobs_create') {
     if (!normalized.jobName?.trim()) errors.push('name_required');
@@ -413,7 +413,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
       function: {
         name: 'agent_update_tools_profile',
         description: 'Replace your own PostgreSQL-backed TOOLS.md profile document. Use it only for concise, verified environment facts and concrete recovery recipes that will help future turns (for example, a known GitHub authentication command). Never put credentials, tokens, private data, guesses, or task transcripts here. This tool cannot edit SOUL, RULES, ORIENTATION, or another agent profile.',
-        parameters: { type: 'object', additionalProperties: false, properties: { content: { type: 'string', description: 'Complete intended Markdown content for your TOOLS.md document.' }, reason: { type: 'string' } }, required: ['content'] },
+        parameters: { type: 'object', additionalProperties: false, properties: { content: { type: 'string', description: 'Complete, nonblank Markdown content for your TOOLS.md document.' }, reason: { type: 'string' } }, required: ['content'] },
       },
     },
     { type: 'function', function: { name: 'scheduled_jobs_list', description: 'List scheduled jobs owned by this active agent in this Burrow runtime. This never lists another agent’s or a mod’s jobs. Results are in stable ID order; follow nextCursor for further pages.', parameters: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, cursor: { type: 'string', description: 'Returned nextCursor with the same filters.' }, limit: { type: 'number', minimum: 1, maximum: 100 }, reason: { type: 'string' } } } } },

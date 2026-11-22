@@ -1,5 +1,6 @@
 export async function updateOwnToolsProfile({ agentId, markdown, store } = {}) {
   if (!agentId) return { tool: 'agent_update_tools_profile', ok: false, error: 'agent_profile_update_agent_required' };
+  if (typeof markdown !== 'string' || !markdown.trim()) return { tool: 'agent_update_tools_profile', ok: false, error: 'content_required' };
   if (!store?.replaceTools) return { tool: 'agent_update_tools_profile', ok: false, error: 'agent_profile_store_required' };
   try {
     const document = await store.replaceTools(agentId, markdown);
