@@ -343,6 +343,7 @@ export function Chat({
   return (
     <div className="chat-view">
       <ChatTranscript
+        key={JSON.stringify([selected.id, sessionId])}
         selected={selected}
         parent={parent}
         agents={agents}

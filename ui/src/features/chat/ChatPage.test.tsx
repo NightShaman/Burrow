@@ -1009,3 +1009,23 @@ describe.each(['codex', 'claude', 'gemini'] as const)(
     );
   },
 );
+
+it('starts following latest on conversation switches without resetting on same-chat updates', () => {
+  const { container, rerender, props } = renderChat({
+    turns: [{ type: 'message', role: 'user', content: 'History' }],
+  });
+  const transcript = () => container.querySelector<HTMLDivElement>('.chat-messages')!;
+  const first = transcript();
+  Object.defineProperty(first, 'scrollHeight', { value: 1000 });
+  first.scrollTop = 100;
+  fireEvent.scroll(first);
+  rerender(<Chat {...props} liveAnswer="updated" />);
+  expect(transcript().scrollTop).toBe(100);
+  expect(screen.getByRole('button', { name: 'Jump to latest message' })).toBeTruthy();
+  rerender(<Chat {...props} sessionId="next" />);
+  expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
+  const second = transcript();
+  expect(second).not.toBe(first);
+  rerender(<Chat {...props} sessionId="next" selected={{ ...agent, id: 'another' }} />);
+  expect(transcript()).not.toBe(second);
+});
