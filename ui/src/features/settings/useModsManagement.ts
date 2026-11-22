@@ -2,6 +2,7 @@ import { useInstalledMods } from './useInstalledMods';
 import { useSourcesCredentials } from './useSourcesCredentials';
 export { rankSecretReferences } from './useSourcesCredentials';
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../../app/apiError';
 import { modsChangedEvent } from '../../app/modPanels';
 import { modContributionsChangedEvent } from '../../app/apiTargets';
 import { useAutomaticChecks } from './useAutomaticChecks';
@@ -10,6 +11,8 @@ import {
   isModBusyError,
   loadModManagement,
   modManagementAction,
+  saveModAutoUpdate,
+  type ModRecord,
   type NormalizedModManagement,
 } from './modManagementApi';
 
@@ -24,6 +27,9 @@ export function useModsManagement(section: 'installed' | 'sources' | 'automatic-
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autoUpdateError, setAutoUpdateError] = useState<{ id: string; message: string } | null>(
+    null,
+  );
   const refresh = useCallback(async () => {
     setError(null);
     try {
@@ -39,6 +45,7 @@ export function useModsManagement(section: 'installed' | 'sources' | 'automatic-
   const sourceRefresh = state.sourceRefresh ?? defaultSourceRefresh;
   const run = async (key: string, path: string, init?: RequestInit, onSubmitted?: () => void) => {
     setBusy(key);
+    setAutoUpdateError(null);
     setError(null);
     try {
       const result = await modManagementAction(path, init);
@@ -67,6 +74,35 @@ export function useModsManagement(section: 'installed' | 'sources' | 'automatic-
     }
   };
 
+  const changeAutoUpdate = async (mod: ModRecord, enabled: boolean) => {
+    if (
+      busy !== null ||
+      mod.status !== 'installed' ||
+      (enabled && mod.autoUpdateAvailable !== true)
+    )
+      return;
+    setBusy(`auto-update:${mod.id}`);
+    setAutoUpdateError(null);
+    try {
+      const autoUpdateEnabled = await saveModAutoUpdate(mod.id, enabled);
+      setState((current) => ({
+        ...current,
+        mods: current.mods.map((record) =>
+          record.id === mod.id ? { ...record, autoUpdateEnabled } : record,
+        ),
+      }));
+      // Re-read server-owned eligibility and reasons, without refreshing sources or reloading mod UIs.
+      await refresh();
+    } catch (cause) {
+      setAutoUpdateError({
+        id: mod.id,
+        message: apiErrorMessage(cause, 'Could not save automatic updates.'),
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const installed = useInstalledMods(state.mods, run);
   const {
     refreshConfig,
@@ -89,6 +125,8 @@ export function useModsManagement(section: 'installed' | 'sources' | 'automatic-
   return {
     ...sources,
     ...installed,
+    autoUpdateError,
+    changeAutoUpdate,
     state,
     busy,
     error,

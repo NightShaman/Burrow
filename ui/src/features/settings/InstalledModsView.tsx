@@ -1,4 +1,5 @@
 import type { useModsManagement } from './useModsManagement';
+import { useId } from 'react';
 import { createPortal } from 'react-dom';
 import type { ModRecord } from './modManagementApi';
 function actionLabel(mod: ModRecord) {
@@ -18,6 +19,8 @@ export function InstalledModsView({
     | 'busy'
     | 'selectedMod'
     | 'run'
+    | 'autoUpdateError'
+    | 'changeAutoUpdate'
     | 'install'
     | 'lifecycle'
   >;
@@ -25,6 +28,16 @@ export function InstalledModsView({
 }) {
   const { state, selectedModId, setSelectedModId, busy, selectedMod, run, install, lifecycle } =
     model;
+  const autoUpdateReasonId = useId();
+  const autoUpdateOn = selectedMod?.autoUpdateEnabled === true;
+  const autoUpdateAvailable = selectedMod?.autoUpdateAvailable === true;
+  const issue =
+    typeof selectedMod?.autoUpdateReason === 'string' ? selectedMod.autoUpdateReason : undefined;
+  const showAutoUpdate =
+    selectedMod?.status === 'installed' &&
+    (typeof selectedMod.autoUpdateAvailable === 'boolean' || autoUpdateOn || Boolean(issue));
+  const autoUpdateReason =
+    issue || (!autoUpdateAvailable ? 'Automatic updates are unavailable for this mod.' : undefined);
   const refreshSourcesAction = (label: string) => (
     <button
       className="secondary"
@@ -133,16 +146,47 @@ export function InstalledModsView({
             {selectedMod.reason ? ` · ${selectedMod.reason}` : ''}
           </p>
           <p className="settings-help">
-            Install, update, enable, and disable apply live without restarting Burrow. All mods,
-            including Node Goblin and system mods, start disabled until you explicitly enable them
-            in Settings → Mods → Installed mods. Updates and reinstalls preserve the current enabled
-            or disabled state.
+            All mods, including Node Goblin and system mods, start disabled until you explicitly
+            enable them in Settings → Mods → Installed mods. Updates and reinstalls preserve the
+            current enabled or disabled state.
           </p>
           {selectedMod.status === 'installed' && selectedMod.enabled === false && (
             <p className="settings-help">
               This mod is disabled. Choose Enable to activate it; installation alone does not enable
               it.
             </p>
+          )}
+          {showAutoUpdate && (
+            <div>
+              <label className="settings-checkbox-row">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={autoUpdateOn}
+                  disabled={busy !== null || (!autoUpdateAvailable && !autoUpdateOn)}
+                  aria-describedby={autoUpdateReason ? autoUpdateReasonId : undefined}
+                  onChange={(event) =>
+                    void model.changeAutoUpdate(selectedMod, event.target.checked)
+                  }
+                />
+                <span>Update automatically</span>
+              </label>
+              {autoUpdateReason && (
+                <p className="settings-auth-warning" id={autoUpdateReasonId} role="status">
+                  {autoUpdateReason}
+                </p>
+              )}
+              {busy === `auto-update:${selectedMod.id}` && (
+                <p className="settings-help" role="status">
+                  Saving automatic updates…
+                </p>
+              )}
+              {model.autoUpdateError?.id === selectedMod.id && (
+                <p className="settings-request-error" role="alert">
+                  {model.autoUpdateError.message}
+                </p>
+              )}
+            </div>
           )}
           <div className="model-actions">
             {selectedMod.status === 'installed' && (

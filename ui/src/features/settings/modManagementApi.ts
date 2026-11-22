@@ -12,6 +12,9 @@ export type ModRecord = {
   source?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
+  autoUpdateEnabled?: boolean;
+  autoUpdateAvailable?: boolean;
+  autoUpdateReason?: string;
   canInstall?: boolean;
   reason?: string;
 };
@@ -132,6 +135,19 @@ export async function modManagementAction(path: string, init: RequestInit = {}) 
     return api<ModManagementState>(path, jsonMutation(method as JsonMutationMethod, body, init));
   }
   return api<ModManagementState>(path, init);
+}
+
+export async function saveModAutoUpdate(modId: string, enabled: boolean): Promise<boolean> {
+  const saved = await api<{ ok?: boolean; autoUpdateEnabled?: boolean }>(
+    `/api/mod-management/${encodeURIComponent(modId)}/auto-update`,
+    jsonMutation('PUT', { enabled }),
+  );
+  if (saved?.ok !== true || saved.autoUpdateEnabled !== enabled) {
+    throw new Error(
+      'Core did not confirm the requested setting. Refresh the catalog and try again.',
+    );
+  }
+  return saved.autoUpdateEnabled;
 }
 
 export async function loadSecretReferences(scheme = 'gss'): Promise<SecretReference[]> {
