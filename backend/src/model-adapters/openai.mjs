@@ -9,6 +9,19 @@ import { redactStructuredJsonText, redactProtectedText } from '../redaction.mjs'
 import { googleCompatibleWireModel } from './google-wire.mjs';
 import { readResponseTextBounded, chatToolContinuationMessages, buildProviderMessageManifest, serializedMessageHash, providerInputAccounting, contextUsageFromRequest, contextUsageFromResponse, contextUsageCallback, providerResponseModel, providerResponseIdentifier, redactHeaders, boundedText, randomUUID, nativeToolCall } from './adapter-primitives.mjs';
 
+// The assembler may put shared mod guidance between support and the task.
+// Move only the current support item on the freshly serialized message list.
+function orderChatGptRuntimeSupport(input) {
+  const task = input.findLastIndex(item => item.role === 'user' && item.metadata?.providerMessageSource === 'current-task');
+  for (let index = task - 1; index >= 0 && input[index].role === 'developer'; index--) {
+    if (input[index].metadata?.providerMessageSource === 'support-context-provider') {
+      const [support] = input.splice(index, 1);
+      input.splice(task, 0, support);
+      return;
+    }
+  }
+}
+
 export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
   const mode = apiMode(config);
@@ -84,6 +97,7 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
     const responseInput = mode === 'openai-responses'
       ? ((!isToolContinuation && !messages?.length) ? String(prompt || '') : messagesToResponsesInput(transcript, prompt, reasoningOwner, estimate))
       : null;
+    if (chatGptBackend && Array.isArray(responseInput)) orderChatGptRuntimeSupport(responseInput);
     const continuationMessages = isToolContinuation && mode !== 'openai-responses' ? transcript : null;
     const body = mode === 'openai-responses'
       ? {
