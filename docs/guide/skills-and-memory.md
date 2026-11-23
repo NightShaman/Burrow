@@ -132,3 +132,6 @@ Open **Archive → Dreams** for agent/day groups containing narratives and separ
 
 Checked **12 November 2026**: Optional skill frontmatter starts with a first-line `---` and, once opened, requires a closing delimiter. Core parses a YAML mapping using the JSON schema; `name`, `description` and `version`, when supplied, must be strings. Invalid, unclosed, nonmapping or incorrectly typed metadata fails explicitly rather than falling back to regex extraction. This validates metadata only; loading a skill does not authorize its instructions or tools.
 
+## Updating a TOOLS profile from an agent
+
+The native `agent_update_tools_profile` call rejects empty or whitespace-only content with `content_required` before writing. It replaces the agent’s own TOOLS Markdown rather than patching one section. An invalid replacement leaves the existing document unchanged. This does not change the operator’s profile editor contract.

@@ -201,3 +201,8 @@ Scheduled tasks and mod-submitted external turns likewise retain the first known
 
 For native OpenAI pools, a structured upstream rate-limit or unavailable response inside HTTP 2xx can now qualify for account cooldown/failover only before parsed or visible output and without a callback failure. Existing dispatch budgets and replay/ownership gates still apply; arbitrary error prose does not authorize failover.
 
+## Group-room peer delivery
+
+When both peers are members of the current group, native A2A places the targeted request and attributed reply in the shared room, not the recipient’s ordinary peer inbox. The reply runs in an isolated room-specific lane; Core rechecks membership and detects waits that would return to a held lane. A failed partial reply can remain visible as failure evidence without becoming prompt history. Calls to nonmembers still use normal private A2A routing, subject to its checks.
+
+An initiating operator room turn can finish using `finish_group_reply` after a successful published peer reply without adding an empty or duplicate assistant message. Core only offers it after a clean eligible tool batch with no pending operator steer. It is not an independent persistent tool or a terminal shortcut for private or nested recipient turns.

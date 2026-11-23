@@ -8,9 +8,9 @@ The **18 November** ordinary delta review reconciled recovery-message attributio
 
 | Component | Inspected revision |
 |---|---|
-| Assembled Burrow, build `2026.11.22.2` | `8580cd87237ccea3696c8d30db95379299fe5b55` |
-| Core / Backend | `36faf155d07c899cc415c5392d0c5e5cfcc044e7` |
-| UI | `58fefb64b4b60ee798808b34c546233b24e68742` |
+| Assembled Burrow, build `2026.11.22.9` | `f9c900d34916bd8e081097bbf7cc414293acf50f` |
+| Core / Backend | `80c9c651bfd580faa79deb75579b882e8f26586d` |
+| UI | `4742bdab27731635bc14c443a2ea825298c9d01d` |
 | Skills | `4db878b2b736575ccc60bc1eb96ff0511f430232` |
 
 The assembly's `SOURCE_VERSIONS` matches those Backend/UI pins. Private source links are intentionally not published. Older public commit links below remain historical evidence and are not silently repointed to claim current compatibility. Check your installed health/build identity before using a newer capability.
@@ -191,3 +191,7 @@ Compared the last verified source pins through assembly **2026.11.21.2**. Review
 ## Ordinary delta: 21 November 2026
 
 Compared the last verified source pins through assembly **2026.11.22.2**. Reviewed direct ChatGPT backend Responses support ordering, clarified native tool descriptions, and latest-message behavior on conversation switches. Prior documentation-only changes were excluded from the implementation delta. This was static source and regression-definition inspection plus documentation checks, not an application or provider test. Unchanged pages retain their earlier review scope; approved artwork and layout are unchanged.
+
+## Sunday full reconciliation: 22 November 2026
+
+Reviewed each existing Core page and its owning counterpart against the current source and prior review baseline, including setup, runtime, workflows, operations, API/configuration, security guidance, and source scope. Changes reconcile in-room peer replies, per-mod automatic update consent, mod-owned agent removal, blank TOOLS replacement rejection, and current storage migration notes. Dated release examples and public compatibility boundaries remain historical. No application, database, provider or installed-instance tests were executed; documentation builds, links and existing artwork were checked without altering layout.

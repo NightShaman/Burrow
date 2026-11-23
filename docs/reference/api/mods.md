@@ -12,7 +12,7 @@ Mods are trusted installed server/UI code. Distribution, activation, tool grants
 
 The management API supports adding/removing sources, refreshing release discovery, install/update, enable, disable and uninstall. A fresh install starts disabled; update preserves lifecycle state. Installation does not automatically grant agent tools.
 
-Sources use validated Git URLs, tagged manifests and checked archives. The current installer chooses the latest accepted version tag; an explicit requested version must match that latest release. Do not assume arbitrary historical pin/rollback selection. Source discovery is not auto-update installation. Background refresh is normally every six hours, with stale checks/backoff; read/save its persisted settings through `/source-refresh`.
+Sources use validated Git URLs, tagged manifests and checked archives. The current installer chooses the latest accepted version tag; an explicit requested version must match that latest release. Do not assume arbitrary historical pin/rollback selection. Source refresh discovers tagged releases and may apply eligible updates to installed mods that individually opted in. Background refresh is normally every six hours, with stale checks/backoff; read/save its persisted settings through `/source-refresh`.
 
 Uninstall refuses system mods and preserves mod settings, encrypted secrets and `mods/mod-data/<id>`. Removing source metadata and uninstalling code are separate actions. Active lifecycle changes can be refused while the mod is busy; inspect the response rather than retrying destructive transitions blindly.
 ## Operator-owned system capability access
@@ -50,6 +50,7 @@ Methods are significant. Braced segments are placeholders; URL-encode identifier
 | `GET` | `/api/mod-management/secret-references` | Optional source-credential reference discovery; current distribution service returns an empty fallback |
 | `POST` | `/api/mod-management/refresh` | Refresh all mod sources |
 | `POST` | `/api/mod-management/{modId}/install` | Install or update a mod |
+| `PUT` | `/api/mod-management/{modId}/auto-update` | Save per-mod automatic update consent |
 | `POST` | `/api/mod-management/{modId}/enable` | Enable an installed mod |
 | `POST` | `/api/mod-management/{modId}/disable` | Disable an installed mod |
 | `POST` | `/api/mod-management/{modId}/uninstall` | Uninstall a mod while preserving settings |
@@ -75,3 +76,7 @@ Source reviewed on **31 October 2026** against Core `8275b6bedf1fcd969fb5289cf0b
 ## 15 November full static review
 
 Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.
+
+## Automatic update consent
+
+`PUT /api/mod-management/{modId}/auto-update` takes `{"enabled":true}` or `{"enabled":false}` and returns `{ok, autoUpdateEnabled}`. This is an operator action; neither a diagnostics token nor an internal full Core API caller can opt in. Enabling requires an installed mod with a bound, ready source for that same mod. The inventory exposes `autoUpdateEnabled`, `autoUpdateAvailable` and, when applicable, `autoUpdateReason`. Saving consent does not itself refresh sources or install an update. See [when updates run](../../guide/tools-and-mods.md#opt-an-installed-mod-into-updates).

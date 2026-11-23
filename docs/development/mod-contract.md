@@ -100,7 +100,7 @@ Archive exports `mountArchive({modId,runtimeScope,root,api,date})`; `date` is `Y
 
 Flow: add Git source, refresh, install, explicitly enable, separately grant tools, then update/disable/uninstall. Fresh installs start disabled. Updates preserve enabled state. Active work can return busy. Disable removes live routes/tools. Uninstall removes code/catalog/grants but preserves settings, secrets, and mod-data.
 
-Burrow has no manifest `apiVersion` or Core range yet. This page plus the reference mod define the current public contract. Breaking changes require coordinated Core docs/reference updates. Test against every release you claim to support.
+There is no manifest `apiVersion` or maximum-version range. Distribution accepts an optional calendar-versioned `minCoreVersion` and rejects a release requiring a newer Core. A boolean `restartRequired` defers automatic installation and surfaces the restart requirement to the operator. This page plus the reference mod define the current public contract. Breaking changes require coordinated Core docs/reference updates. Test against every release you claim to support.
 
 ## Release checklist
 
@@ -113,3 +113,4 @@ Where supported by the installed Core, `context.forge.references.get({key})`, `.
 `context.forge.createImage({prompt,idempotencyKey,referenceImages:[{key,id,name}]})` may select those exact saved revisions. Core binds the owning Mod, validates each revision, snapshots original bytes and ties the ordered identities/digests to idempotency. Missing/stale photos or unsupported models fail without silent text-only fallback. Public agent/operator selectors cannot be mixed into this private Mod context. Omit references for prompt-only behavior. The photos do not authorize paid generation; retain explicit consent and inspect the durable job outcome.
 
 Settings `fetchContent(path, init?)` returns an authenticated `Promise<Response>` for binary content, unlike the scoped JSON `api` helper. It forces GET and requires a `/api/` path, rejecting fragments, backslashes, malformed escapes and decoded dot/dot-dot path segments. Use the returned Core content URL and `response.blob()` for previews; manage object-URL cleanup. This does not create a secret transport or sandbox for trusted Mod UI.
+

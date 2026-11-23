@@ -386,3 +386,7 @@ Migration **101**, `workflow-watch-conclusions`, adds `conclusions` to `github_w
 | 104 | `mcp-connection-tls-verification` | Adds non-null `mcp_connections.verify_tls`, default true. Existing connections retain certificate verification unless deliberately changed through the supported connection controls. |
 
 Simple global/per-agent Minion settings use existing `settings_meta` keys (`minion_settings` and `minion_settings:<agentId>`), not another migration or replacement model-selection table. Saved per-agent values and `overrideEnabled` are distinct from effective inherited settings. Legacy profile and Minion-model rows remain compatibility data, not normal dispatch defaults. See [Minion configuration](configuration.md#minion-settings). No migrations or application tests were executed for this review.
+
+## Current Forge cleanup and mod update preferences
+
+Migration **105**, `forge-durable-artifact-cleanup`, adds durable pending cleanup for generated media bytes. Removing the live job or artifact locator and enqueueing cleanup commit together; later cleanup checks remaining references before removing the file. Migration **106**, `per-mod-auto-update`, stores per-installation opt-in and the last blocking reason. Existing installations remain off unless explicitly enabled. Both were inspected statically; no migration was executed for this review.

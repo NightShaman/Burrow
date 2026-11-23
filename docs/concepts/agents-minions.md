@@ -228,3 +228,9 @@ Checked **12 November 2026**: An `@` mention begins at the start of text or afte
 ## Sunday source checkpoint: 15 November 2026
 
 This page was fully reconciled statically against the [current implementation baseline](../project/source-map.md). Earlier dated sections and public-source links retain their historical scope. No application/provider execution or installed-instance verification is implied.
+
+## In-room peer exchange
+
+When both peers are members of the current group, native A2A places the targeted request and attributed reply in the shared room, not the recipient’s ordinary peer inbox. The reply runs in an isolated room-specific lane; Core rechecks membership and detects waits that would return to a held lane. A failed partial reply can remain visible as failure evidence without becoming prompt history. Calls to nonmembers still use normal private A2A routing, subject to its checks.
+
+When a successful published peer reply answers the operator’s request, the initiating room turn can finish without a duplicate message if Core offers `finish_group_reply`. This control is not available for private exchanges or nested recipient replies; a pending operator steer or failed tool also prevents it.

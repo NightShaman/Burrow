@@ -142,3 +142,7 @@ Checked **6 November 2026**: discovery ignores distribution-owned backup/uninsta
 ## Mod transitions and skill synchronization
 
 Checked **7 November 2026**: an auxiliary managed-skill synchronization failure is reported separately and no longer rolls back a completed mod disable or uninstall. Inspect mod status and skill-sync health independently; do not assume a missing managed skill means the mod transition failed. Actual activation failures still reject the transition. See [managed skill guidance](skills-and-memory.md).
+
+## Opt an installed mod into updates
+
+Automatic updates are off by default and require separate consent for each installed mod. After enabling **Update automatically** in the installed mod’s detail, a manual or automatic source refresh may install a strictly newer release from that mod’s bound, ready source. Updating does not enable a disabled mod. Busy mods, updates requiring a restart, incompatible Core versions, and newly declared system capabilities without an existing grant are deferred; inspect the displayed reason. Turning off background checks does not stop a manual refresh from applying an opted-in update. Removing its source or finding a different mod at that source clears consent rather than carrying it to another package.

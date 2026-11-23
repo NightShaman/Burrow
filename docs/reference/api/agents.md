@@ -78,3 +78,7 @@ The exact photo-byte endpoints are `GET /api/agents/{agentId}/reference-image/co
 ## 15 November full static review
 
 Rechecked the documented route family and its current implementation boundaries against Backend `29ca7b6cec378700503a587703adc1d82e9d6f6d`. Historical source links and earlier receipts above remain historical. This pass inspected source and contracts; it did not execute API calls, application tests or model/provider work.
+
+## Mod-owned identity removal
+
+`DELETE /api/agents/{agentId}` returns HTTP 409 `agent_managed_by_mod` for a mod-owned identity. Its installed owner can remove it through the [mod host capability](../../development/extensions.md#remove-a-mod-owned-native-agent). This is distinct from removing an agent from a group, disabling it, or uninstalling a mod.

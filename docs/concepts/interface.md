@@ -147,7 +147,7 @@ The **Agents** selector is a horizontal, non-wrapping row of named buttons at ev
 
 **Export** keeps export controls in the main editor and **Import** in the additional-settings column. **Agents → Global → Minions** owns shared defaults; each agent has a **Minions** section with an override toggle. Depth, Burrow model and native enable/model choices use **Save minion defaults**, rather than the earlier autosave controls. Inactive overrides remain saved. **OpenTelemetry** keeps the **Destinations** inventory left of the selected destination editor; **Dreams** pairs its configuration with **Dream memory**, with retained history in **Archive → Dreams**. Settings boolean controls are styled as switches; save the relevant section where it offers a Save action.
 
-Under **Mods**, source checks discover available versions; they do not automatically install updates. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization.
+Under **Mods**, source checks discover available versions. They can also install an eligible update for an installed mod only after the operator opts in for that mod. Newly installed mods begin disabled, while updates preserve enabled state. Honor any restart-required or busy response shown by the runtime. A mod UI is dynamically imported into the application page, so installing a mod is a trust decision rather than an isolated visual customization.
 
 ### General
 
@@ -485,3 +485,7 @@ Forge Home retains its schematic/ambient presentation under the existing motion 
 ## Start switched conversations at the latest message
 
 Checked **21 November 2026**: switching the selected agent or session opens the transcript following its latest message. Updates to the same conversation preserve the reader's scroll position when they are away from the bottom; **Jump to latest message** remains available.
+
+## Installed mod update preference
+
+The **Update automatically** switch appears on eligible installed mod details. It saves immediately; turning it on does not run an update by itself. A saved preference, displayed blocking reason, and current installed/running version answer different questions. See [mod update behavior](../guide/tools-and-mods.md#opt-an-installed-mod-into-updates).
