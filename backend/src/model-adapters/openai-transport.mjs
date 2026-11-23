@@ -167,6 +167,12 @@ function messagesToResponsesInput(messages, prompt, reasoningOwner = null, estim
     };
     emitReasoning(0);
     if (message?.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) {
+      // Chat-style assistants can carry prose and calls in the same message.
+      // Responses needs both items: keep the prose once, before the calls,
+      // without manufacturing an empty message for tool-only rounds. Reasoning
+      // positions count calls, so this text must not advance that cursor.
+      const content = messageContentToResponses(message.content);
+      if (content.length) input.push({ role: 'assistant', content });
       for (const [index, call] of message.tool_calls.entries()) {
         const fn = call.function || call;
         input.push({

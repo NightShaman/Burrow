@@ -412,7 +412,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const started = await traceLogger?.toolStart?.({ tool: 'agent_update_tools_profile', agentId });
       const result = await updateOwnToolsProfile({ agentId, markdown: action.profileToolsContent, store: executionContext?.stores?.profiles });
       toolResults.push(result);
-      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agent_update_tools_profile', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, agentId: agentId || null, document: result.document || null, error: result.error || null });
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'agent_update_tools_profile', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, agentId: agentId || null, status: result.status || null, document: result.document || null, error: result.error || null });
       continue;
     }
 

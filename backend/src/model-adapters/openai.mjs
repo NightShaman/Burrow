@@ -247,9 +247,14 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
       const choice = ok ? (mode === 'openai-responses' ? normalizeResponseChoice(data) : normalizeChoice(data)) : null;
       const opaqueAssistant = ok && reasoningEnabled ? responseReasoningMessage(data.output, reasoningOwner, {
         role: 'assistant',
-        content: choice.toolCalls.length ? '' : choice.text,
+        content: choice.text,
         ...(choice.toolCalls.length ? { tool_calls: choice.toolCalls.map(nativeToolCall) } : {}),
       }) : null;
+      // Opaque rounds already own their prose and pending calls. Without an
+      // encrypted item, preparation supplies the call round separately; retain
+      // only its nonempty prose here so neither text nor calls are duplicated.
+      const replayAssistant = opaqueAssistant || (ok && mode === 'openai-responses' && choice.toolCalls.length && choice.text
+        ? { role: 'assistant', content: choice.text } : null);
       const result = {
         ok,
         requestId,
@@ -273,9 +278,9 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         raw: ok
           ? { responseBytes: responseBody.bytes, ...(streaming ? { streamedTextChars: responseBody.streamedTextChars || 0, streamFallback: providerReturnedJson } : {}) }
           : { error: { message: responseBody.error || data?.error?.message || `HTTP ${response.status}`, ...((responseBody.errorDetails || data?.error) ? { details: responseBody.errorDetails || { ...(data?.error?.type ? { type: boundedText(data.error.type, 128) } : {}), ...(data?.error?.code ? { code: boundedText(data.error.code, 128) } : {}), ...(data?.error?.param ? { param: boundedText(data.error.param, 128) } : {}), status: response.status } } : {}) } },
-        // Replay the submitted transcript plus any pending opaque assistant;
+        // Replay the submitted transcript plus this round's assistant evidence;
         // preparation will pair its calls with the next tool outputs.
-        nativeTranscript: opaqueAssistant ? [...nativeTranscript, opaqueAssistant] : nativeTranscript,
+        nativeTranscript: replayAssistant ? [...nativeTranscript, replayAssistant] : nativeTranscript,
       };
 
       // Capture parser/HTTP provenance before response diagnostics can throw.

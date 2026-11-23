@@ -329,7 +329,7 @@ function nativeToolReceipt(result = {}) {
     memory_working_search: ['project', 'agentId', 'results'],
     memory_rolling_search: ['project', 'agentId', 'owner', 'entersPrompt', 'results'],
     memory_working_write: ['record'],
-    agent_update_tools_profile: ['document'],
+    agent_update_tools_profile: ['status', 'document'],
     session_write_handoff: ['handoff'],
     files_read: ['encoding', 'bytes', 'modifiedAt', 'offsetBytes', 'returnedBytes', 'nextOffsetBytes'],
     files_write: ['encoding', 'created', 'overwrote', 'bytesWritten'],

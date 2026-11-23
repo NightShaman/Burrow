@@ -2,11 +2,17 @@ import { compactSearchMatch } from './search-match-receipt.mjs';
 import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { createHash } from 'node:crypto';
 import { runtimeHeapStage } from './runtime-heap-diagnostics.mjs';
+function repeatFingerprint(call) {
+  if (call?.callFingerprint) return call.callFingerprint; // computed before receipt truncation
+  const args = call?.arguments || {};
+  const identity = call?.name === 'agent_update_tools_profile' ? { content: args.content } : args;
+  return exactArgumentFingerprint({ name: call?.name, arguments: identity });
+}
 function compactToolCalls(toolCalls = []) {
   return (toolCalls || []).map((call, index) => ({
     id: String(call?.id || `tool-call-${index}`).slice(0, 256),
     name: call?.name ? String(call.name).slice(0, 256) : null,
-    callFingerprint: call?.callFingerprint || exactArgumentFingerprint({ name: call?.name, arguments: call?.arguments || {} }),
+    callFingerprint: repeatFingerprint(call),
     // This is a receipt projection only. The original provider calls remain
     // available to the executor for this iteration; no tool is rejected or
     // skipped because its retained representation was compacted.
@@ -197,7 +203,7 @@ function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
   const prior = (priorIterations || []).flatMap((entry) => entry.toolCalls || []);
   return compactToolCalls(toolCalls).map((call) => {
     const callFingerprint = call.callFingerprint;
-    const priorCount = prior.filter((entry) => (entry.callFingerprint || exactArgumentFingerprint({ name: entry.name, arguments: entry.arguments })) === callFingerprint).length;
+    const priorCount = prior.filter((entry) => repeatFingerprint(entry) === callFingerprint).length;
     return { tool: call.name, fingerprint: callFingerprint, repeatCount: priorCount + 1, reason: typeof call.arguments?.reason === 'string' ? call.arguments.reason.slice(0, 500) : null };
   });
 }

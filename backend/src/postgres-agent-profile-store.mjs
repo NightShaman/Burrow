@@ -228,10 +228,17 @@ export class PostgresAgentProfileStore {
     return withPostgresTransaction(this.pool, async (client) => {
       const found = await client.query('SELECT id FROM agents WHERE id=$1 FOR UPDATE', [id]);
       if (!found.rows[0]) throw new Error('agent_not_found');
+      // All profile writers serialize on the owning agent. Compare under the
+      // same lock as the write; identical TOOLS text must not advance xmin.
+      if (normalizedKind === 'TOOLS') {
+        const current = (await client.query('SELECT kind,markdown,created_at,updated_at FROM agent_profile_documents WHERE agent_id=$1 AND kind=$2', [id, normalizedKind])).rows[0];
+        if (current?.markdown === content) return { ...document(current), changed: false };
+      }
       const stamp = this.clock();
       if (normalizedKind === 'PREFERENCES') await markOperatorPreferenceEdit(client, id, content, stamp);
       const result = await client.query(`INSERT INTO agent_profile_documents (agent_id,kind,markdown,created_at,updated_at) VALUES ($1,$2,$3,$4,$4) ON CONFLICT (agent_id,kind) DO UPDATE SET markdown=EXCLUDED.markdown,updated_at=CASE WHEN agent_profile_documents.kind='PREFERENCES' AND agent_profile_documents.markdown=EXCLUDED.markdown THEN agent_profile_documents.updated_at ELSE EXCLUDED.updated_at END RETURNING kind,markdown,created_at,updated_at`, [id, normalizedKind, content, stamp]);
-      return document(result.rows[0]);
+      const saved = document(result.rows[0]);
+      return normalizedKind === 'TOOLS' ? { ...saved, changed: true } : saved;
     });
   }
 }
