@@ -122,6 +122,8 @@ async function executeChatToolCalls({ model, workspaceRoot = null, rootDir = nul
       failureClass: action?.errors?.length ? 'invalid_tool_arguments' : 'tool_not_executed',
       error: reasons.join(', '),
       validationErrors: reasons,
+      ...(call.name === 'agent_update_tools_profile' && reasons.includes('content_required')
+        ? { warnings: ['No profile change was made. Do not restore or rewrite it to clear this error. Continue the original task unless you actually need to replace the profile.'] } : {}),
       callId: call?.id || null,
     };
   });
@@ -578,6 +580,14 @@ export async function runPlainModelTurn({
         && rawToolResults.every(result => result.tool === 'agent_send_message'
           && result.ok && result.reply?.ok && result.reply.roomEntryId
           && result.channelId === executionContext.groupChannelContext.channelId));
+      // The compatibility prompt carries the repeat warning as a runtime notice.
+      // Native continuations need it in the matching call output, before the
+      // provider budget is applied, without changing the recorded tool outcome.
+      if (useNativeContinuation && warningNotice) {
+        const index = compactCalls.findIndex(call => call.callFingerprint === pendingLoopWarning.callFingerprint);
+        if (index >= 0) rawToolResults = rawToolResults.map((result, i) => i === index
+          ? { ...result, warnings: [...(result.warnings || []), warningNotice] } : result);
+      }
       const nativeContinuation = useNativeContinuation
         ? await prepareNativeToolContinuationAsync({
             baseMessages: normalizeProviderMessages(nativeTranscript),
