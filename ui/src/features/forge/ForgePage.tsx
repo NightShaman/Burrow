@@ -19,6 +19,13 @@ import {
   type ImageOutputFormat,
 } from './ForgeImageOptions';
 
+import {
+  ForgeVideoOptions,
+  videoConflict,
+  type VideoOptions,
+  type VideoCapability,
+} from './ForgeVideoOptions';
+
 type ForgeModel = {
   connectionId: string;
   modelId: string;
@@ -29,6 +36,7 @@ type ForgeModel = {
   controls: string[];
   agentReferenceImage?: { available: boolean; reason?: string | null };
   referenceArtifacts?: { available: boolean; maxImages?: number; reason?: string | null };
+  videoOptions?: VideoCapability;
   imageOptions?: { outputFormats: ImageOutputFormat[]; sizes: string[] };
 };
 type ForgeCatalog = {
@@ -378,6 +386,9 @@ export function Forge({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [imageState, setImageState] = useState<{ scope: string; draft: ImageDraft } | null>(null);
+  const [videoState, setVideoState] = useState<{ scope: string; options: VideoOptions } | null>(
+    null,
+  );
   const [referenceState, setReferenceState] = useState<{
     scope: string;
     agentIds: string[];
@@ -498,27 +509,34 @@ export function Forge({
       : [];
   const videoReferenceLimit = Math.min(6, videoModel?.referenceArtifacts?.maxImages ?? 6);
   const portraitCount = referenceAgentIds.length + Number(useOperatorReferenceImage);
-  const referenceCount = portraitCount + (mode === 'video' ? artifactReferences.length : 0);
-  const referenceError =
-    mode === 'video' && referenceCount > videoReferenceLimit
-      ? `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`
-      : '';
+  const videoImageCount = artifactReferences.length + (mode === 'video' ? portraitCount : 0);
+  const capability = videoModel?.videoOptions;
+  const videoDraft = videoState?.scope === videoReferenceScope ? videoState.options : {};
+  const imageLimitError = `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`;
+  const videoErrorAt = (count: number) =>
+    (capability ? videoConflict(capability, videoDraft, count) : '') ||
+    (count > videoReferenceLimit ? imageLimitError : '');
+  const referenceError = mode === 'video' ? videoErrorAt(videoImageCount) : '';
+  const addReferenceError = videoErrorAt(videoImageCount + 1);
+  const videoOptions =
+    mode === 'video' && capability && Object.keys(videoDraft).length ? videoDraft : undefined;
   useEffect(() => {
     setArtifactReferenceState(null);
+    setVideoState(null);
   }, [videoReferenceScope]);
+  const alreadySelected = (jobId: string, artifactId: string) =>
+    artifactReferences.some((ref) => ref.jobId === jobId && ref.artifactId === artifactId);
   const useArtifactReference = (job: Job, artifact: Artifact) => {
-    if (!artifactReferencesAvailable || !eligibleVideoReference(job, artifact) || busy)
-      return false;
-    const exists = artifactReferences.some(
-      (ref) => ref.jobId === job.id && ref.artifactId === artifact.id,
-    );
     if (
-      !exists &&
-      (mode === 'video' ? referenceCount : artifactReferences.length) >= videoReferenceLimit
-    ) {
-      setError(
-        `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`,
-      );
+      !artifactReferencesAvailable ||
+      !eligibleVideoReference(job, artifact) ||
+      busy ||
+      selectionSavingRef.current
+    )
+      return false;
+    const exists = alreadySelected(job.id, artifact.id);
+    if (!exists && addReferenceError) {
+      setError(addReferenceError);
       return false;
     }
     setArtifactReferenceState({
@@ -668,6 +686,10 @@ export function Forge({
         model.modelId,
         submittedPrompt,
         imageOptions,
+        videoOptions?.workflow,
+        videoOptions?.durationSeconds,
+        videoOptions?.aspectRatio,
+        videoOptions?.resolution,
         references,
       ]);
       const existing = idempotencyRef.current;
@@ -681,6 +703,7 @@ export function Forge({
           modelId: model.modelId,
           prompt: submittedPrompt,
           ...(imageOptions ? { imageOptions } : {}),
+          ...(videoOptions ? { videoOptions } : {}),
           ...references,
           idempotencyKey,
         }),
@@ -691,6 +714,7 @@ export function Forge({
       setPrompt('');
       setLyrics('');
       setImageState(null);
+      if (mode === 'video') setVideoState(null);
       setReferenceState(null);
       setArtifactReferenceState(null);
       setNotice('Forge job accepted.');
@@ -757,13 +781,16 @@ export function Forge({
   };
   const renderMediaActions = (jobId: string, artifact: Artifact, close?: () => void) => {
     const job = jobs.find((item) => item.id === jobId);
+    const videoActionReason =
+      capability && !alreadySelected(jobId, artifact.id) ? addReferenceError : '';
     return (
       <div className="forge-media-actions">
         {artifactReferencesAvailable && job && eligibleVideoReference(job, artifact) && (
           <button
             type="button"
             className="forge-reference-action"
-            disabled={busy || selectionSaving}
+            disabled={busy || selectionSaving || !!videoActionReason}
+            title={videoActionReason || undefined}
             onClick={() => {
               if (useArtifactReference(job, artifact)) close?.();
             }}
@@ -1003,6 +1030,15 @@ export function Forge({
                 onChange={(draft) => setImageState({ scope: imageScope, draft })}
               />
             )}
+            {mode === 'video' && capability && (
+              <ForgeVideoOptions
+                capability={capability}
+                options={videoDraft}
+                imageCount={videoImageCount}
+                disabled={loading || selectionSaving || busy}
+                onChange={(options) => setVideoState({ scope: videoReferenceScope, options })}
+              />
+            )}
             {referenceAvailable && (portraits.length > 0 || catalog?.operatorReferenceImage) && (
               <details className="forge-references" key={referenceScope}>
                 <summary>
@@ -1021,7 +1057,7 @@ export function Forge({
                         checked={referenceAgentIds.includes(portrait.agentId)}
                         disabled={
                           mode === 'video' &&
-                          referenceCount >= videoReferenceLimit &&
+                          !!addReferenceError &&
                           !referenceAgentIds.includes(portrait.agentId)
                         }
                         onChange={(event) =>
@@ -1044,9 +1080,7 @@ export function Forge({
                         aria-label="Use operator reference photo"
                         checked={useOperatorReferenceImage}
                         disabled={
-                          mode === 'video' &&
-                          referenceCount >= videoReferenceLimit &&
-                          !useOperatorReferenceImage
+                          mode === 'video' && !!addReferenceError && !useOperatorReferenceImage
                         }
                         onChange={(event) =>
                           setReferenceState({
@@ -1095,7 +1129,7 @@ export function Forge({
                 <button
                   type="button"
                   className="forge-reference-action"
-                  disabled={referenceCount >= videoReferenceLimit}
+                  disabled={!!addReferenceError}
                   onClick={() => {
                     setShowHome(false);
                     setShowRecents(true);
@@ -1107,6 +1141,13 @@ export function Forge({
                 </button>
               </fieldset>
             )}
+            {mode === 'video' &&
+              capability &&
+              !referenceError &&
+              addReferenceError &&
+              (referenceAvailable || artifactReferencesAvailable) && (
+                <p className="forge-reference-hint">{addReferenceError}</p>
+              )}
             {referenceError && (
               <p className="forge-error" role="alert">
                 {referenceError}
