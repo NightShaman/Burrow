@@ -1,6 +1,6 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ArchiveRunDetail } from '../../app/api';
+import type { ArchiveRunDetail, ArchiveOutcomeCheck } from '../../app/api';
 import { ArchiveRunsProof } from './ArchiveRunsProof';
 import { archiveRepository, type ArchivePage } from './archiveRepository';
 
@@ -288,4 +288,162 @@ it('merges overlapping pages and opens same-run occurrences by session', async (
   expect(row.classList.contains('selected')).toBe(true);
   expect(original.classList.contains('selected')).toBe(false);
   expect(await screen.findByRole('heading', { level: 2, name: 'Second occurrence' })).toBeTruthy();
+});
+
+const checkedAt = '2026-11-24T20:45:21.000Z';
+function checkReceipt(status: ArchiveOutcomeCheck['status']): ArchiveOutcomeCheck {
+  const absent = status === 'unverified';
+  const repository = 'GoblinKing-Burrow/Burrow',
+    version = '2026.11.24';
+  const artifact = {
+    sourceTreeSha: 'a'.repeat(40),
+    imageRepository: 'ghcr.io/example/burrow',
+    imageId: `sha256:${'b'.repeat(64)}`,
+  };
+  return {
+    schemaVersion: 1,
+    kind: 'outcome-check',
+    verifier: 'github_public_release',
+    status,
+    checkedAt,
+    expected: { repository, version, artifact },
+    observed: {
+      repository,
+      version: absent ? null : status === 'mismatch' ? '2026.11.23' : version,
+      artifact: absent
+        ? { sourceTreeSha: null }
+        : {
+            ...artifact,
+            imageId: status === 'mismatch' ? `sha256:${'c'.repeat(64)}` : artifact.imageId,
+            manifestDigest: `sha256:${'d'.repeat(64)}`,
+          },
+    },
+    reasonCode: absent ? 'tag_missing' : status,
+    reason: absent
+      ? 'No public tag found for 2026.11.24.'
+      : status === 'mismatch'
+        ? 'Public version and image do not match the intended release.'
+        : 'The public tree and image match.',
+    evidenceSources: [
+      {
+        kind: 'github_ref',
+        url: `https://api.github.com/repos/${repository}/git/ref/tags/${version}`,
+        checkedAt,
+        statusCode: absent ? 404 : 200,
+      },
+    ],
+    intentSource: { kind: 'caller_supplied', sourceRefs: [] },
+  };
+}
+async function openProof(value: ArchiveRunDetail) {
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
+  vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(value);
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  fireEvent.click(await screen.findByRole('button', { name: /smatchet objective/ }));
+  await screen.findByRole('heading', { name: 'smatchet objective', level: 2 });
+}
+for (const status of ['verified', 'mismatch', 'unverified'] as const) {
+  it(`keeps green workflow, completed handling and ${status} publication independent in Proof and Markdown`, async () => {
+    const value = run(),
+      check = checkReceipt(status);
+    value.workflowEvent = {
+      workflow: 'Public promotion',
+      conclusion: 'success',
+      runId: 421,
+      runAttempt: 2,
+    };
+    value.evidence.verifications.push({
+      status: 'observed',
+      text: 'Native receipt',
+      sourceRefs: [],
+      outcomeCheck: check,
+    });
+    value.timeline.push({
+      kind: 'verification',
+      ts: checkedAt,
+      status: 'observed',
+      evidence: 'outcome_check',
+      summary: `Release check: ${status}`,
+    });
+    value.counts.verifications = 1;
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('isSecureContext', true);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: copy },
+    });
+    try {
+      await openProof(value);
+      expect(
+        screen.getByText('GitHub conclusion: success · Public promotion #421 · attempt 2'),
+      ).toBeTruthy();
+      expect(screen.getByText('smatchet · Burrow handling: Completed')).toBeTruthy();
+      expect(screen.getByText(check.reason)).toBeTruthy();
+      const expected = within(screen.getByText('Expected (caller supplied)').parentElement!);
+      const observed = within(screen.getByText('Observed', { exact: true }).parentElement!);
+      expect(expected.getByText(check.expected.version)).toBeTruthy();
+      expect(expected.getByText(check.expected.artifact.imageId!)).toBeTruthy();
+      expect(
+        observed.getAllByText(check.observed.version ?? 'Not observed').length,
+      ).toBeGreaterThan(0);
+      expect(
+        observed.getAllByText(check.observed.artifact.sourceTreeSha ?? 'Not observed').length,
+      ).toBeGreaterThan(0);
+      expect(
+        observed.getAllByText(check.observed.artifact.imageId ?? 'Not observed').length,
+      ).toBeGreaterThan(0);
+      const verdict = screen.getByText(status, {
+        exact: false,
+        selector: '.proof-outcome-heading strong',
+      });
+      expect(verdict.textContent?.toLowerCase()).toBe(status);
+      expect(screen.getByText(`Release check: ${status}`)).toBeTruthy();
+      expect(screen.getByText(/^Checked /).getAttribute('datetime')).toBe(check.checkedAt);
+      fireEvent.click(screen.getByText(/Evidence sources: api.github.com/));
+      expect(screen.getByText(check.evidenceSources[0].url, { exact: false })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Copy proof as Markdown' }));
+      const text = copy.mock.calls[0][0] as string;
+      for (const part of [
+        check.checkedAt,
+        check.expected.version,
+        check.expected.artifact.sourceTreeSha,
+        check.observed.version ?? 'Not observed',
+        check.reason,
+        check.evidenceSources[0].url,
+        `HTTP ${check.evidenceSources[0].statusCode}`,
+        'Burrow handling: Completed',
+        'GitHub conclusion: success',
+        `Public release: ${verdict.textContent}`,
+        'Expected (caller supplied)',
+        'Observed:',
+      ])
+        expect(text).toContain(part);
+      if (check.observed.artifact.manifestDigest)
+        expect(text).toContain(check.observed.artifact.manifestDigest);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+}
+it('does not infer a publication check from plain evidence or the agent’s final answer', async () => {
+  const value = run();
+  value.workflowEvent = { conclusion: 'success' };
+  value.finalAnswer = 'Publication verified.';
+  value.evidence.verifications.push({
+    text: 'Build tests passed',
+    status: 'validated',
+    sourceRefs: [],
+  });
+  await openProof(value);
+  expect(screen.getByText('No outcome check recorded.')).toBeTruthy();
+  expect(screen.getByText('Build tests passed')).toBeTruthy();
+  expect(screen.queryByText('Public release')).toBeNull();
+  expect(screen.getByText('No timeline evidence recorded.')).toBeTruthy();
+});
+it('keeps historical Proof empty states without inventing workflow handling or a missing check', async () => {
+  await openProof(run());
+  expect(screen.getByText('No verification recorded.')).toBeTruthy();
+  expect(
+    screen.queryByText(/GitHub conclusion|Burrow handling|No outcome check recorded/),
+  ).toBeNull();
 });

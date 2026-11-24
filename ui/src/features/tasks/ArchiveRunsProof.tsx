@@ -2,7 +2,8 @@ import { minionOutcome } from '../../app/minionOutcome';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
-import type { ArchiveRunDetail } from '../../app/api';
+import { ProofOutcomeCheck, outcomeMarkdown, publicReleaseCheck } from './ProofOutcomeCheck';
+import type { ArchiveRunDetail, ArchiveVerification, WorkflowCompletionEvent } from '../../app/api';
 import { archiveRepository, type ArchiveRepository } from './archiveRepository';
 import { ProviderRequestHistory } from './ProviderRequestHistory';
 
@@ -74,11 +75,38 @@ async function copyText(text: string) {
   textarea.remove();
   return copied;
 }
+function workflowLabel(event: WorkflowCompletionEvent) {
+  return [
+    `GitHub conclusion: ${event.conclusion || 'Not recorded'}`,
+    [
+      event.workflow || event.repository,
+      event.runId
+        ? `#${event.runId}${event.runAttempt ? ` · attempt ${event.runAttempt}` : ''}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+function missingOutcome(run: ArchiveRunDetail) {
+  return run.workflowEvent && !run.evidence.verifications.some((item) => item.outcomeCheck)
+    ? 'No outcome check recorded.'
+    : undefined;
+}
 function proofMarkdown(run: ArchiveRunDetail) {
-  const evidence = (title: string, items: ArchiveRunDetail['evidence']['observations']) =>
-    items.length
-      ? `### ${title}\n${items.map((item) => `- **${item.status}** ${item.text}`).join('\n')}`
-      : `### ${title}\n_No ${title.toLowerCase()} recorded._`;
+  const evidence = (title: string, items: ArchiveVerification[], note?: string) =>
+    [
+      `### ${title}`,
+      ...items.map((item) => {
+        const check = title === 'Verification' ? publicReleaseCheck(item) : undefined;
+        return check ? outcomeMarkdown(check) : `- **${item.status}** ${item.text}`;
+      }),
+      note ? `_${note}_` : !items.length ? `_No ${title.toLowerCase()} recorded._` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   const timeline = run.timeline.length
     ? run.timeline
         .map(
@@ -90,7 +118,8 @@ function proofMarkdown(run: ArchiveRunDetail) {
   return [
     `# ${run.objective || run.runId}`,
     `- Agent: ${run.agentName || run.agentId}`,
-    `- Status: ${statusInfo(run.status).label}`,
+    `- ${run.workflowEvent ? 'Burrow handling' : 'Status'}: ${statusInfo(run.status).label}`,
+    run.workflowEvent ? `- ${workflowLabel(run.workflowEvent)}` : '',
     `- Started: ${date(run.startedAt)}`,
     `- Completed: ${date(run.completedAt)}`,
     `- Duration: ${duration(run)}`,
@@ -108,7 +137,7 @@ function proofMarkdown(run: ArchiveRunDetail) {
     '',
     evidence('Actions / changes', run.evidence.changes),
     '',
-    evidence('Verification', run.evidence.verifications),
+    evidence('Verification', run.evidence.verifications, missingOutcome(run)),
     '',
     evidence('Unresolved', run.evidence.unresolved),
     '',
@@ -124,9 +153,11 @@ function proofMarkdown(run: ArchiveRunDetail) {
 function EvidenceList({
   title,
   items,
+  note,
 }: {
   title: string;
-  items: ArchiveRunDetail['evidence']['observations'];
+  items: ArchiveVerification[];
+  note?: string;
 }) {
   return (
     <section className="proof-section">
@@ -136,16 +167,28 @@ function EvidenceList({
       </h3>
       {items.length ? (
         <ul>
-          {items.map((item, index) => (
-            <li key={`${item.text}-${index}`}>
-              <strong className={`proof-status proof-status-${item.status}`}>{item.status}</strong>
-              <span>{item.text}</span>
-            </li>
-          ))}
+          {items.map((item, index) => {
+            const check = title === 'Verification' ? publicReleaseCheck(item) : undefined;
+            return (
+              <li key={`${item.text}-${index}`}>
+                {check ? (
+                  <ProofOutcomeCheck check={check} />
+                ) : (
+                  <>
+                    <strong className={`proof-status proof-status-${item.status}`}>
+                      {item.status}
+                    </strong>
+                    <span>{item.text}</span>
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
-      ) : (
-        <p className="proof-muted">No {title.toLowerCase()} recorded.</p>
-      )}
+      ) : null}
+      {note || !items.length ? (
+        <p className="proof-muted">{note ?? `No ${title.toLowerCase()} recorded.`}</p>
+      ) : null}
     </section>
   );
 }
@@ -235,9 +278,15 @@ function ProofDetail({
       <header className="proof-detail-header">
         <div>
           <span className="eyebrow">
-            {run.agentName || run.agentId} · {statusInfo(run.status).label}
+            {run.agentName || run.agentId} ·{' '}
+            {run.workflowEvent
+              ? `Burrow handling: ${statusInfo(run.status).label}`
+              : statusInfo(run.status).label}
           </span>
           <h2>{run.objective || run.runId}</h2>
+          {run.workflowEvent && (
+            <p className="proof-workflow-result">{workflowLabel(run.workflowEvent)}</p>
+          )}
           <p>
             {date(run.startedAt)} → {date(run.completedAt)} · {duration(run)} ·{' '}
             {run.decision || 'No terminal decision'}
@@ -310,7 +359,11 @@ function ProofDetail({
       </div>
       <div className="proof-evidence-grid">
         <EvidenceList title="Actions / changes" items={run.evidence.changes} />
-        <EvidenceList title="Verification" items={run.evidence.verifications} />
+        <EvidenceList
+          title="Verification"
+          items={run.evidence.verifications}
+          note={missingOutcome(run)}
+        />
         <EvidenceList title="Unresolved" items={run.evidence.unresolved} />
       </div>
       <FullToolEvidence repository={repository} key={occurrenceKey(run)} run={run} />

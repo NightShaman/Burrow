@@ -522,6 +522,38 @@ export type ArchiveEvidenceItem = {
   status: 'observed' | 'validated' | 'failed' | 'unresolved' | 'unknown';
   sourceRefs: string[];
 };
+export type ArchiveOutcomeCheck = {
+  schemaVersion: 1;
+  kind: 'outcome-check';
+  verifier: 'github_public_release';
+  status: 'verified' | 'mismatch' | 'unverified';
+  expected: {
+    repository: string;
+    version: string;
+    artifact: { sourceTreeSha: string; imageRepository?: string; imageId?: string };
+  };
+  observed: {
+    repository: string;
+    version: string | null;
+    artifact: {
+      sourceTreeSha: string | null;
+      imageRepository?: string;
+      imageId?: string | null;
+      manifestDigest?: string | null;
+    };
+  };
+  checkedAt: string;
+  reasonCode: string;
+  reason: string;
+  evidenceSources: Array<{
+    kind: string;
+    url: string;
+    checkedAt: string;
+    statusCode: number | null;
+  }>;
+  intentSource: { kind: 'caller_supplied'; sourceRefs: string[] };
+};
+export type ArchiveVerification = ArchiveEvidenceItem & { outcomeCheck?: ArchiveOutcomeCheck };
 export type ArchiveRunDetail = {
   id: string;
   runId: string;
@@ -529,6 +561,7 @@ export type ArchiveRunDetail = {
   agentName?: string | null;
   sessionId: string;
   status: ArchiveRunStatus;
+  workflowEvent?: WorkflowCompletionEvent | null;
   startedAt?: string | null;
   lastActivityAt?: string | null;
   completedAt?: string | null;
@@ -549,7 +582,7 @@ export type ArchiveRunDetail = {
   evidence: {
     observations: ArchiveEvidenceItem[];
     changes: ArchiveEvidenceItem[];
-    verifications: ArchiveEvidenceItem[];
+    verifications: ArchiveVerification[];
     unresolved: ArchiveEvidenceItem[];
     failures: ArchiveEvidenceItem[];
   };

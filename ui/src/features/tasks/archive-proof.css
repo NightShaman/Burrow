@@ -432,3 +432,78 @@
   display: block;
   color: var(--text);
 }
+
+.proof-detail-header:has(.proof-workflow-result) {
+  flex-wrap: wrap;
+}
+.proof-workflow-result {
+  overflow-wrap: anywhere;
+  padding-bottom: 4px;
+}
+.proof-status-verified {
+  color: var(--ok, #58d68d);
+}
+.proof-status-mismatch {
+  color: var(--danger, #ef6a7a);
+}
+.proof-outcome {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.proof-outcome p,
+.proof-outcome dl,
+.proof-outcome dd {
+  margin: 0;
+}
+.proof-outcome-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.proof-outcome-heading b,
+.proof-outcome-identity strong {
+  color: var(--text-strong);
+}
+.proof-outcome-identity {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+.proof-outcome-identity > b,
+.proof-outcome-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+.proof-outcome-identity dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 8px;
+  margin-top: 3px;
+}
+.proof-outcome-identity dl > div {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.proof-outcome-identity dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.proof-outcome-identity dd {
+  font-family: monospace;
+  font-size: 11px;
+}
+.proof-outcome-sources summary {
+  color: var(--accent-strong);
+  cursor: pointer;
+  width: fit-content;
+}
+.proof-outcome-sources div {
+  margin-top: 6px;
+}
+.proof-section ul + .proof-muted {
+  margin-top: 8px;
+}
