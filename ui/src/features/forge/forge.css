@@ -177,6 +177,15 @@
   margin-bottom: 8px;
   font-weight: 800;
 }
+.forge-references > summary {
+  padding-block: 6px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.forge-references > summary:hover,
+.forge-references > summary:focus-visible {
+  color: var(--text-strong);
+}
 .forge-reference-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));

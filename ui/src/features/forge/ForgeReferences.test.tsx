@@ -119,7 +119,11 @@ const ref = (name = 'Smatchet') =>
 const tab = (name: string) =>
   fireEvent.click(screen.getByRole('tab', { name: new RegExp(name, 'i') }));
 async function ready() {
-  await screen.findByRole('checkbox', { name: 'Use Smatchet reference photo' });
+  await screen.findByText('Reference photos', { selector: 'summary' });
+}
+function openPhotos() {
+  const summary = screen.getByText(/^Reference photos/, { selector: 'summary' });
+  if (!summary.closest('details')?.open) fireEvent.click(summary);
 }
 function submit(mode = 'Video') {
   fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'A dragon in flight' } });
@@ -140,10 +144,36 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe('saved reference photos in Forge video and image', () => {
+  it.each(['Image', 'Video'])(
+    'starts closed and submits the folded photo selection in %s',
+    async (mode) => {
+      setup();
+      await ready();
+      if (mode === 'Video') tab(mode);
+      const summary = screen.getByText('Reference photos', { selector: 'summary' });
+      const disclosure = summary.closest('details')!;
+      expect(disclosure.open).toBe(false);
+      fireEvent.click(summary);
+      expect(disclosure.open).toBe(true);
+      fireEvent.click(ref());
+      fireEvent.click(ref('operator'));
+      fireEvent.click(summary);
+      expect(disclosure.open).toBe(false);
+      expect(summary.textContent).toContain('2 selected');
+      submit(mode);
+      await waitFor(() =>
+        expect(posts[0]).toMatchObject({
+          referenceAgentIds: ['smatchet'],
+          useOperatorReferenceImage: true,
+        }),
+      );
+    },
+  );
   it('sends ordered saved agent ids and operator flag for video; clears accepted refs', async () => {
     setup();
     await ready();
     tab('video');
+    openPhotos();
     fireEvent.click(ref('Kerning'));
     fireEvent.click(ref());
     fireEvent.click(ref('operator'));
@@ -162,6 +192,7 @@ describe('saved reference photos in Forge video and image', () => {
   it('supports the same saved portrait controls for images', async () => {
     setup();
     await ready();
+    openPhotos();
     fireEvent.click(ref());
     submit('Image');
     await waitFor(() => expect(posts).toHaveLength(1));
@@ -179,23 +210,28 @@ describe('saved reference photos in Forge video and image', () => {
   it('clears refs across mode and model changes, including switch back', async () => {
     setup();
     await ready();
+    openPhotos();
     fireEvent.click(ref());
     tab('video');
+    openPhotos();
     expect((ref() as HTMLInputElement).checked).toBe(false);
     fireEvent.click(ref());
     await choose('text');
-    expect(screen.queryByRole('group', { name: 'Reference photos' })).toBeNull();
+    expect(screen.queryByText(/^Reference photos/, { selector: 'summary' })).toBeNull();
     await choose('veo');
+    openPhotos();
     expect((ref() as HTMLInputElement).checked).toBe(false);
     tab('image');
+    openPhotos();
     expect((ref() as HTMLInputElement).checked).toBe(false);
     tab('speech');
-    expect(screen.queryByRole('group', { name: 'Reference photos' })).toBeNull();
+    expect(screen.queryByText(/^Reference photos/, { selector: 'summary' })).toBeNull();
   });
   it('retains failed refs and prompt; retries use same key, changed refs use new key', async () => {
     setup();
     await ready();
     tab('video');
+    openPhotos();
     fireEvent.click(ref());
     fail = true;
     submit();
@@ -223,7 +259,7 @@ describe('saved reference photos in Forge video and image', () => {
       expect(screen.getByLabelText('Forge model').hasAttribute('disabled')).toBe(false),
     );
     tab('video');
-    expect(screen.queryByRole('group', { name: 'Reference photos' })).toBeNull();
+    expect(screen.queryByText(/^Reference photos/, { selector: 'summary' })).toBeNull();
     expect(document.querySelector('input[type=file]')).toBeNull();
     submit();
     await waitFor(() => expect(posts).toHaveLength(1));
@@ -251,18 +287,19 @@ describe('saved reference photos in Forge video and image', () => {
     expect(screen.getByRole('button', { name: 'Generate Video' }).hasAttribute('disabled')).toBe(
       true,
     );
-    expect(screen.queryByRole('group', { name: 'Reference photos' })).toBeNull();
+    expect(screen.queryByText(/^Reference photos/, { selector: 'summary' })).toBeNull();
   });
   it('filters removed portraits on catalog refresh', async () => {
     const remove = setup();
     await ready();
     tab('video');
+    openPhotos();
     fireEvent.click(ref());
     fireEvent.click(ref('operator'));
     remove();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() =>
-      expect(screen.queryByRole('group', { name: 'Reference photos' })).toBeNull(),
+      expect(screen.queryByText(/^Reference photos/, { selector: 'summary' })).toBeNull(),
     );
     submit();
     await waitFor(() => expect(posts).toHaveLength(1));
@@ -304,6 +341,7 @@ describe('existing Forge image references for video', () => {
     await ready();
     await addImage();
     expect(screen.getByRole('tab', { name: /Video/ }).getAttribute('aria-selected')).toBe('true');
+    openPhotos();
     fireEvent.click(ref());
     fireEvent.click(ref('operator'));
     await addImage('source', true);
@@ -349,6 +387,7 @@ describe('existing Forge image references for video', () => {
     setup({ jobs: [imageJob()] });
     await ready();
     await addImage();
+    openPhotos();
     fireEvent.click(ref());
     fail = error;
     submit();
@@ -433,6 +472,7 @@ describe('existing Forge image references for video', () => {
     });
     await screen.findByRole('button', { name: 'Use as video reference' });
     await addImage();
+    openPhotos();
     for (let i = 0; i < 5; i++) fireEvent.click(ref(`Person ${i}`));
     expect(ref('Person 5').hasAttribute('disabled')).toBe(true);
     expect(ref('operator').hasAttribute('disabled')).toBe(true);

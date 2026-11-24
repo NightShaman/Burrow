@@ -497,10 +497,8 @@ export function Forge({
         })
       : [];
   const videoReferenceLimit = Math.min(6, videoModel?.referenceArtifacts?.maxImages ?? 6);
-  const referenceCount =
-    referenceAgentIds.length +
-    Number(useOperatorReferenceImage) +
-    (mode === 'video' ? artifactReferences.length : 0);
+  const portraitCount = referenceAgentIds.length + Number(useOperatorReferenceImage);
+  const referenceCount = portraitCount + (mode === 'video' ? artifactReferences.length : 0);
   const referenceError =
     mode === 'video' && referenceCount > videoReferenceLimit
       ? `Video supports up to ${videoReferenceLimit} reference images. Remove a reference to continue.`
@@ -1006,9 +1004,15 @@ export function Forge({
               />
             )}
             {referenceAvailable && (portraits.length > 0 || catalog?.operatorReferenceImage) && (
-              <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
-                <legend>Reference photos</legend>
-                <div className="forge-reference-options">
+              <details className="forge-references" key={referenceScope}>
+                <summary>
+                  Reference photos{portraitCount > 0 && ` · ${portraitCount} selected`}
+                </summary>
+                <fieldset
+                  aria-label="Reference photos"
+                  className="forge-references forge-reference-options"
+                  disabled={loading || selectionSaving || busy}
+                >
                   {portraits.map((portrait) => (
                     <label key={portrait.agentId}>
                       <input
@@ -1055,8 +1059,8 @@ export function Forge({
                       <span>Operator</span>
                     </label>
                   )}
-                </div>
-              </fieldset>
+                </fieldset>
+              </details>
             )}
             {mode === 'video' && artifactReferencesAvailable && (
               <fieldset className="forge-references" disabled={loading || selectionSaving || busy}>
