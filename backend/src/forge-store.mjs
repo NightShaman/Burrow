@@ -1,44 +1,32 @@
 import { imageOptionsCapability } from './model-adapters/image-generation-options.mjs';
-import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
-import { generatedArtifactKind } from './model-adapters/openai-generated-artifacts.mjs';
-import { googleLyriaSupported } from './model-adapters/google-lyria.mjs';
-import { videoContract, VIDEO_REFERENCE_LIMIT } from './model-adapters/video-contract.mjs';
-import { referenceImageCapability } from './model-adapters/reference-image-capability.mjs';
+import { forgeMediaContract, forgeModelConfig, forgeConnectionModels, declaredForgeKind } from './model-adapters/forge-media-contract.mjs';
 
 export function forgeCatalog(connections) {
-  const models = connections.flatMap(c => (c.models || []).filter(m => m.selected !== false).flatMap(m => {
-    const modelOutputs = m.acceptedOutputOverride ?? m.acceptedOutput ?? m.discoveredOutput;
-    const outputs = modelOutputs ?? [];
-    const inputs = m.acceptedInputOverride ?? m.acceptedInput ?? m.discoveredInput ?? c.acceptedInput;
-    const config = { ...c, model: m.id, acceptedInput: inputs,
-      acceptedOutput: modelOutputs,
-      capabilities: { inputs, outputs: modelOutputs },
-      supportedGenerationMethods: m.supportedGenerationMethods };
-    const nativeKind = googleNativeApi(c) ? googleMediaKind(config) : null;
-    const google = googleLyriaSupported({ ...c, model: m.id });
-    const video = videoContract(config);
-    const effectiveOutputs = video && !outputs.length ? ['video'] : google && m.acceptedOutputOverride === undefined && m.acceptedOutput === undefined && !outputs.length ? ['audio'] : nativeKind && !outputs.length ? [nativeKind] : outputs;
-    // Native image contracts return TEXT and IMAGE together; the generic
-    // OpenAI media-only classifier intentionally rejects text outputs.
-    const kind = effectiveOutputs.includes('video') ? 'video' : nativeKind || generatedArtifactKind({ capabilities: { outputs: effectiveOutputs } });
+  const models = connections.flatMap(connection => forgeConnectionModels(connection).filter(model => model.selected !== false).flatMap(model => {
+    const config = forgeModelConfig(connection, model);
+    const contract = forgeMediaContract(config);
+    const kind = contract?.kind || declaredForgeKind(config);
     if (!kind) return [];
-    const available = kind === 'video'
-      ? Boolean(video)
-      : ( /^openai-/.test(c.apiType) || (kind === 'audio' && google) || nativeKind === kind );
-    const agentReferenceImage = available && ['image', 'video'].includes(kind)
-      ? referenceImageCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } })
+    const available = Boolean(contract);
+    const agentReferenceImage = contract?.referenceImages
+      ? { available: true, reason: null }
       : { available: false, reason: 'agent_reference_image_unsupported' };
-    // Use only existing native image-input generation contracts.
-    const referenceArtifacts = ['image', 'video'].includes(kind) && agentReferenceImage.available
-      ? { available: true, ...(kind === 'video' ? { maxImages: VIDEO_REFERENCE_LIMIT } : {}) }
+    const referenceArtifacts = contract?.referenceImages
+      ? { available: true, ...(contract.referenceImageLimit ? { maxImages: contract.referenceImageLimit } : {}) }
       : { available: false };
-    const imageOptions = available && kind === 'image' ? imageOptionsCapability({ ...config, capabilities: { inputs, outputs: effectiveOutputs } }) : null;
-    return [{ ...(imageOptions ? { imageOptions } : {}), connectionId: c.id, modelId: m.id, label: m.name || m.id, kind, available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable', controls: [], agentReferenceImage, referenceArtifacts, referenceAttachments: { ...referenceArtifacts } }];
+    const imageOptions = available && kind === 'image' ? imageOptionsCapability(config) : null;
+    return [{ connectionId: connection.id, modelId: model.id, label: model.name || model.id, kind,
+      ...(contract ? { mode: contract.mode } : {}),
+      ...(contract?.connectionLevel ? { connectionLevel: true } : {}),
+      available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable',
+      controls: [], agentReferenceImage, referenceArtifacts, referenceAttachments: { ...referenceArtifacts },
+      ...(imageOptions ? { imageOptions } : {}) }];
   }));
-  const musicModels = models.filter(m => m.kind === 'audio' && m.available && googleLyriaSupported({ ...connections.find(c => c.id === m.connectionId), model: m.modelId }));
+  const musicModels = models.filter(model => model.available && model.mode === 'music');
   const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };
-  return { ok: true, models, music, sourceAttachments: { available: models.some(m => m.referenceAttachments.available), field: 'referenceAttachmentIds' }, video: models.some(m => m.kind === 'video' && m.available)
-    ? { available: true, reason: null } : { available: false, reason: 'video_provider_contract_unavailable' } };
+  return { ok: true, models, music, sourceAttachments: { available: models.some(model => model.referenceAttachments.available), field: 'referenceAttachmentIds' },
+    video: models.some(model => model.kind === 'video' && model.available)
+      ? { available: true, reason: null } : { available: false, reason: 'video_provider_contract_unavailable' } };
 }
 
 /** Legacy entry point: callers must inject the PostgreSQL store. */

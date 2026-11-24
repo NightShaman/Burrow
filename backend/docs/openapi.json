@@ -16324,6 +16324,20 @@
                 "description": "Combined reference image limit when advertised."
               }
             }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "image",
+              "music",
+              "speech",
+              "video"
+            ],
+            "description": "Present on supported models; comes from the same provider contract used by the worker."
+          },
+          "connectionLevel": {
+            "type": "boolean",
+            "description": "True for a native connection capability such as xAI TTS. Its local modelId selector is not sent as a provider model."
           }
         },
         "required": [
@@ -16370,11 +16384,13 @@
             "type": "object",
             "properties": {
               "available": {
-                "const": false,
                 "type": "boolean"
               },
               "reason": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -16391,12 +16407,20 @@
             ],
             "properties": {
               "available": {
-                "type": "boolean",
-                "const": false
+                "type": "boolean"
               },
               "reason": {
-                "type": "string",
-                "const": "music_model_not_configured"
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ForgeModel"
+                },
+                "description": "Configured supported music contracts, not every audio output model."
               }
             }
           },

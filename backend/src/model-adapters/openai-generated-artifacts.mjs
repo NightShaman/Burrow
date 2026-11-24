@@ -1,3 +1,4 @@
+import { openaiMediaContract } from './forge-media-contract.mjs';
 import { classifyModelFailure, providerErrorSecrets, withProviderErrorScope } from '../model-failure.mjs';
 import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { fetchProviderImage } from './provider-image-url.mjs';
@@ -141,13 +142,14 @@ export function generatedArtifactKind(config = {}) {
 export function createOpenAIGeneratedArtifactAdapter({ config = {}, fetchImpl = globalThis.fetch, lookupImpl, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
   if (!fetchImpl) throw new Error('fetch implementation is required');
   const budgets = mediaBudgets(config);
-  const kind = generatedArtifactKind(config);
+  const kind = openaiMediaContract(config)?.kind || generatedArtifactKind(config);
   if (!kind) throw new Error('generated artifact output capability is required');
   const model = text(config.model);
   const wireModel = googleCompatibleWireModel(config);
   if (!model) throw new Error('model is required');
   const provider = text(config.provider || config.providerName) || 'openai-compatible';
-  const baseUrl = config.baseUrl || config.apiBaseUrl || config.url;
+  const configuredBase = config.baseUrl || config.apiBaseUrl || config.url;
+  const baseUrl = kind === 'image' ? text(configuredBase).replace(/\/images\/(?:generations|edits)\/?$/, '') : configuredBase;
   const url = endpoint(baseUrl, kind === 'image' ? 'images/generations' : 'audio/speech');
 
   const complete = async (options = {}) => withProviderErrorScope(providerErrorSecrets(config), async () => {

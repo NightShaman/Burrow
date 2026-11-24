@@ -1,41 +1,14 @@
-import { googleNativeApi, googleMediaKind } from './google-native-catalog.mjs';
-import { videoContract, videoReferenceImagesSupported } from './video-contract.mjs';
-import { isGoogleOpenAICompatible } from './google-wire.mjs';
+import { forgeMediaContract } from './forge-media-contract.mjs';
 
 export const REFERENCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const unsupported = () => ({ available: false, reason: 'agent_reference_image_unsupported' });
 
-/** An image input capability alone is not an image-generation/edit contract.
- * OpenAI-compatible media models must declare both image input and image-only
- * output (image or GIF); no model/deployment-name whitelist is imposed. Google's
- * compatible chat endpoint is not implicitly an edits contract; explicit GIF
- * configuration opts into the compatible image contract. Native Google uses the existing
- * documented image-generation contracts, never a guessed model-name substring.
- */
+/** Reference support belongs to the selected provider generation contract,
+ * not chat vision or a media output modality by itself. */
 export function referenceImageCapability(config = {}) {
-  if (!config) return unsupported();
-  const inputs = config.capabilities?.inputs ?? config.acceptedInput;
-  const explicitInputs = Array.isArray(inputs);
-  const inputFlags = [config.capabilities?.images, config.capabilities?.vision, config.supportsVision, config.vision];
-  const declaredInput = explicitInputs || inputFlags.some(value => typeof value === 'boolean');
-  const acceptsImages = explicitInputs ? inputs.includes('image') : inputFlags.includes(true);
-  const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
-  if ((Array.isArray(outputs) && outputs.includes('video')) || videoContract(config)) {
-    return videoReferenceImagesSupported(config) ? { available: true, reason: null } : unsupported();
-  }
-  if (googleNativeApi(config)) {
-    // Native image-generation contracts include image editing. In the absence
-    // of an explicit modality list they supply that fact (discovery may only
-    // return generation methods); a deliberate input override still wins.
-    return googleMediaKind(config) === 'image' && (!declaredInput || acceptsImages)
-      ? { available: true, reason: null }
-      : unsupported();
-  }
-  return /^openai-/.test(config.api || config.apiType || '') &&
-    Array.isArray(outputs) && (!isGoogleOpenAICompatible(config) || outputs.includes('gif')) && (outputs.includes('image') || outputs.includes('gif')) && !outputs.includes('text') && acceptsImages
-    ? { available: true, reason: null }
-    : unsupported();
+  return forgeMediaContract(config)?.referenceImages
+    ? { available: true, reason: null } : unsupported();
 }
 
 /** Private adapter input only: never accept source URLs or silently ignore an

@@ -1,8 +1,8 @@
+import { forgeMediaContract } from './model-adapters/forge-media-contract.mjs';
+import { createForgeMediaAdapter } from './model-adapters/forge-media.mjs';
 import { readForgeGallery, listForgeGalleryFolders, listForgeGalleryImages, createForgeGalleryFolder, moveForgeGalleryImage, eligibleGalleryJob, eligibleGalleryArtifact } from './postgres-forge-gallery.mjs';
-import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { createForgeVideoAdapter } from './model-adapters/forge-video.mjs';
-import { videoContract, VIDEO_REFERENCE_LIMIT } from './model-adapters/video-contract.mjs';
-import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
+import { VIDEO_REFERENCE_LIMIT } from './model-adapters/video-contract.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
 import { findSessionReplay, PostgresSessionStore } from './postgres-session-store.mjs';
@@ -13,11 +13,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import {
   createOpenAIGeneratedArtifactAdapter,
-  generatedArtifactKind,
 } from "./model-adapters/openai-generated-artifacts.mjs";
 import {
   createGoogleLyriaAdapter,
-  googleLyriaSupported,
 } from "./model-adapters/google-lyria.mjs";
 import {
   persistGeneratedArtifact,
@@ -158,6 +156,7 @@ export class PostgresForgeStore {
     adapterFactory = createOpenAIGeneratedArtifactAdapter,
     googleAdapterFactory = createGoogleLyriaAdapter,
     videoAdapterFactory = createForgeVideoAdapter,
+    mediaAdapterFactory = createForgeMediaAdapter,
     ownerId = randomUUID(),
   } = {}) {
     if (!pool?.query || !pool?.connect)
@@ -178,6 +177,7 @@ export class PostgresForgeStore {
     this.adapterFactory = adapterFactory;
     this.googleAdapterFactory = googleAdapterFactory;
     this.videoAdapterFactory = videoAdapterFactory;
+    this.mediaAdapterFactory = mediaAdapterFactory;
     this.ownerId = ownerId;
     this.pending = new Set();
     this.admissions = new Set();
@@ -782,7 +782,8 @@ export class PostgresForgeStore {
           if (!model.agentReferenceImage?.available) fail('agent_reference_image_unsupported', 409);
           if (dispatch.configurationUnavailable) fail('forge_model_unavailable', 409);
           if (!referenceImageCapability(dispatch.config).available) fail('agent_reference_image_unsupported', 409);
-          if (model.kind === 'video' && dispatch.sourceImages.length > VIDEO_REFERENCE_LIMIT) fail('forge_video_reference_image_limit_exceeded');
+          const referenceLimit = forgeMediaContract(dispatch.config)?.referenceImageLimit;
+          if (referenceLimit && dispatch.sourceImages.length > referenceLimit) fail(model.kind === 'video' ? 'forge_video_reference_image_limit_exceeded' : 'forge_reference_image_limit_exceeded');
         }
         const job = {
           id: randomUUID(),
@@ -933,25 +934,12 @@ export class PostgresForgeStore {
       config = dispatch?.config ?? await this.resolveConfig(job.connectionId, job.modelId);
       if ((job.useAgentReferenceImage || job.referenceImages?.length) && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
         throw new Error('agent_reference_image_snapshot_unavailable');
-      const video = job.kind === 'video';
-      if (video && !videoContract(config)) throw new Error('video_provider_contract_unavailable');
-      const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
-      const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
-      if (
-        !config ||
-        (!video && !google && !nativeGoogle &&
-          (generatedArtifactKind(config) !== job.kind ||
-            !/^openai-/.test(config.api)))
-      )
-        throw new Error("unavailable");
+      const contract = forgeMediaContract(config);
+      if (!contract || contract.kind !== job.kind || (job.mode && contract.mode !== job.mode))
+        throw new Error('provider_contract_unavailable');
       config = withImageOptions(config, job.imageOptions);
-      const adapter = video
-        ? this.videoAdapterFactory({ config })
-        : nativeGoogle
-        ? createGoogleMediaAdapter({ config })
-        : google
-        ? this.googleAdapterFactory({ config })
-        : this.adapterFactory({ config });
+      const adapter = this.mediaAdapterFactory({ config, adapterFactory: this.adapterFactory,
+        googleAdapterFactory: this.googleAdapterFactory, videoAdapterFactory: this.videoAdapterFactory });
       stage = "provider";
       job.providerDispatchState = 'may_have_started';
       job.calls = [{ connectionId: job.connectionId, modelId: job.modelId, startedAt: at(), status: 'running' }];

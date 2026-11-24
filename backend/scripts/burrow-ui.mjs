@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resolveForgeConfig } from '../src/forge-config.mjs';
 import { classifyModelFailure, withProviderErrorScope } from '../src/model-failure.mjs';
 import { httpFailureResponse, postgresDiagnosticSecrets, otelDiagnosticSecrets } from './ui/http-error-response.mjs';
 import { uiPreferences, saveUiPreferences } from '../src/ui-preferences.mjs';
@@ -229,7 +230,7 @@ const postgresApplication = await createPostgresApplication({
   resolveAgent: async (agentId) => resolveAgentRuntime(agentId),
   resolveOperator: async () => ({ operatorId: 'operator', agentWorkspaceRoot: runtimeRoot }),
   connections: async (filter) => postgresApplication.stores.models.list(filter),
-  resolveConfig: (connectionId, modelId) => resolveModelConfig({ stores: postgresApplication.stores, modelConnectionId: connectionId, model: modelId }),
+  resolveConfig: (connectionId, modelId) => resolveForgeConfig({ stores: postgresApplication.stores, connectionId, modelId }),
 });
 const { anthropicOauthUsage, anthropicResetInventory, activateAnthropicFullReset, openaiOauthUsage, openaiResetCredits, consumeOpenaiResetCredit, pollExpiringResets } = createProviderUsageService({ modelLookup: modelsStore, authSecretToken, fetchImpl: globalThis.fetch, clock: Date.now,
   anthropicCoordinationStore: createPostgresAnthropicCoordinationStore(modelsStore().pool),

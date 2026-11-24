@@ -19,6 +19,7 @@ export const googleModelId = value => String(value || '').replace(/^models\//, '
 // do not describe modalities. Unknown models retain methods, not invented outputs.
 export const GOOGLE_IMAGE_MODELS = new Set(['gemini-nano-banana-2.1', 'gemini-2.5-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-3.1-flash-lite-image']);
 export const GOOGLE_MUSIC_MODELS = new Set(['lyria-3-clip-preview', 'lyria-3-pro-preview', 'lyria-3.5']);
+export const GOOGLE_SPEECH_MODELS = Object.freeze(['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts']);
 export function googleMediaKind(config = {}) {
   try { googleNativeBase(config); } catch { return null; }
   if (config.auth?.type && config.auth.type !== 'api_key') return null;
@@ -48,10 +49,10 @@ export async function discoverGoogleModels(config, { fetchImpl = fetch, signal }
       models.push({ id: m.name, displayName: m.displayName, selected: false, manual: false,
         supportedGenerationMethods: Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [],
         googleMetadata: { metadataSource: 'https://ai.google.dev/api/models',
-          ...(GOOGLE_IMAGE_MODELS.has(id) ? { outputCapabilitySource: 'https://ai.google.dev/gemini-api/docs/image-generation' } : GOOGLE_MUSIC_MODELS.has(id) ? { outputCapabilitySource: 'https://ai.google.dev/gemini-api/docs/music-generation' } : {}),
+          ...(GOOGLE_IMAGE_MODELS.has(id) ? { outputCapabilitySource: 'https://ai.google.dev/gemini-api/docs/image-generation' } : GOOGLE_MUSIC_MODELS.has(id) ? { outputCapabilitySource: 'https://ai.google.dev/gemini-api/docs/music-generation' } : GOOGLE_SPEECH_MODELS.includes(id) ? { outputCapabilitySource: 'https://ai.google.dev/gemini-api/docs/speech-generation' } : {}),
           ...Object.fromEntries(['name','baseModelId','version','description','inputTokenLimit','outputTokenLimit','thinking','temperature','maxTemperature','topP','topK'].filter(k => m[k] !== undefined).map(k => [k,m[k]])) },
         discoveredContextWindow: m.inputTokenLimit, outputTokens: m.outputTokenLimit,
-        ...(GOOGLE_IMAGE_MODELS.has(id) ? { discoveredOutput: ['text','image'] } : GOOGLE_MUSIC_MODELS.has(id) ? { discoveredOutput: ['audio'] } : {}) });
+        ...(GOOGLE_IMAGE_MODELS.has(id) ? { discoveredOutput: ['text','image'] } : (GOOGLE_MUSIC_MODELS.has(id) || GOOGLE_SPEECH_MODELS.includes(id)) ? { discoveredOutput: ['audio'] } : {}) });
     }
     token = typeof body.nextPageToken === 'string' ? body.nextPageToken : '';
   } while (token);

@@ -1,3 +1,5 @@
+import { forgeMediaContract } from './forge-media-contract.mjs';
+
 const STILL_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536'];
 // Convenient frame presets; unpublished aggregate GIF budgets remain provider-owned.
 const GIF_SIZES = ['auto', '640x640', '768x512', '512x768'];
@@ -10,9 +12,9 @@ const unsupported = () => { throw Object.assign(new Error('generation_options_un
 /** The compatible API defines the wire; saved model outputs define support.
  * Neither operator-owned connection labels nor model/deployment IDs are gates. */
 export function imageOptionsCapability(config = {}) {
-  if (!config || !/^openai-/.test(config.api || config.apiType || '')) return null;
+  if (forgeMediaContract(config)?.id !== 'openai-image') return null;
   const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
-  if (!Array.isArray(outputs) || outputs.includes('text')) return null;
+  if (!Array.isArray(outputs)) return null;
   const image = outputs.includes('image');
   const gif = outputs.includes('gif');
   if (!image && !gif) return null;
