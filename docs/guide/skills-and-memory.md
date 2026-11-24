@@ -134,4 +134,4 @@ Checked **12 November 2026**: Optional skill frontmatter starts with a first-lin
 
 ## Updating a TOOLS profile from an agent
 
-The native `agent_update_tools_profile` call rejects empty or whitespace-only content with `content_required` before writing. It replaces the agent’s own TOOLS Markdown rather than patching one section. An invalid replacement leaves the existing document unchanged. This does not change the operator’s profile editor contract.
+The native `agent_update_tools_profile` call rejects empty or whitespace-only content with `content_required` before writing. It replaces the agent’s own TOOLS Markdown rather than patching one section. An invalid replacement leaves the existing document unchanged. Use the tool only for a verified change, not as an acknowledgment or a way to finish a turn. An identical replacement returns `already_current` without rewriting the document; a changed replacement returns `updated`. If an empty call was rejected, continue the original task without rewriting or restoring the unchanged document. This does not change the operator’s profile editor contract.
