@@ -1,6 +1,7 @@
 import { createNativeToolExecutor } from './native-tool-executor.mjs';
 import { REFERENCE_IMAGE_ATTACHMENT_PREFIX, OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX } from './postgres-agent-reference-image-store.mjs';
 import { searchAgentRunEvidence } from './run-evidence.mjs';
+import { executeOutcomeTool } from './outcome-tools.mjs';
 import { executeBrainTool } from './brain-tool-executor.mjs';
 import { executeSpawnSubagentTool } from './subagent-spawn-execution.mjs';
 import { listAgentPeers } from './agent-directory-tool.mjs';
@@ -284,6 +285,16 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null,
         ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, error: result.error || null });
+      continue;
+    }
+
+    if (action.tool === 'verify_outcome') {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
+      const result = await executeOutcomeTool(action.outcomeArguments, { signal: abortSignal || undefined });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null,
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok,
+        outcomeStatus: result.outcomeCheck?.status || null, error: result.error || null });
       continue;
     }
 

@@ -594,9 +594,9 @@ export class PostgresSessionReadStore {
       CROSS JOIN LATERAL (SELECT CASE WHEN evidence.item IS NULL THEN 'incomplete'
         WHEN EXISTS (SELECT 1 FROM unnest(ARRAY['observations','changes','validations','unresolved']) AS fields(key)
           CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(evidence.item->key)='array' THEN evidence.item->key ELSE '[]'::jsonb END) AS items(item)
-          WHERE items.item->>'status'='failed' OR items.item->>'text' ~* '^[[:space:]]*shell_exec:[[:space:]]*(command )?failed'
+          WHERE NOT (items.item ? 'outcomeCheck') AND (items.item->>'status'='failed' OR items.item->>'text' ~* '^[[:space:]]*shell_exec:[[:space:]]*(command )?failed'
           OR (key='unresolved' AND items.item->>'status'='unresolved'
-            AND COALESCE(items.item->>'text','') !~* '^[[:space:]]*(command|run|tool)?[[:space:]]*completed[.]?[[:space:]]*$')) THEN 'warning'
+            AND COALESCE(items.item->>'text','') !~* '^[[:space:]]*(command|run|tool)?[[:space:]]*completed[.]?[[:space:]]*$'))) THEN 'warning'
         ELSE 'completed' END AS status) summary
       WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
       AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)

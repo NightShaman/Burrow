@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
+import { outcomeToolSchema } from './outcome-tools.mjs';
 
-export const ALLOWED_TOOLS = new Set(['mod_agent_tool', 'runtime_context_inspect', 'run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image', 'list_skills', 'load_skill']);
+export const ALLOWED_TOOLS = new Set(['verify_outcome', 'mod_agent_tool', 'runtime_context_inspect', 'run_evidence_search','brain_search','brain_read','brain_save','brain_update','brain_remove', 'shell_exec', 'files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'files_edit', 'git_status', 'git_diff', 'session_search', 'session_read_handoff', 'attachment_view', 'memory_working_search', 'memory_rolling_search', 'memory_working_write', 'session_write_handoff', 'tasks_list', 'tasks_create', 'tasks_update', 'tasks_assign', 'tasks_delete', 'agent_update_tools_profile', 'scheduled_jobs_list', 'scheduled_jobs_read', 'scheduled_jobs_create', 'scheduled_jobs_update', 'scheduled_jobs_delete', 'scheduled_job_runs', 'scheduled_jobs_run_now', 'files_write', 'files_patch', 'spawn_subagent', 'agents_list', 'agent_send_message', 'mcp_providers', 'mcp_capabilities', 'mcp_call', 'forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image', 'list_skills', 'load_skill']);
 
 const TARGET_KIND_ALIASES = new Map([
   ['filesystem', 'filesystem'],
@@ -58,6 +59,7 @@ function normalizeAction(action, index) {
     toolCallId: action?.toolCallId ? String(action.toolCallId) : null,
     reason: action?.reason ? String(action.reason) : null,
     ...(tool === 'runtime_context_inspect' ? { contextSection: action.section } : {}),
+    ...(tool === 'verify_outcome' ? { outcomeArguments: action.outcomeArguments ?? Object.fromEntries(Object.entries(action).filter(([key]) => !['tool', 'toolCallId', 'index'].includes(key))) } : {}),
     requiresApproval: Boolean(action?.requiresApproval),
     command: action?.command ? String(action.command) : null,
     protectedBindings: action?.protectedBindings && typeof action.protectedBindings === 'object' && !Array.isArray(action.protectedBindings) ? action.protectedBindings : {},
@@ -276,6 +278,7 @@ export function parseActionProposal(text) {
 export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = true, includeMutations = true, includeWorkingMemory = false, includeBrainMemory = false, includeAgentProfile = false, includeAgentChat = false, includeTaskBoard = false, includeDelegateWork = false, includeMcpMenu = false } = {}) {
   const tools = [
     { type: 'function', function: { name: 'runtime_context_inspect', description: 'Read details for this turn: environment returns the selected host report (including available interfaces), execution workspace and configured browser target; attachments lists up to 24 recent reopenable attachments in this session without loading bytes. Pass a returned attachment ID to attachment_view.', parameters: { type: 'object', additionalProperties: false, properties: { section: { type: 'string', enum: ['environment', 'attachments'] }, reason: { type: 'string' } }, required: ['section'] } } },
+    outcomeToolSchema,
     { type: 'function', function: { name: 'run_evidence_search', description: 'Find what this agent actually ran and what its tools recorded on a previous run, even across sessions. For what someone said, use session_search. Historical proof is subject to retention; it does not establish current state or authorize repeating an action.', parameters: { type: 'object', additionalProperties: false, properties: { query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100 }, reason: { type: 'string' } }, required: ['query'] } } },
     ...Object.entries({
       brain_search: 'Look up what you remember about a person, relationship, preference, decision, or shared experience. Saved memories are not preloaded. For a full account, also use session_search when available: conversations may contain details nobody saved.',
@@ -546,6 +549,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings });
   if (tool === 'files_read') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes });
   if (tool === 'attachment_view') return normalizeNative({ tool, reason: args.reason, attachmentId: args.attachmentId || args.id });
+  if (tool === 'verify_outcome') return normalizeNative({ tool, outcomeArguments: args, reason: args.reason });
   if (tool === 'runtime_context_inspect') return normalizeNative({ tool, section: args.section, reason: args.reason });
   if (tool === 'run_evidence_search') return normalizeNative({ tool, query: args.query, limit: args.limit, reason: args.reason });
   if (tool === 'session_search') return normalizeNative({ tool, reason: args.reason, query: args.query, scope: args.scope, limit: args.limit, since: args.since, until: args.until, sourceId: args.sourceId, sourceSessionId: args.sourceSessionId, neighborCount: args.neighborCount });

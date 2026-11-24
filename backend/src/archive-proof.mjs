@@ -1,3 +1,5 @@
+import { outcomeEvidenceForResult } from './outcome-tools.mjs';
+import { normalizeOutcomeCheck } from './outcome-verification.mjs';
 import { archiveReadCheckpoint, archiveReadTasks } from './archive-read-scope.mjs';
 import { isInternalContextSession } from './model-context-boundary.mjs';
 import { evidenceTranscript } from './session-search.mjs';
@@ -213,7 +215,7 @@ function evidenceItems(evidence = {}) {
   return ['observations', 'changes', 'validations', 'unresolved'].flatMap((key) => Array.isArray(evidence?.[key]) ? evidence[key] : []);
 }
 function failureEvidence(evidence = {}) {
-  return evidenceItems(evidence).filter((item) => item?.status === 'failed' || /^shell_exec:\s*(?:command )?failed/iu.test(text(item?.text))).slice(0, MAX_FAILURES);
+  return evidenceItems(evidence).filter((item) => !normalizeOutcomeCheck(item?.outcomeCheck) && (item?.status === 'failed' || /^shell_exec:\s*(?:command )?failed/iu.test(text(item?.text)))).slice(0, MAX_FAILURES);
 }
 function unresolvedEvidence(evidence = {}) {
   return (Array.isArray(evidence?.unresolved) ? evidence.unresolved : []).filter((item) => item?.status === 'unresolved' && !genericCompletionText(item?.text) && !/^shell_exec:\s*(?:command )?failed/iu.test(text(item?.text))).slice(0, MAX_FAILURES);
@@ -363,7 +365,7 @@ function childVerificationEvidence(subagents = []) {
   });
 }
 function verificationEvidence(evidence = {}, subagents = []) {
-  const recorded = nonFailure(evidence?.validations);
+  const recorded = (Array.isArray(evidence?.validations) ? evidence.validations : []).filter(item => item?.status !== 'failed' || normalizeOutcomeCheck(item?.outcomeCheck));
   return [...recorded.map((item) => ({ ...item, text: operatorEvidenceText(item, 'verification') })), ...childVerificationEvidence(subagents)];
 }
 function isLinkedChildObservation(item = {}, subagents = []) {
@@ -395,7 +397,7 @@ function timelineFor({ receipt, answer, activities, executionEntries, trace, evi
   }
   for (const item of observationEvidence(evidence, subagents)) timeline.push({ kind: 'observation', status: item.status, ts: evidence.createdAt || null, summary: operatorEvidenceText(item, 'observation'), evidence: 'run_evidence' });
   for (const item of nonFailure(evidence?.changes)) timeline.push({ kind: 'change', status: item.status, ts: evidence.createdAt || null, summary: operatorEvidenceText(item, 'change'), evidence: 'run_evidence' });
-  for (const item of verificationEvidence(evidence, subagents)) timeline.push({ kind: 'verification', status: item.status, ts: evidence?.createdAt || null, summary: item.text, evidence: item.sourceRefs?.[0]?.startsWith('subagent:') ? 'subagent_record' : 'run_evidence' });
+  for (const item of verificationEvidence(evidence, subagents)) timeline.push({ kind: 'verification', status: item.status, ts: item.outcomeCheck?.checkedAt || evidence?.createdAt || null, summary: item.text, evidence: item.outcomeCheck ? 'outcome_check' : item.sourceRefs?.[0]?.startsWith('subagent:') ? 'subagent_record' : 'run_evidence' });
   for (const item of failureEvidence(evidence)) timeline.push({ kind: 'failure', status: 'failed', ts: evidence.createdAt || null, summary: operatorFailureText(item), evidence: 'run_evidence' });
   for (const item of unresolvedEvidence(evidence)) timeline.push({ kind: 'unresolved', status: item.status, ts: evidence.createdAt || null, summary: operatorEvidenceText(item, 'unresolved'), evidence: 'run_evidence' });
   if (context) {
@@ -412,7 +414,30 @@ function timelineFor({ receipt, answer, activities, executionEntries, trace, evi
   return timeline.sort((left, right) => String(left.ts || '').localeCompare(String(right.ts || ''))).slice(-MAX_TIMELINE);
 }
 
+function workflowEventFor(entries) {
+  const entry = entries.find(item => item.type === 'message' && item.role === 'user' && item.metadata?.source === 'workflow-event' && item.metadata?.completionEvent);
+  const value = entry?.metadata?.completionEvent;
+  if (!value || !['id', 'repository', 'workflow', 'runId', 'headSha', 'conclusion', 'url'].every(key => typeof value[key] === 'string' && value[key]) || !Number.isInteger(value.runAttempt)) return null;
+  return Object.fromEntries(['id', 'repository', 'workflow', 'runId', 'runAttempt', 'headSha', 'conclusion', 'url'].map(key => [key, value[key]]));
+}
+
+// Canonical tool results survive an interrupted terminal commit or metadata
+// eviction. Merge by physical call identity, never by an assistant's claim.
+function evidenceWithOutcomeChecks(evidence, entries, runId) {
+  const validations = [...(Array.isArray(evidence?.validations) ? evidence.validations : [])];
+  const keys = new Set(validations.filter(item => normalizeOutcomeCheck(item?.outcomeCheck)).map(item => item.callId || JSON.stringify(item.outcomeCheck)));
+  for (const entry of executionEntriesFor(entries).filter(item => item.type === 'tool_result' && item.metadata?.tool === 'verify_outcome')) {
+    const result = resultForEntry(entry);
+    const item = outcomeEvidenceForResult({ ...result, toolCallId: result.toolCallId || entry.metadata?.callId }, [`run:${runId}`]);
+    if (!item) continue;
+    const key = item.callId || JSON.stringify(item.outcomeCheck);
+    if (!keys.has(key)) { validations.push(item); keys.add(key); }
+  }
+  return validations.length ? { ...(evidence || {}), validations } : evidence;
+}
+
 async function proofDetail({ conversationStore, agentId, agentName, sessionId, runId, entries, evidence, subagentRecords = [], traceRoot = null, signal, deadline }) {
+  evidence = evidenceWithOutcomeChecks(evidence, entries, runId);
   const receipt = receiptFor(entries);
   const answer = answerFor(entries);
   const request = requestFor(entries);
@@ -463,6 +488,7 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
       unresolved: unresolvedEvidence(evidence).map((item) => ({ ...item, text: operatorEvidenceText(item, 'unresolved') })),
     },
     context,
+    ...(workflowEventFor(entries) ? { workflowEvent: workflowEventFor(entries) } : {}),
     subagents,
     timeline: timelineFor({ receipt, answer, activities, executionEntries, trace: trace?.exists ? trace : null, evidence, context, subagents, lastActivityAt: bounds.lastActivityAt }),
     references: {
@@ -474,6 +500,7 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
 
 // List projection deliberately never builds detail or consults trace storage.
 function proofSummary({ agentId, agentName, sessionId, runId, entries, evidence, subagentRecords }) {
+  evidence = evidenceWithOutcomeChecks(evidence, entries, runId);
   const receipt = receiptFor(entries);
   const answer = answerFor(entries);
   const bounds = runBounds(entries);
@@ -491,7 +518,7 @@ function proofSummary({ agentId, agentName, sessionId, runId, entries, evidence,
     counts: {
       observations: nonFailure(evidence?.observations).filter(item => !(text(item.tool) === 'spawn_subagent' && childIds.has(text(item.subagentId)))).length,
       changes: nonFailure(evidence?.changes).length,
-      verifications: nonFailure(evidence?.validations).length + children.filter(record => childVerification(record)).length,
+      verifications: verificationEvidence(evidence).length + children.filter(record => childVerification(record)).length,
       failures: failureEvidence(evidence).length,
       unresolved: unresolvedEvidence(evidence).length,
       toolActivities: entries.reduce((total, entry) => total + (entry.visibility === 'activity' ? Number(entry.metadata?.toolActivity?.totalCalls || 0) : 0), 0),
@@ -574,7 +601,7 @@ export async function listArchiveRunSummariesPage({ rootDir, conversationStore, 
       _sortTimestamp: row.sortTimestamp,
       objective: evidence?.objective || null, decision: evidence?.decision || null, route: evidence?.route || null,
       counts: { observations: nonFailure(evidence?.observations).length, changes: nonFailure(evidence?.changes).length,
-        verifications: nonFailure(evidence?.validations).length + children.filter(record => childVerification(record)).length,
+        verifications: verificationEvidence(evidence).length + children.filter(record => childVerification(record)).length,
         failures: failureEvidence(evidence).length, unresolved: unresolvedEvidence(evidence).length, toolActivities: 0, subagents: children.length },
     };
   });

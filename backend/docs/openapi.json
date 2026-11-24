@@ -14869,6 +14869,15 @@
             "items": {
               "type": "string"
             }
+          },
+          "tool": {
+            "type": "string"
+          },
+          "callId": {
+            "type": "string"
+          },
+          "outcomeCheck": {
+            "$ref": "#/components/schemas/OutcomeCheck"
           }
         },
         "additionalProperties": false
@@ -15150,6 +15159,47 @@
               "null"
             ],
             "description": "Exact canonical user message that initiated this run, when retained."
+          },
+          "workflowEvent": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "workflow": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              },
+              "headSha": {
+                "type": "string"
+              },
+              "conclusion": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "runAttempt": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "id",
+              "repository",
+              "workflow",
+              "runId",
+              "headSha",
+              "conclusion",
+              "url",
+              "runAttempt"
+            ],
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -22702,6 +22752,201 @@
             }
           }
         }
+      },
+      "OutcomeCheck": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "outcome-check"
+            ]
+          },
+          "verifier": {
+            "type": "string",
+            "enum": [
+              "github_public_release"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "mismatch",
+              "unverified"
+            ]
+          },
+          "expected": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "artifact": {
+                "type": "object",
+                "properties": {
+                  "sourceTreeSha": {
+                    "type": "string"
+                  },
+                  "imageRepository": {
+                    "type": "string"
+                  },
+                  "imageId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sourceTreeSha"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "repository",
+              "version",
+              "artifact"
+            ],
+            "additionalProperties": false
+          },
+          "observed": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "artifact": {
+                "type": "object",
+                "properties": {
+                  "sourceTreeSha": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "imageRepository": {
+                    "type": "string"
+                  },
+                  "imageId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "manifestDigest": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "sourceTreeSha"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "repository",
+              "version",
+              "artifact"
+            ],
+            "additionalProperties": false
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "evidenceSources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "checkedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "statusCode": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 100,
+                  "maximum": 599
+                }
+              },
+              "required": [
+                "kind",
+                "url",
+                "checkedAt",
+                "statusCode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "intentSource": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "caller_supplied"
+                ]
+              },
+              "sourceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "sourceRefs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "kind",
+          "verifier",
+          "status",
+          "expected",
+          "observed",
+          "checkedAt",
+          "reasonCode",
+          "reason",
+          "evidenceSources",
+          "intentSource"
+        ],
+        "additionalProperties": false,
+        "description": "Runtime-executed outcome check, independent of workflow conclusion or agent completion. Expected identity is caller-supplied intent, never inferred from observed publication. Checks public final release/source tree and optionally requested GHCR image identity; not installation proof."
       }
     },
     "securitySchemes": {

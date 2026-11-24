@@ -23,7 +23,7 @@ function retainedChatMetadata(metadata = {}) {
   // Successor transcripts preserve conversational provenance, not bulky
   // finalizer/debug receipts from the archived generation.
   const projected = {};
-  for (const key of ['attachments', 'decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'direction', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState', 'chatInput', 'lane', 'chatResultVersion', 'terminalStatus', 'modelFailure', 'modelRecovery']) {
+  for (const key of ['source', 'completionEvent', 'attachments', 'decision', 'canonicalExecution', 'executionDigest', 'toolResultCount', 'iteration', 'tool', 'callId', 'ok', 'toolCalls', 'normalizedResult', 'subjectScope', 'fromAgentId', 'fromAgentName', 'toAgentId', 'direction', 'messageMode', 'sourceSessionId', 'targetSessionId', 'contextState', 'chatInput', 'lane', 'chatResultVersion', 'terminalStatus', 'modelFailure', 'modelRecovery']) {
     if (metadata?.[key] !== undefined) projected[key] = metadata[key];
   }
   return redactedMetadata(projected);

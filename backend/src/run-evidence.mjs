@@ -1,3 +1,5 @@
+import { normalizeOutcomeCheck } from './outcome-verification.mjs';
+import { outcomeEvidenceForResult } from './outcome-tools.mjs';
 import { archiveReadCheckpoint } from './archive-read-scope.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 
@@ -120,7 +122,8 @@ function terminalFailures(results = []) {
 }
 
 function compactItems(items = []) {
-  return list(items).slice(0, MAX_ITEMS).map((item) => {
+  const outcomes = list(items).filter(item => item?.tool === 'verify_outcome' && normalizeOutcomeCheck(item.outcomeCheck));
+  return [...list(items).filter(item => !outcomes.includes(item)).slice(0, MAX_ITEMS), ...outcomes].map((item) => {
     const tool = text(item?.tool);
     const subagentId = text(item?.subagentId);
     return {
@@ -129,6 +132,7 @@ function compactItems(items = []) {
       sourceRefs: unique(list(item?.sourceRefs), MAX_SOURCE_REFS),
       ...(item?.scope === 'shell_command' ? { scope: 'shell_command', subcommandsAttested: false } : {}),
       ...(subagentId ? { tool, subagentId } : {}),
+      ...(tool === 'verify_outcome' && normalizeOutcomeCheck(item.outcomeCheck) ? { tool, ...(text(item.callId) ? { callId: text(item.callId) } : {}), outcomeCheck: normalizeOutcomeCheck(item.outcomeCheck) } : {}),
     };
   }).filter((item) => item.text);
 }
@@ -154,6 +158,8 @@ export function deriveRunEvidence({ agentId, sessionId, runId, traceDir, objecti
     const detail = resultText(result);
     const ref = resultRef(result);
     const refs = unique([...source, ...executionRefs(result), ref ? `receipt:${ref}` : ''], MAX_SOURCE_REFS);
+    const outcomeItem = outcomeEvidenceForResult(result, refs);
+    if (outcomeItem) { validations.push(outcomeItem); continue; }
     const change = isChange(result);
     const validation = !change && isValidation(result);
     const fact = change

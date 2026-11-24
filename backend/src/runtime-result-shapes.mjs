@@ -1,3 +1,4 @@
+import { normalizeOutcomeCheck } from './outcome-verification.mjs';
 import { compactSearchMatch } from './search-match-receipt.mjs';
 import { scheduledResultReceipt } from './scheduled-result-receipt.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
@@ -95,7 +96,15 @@ function compactChildEvidence(toolResult) {
 }
 
 export function summarizeToolResults(toolResults = []) {
-  return (toolResults || []).map((toolResult, index) => toolResult.tool === 'agents_list' ? {
+  return (toolResults || []).map((toolResult, index) => toolResult.tool === 'verify_outcome' ? {
+    // Keep this typed receipt compact enough to survive canonical metadata's
+    // key/depth budgets; filesystem-shaped placeholders are not outcome data.
+    activityId: toolResult.activityId || `tool-${index + 1}`,
+    tool: 'verify_outcome', toolCallId: toolResult.toolCallId || null,
+    ok: toolResult.ok ?? null, error: toolResult.error || null,
+    ...(toolResult.message ? { message: compactText(toolResult.message, RECEIPT_TEXT_LIMITS.error) } : {}),
+    ...(toolResult.ok === true && normalizeOutcomeCheck(toolResult.outcomeCheck) ? { outcomeCheck: normalizeOutcomeCheck(toolResult.outcomeCheck) } : {}),
+  } : toolResult.tool === 'agents_list' ? {
     // Keep the small public page compact in shape as well as size. A generic
     // filesystem receipt's many irrelevant keys can exhaust metadata key limits.
     activityId: toolResult.activityId || `tool-${index + 1}`,
