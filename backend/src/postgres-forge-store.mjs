@@ -30,6 +30,7 @@ import {
   withPostgresTransaction,
 } from "./postgres-foundation.mjs";
 import { forgeCatalog } from "./forge-store.mjs";
+import { normalizeVideoOptions, validateVideoRequest, withVideoOptions } from './model-adapters/video-generation-options.mjs';
 import { normalizeImageOptions, withImageOptions } from './model-adapters/image-generation-options.mjs';
 import { mediaBudgets } from './model-adapters/generated-media-budgets.mjs';
 import { REFERENCE_IMAGE_MAX_BYTES, referenceImageCapability, validatedSourceImages } from "./model-adapters/reference-image-capability.mjs";
@@ -54,6 +55,7 @@ const stable = (value) => {
 const sameRequest = (a, b, current) => {
   // Options must match even for legacy/default/reference-image replay paths.
   if (stable(a?.imageOptions ?? null) !== stable(current.imageOptions ?? null)) return false;
+  if (stable(a?.videoOptions ?? null) !== stable(current.videoOptions ?? null)) return false;
   if (stable(a) === stable(b)) return true;
   // New multi-reference identities bind ordered digests, actor and Mod owner.
   // Saved-default retries may keep their admitted model when the configured
@@ -613,6 +615,7 @@ export class PostgresForgeStore {
       "referenceArtifacts",
       "referenceAttachmentIds",
       "imageOptions",
+      "videoOptions",
     ];
     if (
       Object.keys(body).some((k) => !keys.includes(k)) ||
@@ -725,8 +728,17 @@ export class PostgresForgeStore {
       dispatch.configurationUnavailable = referenceConfigurationUnavailable;
     }
     const imageOptions = normalizeImageOptions(body.imageOptions, { mode: body.mode ?? 'image', validateSupport: false });
+    const videoOptions = normalizeVideoOptions(body.videoOptions, { mode: body.mode ?? model?.mode ?? 'video', validateSupport: false });
+    // Resolve outside the transaction: configured providers may use this same
+    // max-one settings pool. Defer current support errors until after replay.
+    let videoConfig = referenceConfig, videoConfigurationUnavailable = referenceConfigurationUnavailable;
+    if (videoOptions && model?.kind === 'video' && !hasReferences) {
+      try { videoConfig = await this.resolveConfig(saved.connectionId, saved.modelId); }
+      catch { videoConfigurationUnavailable = true; }
+    }
     const request = {
       ...(imageOptions ? { imageOptions } : {}),
+      ...(videoOptions ? { videoOptions } : {}),
       mode: body.mode ?? null,
       connectionId: saved.connectionId,
       modelId: saved.modelId,
@@ -773,6 +785,15 @@ export class PostgresForgeStore {
           if (model.kind !== 'image' || !model.imageOptions?.outputFormats.includes(imageOptions.outputFormat)) fail('generation_options_unsupported');
           // Shape/bounds were normalized before claiming; support comes from
           // the same configured-output catalog exposed to UI and agents.
+        }
+        if (videoOptions && model.kind !== 'video') fail('generation_options_unsupported');
+        if (model.kind === 'video') {
+          const referenceCount = dispatch?.sourceImages?.length ?? 0;
+          normalizeVideoOptions(videoOptions, { capability: model.videoOptions ?? null, referenceCount });
+          if (videoOptions) {
+            if (videoConfigurationUnavailable) fail('forge_model_unavailable', 409);
+            validateVideoRequest(videoConfig, videoOptions, referenceCount);
+          }
         }
         if (artifactReferences.length && (!['image', 'video'].includes(model.kind) || !model.referenceArtifacts?.available)) fail('forge_reference_artifacts_unsupported', 409);
         if (attachmentIds.length && !model.referenceAttachments?.available) fail('forge_reference_attachments_unsupported', 409);
@@ -938,6 +959,10 @@ export class PostgresForgeStore {
       if (!contract || contract.kind !== job.kind || (job.mode && contract.mode !== job.mode))
         throw new Error('provider_contract_unavailable');
       config = withImageOptions(config, job.imageOptions);
+      if (job.kind === 'video') {
+        validateVideoRequest(config, job.videoOptions, dispatch?.sourceImages?.length ?? 0);
+        config = withVideoOptions(config, job.videoOptions);
+      }
       const adapter = this.mediaAdapterFactory({ config, adapterFactory: this.adapterFactory,
         googleAdapterFactory: this.googleAdapterFactory, videoAdapterFactory: this.videoAdapterFactory });
       stage = "provider";

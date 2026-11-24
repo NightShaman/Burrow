@@ -257,7 +257,7 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       let result;
       try {
         const args = action.tool === 'forge_create_job'
-          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage, useOperatorReferenceImage: action.useOperatorReferenceImage, referenceAgentIds: action.referenceAgentIds, referenceAttachmentIds: action.referenceAttachmentIds, referenceArtifacts: action.referenceArtifacts, imageOptions: action.imageOptions }
+          ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage, useOperatorReferenceImage: action.useOperatorReferenceImage, referenceAgentIds: action.referenceAgentIds, referenceAttachmentIds: action.referenceAttachmentIds, referenceArtifacts: action.referenceArtifacts, imageOptions: action.imageOptions, videoOptions: action.videoOptions }
           : action.tool === 'forge_list_gallery_folders' ? { name: action.galleryName }
           : action.tool === 'forge_list_gallery_images' ? { folderId: action.galleryFolderId }
           : action.tool === 'forge_move_gallery_image' ? { jobId: action.jobId, artifactId: action.artifactId, folderId: action.galleryFolderId }

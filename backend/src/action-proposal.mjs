@@ -146,6 +146,7 @@ function normalizeAction(action, index) {
     referenceArtifacts: action?.referenceArtifacts,
     // Preserve typed options (including invalid values) for store-owned validation.
     imageOptions: action?.imageOptions,
+    videoOptions: action?.videoOptions,
     forgeMode: action?.mode ? String(action.mode).trim() : null,
     forgeConnectionId: action?.connectionId ? String(action.connectionId).trim() : null,
     forgeModelId: action?.modelId ? String(action.modelId).trim() : null,
@@ -576,7 +577,7 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   if (tool === 'forge_list_gallery_images') return normalizeNative({ tool, reason: args.reason, folderId: args.folderId });
   if (tool === 'forge_move_gallery_image') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, artifactId: args.artifactId, folderId: args.folderId });
   if (tool === 'forge_catalog' || tool === 'forge_list_jobs') return normalizeNative({ tool, reason: args.reason });
-  if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, mode: args.mode, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey, useAgentReferenceImage: args.useAgentReferenceImage, useOperatorReferenceImage: args.useOperatorReferenceImage, referenceAgentIds: args.referenceAgentIds, referenceAttachmentIds: args.referenceAttachmentIds, referenceArtifacts: args.referenceArtifacts, imageOptions: args.imageOptions });
+  if (tool === 'forge_create_job') return normalizeNative({ tool, reason: args.reason, mode: args.mode, connectionId: args.connectionId, modelId: args.modelId, prompt: args.prompt, idempotencyKey: args.idempotencyKey, useAgentReferenceImage: args.useAgentReferenceImage, useOperatorReferenceImage: args.useOperatorReferenceImage, referenceAgentIds: args.referenceAgentIds, referenceAttachmentIds: args.referenceAttachmentIds, referenceArtifacts: args.referenceArtifacts, imageOptions: args.imageOptions, videoOptions: args.videoOptions });
   if (tool === 'forge_inspect_job') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId });
   if (tool === 'forge_attach_artifact') return normalizeNative({ tool, reason: args.reason, jobId: args.jobId, artifactId: args.artifactId });
   if (tool === 'mcp_providers') return normalizeNative({ tool, reason: args.reason });

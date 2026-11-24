@@ -1,7 +1,7 @@
 import { googleNativeApi, googleNativeBase, googleMediaKind } from './google-native-catalog.mjs';
 import { googleSpeechContract } from './google-speech-contract.mjs';
 import { xaiMediaContract, XAI_SPEECH_SELECTOR } from './xai-media-contract.mjs';
-import { videoContract, videoReferenceImagesSupported, VIDEO_REFERENCE_LIMIT } from './video-contract.mjs';
+import { videoContract, videoReferenceImagesSupported, videoReferenceImageLimit } from './video-contract.mjs';
 
 const compatibleApis = new Set(['openai-chat-completions', 'openai-responses', 'openai-completions']);
 const outputsOf = config => config.acceptedOutputOverride ?? config.capabilities?.outputs ?? config.acceptedOutput ?? config.discoveredOutput;
@@ -52,7 +52,7 @@ export function forgeMediaContract(config = {}) {
   if (Array.isArray(outputs) && !outputs.length) return null;
   const video = videoContract(config);
   if (video) return { id: `${video}-video`, provider: video, kind: 'video', mode: 'video',
-    referenceImages: videoReferenceImagesSupported(config), referenceImageLimit: VIDEO_REFERENCE_LIMIT };
+    referenceImages: videoReferenceImagesSupported(config), referenceImageLimit: videoReferenceImageLimit(config) };
   const xai = xaiMediaContract(config);
   if (xai) return xai;
   const speech = googleSpeechContract(config);

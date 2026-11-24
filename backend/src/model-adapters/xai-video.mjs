@@ -5,7 +5,8 @@ import { classifyModelFailure, markProviderTransportError, providerErrorSecrets,
 import { mediaBudgets, mediaBytes } from './generated-media-budgets.mjs';
 import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { validatedSourceImages } from './reference-image-capability.mjs';
-import { videoContract, videoReferenceImagesSupported, VIDEO_REFERENCE_LIMIT, xaiVideoBase } from './video-contract.mjs';
+import { videoContract, videoReferenceImagesSupported, xaiVideoBase } from './video-contract.mjs';
+import { normalizeVideoOptions, validateVideoRequest } from './video-generation-options.mjs';
 
 // https://docs.x.ai/developers/model-capabilities/video/generation
 function downloadUrl(value) {
@@ -28,12 +29,13 @@ export function createXaiVideoAdapter({ config = {}, fetchImpl = globalThis.fetc
   const model = config.model, provider = 'xai', api = 'xai-video', budgets = mediaBudgets(config);
   const secrets = providerErrorSecrets(config, headers);
   return { provider, api, model, outputKind: 'video', url,
-    async complete({ prompt, signal: callerSignal, sourceImages } = {}) {
+    async complete({ prompt, signal: callerSignal, sourceImages, videoOptions = config.forgeVideoOptions } = {}) {
       return withProviderErrorScope(secrets, async () => {
         callerSignal?.throwIfAborted();
         if (sourceImages !== undefined && !videoReferenceImagesSupported(config)) throw new Error('agent_reference_image_unsupported');
-        if (Array.isArray(sourceImages) && sourceImages.length > VIDEO_REFERENCE_LIMIT) throw new Error('xai_video_reference_image_limit_exceeded');
         const images = validatedSourceImages(sourceImages);
+        const options = normalizeVideoOptions(videoOptions, { config, referenceCount: images?.length ?? 0 });
+        const workflow = validateVideoRequest(config, options, images?.length ?? 0);
         const fields = { requestId: idFactory(), provider, api, model };
         const controller = new AbortController();
         const signal = callerSignal ? AbortSignal.any([controller.signal, callerSignal]) : controller.signal;
@@ -74,7 +76,11 @@ export function createXaiVideoAdapter({ config = {}, fetchImpl = globalThis.fetc
         try {
           // Exactly one paid POST. Pending state only triggers read-only GETs.
           const submit = await jsonStep(url, { method: 'POST', headers, body: JSON.stringify({ model, prompt: String(prompt || ''),
-            ...(images ? { reference_images: images.map(({ bytes, mimeType }) => ({ url: `data:${mimeType};base64,${bytes.toString('base64')}` })) } : {}),
+            ...(workflow.id === 'image-to-video' ? { image: { url: `data:${images[0].mimeType};base64,${images[0].bytes.toString('base64')}` } } : {}),
+            ...(workflow.id === 'reference-to-video' ? { reference_images: images.map(({ bytes, mimeType }) => ({ url: `data:${mimeType};base64,${bytes.toString('base64')}` })) } : {}),
+            ...(options?.durationSeconds !== undefined ? { duration: options.durationSeconds } : {}),
+            ...(options?.aspectRatio !== undefined ? { aspect_ratio: options.aspectRatio } : {}),
+            ...(options?.resolution !== undefined ? { resolution: options.resolution } : {}),
           }) }, 'submit');
           if (submit.failure) return submit.failure;
           const requestId = submit.payload?.request_id;

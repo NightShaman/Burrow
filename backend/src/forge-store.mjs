@@ -1,3 +1,4 @@
+import { videoOptionsCapability } from './model-adapters/video-generation-options.mjs';
 import { imageOptionsCapability } from './model-adapters/image-generation-options.mjs';
 import { forgeMediaContract, forgeModelConfig, forgeConnectionModels, declaredForgeKind } from './model-adapters/forge-media-contract.mjs';
 
@@ -14,13 +15,14 @@ export function forgeCatalog(connections) {
     const referenceArtifacts = contract?.referenceImages
       ? { available: true, ...(contract.referenceImageLimit ? { maxImages: contract.referenceImageLimit } : {}) }
       : { available: false };
+    const videoOptions = available && kind === 'video' ? videoOptionsCapability(config) : null;
     const imageOptions = available && kind === 'image' ? imageOptionsCapability(config) : null;
     return [{ connectionId: connection.id, modelId: model.id, label: model.name || model.id, kind,
       ...(contract ? { mode: contract.mode } : {}),
       ...(contract?.connectionLevel ? { connectionLevel: true } : {}),
       available, unavailableReason: available ? null : kind === 'video' ? 'video_provider_contract_unavailable' : 'provider_contract_unavailable',
       controls: [], agentReferenceImage, referenceArtifacts, referenceAttachments: { ...referenceArtifacts },
-      ...(imageOptions ? { imageOptions } : {}) }];
+      ...(imageOptions ? { imageOptions } : {}), ...(videoOptions ? { videoOptions } : {}) }];
   }));
   const musicModels = models.filter(model => model.available && model.mode === 'music');
   const music = musicModels.length ? { available: true, reason: null, models: musicModels } : { available: false, reason: 'music_model_not_configured' };

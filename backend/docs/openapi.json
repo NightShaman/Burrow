@@ -16105,6 +16105,9 @@
           },
           "imageOptions": {
             "$ref": "#/components/schemas/ForgeImageOptions"
+          },
+          "videoOptions": {
+            "$ref": "#/components/schemas/ForgeVideoOptions"
           }
         },
         "required": [
@@ -16223,6 +16226,9 @@
               "minLength": 1
             },
             "description": "Ordered runtime-owned PNG/JPEG/WebP chat attachment IDs. Requires trusted runtime agent/session context; operator HTTP calls without that context fail closed. No bytes or arbitrary paths. Snapshotted with hashes before dispatch."
+          },
+          "videoOptions": {
+            "$ref": "#/components/schemas/ForgeVideoOptions"
           }
         },
         "required": [
@@ -16338,6 +16344,9 @@
           "connectionLevel": {
             "type": "boolean",
             "description": "True for a native connection capability such as xAI TTS. Its local modelId selector is not sent as a provider model."
+          },
+          "videoOptions": {
+            "$ref": "#/components/schemas/ForgeVideoOptionsCapability"
           }
         },
         "required": [
@@ -22495,6 +22504,202 @@
           },
           "request": {
             "$ref": "#/components/schemas/ProviderRequestDetail"
+          }
+        }
+      },
+      "ForgeVideoOptions": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "description": "Video-only xAI settings; consult the selected model videoOptions workflow. Omitted/null/empty preserves provider defaults. Only explicitly supplied keys are persisted and sent. Workflow defaults to text-to-video without images or the catalog defaultReferenceWorkflow with images. Starting-frame animation inherits image aspect ratio and rejects explicit aspectRatio; subject references limit resolution/duration. Unsupported combinations are rejected before dispatch, never ignored.",
+        "properties": {
+          "workflow": {
+            "type": "string",
+            "enum": [
+              "text-to-video",
+              "image-to-video",
+              "reference-to-video"
+            ]
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15
+          },
+          "aspectRatio": {
+            "type": "string",
+            "enum": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "21:9",
+              "5:2"
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "480p",
+              "720p",
+              "1080p"
+            ]
+          }
+        }
+      },
+      "ForgeVideoWorkflowCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "minImages",
+          "maxImages",
+          "durationSeconds",
+          "aspectRatios",
+          "resolutions",
+          "defaults"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "text-to-video",
+              "image-to-video",
+              "reference-to-video"
+            ]
+          },
+          "minImages": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxImages": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "durationSeconds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "min",
+              "max",
+              "default"
+            ],
+            "properties": {
+              "min": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max": {
+                "type": "integer",
+                "maximum": 15
+              },
+              "default": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 15
+              }
+            }
+          },
+          "aspectRatios": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "1:1",
+                "16:9",
+                "9:16",
+                "4:3",
+                "3:4",
+                "3:2",
+                "2:3",
+                "21:9",
+                "5:2"
+              ]
+            },
+            "description": "Empty when aspect ratio follows the starting image; do not send aspectRatio."
+          },
+          "resolutions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "480p",
+                "720p",
+                "1080p"
+              ]
+            }
+          },
+          "defaults": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resolution"
+            ],
+            "properties": {
+              "aspectRatio": {
+                "type": "string",
+                "enum": [
+                  "1:1",
+                  "16:9",
+                  "9:16",
+                  "4:3",
+                  "3:4",
+                  "3:2",
+                  "2:3",
+                  "21:9",
+                  "5:2"
+                ]
+              },
+              "resolution": {
+                "type": "string",
+                "enum": [
+                  "480p",
+                  "720p",
+                  "1080p"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "ForgeVideoOptionsCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "defaultWorkflow",
+          "defaultReferenceWorkflow",
+          "workflows"
+        ],
+        "description": "Shared model/provider workflow contract for video controls and dispatch. Defaults describe the provider and are not injected into omitted requests. Image counts combine all portrait, Gallery, and chat selectors. Google video does not advertise these xAI-specific options.",
+        "properties": {
+          "defaultWorkflow": {
+            "type": "string",
+            "enum": [
+              "text-to-video",
+              "image-to-video",
+              "reference-to-video"
+            ]
+          },
+          "defaultReferenceWorkflow": {
+            "type": "string",
+            "enum": [
+              "text-to-video",
+              "image-to-video",
+              "reference-to-video"
+            ]
+          },
+          "workflows": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ForgeVideoWorkflowCapability"
+            }
           }
         }
       }
