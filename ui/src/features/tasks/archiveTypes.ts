@@ -109,6 +109,17 @@ export type ArchiveWorkflowEvent = {
   finishedAt?: string | null;
 };
 
+export type EventKey = Pick<ArchiveWorkflowEvent, 'agentId' | 'id'>;
+export type ProofKey = { agentId: string; sessionId: string; runId: string };
+export type WorkflowEventDetail = {
+  ok: true;
+  event: ArchiveWorkflowEvent;
+  handlingProof: { reasonCode: string; reason: string } & (
+    | { status: 'available'; target: ProofKey }
+    | { status: 'unavailable' | 'not_recorded'; target: null }
+  );
+};
+
 // Archive Dreams groups are complete server projections, never regrouped diary pages.
 export type DreamPhase = 'light' | 'deep' | 'rem';
 export type DreamDiary = {

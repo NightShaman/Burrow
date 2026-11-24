@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { archiveRepository, type ArchivePage } from './archiveRepository';
 import type { ArchiveWorkflowEvent } from './archiveTypes';
 import { WorkflowEventsArchiveShelf, workflowArchiveRunUrl } from './WorkflowEventsArchiveShelf';
@@ -42,6 +42,10 @@ const props = {
   queryKey: 'initial',
   agentNames: new Map([['a', 'Agent A']]),
 };
+// List snapshots stay inspectable if the exact-detail read fails.
+beforeEach(() => {
+  vi.spyOn(archiveRepository, 'loadWorkflowEvent').mockRejectedValue(new Error('Detail offline'));
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -192,4 +196,43 @@ it('ignores an older first-page rejection after a filter replacement', async () 
   await screen.findByRole('button', { name: /CI current/ });
   await act(async () => old.reject(new Error('Late failure')));
   expect(screen.queryByText('Late failure')).toBeNull();
+});
+
+it('drops an available reply for a prior selection and never links a preallocated run', async () => {
+  const first = event('first'),
+    pending = { ...event('pending'), status: 'pending' as const, chatRunId: 'reserved' };
+  const late = deferred<Awaited<ReturnType<typeof archiveRepository.loadWorkflowEvent>>>();
+  const read = vi
+    .mocked(archiveRepository.loadWorkflowEvent)
+    .mockReturnValueOnce(late.promise)
+    .mockResolvedValueOnce({
+      ok: true,
+      event: pending,
+      handlingProof: {
+        status: 'not_recorded',
+        target: null,
+        reason: 'Handling has not started.',
+        reasonCode: 'pending',
+      },
+    });
+  vi.spyOn(archiveRepository, 'listWorkflowEvents').mockResolvedValue(page([first, pending]));
+  render(<WorkflowEventsArchiveShelf {...props} onOpenProof={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: /CI first/ }));
+  fireEvent.click(screen.getByRole('button', { name: /CI pending/ }));
+  await screen.findByText('Handling has not started.');
+  expect(read.mock.calls[0][1]?.aborted).toBe(true);
+  await act(async () =>
+    late.resolve({
+      ok: true,
+      event: first,
+      handlingProof: {
+        status: 'available',
+        target: { agentId: 'a', sessionId: 's', runId: 'first' },
+        reasonCode: 'retained',
+        reason: 'Proof retained.',
+      },
+    }),
+  );
+  expect(screen.queryByRole('button', { name: /Open run proof/ })).toBeNull();
+  expect(screen.getByText('reserved')).toBeTruthy();
 });

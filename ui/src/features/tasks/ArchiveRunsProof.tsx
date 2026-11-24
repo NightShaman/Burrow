@@ -5,6 +5,7 @@ import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdow
 import { ProofOutcomeCheck, outcomeMarkdown, publicReleaseCheck } from './ProofOutcomeCheck';
 import type { ArchiveRunDetail, ArchiveVerification, WorkflowCompletionEvent } from '../../app/api';
 import { archiveRepository, type ArchiveRepository } from './archiveRepository';
+import type { EventKey, ProofKey } from './archiveTypes';
 import { ProviderRequestHistory } from './ProviderRequestHistory';
 
 function date(value?: string | null) {
@@ -197,6 +198,7 @@ function FullToolEvidence({
   repository = archiveRepository,
 }: {
   run: ArchiveRunDetail;
+  onOpenEvent?: (event: EventKey) => void;
   repository?: ArchiveRepository;
 }) {
   const request = useRef<AbortController | null>(null);
@@ -259,11 +261,26 @@ function FullToolEvidence({
     </details>
   );
 }
+function TriggeringEventButton({
+  event,
+  onOpenEvent,
+}: {
+  event: EventKey;
+  onOpenEvent: (event: EventKey) => void;
+}) {
+  return (
+    <button type="button" className="archive-copy-button" onClick={() => onOpenEvent(event)}>
+      Open triggering event
+    </button>
+  );
+}
 function ProofDetail({
+  onOpenEvent,
   run,
   repository = archiveRepository,
 }: {
   run: ArchiveRunDetail;
+  onOpenEvent?: (event: EventKey) => void;
   repository?: ArchiveRepository;
 }) {
   const compression = run.context?.compression;
@@ -285,7 +302,15 @@ function ProofDetail({
           </span>
           <h2>{run.objective || run.runId}</h2>
           {run.workflowEvent && (
-            <p className="proof-workflow-result">{workflowLabel(run.workflowEvent)}</p>
+            <p className="proof-workflow-result archive-related-record">
+              <span>{workflowLabel(run.workflowEvent)}</span>
+              {run.workflowEvent.id && onOpenEvent && (
+                <TriggeringEventButton
+                  event={{ agentId: run.agentId, id: run.workflowEvent.id }}
+                  onOpenEvent={onOpenEvent}
+                />
+              )}
+            </p>
           )}
           <p>
             {date(run.startedAt)} → {date(run.completedAt)} · {duration(run)} ·{' '}
@@ -494,8 +519,7 @@ function ProofDetail({
   );
 }
 
-const occurrenceKey = (run: ArchiveRunDetail) =>
-  JSON.stringify([run.agentId, run.sessionId, run.runId]);
+const occurrenceKey = (run: ProofKey) => JSON.stringify([run.agentId, run.sessionId, run.runId]);
 
 function mergeOccurrences(current: ArchiveRunDetail[], incoming: ArchiveRunDetail[]) {
   const seen = new Set(current.map(occurrenceKey));
@@ -510,34 +534,39 @@ function mergeOccurrences(current: ArchiveRunDetail[], incoming: ArchiveRunDetai
   ];
 }
 
-export function ArchiveRunsProof({
-  selectedAgent,
-  search,
-  repository = archiveRepository,
-}: {
+type ProofSelection = ProofKey & { eventId?: string };
+type ProofShelfProps = {
   selectedAgent: string;
   search: string;
   repository?: ArchiveRepository;
-}) {
-  const detailRequest = useRef<AbortController | null>(null);
+  initialProof?: ProofSelection;
+  onOpenEvent?: (event: EventKey) => void;
+};
+export function ArchiveRunsProof(props: ProofShelfProps) {
+  return <ProofShelf key={props.selectedAgent} {...props} />;
+}
+function ProofShelf({
+  selectedAgent,
+  search,
+  repository = archiveRepository,
+  initialProof,
+  onOpenEvent,
+}: ProofShelfProps) {
+  const readerRef = useRef<HTMLElement>(null);
+  const [linkedEntry] = useState(Boolean(initialProof));
+  useEffect(() => {
+    if (linkedEntry) readerRef.current?.focus();
+  }, [linkedEntry]);
   const moreRequest = useRef<AbortController | null>(null);
   const [runs, setRuns] = useState<ArchiveRunDetail[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [moreLoading, setMoreLoading] = useState(false);
   const [moreError, setMoreError] = useState('');
-  const [selected, setSelected] = useState<ArchiveRunDetail | null>(null);
+  const [selected, setSelected] = useState<ProofSelection | undefined>(initialProof);
   const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [detailError, setDetailError] = useState('');
   const query = search.trim();
-  useEffect(() => {
-    setSelected(null);
-    setDetailLoading(false);
-    setDetailError('');
-    return () => detailRequest.current?.abort();
-  }, [selectedAgent, repository]);
   useEffect(() => {
     const abort = new AbortController();
     setLoading(true);
@@ -595,29 +624,6 @@ export function ArchiveRunsProof({
         if (!abort.signal.aborted) setMoreLoading(false);
       });
   };
-  const open = (run: ArchiveRunDetail) => {
-    detailRequest.current?.abort();
-    const abort = new AbortController();
-    detailRequest.current = abort;
-    setSelected(run);
-    setDetailError('');
-    setDetailLoading(true);
-    repository
-      .loadRun(run.runId, run.agentId, abort.signal, run.sessionId)
-      .then((detail) => {
-        if (abort.signal.aborted) return;
-        if (occurrenceKey(detail) !== occurrenceKey(run))
-          throw new Error('Run details did not match the selected session.');
-        setSelected(detail);
-      })
-      .catch((cause) => {
-        if (!abort.signal.aborted)
-          setDetailError(cause instanceof Error ? cause.message : 'Could not open this run.');
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setDetailLoading(false);
-      });
-  };
   return (
     <div className="archive-split-view archive-proof-view">
       <section className="archive-results-pane" aria-label="Archive proof runs">
@@ -659,7 +665,14 @@ export function ArchiveRunsProof({
                   type="button"
                   className={`archive-session-card proof-run-card${selected && occurrenceKey(selected) === occurrenceKey(run) ? ' selected' : ''}`}
                   key={occurrenceKey(run)}
-                  onClick={() => open(run)}
+                  aria-pressed={!!selected && occurrenceKey(selected) === occurrenceKey(run)}
+                  onClick={() =>
+                    setSelected({
+                      runId: run.runId,
+                      agentId: run.agentId,
+                      sessionId: run.sessionId,
+                    })
+                  }
                 >
                   <div className="archive-session-main">
                     <div className="archive-session-meta">
@@ -697,29 +710,14 @@ export function ArchiveRunsProof({
           ) : null}
         </div>
       </section>
-      <section className="archive-reader-pane">
+      <section className="archive-reader-pane" aria-label="Run proof" tabIndex={-1} ref={readerRef}>
         {selected ? (
-          <div className="archive-content-body archive-reader-body">
-            {detailLoading ? (
-              <section className="archive-empty-state">
-                <div className="archive-empty-mark">⌁</div>
-                <div>
-                  <h3>Opening proof.</h3>
-                  <p>Reading the run evidence.</p>
-                </div>
-              </section>
-            ) : detailError ? (
-              <section className="archive-empty-state archive-error">
-                <div className="archive-empty-mark">!</div>
-                <div>
-                  <h3>Could not open this run.</h3>
-                  <p>{detailError}</p>
-                </div>
-              </section>
-            ) : (
-              <ProofDetail repository={repository} run={selected} />
-            )}
-          </div>
+          <ProofReader
+            key={JSON.stringify([occurrenceKey(selected), selected.eventId])}
+            target={selected}
+            repository={repository}
+            onOpenEvent={onOpenEvent}
+          />
         ) : (
           <section className="archive-empty-state archive-reader-placeholder">
             <div className="archive-empty-mark">⌁</div>
@@ -730,6 +728,84 @@ export function ArchiveRunsProof({
           </section>
         )}
       </section>
+    </div>
+  );
+}
+
+function ProofReader({
+  target,
+  repository,
+  onOpenEvent,
+}: {
+  target: ProofSelection;
+  repository: ArchiveRepository;
+  onOpenEvent: ProofShelfProps['onOpenEvent'];
+}) {
+  const [run, setRun] = useState<ArchiveRunDetail | null>(null);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    setRun(null);
+    setError('');
+    repository
+      .loadRun(target.runId, target.agentId, abort.signal, target.sessionId)
+      .then((detail) => {
+        if (abort.signal.aborted) return;
+        if (!detail || occurrenceKey(detail) !== occurrenceKey(target))
+          throw new Error('Run details did not match the selected session.');
+        if (target.eventId && detail.workflowEvent?.id !== target.eventId)
+          throw new Error('This run does not match the triggering event.');
+        setRun(detail);
+      })
+      .catch((cause: unknown) => {
+        if (!abort.signal.aborted)
+          setError(
+            cause instanceof Error && 'status' in cause && cause.status === 404
+              ? 'This run is no longer in the archive.'
+              : cause instanceof Error
+                ? cause.message
+                : 'Could not read the run evidence.',
+          );
+      });
+    return () => abort.abort();
+  }, [repository, target, retry]);
+  return (
+    <div className="archive-content-body archive-reader-body">
+      {run ? (
+        <ProofDetail run={run} repository={repository} onOpenEvent={onOpenEvent} />
+      ) : error ? (
+        <section className="archive-empty-state archive-error" role="alert">
+          <div className="archive-empty-mark">!</div>
+          <div>
+            <h3>Could not open this run.</h3>
+            <p>{error}</p>
+            <span className="archive-related-record">
+              <button
+                type="button"
+                className="archive-copy-button"
+                onClick={() => setRetry((value) => value + 1)}
+              >
+                Retry
+              </button>
+              {target.eventId && onOpenEvent && (
+                <TriggeringEventButton
+                  event={{ agentId: target.agentId, id: target.eventId }}
+                  onOpenEvent={onOpenEvent}
+                />
+              )}
+            </span>
+          </div>
+        </section>
+      ) : (
+        <section className="archive-empty-state" role="status">
+          <div className="archive-empty-mark">⌁</div>
+          <div>
+            <h3>Opening proof.</h3>
+            <p>Reading the run evidence.</p>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

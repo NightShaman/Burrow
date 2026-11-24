@@ -14,7 +14,7 @@ import {
   type ArchiveCalendarKind,
 } from './archiveRepository';
 import { buildCalendarDays, dateFromMonthKey, monthKey } from './archiveDerivations';
-import type { ArchiveKind } from './archiveTypes';
+import type { ArchiveKind, EventKey, ProofKey } from './archiveTypes';
 import { ChatArchiveShelf } from './ChatArchiveShelf';
 import { DreamArchiveShelf } from './DreamArchiveShelf';
 import { TaskArchiveShelf, taskArchiveDate } from './TaskArchiveShelf';
@@ -59,6 +59,18 @@ export function Archive({
   const [modHeaderRoot, setModHeaderRoot] = useState<HTMLDivElement | null>(null);
   const activeMod = modArchives.find((mod) => mod.modId === modId);
   const [kind, setKind] = useState<ArchiveKind>('chat');
+  // One-shot shelf entry. The destination owns subsequent row selection; a filter
+  // remount or a later visit from Browse must never replay an old backlink.
+  const [entry, setEntry] = useState<
+    { run: ProofKey; event: EventKey } | { event: EventKey } | null
+  >(null);
+  useEffect(() => {
+    if (entry) setEntry(null);
+  }, [entry]);
+  const openEvent = (event: EventKey) => {
+    setEntry({ event });
+    setKind('workflow-events');
+  };
   const [selectedAgent, setSelectedAgent] = useState('');
   useEffect(() => {
     if (selectedAgent && !enabledAgents(agents).some((agent) => agent.id === selectedAgent))
@@ -465,6 +477,11 @@ export function Archive({
             />
           ) : kind === 'workflow-events' ? (
             <WorkflowEventsArchiveShelf
+              initialEvent={entry?.event}
+              onOpenProof={(run, event) => {
+                setEntry({ run, event });
+                setKind('proof');
+              }}
               archiveRepository={archiveRepository}
               selectedAgent={selectedAgent}
               selectedDate={selectedDate}
@@ -491,6 +508,10 @@ export function Archive({
             />
           ) : (
             <ArchiveRunsProof
+              initialProof={
+                entry && 'run' in entry ? { ...entry.run, eventId: entry.event.id } : undefined
+              }
+              onOpenEvent={openEvent}
               repository={archiveRepository}
               selectedAgent={selectedAgent}
               search={search}

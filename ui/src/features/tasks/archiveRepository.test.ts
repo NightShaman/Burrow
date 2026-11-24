@@ -307,3 +307,34 @@ it('passes each exact owner signal to calendar, first list, pagination, detail a
     'earlier-page',
   );
 });
+
+it('validates the exact delivery and handling tuple before exposing a Proof target', async () => {
+  const key = { agentId: 'agent/one', id: 'delivery/2' };
+  const event = { ...key, chatRunId: 'handling-b', sessionId: 'session-b', runId: '123' };
+  const target = { agentId: key.agentId, runId: event.chatRunId, sessionId: event.sessionId };
+  const proof = { status: 'available', target, reason: 'Proof available.', reasonCode: 'retained' };
+  const detail = { ok: true, event, handlingProof: proof };
+  const signal = new AbortController().signal;
+  apiMock.mockResolvedValueOnce(detail);
+  await expect(repository.loadWorkflowEvent(key, signal)).resolves.toEqual(detail);
+  expect(apiMock).toHaveBeenCalledWith('/api/archive/workflow-events/agent%2Fone/delivery%2F2', {
+    signal,
+  });
+  for (const response of [
+    { ...detail, event: { ...event, id: 'other' } },
+    { ...detail, event: { ...event, agentId: 'other' } },
+    ...[
+      { ...target, agentId: 'other' },
+      { ...target, sessionId: 'other' },
+      { ...target, runId: event.runId },
+      null,
+    ].map((target) => ({ ...detail, handlingProof: { ...proof, target } })),
+    { ...detail, handlingProof: { ...proof, status: 'not_recorded' } },
+    { ...detail, handlingProof: { ...proof, status: 'unknown', target: null } },
+  ]) {
+    apiMock.mockResolvedValueOnce(response);
+    await expect(repository.loadWorkflowEvent(key)).rejects.toThrow(
+      'Invalid workflow event detail',
+    );
+  }
+});

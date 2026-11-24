@@ -1002,6 +1002,35 @@
   padding-top: 18px;
   overflow-wrap: anywhere;
 }
+.archive-related-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 9px;
+  overflow-wrap: anywhere;
+}
+.archive-handling-proof {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 5px;
+}
+.archive-handling-reason {
+  color: var(--muted);
+}
+.archive-proof-link {
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  color: var(--accent-strong);
+  white-space: normal;
+  text-align: left;
+}
+.archive-proof-link-id {
+  color: var(--text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
 .workflow-archive-details pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

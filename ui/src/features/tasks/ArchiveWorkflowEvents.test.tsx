@@ -143,3 +143,93 @@ it('aborts workflow requests on shelf switch and ignores late rows and calendar 
   ).toBeNull();
   await screen.findByText('No conversations match this shelf.');
 });
+
+it('opens only the associated Proof and resolves the exact triggering event beyond page one', async () => {
+  setup();
+  const event = {
+    agentId: 'hatchet',
+    id: 'delivery-b',
+    workflow: 'Public promotion',
+    status: 'succeeded',
+    runId: '321',
+    sessionId: 'ci-b',
+    chatRunId: 'handling-b',
+    instruction: 'Inspect the intended public tree.',
+  } as ArchiveWorkflowEvent;
+  const other = { ...event, id: 'delivery-a', sessionId: 'ci-a', chatRunId: 'handling-a' };
+  const list = vi
+    .spyOn(archiveRepository, 'listWorkflowEvents')
+    .mockResolvedValueOnce({ ...empty, items: [other, event] })
+    .mockResolvedValue({ ...empty, items: [other] });
+  const target = { agentId: event.agentId, sessionId: event.sessionId, runId: event.chatRunId! };
+  const detail = vi.spyOn(archiveRepository, 'loadWorkflowEvent').mockResolvedValue({
+    ok: true,
+    event,
+    handlingProof: {
+      status: 'available',
+      target,
+      reasonCode: 'retained',
+      reason: 'Exact proof retained.',
+    },
+  });
+  const run = {
+    ...target,
+    id: target.runId,
+    status: 'completed' as const,
+    objective: 'Handle Public promotion delivery B',
+    workflowEvent: {
+      id: event.id,
+      workflow: event.workflow,
+      runId: event.runId,
+      conclusion: 'success',
+    },
+    counts: {
+      observations: 1,
+      changes: 0,
+      verifications: 0,
+      unresolved: 0,
+      failures: 0,
+      toolActivities: 0,
+      subagents: 0,
+    },
+    evidence: { observations: [], changes: [], verifications: [], unresolved: [], failures: [] },
+    timeline: [],
+    subagents: [],
+    references: { trace: null, sourceRefs: [] },
+  };
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue({
+    ...empty,
+    items: [
+      {
+        ...run,
+        ...{
+          id: 'handling-a',
+          runId: 'handling-a',
+          sessionId: 'ci-a',
+          objective: 'Another delivery',
+        },
+      },
+    ],
+  });
+  const load = vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(run);
+  render(<Archive agents={[]} repository={archiveRepository} />);
+  fireEvent.click(screen.getByRole('button', { name: /^Workflow Events/ }));
+  const rows = await screen.findAllByRole('button', { name: /Public promotion/ });
+  expect(detail).not.toHaveBeenCalled();
+  fireEvent.click(rows[1]);
+  expect(await screen.findByText('Exact proof retained.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Open run proof/ }));
+  await screen.findByRole('heading', { level: 2, name: run.objective });
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith('handling-b', 'hatchet', expect.any(AbortSignal), 'ci-b');
+  fireEvent.click(screen.getByRole('button', { name: 'Open triggering event' }));
+  await screen.findByText(event.id);
+  expect(detail).toHaveBeenCalledTimes(2);
+  expect(detail.mock.calls.map(([key]) => key)).toEqual(
+    Array(2).fill({ id: event.id, agentId: 'hatchet' }),
+  );
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(event.instruction)).toBeTruthy();
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'another' } });
+  expect(screen.queryByText(event.id)).toBeNull();
+});

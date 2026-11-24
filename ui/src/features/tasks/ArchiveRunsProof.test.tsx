@@ -447,3 +447,31 @@ it('keeps historical Proof empty states without inventing workflow handling or a
     screen.queryByText(/GitHub conclusion|Burrow handling|No outcome check recorded/),
   ).toBeNull();
 });
+
+it.each(['missing', 'wrong delivery'] as const)(
+  'never shows another Proof after a %s detail read and keeps the event return',
+  async (failure) => {
+    const value = run();
+    value.workflowEvent = { id: 'other-delivery' };
+    vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([]));
+    const read = vi.spyOn(archiveRepository, 'loadRun');
+    if (failure === 'missing')
+      read.mockRejectedValue(Object.assign(new Error('run_not_found'), { status: 404 }));
+    else read.mockResolvedValue(value);
+    const back = vi.fn();
+    render(
+      <ArchiveRunsProof
+        selectedAgent=""
+        search=""
+        initialProof={{ ...value, eventId: 'delivery-b' }}
+        onOpenEvent={back}
+      />,
+    );
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      failure === 'missing' ? 'no longer in the archive' : 'does not match the triggering event',
+    );
+    expect(screen.queryByRole('heading', { level: 2, name: value.objective! })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open triggering event' }));
+    expect(back).toHaveBeenCalledWith({ id: 'delivery-b', agentId: value.agentId });
+  },
+);

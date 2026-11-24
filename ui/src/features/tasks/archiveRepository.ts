@@ -5,6 +5,8 @@ import type {
   DreamGroupSummary,
   ArchiveSession,
   ArchiveWorkflowEvent,
+  EventKey,
+  WorkflowEventDetail,
   ContinuityCard,
   ContinuityCardGroup,
 } from './archiveTypes';
@@ -114,6 +116,31 @@ export function createArchiveRepository(request: typeof api = api) {
       );
       if (!Array.isArray(response.events)) throw new Error('Invalid workflow events response.');
       return { items: response.events, nextCursor: response.nextCursor, hasMore: response.hasMore };
+    },
+    async loadWorkflowEvent({ agentId, id }: EventKey, signal?: AbortSignal) {
+      const response = await request<WorkflowEventDetail>(
+        `/api/archive/workflow-events/${encodeURIComponent(agentId)}/${encodeURIComponent(id)}`,
+        { signal },
+      );
+      const event = response?.event,
+        proof = response?.handlingProof;
+      if (
+        response?.ok !== true ||
+        event?.agentId !== agentId ||
+        event.id !== id ||
+        !proof ||
+        typeof proof.reason !== 'string' ||
+        !proof.reason.trim() ||
+        (proof.status === 'available'
+          ? !proof.target?.sessionId ||
+            !proof.target.runId ||
+            proof.target.agentId !== agentId ||
+            proof.target.sessionId !== event.sessionId ||
+            proof.target.runId !== event.chatRunId
+          : !['not_recorded', 'unavailable'].includes(proof.status) || proof.target !== null)
+      )
+        throw new Error('Invalid workflow event detail response.');
+      return response;
     },
     loadSession(session: ArchiveSession, signal?: AbortSignal, before?: string, date?: string) {
       const query = new URLSearchParams({ limit: '100' });
