@@ -22,6 +22,11 @@ function projection(result = {}) {
   const base = { tool: result.tool || 'unknown', ok: result.ok ?? null, error: result.error || null, failureClass: result.failureClass || null, artifacts: result.artifacts || null, retentionOmissions: result.retentionOmissions || null };
   const scheduled = scheduledResultReceipt(result);
   if (scheduled) return { ...base, ...scheduled };
+  // Gallery's public cards carry the IDs needed for the next action. Keep them
+  // in the receipt itself, even when the provider cannot admit raw excerpts.
+  if (result.tool === 'forge_list_gallery_folders') return { ...base, folders: result.folders || [] };
+  if (result.tool === 'forge_list_gallery_images') return { ...base, folderId: result.folderId, images: result.images || [] };
+  if (result.tool === 'forge_move_gallery_image') return { ...base, jobId: result.jobId, artifactId: result.artifactId, folderId: result.folderId };
   if (result.tool === 'files_read') {
     const returnedBytes = result.delivery?.returnedBytes ?? result.returnedBytes ?? Buffer.byteLength(text(result.content), result.encoding || 'utf8');
     const offsetBytes = Number(result.offsetBytes || 0);
@@ -62,7 +67,9 @@ function rawFields(result = {}) {
     mcp_call: ['output', 'protectedValues'], session_read_handoff: ['handoff'],
     attachment_view: ['attachment'], forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults', 'agentReferenceImage', 'agentReferenceImages', 'operatorReferenceImage'],
     forge_create_job: ['job', 'replayed', 'attachments'], forge_list_jobs: ['jobs'],
-    forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'], agent_send_message: ['reply'],
+    forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'],
+    forge_list_gallery_folders: ['folders'], forge_list_gallery_images: ['folderId', 'images'],
+    forge_move_gallery_image: ['jobId', 'artifactId', 'folderId'], agent_send_message: ['reply'],
   };
   return (fields[result.tool] || []).filter(key => result[key] !== undefined).map(key => ({ label: `${result.tool} ${key}`, text: typeof result[key] === 'string' ? result[key] : JSON.stringify(result[key]) }));
 }

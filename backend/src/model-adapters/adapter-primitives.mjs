@@ -250,6 +250,8 @@ function nativeToolReceipt(result = {}) {
     forge_list_jobs: ['jobs'],
     forge_inspect_job: ['job'],
     forge_attach_artifact: ['attachment'],
+    forge_list_gallery_folders: ['folders'], forge_list_gallery_images: ['folderId', 'images'],
+    forge_move_gallery_image: ['jobId', 'artifactId', 'folderId'],
   };
   for (const key of forgeFields[result?.tool] || []) {
     if (result[key] !== undefined) receipt[key] = result[key];

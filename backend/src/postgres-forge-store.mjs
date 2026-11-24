@@ -1,4 +1,4 @@
-import { readForgeGallery, createForgeGalleryFolder, moveForgeGalleryImage, eligibleGalleryJob, eligibleGalleryArtifact } from './postgres-forge-gallery.mjs';
+import { readForgeGallery, listForgeGalleryFolders, listForgeGalleryImages, createForgeGalleryFolder, moveForgeGalleryImage, eligibleGalleryJob, eligibleGalleryArtifact } from './postgres-forge-gallery.mjs';
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
 import { createForgeVideoAdapter } from './model-adapters/forge-video.mjs';
 import { videoContract, VIDEO_REFERENCE_LIMIT } from './model-adapters/video-contract.mjs';
@@ -443,6 +443,8 @@ export class PostgresForgeStore {
     return r.rows.map((x) => this.public(parse(x.record)));
   }
   async gallery() { return readForgeGallery(this); }
+  async listGalleryFolders(body) { return listForgeGalleryFolders(this, body); }
+  async listGalleryImages(body) { return listForgeGalleryImages(this, body); }
   async createGalleryFolder(body) { return createForgeGalleryFolder(this, body); }
   async moveGalleryImage(jobId, artifactId, body) { return moveForgeGalleryImage(this, jobId, artifactId, body); }
   async deleteGalleryImage(jobId, artifactId) {

@@ -50,6 +50,20 @@ function projectToolFields(messages = [], maxChars = 0) {
       if (parsed.tool === 'files_search' && Array.isArray(parsed.matches)) {
         return { ...message, content: JSON.stringify({ ...parsed, matches: parsed.matches.map(item => compactSearchMatch(item, Math.min(500, fieldBudget))) }) };
       }
+      if (['forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image'].includes(parsed.tool)) {
+        // Under provider pressure keep Gallery identities atomic and drop only
+        // redundant preview URLs/timestamps. Never clip an ID or hide a tail of
+        // the listing; a still-oversize result fails at the existing budget gate.
+        const receipt = { tool: parsed.tool, ok: parsed.ok, error: parsed.error,
+          ...(parsed.statusCode !== undefined ? { statusCode: parsed.statusCode } : {}), artifacts: parsed.artifacts };
+        for (const key of ['jobId', 'artifactId', 'folderId']) if (parsed[key] !== undefined) receipt[key] = parsed[key];
+        if (Array.isArray(parsed.folders)) receipt.folders = parsed.folders.map(f => ({ id: f.id, name: projectValue(f.name, { maxChars: fieldBudget }), parentId: f.parentId }));
+        if (Array.isArray(parsed.images)) receipt.images = parsed.images.map(i => ({ jobId: i.jobId, artifactId: i.artifactId, folderId: i.folderId,
+          artifact: { kind: i.artifact.kind, name: projectValue(i.artifact.name, { maxChars: fieldBudget }), mimeType: i.artifact.mimeType, sizeBytes: i.artifact.sizeBytes } }));
+        receipt.galleryDelivery = { complete: true, returned: receipt.folders?.length ?? receipt.images?.length ?? 0,
+          detail: 'Gallery summary receipt: all IDs and placements preserved; preview URLs and timestamps omitted for provider context.' };
+        return { ...message, content: JSON.stringify(receipt) };
+      }
       if (parsed.tool === 'agents_list') {
         // Directory identities are atomic, never string excerpts. Its producer
         // already paginates; under request pressure disclose an omitted page and

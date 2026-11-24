@@ -9,7 +9,7 @@ import { evaluateExecutionBoundaries } from './execution-boundaries.mjs';
 const MOD_TOOL_CAPABILITIES = new Map([
   ['mod_agent_tool', null],
   ...['agents_list', 'agent_send_message'].map(name => [name, 'a2a']),
-  ...['forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'attachment_view'].map(name => [name, 'forge']),
+  ...['forge_catalog', 'forge_create_job', 'forge_list_jobs', 'forge_inspect_job', 'forge_attach_artifact', 'forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image', 'attachment_view'].map(name => [name, 'forge']),
   ...['brain_search', 'brain_read', 'brain_save', 'brain_update', 'brain_remove'].map(name => [name, 'brains']),
   ...['list_skills', 'load_skill'].map(name => [name, 'skills']),
   ...['mcp_providers', 'mcp_capabilities', 'mcp_call'].map(name => [name, 'mcp']),
@@ -113,8 +113,8 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 
-  if (['forge_catalog', 'forge_list_jobs', 'forge_inspect_job', 'forge_create_job', 'forge_attach_artifact'].includes(action.tool)) {
-    risk.push(action.tool === 'forge_create_job' ? 'paid-generation' : action.tool === 'forge_attach_artifact' ? 'conversation-attachment' : 'read-only');
+  if (['forge_catalog', 'forge_list_jobs', 'forge_inspect_job', 'forge_create_job', 'forge_attach_artifact', 'forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image'].includes(action.tool)) {
+    risk.push(action.tool === 'forge_create_job' ? 'paid-generation' : action.tool === 'forge_attach_artifact' ? 'conversation-attachment' : action.tool === 'forge_move_gallery_image' ? 'gallery-placement' : 'read-only');
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', risk, blockers: [...new Set(blockers)], warnings };
   }
 

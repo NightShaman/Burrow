@@ -28,7 +28,7 @@ export const eligibleGalleryJob = job => job.status === 'succeeded' && ['image',
 export const eligibleGalleryArtifact = artifact => ['image', 'video'].includes(artifact.kind) && !artifact.deletedAt && typeof artifact.id === 'string' &&
   typeof artifact.storageReference === 'string' && artifact.storageReference.length > 0 &&
   typeof artifact.mimeType === 'string' && artifact.mimeType.startsWith(`${artifact.kind}/`);
-const validId = id => typeof id === 'string' && id.length > 0 && id.length <= 200;
+const validId = id => typeof id === 'string' && id.trim().length > 0 && id.length <= 200;
 function folderId(body, key) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(body, key) ||
     (body[key] !== null && !validId(body[key]))) fail('forge_gallery_request_invalid');
@@ -66,6 +66,26 @@ export async function readForgeGallery(store) {
     }
   }
   return { folders: parse(snapshot.folders).map(folder), images };
+}
+
+// Native browsing deliberately reuses Gallery's snapshot and public projection.
+// No caller-selected owner, Backdoor grant, file copy or generation is involved.
+export async function listForgeGalleryFolders(store, body = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+    (body.name != null && (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 200)))
+    fail('forge_gallery_request_invalid');
+  const { folders } = await readForgeGallery(store);
+  if (body.name == null) return folders;
+  const name = body.name.trim().toLowerCase();
+  // Names are not unique, including across parents: return every matching ID.
+  return folders.filter(item => item.name.toLowerCase() === name);
+}
+
+export async function listForgeGalleryImages(store, body) {
+  const target = folderId(body, 'folderId');
+  const { folders, images } = await readForgeGallery(store);
+  if (target !== null && !folders.some(item => item.id === target)) fail('forge_gallery_folder_not_found', 404);
+  return images.filter(item => item.folderId === target);
 }
 
 export async function createForgeGalleryFolder(store, body) {

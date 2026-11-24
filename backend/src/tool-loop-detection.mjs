@@ -40,6 +40,10 @@ function materialEvidenceKeys(results = []) {
       keys.push(`delegated:${result.tool}:${identity}:${result.status || (result.ok ? 'succeeded' : 'failed')}`);
       continue;
     }
+    if (['forge_list_gallery_folders', 'forge_list_gallery_images', 'forge_move_gallery_image'].includes(result.tool)) {
+      keys.push(`${result.tool}:${exactArgumentFingerprint([result.ok, result.error, result.folders, result.images, result.jobId, result.artifactId, result.folderId])}`);
+      continue;
+    }
     if (result.tool === 'agents_list') {
       keys.push(`agents_list:${exactArgumentFingerprint([result.ok, result.error, result.agents, result.query, result.includeDisabled, result.totalCount, result.nextCursor])}`);
       continue;
@@ -211,7 +215,7 @@ function repeatedToolCallObservations(toolCalls = [], priorIterations = []) {
 function normalizedToolOutcome(result = {}) {
   return {
     // Hash full observed payload before any bounded display projection.
-    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'runs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'agents', 'totalCount', 'nextCursor', 'includeDisabled', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
+    observedPayloadFingerprint: exactArgumentFingerprint(Object.fromEntries(['output', 'job', 'jobs', 'folders', 'images', 'jobId', 'artifactId', 'folderId', 'runs', 'handoff', 'attachment', 'entries', 'paths', 'matches', 'results', 'agents', 'totalCount', 'nextCursor', 'includeDisabled', 'reply', 'content', 'stdout', 'stderr'].filter(key => result[key] !== undefined).map(key => [key, result[key]]))),
     ok: Boolean(result.ok),
     tool: result.tool || null,
     filePath: result.filePath || null,
@@ -422,6 +426,8 @@ function compactPromptEvidenceResult(result = {}) {
     forge_catalog: ['models', 'music', 'video', 'sourceAttachments', 'defaults'],
     forge_create_job: ['job', 'replayed', 'attachments'], forge_list_jobs: ['jobs'],
     forge_inspect_job: ['job'], forge_attach_artifact: ['attachment'],
+    forge_list_gallery_folders: ['folders'], forge_list_gallery_images: ['folderId', 'images'],
+    forge_move_gallery_image: ['jobId', 'artifactId', 'folderId'],
     agent_send_message: ['reply'],
   };
   for (const key of payloadFields[result.tool] || []) {

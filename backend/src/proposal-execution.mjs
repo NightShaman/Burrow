@@ -258,6 +258,9 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       try {
         const args = action.tool === 'forge_create_job'
           ? { mode: action.forgeMode, connectionId: action.forgeConnectionId || action.connectionId, modelId: action.forgeModelId || action.modelId, prompt: action.forgePrompt || action.prompt, idempotencyKey: action.forgeIdempotencyKey || action.idempotencyKey, useAgentReferenceImage: action.useAgentReferenceImage, useOperatorReferenceImage: action.useOperatorReferenceImage, referenceAgentIds: action.referenceAgentIds, referenceAttachmentIds: action.referenceAttachmentIds, referenceArtifacts: action.referenceArtifacts, imageOptions: action.imageOptions }
+          : action.tool === 'forge_list_gallery_folders' ? { name: action.galleryName }
+          : action.tool === 'forge_list_gallery_images' ? { folderId: action.galleryFolderId }
+          : action.tool === 'forge_move_gallery_image' ? { jobId: action.jobId, artifactId: action.artifactId, folderId: action.galleryFolderId }
           : action.tool === 'forge_inspect_job' ? { jobId: action.jobId }
           : action.tool === 'forge_attach_artifact' ? { jobId: action.jobId, artifactId: action.artifactId } : {};
         result = await executeForgeTool(action.tool, args, { agentId, sessionId: sessionId || executionContext?.sessionId, conversationId: resolvedConversationId, runId: executionContext?.parentRunId || traceLogger?.runId || null, signal: abortSignal });
