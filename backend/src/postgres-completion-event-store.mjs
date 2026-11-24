@@ -169,6 +169,15 @@ export class PostgresCompletionEventStore {
     const last = events.at(-1);
     return { events, hasMore, nextCursor: hasMore && last ? archiveCursor({ scope, timestamp: rows[size - 1].archive_cursor_timestamp, identity: last.id }) : null };
   }
+  // Exact scoped retained delivery read: never fall back to a latest-N page.
+  async getArchive({ agentId, eventId, signal, deadline } = {}) {
+    if (typeof agentId !== 'string' || !agentId.trim() || agentId !== agentId.trim() || agentId.length > 255
+      || typeof eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) throw new Error('archive_workflow_event_target_invalid');
+    const { rows } = await archiveReadQuery(this.pool, `SELECT id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
+      agent_id,session_id,instruction,status,chat_run_id,result,error,created_at,started_at,finished_at
+      FROM github_completion_events WHERE agent_id=$1 AND id=$2::uuid`, [agentId, eventId], { signal, deadline });
+    return rows[0] ? eventRow(rows[0]) : null;
+  }
   async listArchiveCalendarDates({ agentId = null, month, timezone = 'UTC', signal, deadline } = {}) {
     timezone = validateTimezone(timezone || 'UTC', 'archive_timezone_invalid');
     month = archiveUtcMonth(month);

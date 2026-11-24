@@ -2,7 +2,7 @@ import { isStructuredAssistantTurn } from '../../src/chat-result-metadata.mjs';
 import { createHmac } from 'node:crypto';
 import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-scope.mjs';
 import { archiveRunListPage } from './archive-run-list.mjs';
-import { readArchiveRun } from '../../src/archive-proof.mjs';
+import { readArchiveRun, workflowEventFor } from '../../src/archive-proof.mjs';
 import { archivePage, archiveUtcDay, archiveUtcMonth, archiveCalendarDates, matchesArchiveDay, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
 import { redactValue } from '../../src/redaction.mjs';
 import { validateTimezone } from '../../src/timezone.mjs';
@@ -132,16 +132,44 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
     return group ? { ok: true, group } : { ok: false, status: 404, error: 'archive_dream_group_not_found' };
   }
 
+  function workflowEventProjection({ ownerId, traceDir, ...event }, names) {
+    return { ...event, agentName: names.get(event.agentId) || event.agentId, result: redactValue(event.result) };
+  }
+
+  async function archiveWorkflowEventDetail({ agentId, eventId, signal, deadline } = {}) {
+    const options = { signal, deadline };
+    archiveReadCheckpoint(options);
+    const event = await stores().completionEvents.getArchive({ agentId, eventId, ...options });
+    archiveReadCheckpoint(options);
+    if (!event) return { ok: false, status: 404, error: 'archive_workflow_event_not_found' };
+    const source = await stores().conversations.readArchiveRunSource({ agentId: event.agentId, sessionId: event.sessionId, runId: event.chatRunId, ...options });
+    archiveReadCheckpoint(options);
+    const provenance = workflowEventFor(source?.entries || []);
+    const matches = provenance && Object.keys(provenance).every(key => provenance[key] === event[key]);
+    let handlingProof;
+    if (source && matches) {
+      handlingProof = { status: 'available', reasonCode: 'proof_available', reason: 'The exact handling run and triggering delivery are retained.',
+        target: { agentId: event.agentId, sessionId: event.sessionId, runId: event.chatRunId } };
+    } else if (source) {
+      handlingProof = { status: 'unavailable', reasonCode: 'event_provenance_mismatch', reason: 'The retained run does not identify this exact triggering delivery.', target: null };
+    } else if (['pending', 'running'].includes(event.status)) {
+      handlingProof = { status: 'not_recorded', reasonCode: event.status === 'pending' ? 'handling_not_started' : 'proof_not_recorded',
+        reason: event.status === 'pending' ? 'Handling has not started. The allocated run ID is not Proof.' : 'Handling is in progress; no run Proof has been recorded yet.', target: null };
+    } else {
+      handlingProof = { status: 'unavailable', reasonCode: 'proof_unavailable', reason: 'The handling run is not retained in Archive.', target: null };
+    }
+    const names = new Map((await agentsStore().list({ includeDisabled: true, ...options })).map(agent => [agent.id, agent.name]));
+    archiveReadCheckpoint(options);
+    return { ok: true, event: workflowEventProjection(event, names), handlingProof };
+  }
+
   async function archiveWorkflowEvents(options = {}) {
     archiveReadCheckpoint(options);
     const page = await stores().completionEvents.listArchive(options);
     archiveReadCheckpoint(options);
     const names = new Map((await agentsStore().list({ includeDisabled: true, ...options })).map(agent => [agent.id, agent.name]));
     archiveReadCheckpoint(options);
-    return { ok: true, ...page, events: page.events.map(({ ownerId, traceDir, ...event }) => ({
-      ...event, agentName: names.get(event.agentId) || event.agentId,
-      result: redactValue(event.result),
-    })) };
+    return { ok: true, ...page, events: page.events.map(event => workflowEventProjection(event, names)) };
   }
 
   async function archiveContinuityCards({ agentId = null, scope = null, limit = 200, cursor = null, signal, deadline } = {}) {
@@ -444,5 +472,5 @@ export function createArchiveService({ stores, agentsStore: registryFactory, dre
     };
   }
 
-  return { archiveWorkflowEvents, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveContinuityCards, archiveContinuityCardDetail };
+  return { archiveWorkflowEvents, archiveWorkflowEventDetail, archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveContinuityCards, archiveContinuityCardDetail };
 }

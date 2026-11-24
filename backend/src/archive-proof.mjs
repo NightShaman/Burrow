@@ -382,8 +382,11 @@ function contextEventSummary(event = {}) {
   const outcome = event.compression?.compressed ? 'compression applied' : event.compression?.attempted ? `compression not applied${event.compression?.reason ? ` (${event.compression.reason.replace(/[_-]+/gu, ' ')})` : ''}` : 'compression not evaluated';
   return [event.phase.replace(/[_-]+/gu, ' '), tokens, usage, threshold, outcome].filter(Boolean).join(' · ');
 }
-function timelineFor({ receipt, answer, activities, executionEntries, trace, evidence, context, subagents, lastActivityAt = null }) {
+function timelineFor({ receipt, answer, request, workflowEvent, activities, executionEntries, trace, evidence, context, subagents, lastActivityAt = null }) {
   const timeline = [];
+  if (workflowEvent) timeline.push({ kind: 'observation', status: 'observed', ts: request?.ts || null,
+    summary: `Workflow event ${workflowEvent.id}: ${workflowEvent.repository} · ${workflowEvent.workflow} · GitHub run ${workflowEvent.runId}, attempt ${workflowEvent.runAttempt}, conclusion ${workflowEvent.conclusion}. Handling request: ${safeDetail(request?.content)}`,
+    evidence: 'runtime_receipt' });
   timeline.push(...correlatedToolTimeline(executionEntries, trace));
   // Activity cards are a legacy aggregate. Canonical calls/results or trace
   // activities are more precise and must not be rendered a second time.
@@ -414,7 +417,7 @@ function timelineFor({ receipt, answer, activities, executionEntries, trace, evi
   return timeline.sort((left, right) => String(left.ts || '').localeCompare(String(right.ts || ''))).slice(-MAX_TIMELINE);
 }
 
-function workflowEventFor(entries) {
+export function workflowEventFor(entries) {
   const entry = entries.find(item => item.type === 'message' && item.role === 'user' && item.metadata?.source === 'workflow-event' && item.metadata?.completionEvent);
   const value = entry?.metadata?.completionEvent;
   if (!value || !['id', 'repository', 'workflow', 'runId', 'headSha', 'conclusion', 'url'].every(key => typeof value[key] === 'string' && value[key]) || !Number.isInteger(value.runAttempt)) return null;
@@ -441,6 +444,7 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
   const receipt = receiptFor(entries);
   const answer = answerFor(entries);
   const request = requestFor(entries);
+  const workflowEvent = workflowEventFor(entries);
   const activities = activitiesFor(entries);
   const executionEntries = executionEntriesFor(entries);
   const options = { signal, deadline };
@@ -488,9 +492,9 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
       unresolved: unresolvedEvidence(evidence).map((item) => ({ ...item, text: operatorEvidenceText(item, 'unresolved') })),
     },
     context,
-    ...(workflowEventFor(entries) ? { workflowEvent: workflowEventFor(entries) } : {}),
+    ...(workflowEvent ? { workflowEvent } : {}),
     subagents,
-    timeline: timelineFor({ receipt, answer, activities, executionEntries, trace: trace?.exists ? trace : null, evidence, context, subagents, lastActivityAt: bounds.lastActivityAt }),
+    timeline: timelineFor({ receipt, answer, request, workflowEvent, activities, executionEntries, trace: trace?.exists ? trace : null, evidence, context, subagents, lastActivityAt: bounds.lastActivityAt }),
     references: {
       trace: traceDir ? { runId, url: `/api/traces/${encodeURIComponent(runId)}?sessionId=${encodeURIComponent(sessionId)}` } : null,
       sourceRefs: evidence?.sourceRefs || [],

@@ -27,6 +27,7 @@ export function createSessionRoutes({
   archiveDreamGroups,
   archiveDreamGroupDetail,
   archiveWorkflowEvents,
+  archiveWorkflowEventDetail,
   archiveContinuityCards,
   archiveContinuityCardDetail,
   listSessions,
@@ -112,6 +113,14 @@ export function createSessionRoutes({
     if (req.method === 'GET' && url.pathname === '/api/archive/workflow-events') {
       sendJson(res, 200, await archiveWorkflowEvents({ ...readOptions, agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 100, cursor: url.searchParams.get('cursor') }));
       return true;
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/archive/workflow-events/')) {
+      let parts;
+      try { parts = url.pathname.slice('/api/archive/workflow-events/'.length).split('/').map(decodeURIComponent); }
+      catch { sendJson(res, 400, { ok: false, error: 'archive_workflow_event_target_invalid' }); return true; }
+      const [agentId, eventId] = parts;
+      if (!agentId || !eventId || parts.length !== 2) { sendJson(res, 400, { ok: false, error: 'archive_workflow_event_target_invalid' }); return true; }
+      return resultResponse(res, await archiveWorkflowEventDetail({ ...readOptions, agentId, eventId }));
     }
     if (req.method === 'GET' && url.pathname === '/api/archive/dreams/groups') {
       sendJson(res, 200, await archiveDreamGroups({ ...readOptions, agentId: url.searchParams.get('agentId'), date: url.searchParams.get('date'), timezone: url.searchParams.get('timezone'), query: url.searchParams.get('q') || '', limit: url.searchParams.get('limit') || 200, cursor: url.searchParams.get('cursor') }));
@@ -233,7 +242,7 @@ export function createSessionRoutes({
         sendJson(res, 504, { ok: false, error: 'archive_query_timeout' }); return true;
       }
       if (['session_target_exists', 'fork_target_exists', 'rename_target_exists'].includes(error?.message)) { sendJson(res, 409, { ok: false, error: error.message }); return true; }
-      if (!['archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid', 'archive_limit_invalid'].includes(error?.message)) throw error;
+      if (!['archive_workflow_event_target_invalid', 'archive_cursor_invalid', 'archive_date_invalid', 'archive_month_invalid', 'archive_kind_invalid', 'archive_timezone_invalid', 'archive_limit_invalid'].includes(error?.message)) throw error;
       sendJson(res, 400, { ok: false, error: error.message });
       return true;
     } finally { owner?.dispose(); }

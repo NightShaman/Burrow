@@ -9990,6 +9990,44 @@
           }
         }
       }
+    },
+    "/api/archive/workflow-events/{agentId}/{eventId}": {
+      "get": {
+        "tags": [
+          "Archive"
+        ],
+        "summary": "Read an exact retained workflow delivery and handling Proof availability",
+        "operationId": "getArchiveWorkflowEvent",
+        "description": "Exact scoped retained event lookup independent of collection filters and pagination. An allocated chatRunId is not proof. Only an existing canonical handling run whose workflow provenance matches this entire delivery supplies a target. Missing or wrong-agent pairs return 404. Reads obey Archive cancellation/deadline ownership and existing UI authorization. No GitHub fetch, dispatch or outcome inference.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAgentId"
+          },
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ArchiveWorkflowEventDetailResponse"
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "504": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -11353,6 +11391,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/AnthropicResetActivationResponse"
+            }
+          }
+        }
+      },
+      "ArchiveWorkflowEventDetailResponse": {
+        "description": "Exact retained workflow event and provenance-checked handling Proof availability.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ArchiveWorkflowEventDetailResponse"
             }
           }
         }
@@ -14976,6 +15024,13 @@
               "archive_inference",
               "outcome_check"
             ]
+          },
+          "callId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Canonical physical tool call correlation ID when retained."
           }
         },
         "additionalProperties": false
@@ -15200,7 +15255,8 @@
               "url",
               "runAttempt"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "description": "Trusted canonical workflow-event provenance of this exact handling run. id is the retained completion delivery UUID, not the GitHub run ID; combine with run.agentId for the exact Archive event backlink. Availability may change with retention; the event detail route returns a truthful 404 instead of another delivery."
           }
         },
         "additionalProperties": false
@@ -22948,6 +23004,90 @@
         ],
         "additionalProperties": false,
         "description": "Runtime-executed outcome check, independent of workflow conclusion or agent completion. Expected identity is caller-supplied intent, never inferred from observed publication. Checks public final release/source tree and optionally requested GHCR image identity; not installation proof."
+      },
+      "ArchiveWorkflowHandlingProof": {
+        "type": "object",
+        "description": "available means retained exact handling evidence, not handling success or publication verification. Pending/running without retained evidence is not_recorded; terminal without retained evidence or mismatched provenance is unavailable. Only available has a target. Transient read failures propagate as errors, never as guessed availability.",
+        "required": [
+          "status",
+          "reasonCode",
+          "reason",
+          "target"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "not_recorded"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "proof_available",
+              "event_provenance_mismatch",
+              "handling_not_started",
+              "proof_not_recorded",
+              "proof_unavailable"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "agentId",
+                  "sessionId",
+                  "runId"
+                ],
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ArchiveWorkflowEventDetailResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "event",
+          "handlingProof"
+        ],
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "event": {
+            "$ref": "#/components/schemas/ArchiveWorkflowEvent"
+          },
+          "handlingProof": {
+            "$ref": "#/components/schemas/ArchiveWorkflowHandlingProof"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
