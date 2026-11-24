@@ -33,7 +33,9 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   checksum, restored in the publish job, and pushed under both tags without a
   rebuild. Local tested-image ID and remote per-tag manifest digests are checked
   and written to the promotion run summary; do not confuse image ID with manifest
-  digest. This is a single-platform image, not a multiarch index.
+  digest. There is one runtime platform; BuildKit may wrap its manifest and
+  provenance attestations in an OCI index. The terminal verifier follows the
+  digest-bound runtime manifest without mistaking its config ID for that index.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
 - GSS, Skills, Backdoor, Tutor, Theater, and Switchboard own their public source snapshots.
 - Complete Backend, UI, Node Goblin, GSS/Core integration, Backdoor/Core integration, installer, assembly, and packaged-image validation runs here against the frozen source set before publication. NightShaman push workflows remain fast development gates.
@@ -64,12 +66,58 @@ The destination repositories must already exist. In particular,
 `GoblinKing-Burrow/Burrow-Backdoor`, `GoblinKing-Burrow/Burrow-Tutor`, `GoblinKing-Burrow/Burrow-Theater`, and `GoblinKing-Burrow/Burrow-Switchboard` must exist before promotion;
 the publisher intentionally does not create repositories implicitly.
 
+## Bounded Burrow public-outcome pilot
+
+The publish job makes **one terminal outcome check**, after the final Burrow
+publication step or after an earlier publication failure when the validated
+artifact was restored successfully. `verify-public-outcome.mjs prepare` runs
+before any publication. It validates the intended date, original run/manifest,
+frozen plan sources, publish disposition and `tested-image.json`, then records:
+
+- the Git tree of the restored `staged/Burrow` payload, calculated with a
+  disposable Git directory/index and the publisher's `git add -A` / `write-tree`
+  semantics (not the development assembly commit SHA);
+- the exact smoke-tested image ID and fixed public image repository;
+- the original Actions run, the named `public-promotion-YYYY.MM.DD` tar artifact
+  (`actions-artifact:` provenance reference, not a download URL), and the current
+  handling run/attempt URL. A resumed run keeps the **original date and artifact
+  origin**, even when handled on a later UTC date.
+
+`verify-public-outcome.mjs verify` dynamically imports the assembled canonical
+Backend `backend/src/outcome-verification.mjs`; the promotion adapter does not
+copy the verifier or implement HTTP. The assembly must contain that exact
+canonical module. It independently observes the exact public, non-draft,
+non-prerelease GitHub release and tag's source tree, and the anonymous GHCR date
+tag's single-platform image config identity. Neither a green publishing step,
+`main`, `latest`, nor a manifest digest substituted for an image ID can prove the
+intended outcome. Missing/unusable canonical verifier code also fails closed.
+
+The receipt is `public-outcome.json`, uploaded as a **separate** Actions artifact
+named `public-outcome-<date>-<handling-run>-<attempt>` whenever it exists, including
+on publication/check failure, with the existing seven-day retention. Only
+`verified` returns zero; both `mismatch` and `unverified` fail the job. A failed
+publication stays failed even if its terminal outcome happens to verify. This
+closes false-green publication into the existing failure-only webhook loop;
+there is no new notification or successful-agent wakeup.
+
+Unchanged, deferred and `validate_only` invocations never publish or run this
+check. A restore/identity failure prevents publication and the check because no
+validated frozen intent is available. This pilot checks Burrow's release/source
+and image only, not every coordinated component's final outcome. It adds no
+polling, retries, cron, repair or deployment action; the existing daily schedule,
+date immutability and original-artifact resume behavior remain unchanged.
+
 ## Local verification
 
 ```sh
+node --test scripts/promotion/verify-public-outcome.test.mjs
 node --test scripts/promotion/*.test.mjs
 node scripts/promotion/validate-public-readiness.mjs ..
 ```
+
+The outcome adapter tests use injected inert verification and disposable local
+Git fixtures; workflow tests assert string contracts. They do not dispatch
+Actions, publish/pull an image, or validate a live public release.
 
 `targets.json` describes target repositories, provenance source subsets and asset
 metadata. `plan.mjs` compares the complete frozen source set once: any change

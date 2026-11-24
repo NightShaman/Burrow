@@ -327,9 +327,12 @@ jobs:
         with:
           node-version: '24'
       - name: Restore snapshots and verify executable permissions before publishing
+        id: restore
         env:
           EXPECTED_DATE: ${{ needs.stage.outputs.release_date }}
           EXPECTED_RUN: ${{ needs.stage.outputs.artifact_run_id }}
+          PROMOTION_PUBLISHABLE: ${{ needs.stage.outputs.publishable }}
+          PROMOTION_VALIDATE_ONLY: ${{ inputs.validate_only == true }}
         run: |
           set -eu
           tar -xpf public-promotion.tar
@@ -339,6 +342,8 @@ jobs:
           test -x staged/Node-Goblin/install.sh
           node orchestrator/scripts/promotion/verify-node-goblin-asset.mjs staged release-assets/nodeGoblin "${{ needs.stage.outputs.release_date }}"
           sha256sum -c tested-image.tar.gz.sha256
+          # Freeze caller intent before publication; never derive it from public main/latest.
+          node orchestrator/scripts/promotion/verify-public-outcome.mjs prepare public-outcome-intent.json
       - name: Publish immutable Git snapshots
         env:
           PUBLIC_GITHUB_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
@@ -408,3 +413,17 @@ jobs:
           set -eu
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow staged/Burrow "$VERSION" "Release Burrow $VERSION"
           orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow" "$VERSION" release-notes/burrow.md
+      - name: Check exact public Burrow outcome once
+        if: ${{ always() && needs.stage.outputs.publishable == 'true' && steps.restore.outcome == 'success' }}
+        env:
+          PROMOTION_PUBLISHABLE: ${{ needs.stage.outputs.publishable }}
+          PROMOTION_VALIDATE_ONLY: ${{ inputs.validate_only == true }}
+        run: node orchestrator/scripts/promotion/verify-public-outcome.mjs verify public-outcome-intent.json public-outcome.json
+      - name: Upload public outcome receipt even on publication or check failure
+        if: ${{ always() && hashFiles('public-outcome.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-outcome-${{ needs.stage.outputs.release_date }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: public-outcome.json
+          if-no-files-found: error
+          retention-days: 7
