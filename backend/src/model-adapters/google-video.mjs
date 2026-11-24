@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { googleNativeBase, googleNativeHeaders, googleModelId, googleVideoSupported } from './google-native-catalog.mjs';
 import { mediaBudgets, mediaBytes, decodeMedia } from './generated-media-budgets.mjs';
+import { videoReferenceImagesSupported, VIDEO_REFERENCE_LIMIT } from './video-contract.mjs';
 import { validatedSourceImages } from './reference-image-capability.mjs';
 import { fetchProviderMedia, providerMediaEnvelopeResult } from './provider-fetch.mjs';
 import { providerErrorSecrets, withProviderErrorScope, markProviderTransportError, classifyModelFailure } from '../model-failure.mjs';
@@ -40,11 +41,9 @@ export function createGoogleVideoAdapter({ config = {}, fetchImpl = globalThis.f
     async complete({ prompt, signal: callerSignal, sourceImages: inputImages } = {}) {
       return withProviderErrorScope(secrets, async () => {
         if (callerSignal?.aborted) throw abortError();
-        if (Array.isArray(inputImages) && inputImages.length > 6) throw new Error('google_video_reference_image_limit_exceeded');
+        if (Array.isArray(inputImages) && inputImages.length > VIDEO_REFERENCE_LIMIT) throw new Error('google_video_reference_image_limit_exceeded');
         const images = validatedSourceImages(inputImages);
-        const inputs = config.capabilities?.inputs ?? config.acceptedInput;
-        const flags = [config.capabilities?.images, config.capabilities?.vision, config.supportsVision, config.vision];
-        if (images && (Array.isArray(inputs) ? !inputs.includes('image') : flags.some(v => typeof v === 'boolean') && !flags.includes(true))) {
+        if (images && !videoReferenceImagesSupported(config)) {
           throw new Error('agent_reference_image_unsupported');
         }
         // Saved portraits are subject references rather than an initial frame.

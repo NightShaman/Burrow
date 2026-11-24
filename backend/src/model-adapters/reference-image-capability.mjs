@@ -1,4 +1,5 @@
-import { googleNativeApi, googleMediaKind, googleVideoSupported } from './google-native-catalog.mjs';
+import { googleNativeApi, googleMediaKind } from './google-native-catalog.mjs';
+import { videoContract, videoReferenceImagesSupported } from './video-contract.mjs';
 import { isGoogleOpenAICompatible } from './google-wire.mjs';
 
 export const REFERENCE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
@@ -19,15 +20,18 @@ export function referenceImageCapability(config = {}) {
   const inputFlags = [config.capabilities?.images, config.capabilities?.vision, config.supportsVision, config.vision];
   const declaredInput = explicitInputs || inputFlags.some(value => typeof value === 'boolean');
   const acceptsImages = explicitInputs ? inputs.includes('image') : inputFlags.includes(true);
+  const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
+  if ((Array.isArray(outputs) && outputs.includes('video')) || videoContract(config)) {
+    return videoReferenceImagesSupported(config) ? { available: true, reason: null } : unsupported();
+  }
   if (googleNativeApi(config)) {
     // Native image-generation contracts include image editing. In the absence
     // of an explicit modality list they supply that fact (discovery may only
     // return generation methods); a deliberate input override still wins.
-    return (googleMediaKind(config) === 'image' || googleVideoSupported(config)) && (!declaredInput || acceptsImages)
+    return googleMediaKind(config) === 'image' && (!declaredInput || acceptsImages)
       ? { available: true, reason: null }
       : unsupported();
   }
-  const outputs = config.capabilities?.outputs ?? config.acceptedOutput;
   return /^openai-/.test(config.api || config.apiType || '') &&
     Array.isArray(outputs) && (!isGoogleOpenAICompatible(config) || outputs.includes('gif')) && (outputs.includes('image') || outputs.includes('gif')) && !outputs.includes('text') && acceptsImages
     ? { available: true, reason: null }

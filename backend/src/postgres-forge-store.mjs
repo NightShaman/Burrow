@@ -1,6 +1,7 @@
 import { readForgeGallery, createForgeGalleryFolder, moveForgeGalleryImage, eligibleGalleryJob, eligibleGalleryArtifact } from './postgres-forge-gallery.mjs';
 import { googleNativeApi, googleMediaKind } from './model-adapters/google-native-catalog.mjs';
-import { createGoogleVideoAdapter, googleVideoSupported } from './model-adapters/google-video.mjs';
+import { createForgeVideoAdapter } from './model-adapters/forge-video.mjs';
+import { videoContract, VIDEO_REFERENCE_LIMIT } from './model-adapters/video-contract.mjs';
 import { createGoogleMediaAdapter } from './model-adapters/google-media.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAlbdruckStore } from './postgres-albdruck-store.mjs';
@@ -156,7 +157,7 @@ export class PostgresForgeStore {
     referenceImages,
     adapterFactory = createOpenAIGeneratedArtifactAdapter,
     googleAdapterFactory = createGoogleLyriaAdapter,
-    videoAdapterFactory = createGoogleVideoAdapter,
+    videoAdapterFactory = createForgeVideoAdapter,
     ownerId = randomUUID(),
   } = {}) {
     if (!pool?.query || !pool?.connect)
@@ -692,7 +693,7 @@ export class PostgresForgeStore {
     const legacySelf = useAgentReferenceImage && !useOperatorReferenceImage && !referenceAgentIds.length && !privateReferences && !artifactReferences.length && !attachmentIds.length;
     const snapshots = legacySelf ? [await this.referenceImageSnapshot(agentId)] : hasReferences
       ? await this.referenceSnapshots({ agentId, referenceAgentIds, useAgentReferenceImage, useOperatorReferenceImage, catalog, ownerModId, privateReferences, maxBytes: snapshotMaxBytes }) : [];
-    if (model?.kind === 'video' && snapshots.length + artifactReferences.length + attachmentIds.length > 6) fail('google_video_reference_image_limit_exceeded');
+    if (model?.kind === 'video' && snapshots.length + artifactReferences.length + attachmentIds.length > VIDEO_REFERENCE_LIMIT) fail('forge_video_reference_image_limit_exceeded');
     for (const ref of artifactReferences) {
       const snapshot = await this.artifactReferenceSnapshot(ref);
       snapshots.push(snapshot);
@@ -779,7 +780,7 @@ export class PostgresForgeStore {
           if (!model.agentReferenceImage?.available) fail('agent_reference_image_unsupported', 409);
           if (dispatch.configurationUnavailable) fail('forge_model_unavailable', 409);
           if (!referenceImageCapability(dispatch.config).available) fail('agent_reference_image_unsupported', 409);
-          if (model.kind === 'video' && dispatch.sourceImages.length > 6) fail('google_video_reference_image_limit_exceeded');
+          if (model.kind === 'video' && dispatch.sourceImages.length > VIDEO_REFERENCE_LIMIT) fail('forge_video_reference_image_limit_exceeded');
         }
         const job = {
           id: randomUUID(),
@@ -930,7 +931,8 @@ export class PostgresForgeStore {
       config = dispatch?.config ?? await this.resolveConfig(job.connectionId, job.modelId);
       if ((job.useAgentReferenceImage || job.referenceImages?.length) && (!dispatch?.sourceImages?.length || !referenceImageCapability(config).available))
         throw new Error('agent_reference_image_snapshot_unavailable');
-      const video = job.kind === 'video' && googleVideoSupported(config);
+      const video = job.kind === 'video';
+      if (video && !videoContract(config)) throw new Error('video_provider_contract_unavailable');
       const nativeGoogle = googleNativeApi(config) && googleMediaKind(config) === job.kind;
       const google = job.kind === "audio" && googleLyriaSupported(config) && googleMediaKind(config) === "audio";
       if (

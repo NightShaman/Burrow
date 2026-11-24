@@ -12,7 +12,7 @@ const SAFE_FORGE_ERRORS = new Set([
   'forge_job_not_succeeded', 'forge_context_unavailable', 'session_not_found',
   'forge_delivery_failed', 'forge_wait_interrupted', 'generation_interrupted',
   'source_attachments_unsupported', 'generation_options_unsupported', 'generation_failed', 'forge_selection_missing',
-  'forge_reference_attachment_invalid', 'forge_reference_attachment_not_found', 'forge_reference_attachments_unsupported', 'forge_reference_artifact_invalid', 'forge_reference_artifacts_video_only', 'forge_reference_artifacts_unsupported', 'reference_images_too_large', 'google_video_reference_image_limit_exceeded', 'agent_reference_image_missing', 'agent_reference_image_invalid', 'agent_reference_image_unsupported', 'agent_reference_image_image_only',
+  'forge_reference_attachment_invalid', 'forge_reference_attachment_not_found', 'forge_reference_attachments_unsupported', 'forge_reference_artifact_invalid', 'forge_reference_artifacts_video_only', 'forge_reference_artifacts_unsupported', 'reference_images_too_large', 'forge_video_reference_image_limit_exceeded', 'agent_reference_image_missing', 'agent_reference_image_invalid', 'agent_reference_image_unsupported', 'agent_reference_image_image_only',
 ]);
 function safeForgeError(error) {
   const message = typeof error?.message === 'string' ? error.message : '';
