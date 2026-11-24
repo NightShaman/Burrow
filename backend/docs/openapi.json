@@ -14973,7 +14973,8 @@
               "run_evidence",
               "runtime_receipt",
               "subagent_record",
-              "archive_inference"
+              "archive_inference",
+              "outcome_check"
             ]
           }
         },
