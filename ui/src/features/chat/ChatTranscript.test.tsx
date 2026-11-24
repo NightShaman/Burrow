@@ -1511,6 +1511,7 @@ it('offers jump to latest only away from the bottom and resumes following after 
     scrollHeight: { configurable: true, value: 1200 },
     clientHeight: { configurable: true, value: 400 },
   });
+  expect(scroller.dataset.followLatest).toBe('true');
   scroller.scrollTop = 800;
   fireEvent.scroll(scroller);
   expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
@@ -1519,10 +1520,12 @@ it('offers jump to latest only away from the bottom and resumes following after 
   const jump = screen.getByRole('button', { name: 'Jump to latest message' });
   expect(jump.getAttribute('type')).toBe('button');
   expect(scroller.contains(jump)).toBe(false);
+  expect(scroller.dataset.followLatest).toBe('false');
   view.rerender(<ChatTranscript {...props} liveAnswer="New streamed content" />);
   expect(scroller.scrollTop).toBe(200);
   fireEvent.click(jump);
   expect(scroller.scrollTop).toBe(1200);
+  expect(scroller.dataset.followLatest).toBe('true');
   expect(screen.queryByRole('button', { name: 'Jump to latest message' })).toBeNull();
   Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1400 });
   view.rerender(<ChatTranscript {...props} liveAnswer="More streamed content" />);

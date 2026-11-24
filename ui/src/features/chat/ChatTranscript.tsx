@@ -194,6 +194,7 @@ export const ChatTranscript = memo(function ChatTranscript({
     <div className="chat-transcript">
       <div
         className={`chat-messages ${isEmptySession ? 'new-session-view' : ''}`}
+        data-follow-latest={!showJumpToLatest}
         ref={messagesRef}
         onScroll={updateScrollIntent}
         aria-busy={isLoading || isSending}

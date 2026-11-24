@@ -21,6 +21,11 @@
   overflow: auto;
   position: relative;
 }
+/* While following, the transcript pins the bottom. A browser-selected anchor
+   higher in the conversation would compete with it when photo previews load. */
+.chat-messages[data-follow-latest='true'] {
+  overflow-anchor: none;
+}
 .chat-messages > :not(.chat-watermark) {
   position: relative;
   z-index: 1;

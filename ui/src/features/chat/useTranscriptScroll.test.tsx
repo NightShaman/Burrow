@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useTranscriptScroll } from './useTranscriptScroll';
 
@@ -26,7 +26,10 @@ function Harness({ load }: { load?: () => Promise<void> }) {
     </>
   );
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 it('observes the container and children, follows resize only while sticky, and disconnects', () => {
   const observers: {
     callback: ResizeObserverCallback;
@@ -64,6 +67,26 @@ it('observes the container and children, follows resize only while sticky, and d
   const last = observers.at(-1)!;
   view.unmount();
   expect(last.disconnect).toHaveBeenCalled();
+});
+it('keeps following if photos grow between a bottom pin and its queued scroll event', () => {
+  const view = render(<Harness />);
+  const element = view.container.querySelector('div')!;
+  let height = 1000;
+  let top = 100;
+  Object.defineProperties(element, {
+    scrollHeight: { get: () => height },
+    clientHeight: { value: 400 },
+    scrollTop: { get: () => top, set: (y: number) => (top = Math.min(y, height - 400)) },
+  });
+  fireEvent.scroll(element);
+  fireEvent.click(screen.getByText('jump'));
+  expect(top).toBe(600);
+  height += 240;
+  fireEvent.scroll(element);
+  expect(screen.queryByText('jump')).toBeNull();
+  element.scrollTop = 450;
+  fireEvent.scroll(element);
+  expect(screen.getByText('jump')).toBeTruthy();
 });
 it('restores the visible anchor after loading older messages', async () => {
   let frame: FrameRequestCallback | undefined;
