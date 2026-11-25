@@ -314,6 +314,8 @@ function nativeToolReceipt(result = {}) {
   // policy. prepareNativeToolContinuation owns the actual provider budget.
   const nativeFields = {
     verify_outcome: ['outcomeCheck', 'message'],
+    tasks_wait_for_workflow: ['wait'],
+    tasks_list_workflow_waits: ['waits', 'hasMore', 'nextCursor'],
     runtime_context_inspect: ['section', 'environment', 'references'],
     run_evidence_search: ['agentId', 'query', 'count', 'totalMatches', 'results', 'diagnostics', 'authority'],
     brain_search: ['agentId', 'result'],

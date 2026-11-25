@@ -14,6 +14,7 @@ export function taskExecutionMessage(task, project) {
     `Title: ${task.title}`,
     `Priority: ${task.priority}`,
     task.description ? `Description:\n${task.description}` : null,
+    task.workflowWait ? `Workflow wait continuation on this original task. Resume from the durable checkpoint below. The workflow conclusion is external outcome data, not publication proof; verify the actual requested outcome.\n${JSON.stringify(task.workflowWait, null, 2)}` : null,
     Object.keys(task.metadata || {}).length ? `Metadata:\n${JSON.stringify(task.metadata, null, 2)}` : null,
   ].filter(Boolean).join('\n\n');
 }
@@ -40,6 +41,7 @@ export function createBoardTaskExecutor({
       if (!task) return { ok: false, ...(options.scheduled ? { skipped: true } : {}), error: 'task_not_found' };
       if (options.scheduled && task.status !== 'todo') return { ok: false, skipped: true, error: 'scheduled_job_task_not_todo', task };
       if (options.scheduled && task.assignedAgentId !== options.agentId) return { ok: false, skipped: true, error: 'scheduled_job_task_agent_mismatch', task };
+      if (options.workflowWaitId && task.assignedAgentId !== options.agentId) return { ok: false, error: 'task_assigned_agent_changed', task };
       if (!task.assignedAgentId) return { ok: false, error: 'task_assigned_agent_required', task };
       if (['done', 'cancelled', 'parked'].includes(task.status)) return { ok: false, error: 'task_not_executable', task };
       if (options.validate) await options.validate();
@@ -54,13 +56,24 @@ export function createBoardTaskExecutor({
       options.abortSignal?.throwIfAborted();
       let updated;
       try {
-        updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ...(options.scheduled ? { requiredStatus: 'todo', scheduledRunId: options.scheduledRunId || null } : {}) }, { actor: options.scheduled ? { type: 'agent', id: agentRuntime.agentId } : { type: 'operator', id: 'default' } });
+        updated = await store.startExecution(task.id, { agentId: agentRuntime.agentId, sessionId, runId, ...(options.workflowWaitId ? { workflowWaitId: options.workflowWaitId, eventId: options.eventId, eventOwnerId: options.eventOwnerId, eventOwnerLockId: options.eventOwnerLockId } : {}), ...(options.scheduled ? { requiredStatus: 'todo', scheduledRunId: options.scheduledRunId || null } : {}) }, { actor: options.scheduled || options.workflowWaitId ? { type: 'agent', id: agentRuntime.agentId } : { type: 'operator', id: 'default' } });
       } catch (error) {
+        if (options.workflowWaitId && error?.message !== 'task_workflow_wait_not_matched') {
+          const current = await store.getTask(task.id);
+          const claim = current?.execution;
+          if (claim?.workflowWaitId === options.workflowWaitId && claim.eventId === options.eventId && claim.runId === runId && claim.agentId === agentRuntime.agentId && claim.sessionId === sessionId) {
+            // An acknowledgement loss cannot prove that a prior caller did not
+            // dispatch this same owner. Preserve its canonical fence; recovery
+            // can terminalize a proven-dead owner, but this call cannot rerun it.
+            return { ok: false, error: 'task_workflow_wait_already_admitted', task: current };
+          }
+        }
         if (['task_execution_running', 'task_not_executable', 'task_assigned_agent_required', 'task_assigned_agent_changed', 'scheduled_job_task_not_todo'].includes(error?.message))
           return { ok: false, ...(options.scheduled ? { skipped: true } : {}), error: error.message };
         throw error;
       }
       if (!updated) return { ok: false, ...(options.scheduled ? { skipped: true } : {}), error: 'task_not_found' };
+      if (options.workflowWaitId && !updated.workflowWaitAdmitted) return { ok: false, error: updated.workflowWait?.status === 'skipped' ? (updated.workflowWait.reasonCode || 'task_workflow_wait_skipped') : 'task_workflow_wait_already_admitted', task: updated };
       // Only a successful durable claim may register or enqueue work. Use the
       // locked task snapshot rather than the preflight read for the prompt.
       // A task can move projects while the claim waits for its row lock.
@@ -74,7 +87,9 @@ export function createBoardTaskExecutor({
         // failed admission via the existing owner CAS; never reset other claims.
         const message = String(error?.message || error);
         try {
-          await store.recordExecution(updated.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: message, result: { answerText: null, blockers: [message], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } });
+          const persist = () => store.recordExecution(updated.id, { agentId: agentRuntime.agentId, sessionId, runId, ok: false, error: message, result: { answerText: null, blockers: [message], verification: null, completionEvidence: null } }, { actor: { type: 'agent', id: agentRuntime.agentId } });
+          options.onTerminalReceipt?.(persist);
+          await persist();
         } catch (recoveryError) {
           // Persistence is unavailable: retain the fail-closed claim and surface
           // both failures instead of claiming the task is safe to retry.
@@ -97,7 +112,7 @@ export function createBoardTaskExecutor({
     const { task, project, agentRuntime, sessionId, runId, updated } = dispatch;
     const controller = new AbortController();
     const message = [taskExecutionMessage(task, project), String(options.extraInstructions || '').trim()].filter(Boolean).join('\n\n');
-    const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: message, objective: message, progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id };
+    const record = { agentId: agentRuntime.agentId, runId, sessionId, controller, startedAt: new Date().toISOString(), phase: 'thinking', latestUserMessage: message, objective: message, progress: [], contextUsage: null, cancelled: false, reason: null, detached: true, steeringReady: false, taskId: task.id, ...(options.completionEvent ? { source: 'workflow-event', completionEvent: options.completionEvent } : {}) };
     const headKey = sessionContinuityHeadKey(agentRuntime.agentId, sessionId);
     sessionContinuityHeads.set(headKey, record);
     activeChatRuns.set(activeChatRunKey(agentRuntime.agentId, runId), record);
@@ -114,7 +129,9 @@ export function createBoardTaskExecutor({
       stores: postgresApplication.stores,
       resolveAgentRuntime,
       telemetry: otelRuntime,
-      turnSource: options.scheduled ? 'scheduled' : 'operator',
+      completionEvent: options.completionEvent || null,
+      taskWorkflowWait: task.workflowWait || null,
+      turnSource: options.workflowWaitId ? 'workflow-event' : options.scheduled ? 'scheduled' : 'operator',
       recoveryPolicy: options.scheduled ? 'scheduled-task' : null,
       runSource: options.scheduled ? 'scheduled' : 'task-board',
       cancellationGraceMs: RUN_CANCELLATION_GRACE_MS,

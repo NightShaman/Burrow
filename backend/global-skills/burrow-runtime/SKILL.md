@@ -108,6 +108,14 @@ On current schemas, `scheduled_jobs_list` and `scheduled_job_runs` return `nextC
 
 `Run now` returns after dispatch. When asked to run or rerun a job, inspect its recent runs until the requested run reaches a terminal result; dispatch alone is not completion. Before creating a recurring monitor, verify it can actually retrieve the information it is supposed to report.
 
+## Wait for an exact workflow on an existing task
+
+When current tools expose `tasks_wait_for_workflow`, an existing task assigned to you in To Do or In Progress can save a checkpoint until one exact GitHub workflow run finishes. Supply task ID, repository, exact workflow name, GitHub run ID, required attempt, commit SHA and checkpoint. Use frozen intended identities, not whatever completion happens to appear. The runtime supplies your source identity; the configured signed webhook supplies completion data. Local receiver readiness is not proof of public connectivity.
+
+Inspect the registration receipt, then finish the current turn rather than leaving a model waiting or creating polling/cron. One matching completion, including failure, resumes the same task through canonical board execution with its checkpoint. Wrong runs, attempts and commits do not match. Registered checkpoints survive restart; cancellation, reassignment, ineligible status or superseding execution skip them durably. Do not revive a skipped wait by merely moving the task back to To Do.
+
+Use `tasks_list_workflow_waits` for retained state, exact trigger, skip reason and eventual execution receipt. A resumed wait means admitted continuation, not success. Follow task-scoped pagination. TaskBoard History and Archive retain the same facts and exact event↔run Proof links. Workflow completion and handling do not verify publication; perform the independent outcome check when that is the task's requested result. No new standing watch or routine success notification is needed. Follow the supplied live schemas on older runtimes that lack these tools.
+
 ## Use MCP for connected systems
 
 MCP catalogs expose external integrations and registered mod-provided tools. Their catalogs can be large, so discover what you need instead of assuming a tool exists.

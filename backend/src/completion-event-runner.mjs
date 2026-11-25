@@ -1,3 +1,4 @@
+import { safeOperationalError } from './runtime-server-log.mjs';
 import { randomUUID } from 'node:crypto';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { runChatTurnFromBody } from './chat-turn-controller.mjs';
@@ -5,7 +6,7 @@ import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 
 export function completionEventMetadata(event) {
   const { id, repository, workflow, runId, runAttempt, headSha, conclusion, url } = event;
-  return { id, repository, workflow, runId, runAttempt, headSha, conclusion, url };
+  return { id, repository, workflow, runId, runAttempt, headSha, conclusion, url, ...(event.taskWaitId ? { taskWaitId: event.taskWaitId, taskId: event.taskId } : {}) };
 }
 
 export function completionEventMessage(event) {
@@ -30,7 +31,7 @@ function boundedResult(result) {
 // The timer only retries DB admission/recovery after transient failures; it never
 // polls GitHub or spends model tokens looking for work.
 export function createCompletionEventRunner({ store, stores, rootDir, resolveAgentRuntime,
-  executeTurn = runChatTurnFromBody, registerActiveRun = null, telemetry = null,
+  executeTask = null, executeTurn = runChatTurnFromBody, registerActiveRun = null, telemetry = null,
   ownerId = `completion-${randomUUID()}`, maxConcurrent = 4, retryMs = 5000,
 } = {}) {
   if (!store || !stores || typeof resolveAgentRuntime !== 'function' || !Number.isInteger(maxConcurrent) || maxConcurrent < 1) throw new Error('completion_event_runner_dependencies_required');
@@ -44,12 +45,17 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
   let starting = null;
   let closing = null;
   let flushing = null;
+  let deferredUntil = 0;
 
   async function run(event) {
     let activeRun;
     let signal = lifecycle.signal;
     let receipt;
     try {
+      if (event.taskWaitId) {
+        await runTaskWait(event, signal);
+        return;
+      }
       signal.throwIfAborted();
       activeRun = registerActiveRun?.({ agentId: event.agentId, sessionId: event.sessionId, runId: event.chatRunId,
         message: completionEventMessage(event), objective: event.instruction, source: 'workflow-event',
@@ -75,8 +81,8 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
       receipt = { ownerId, ownerLockId: event.ownerLockId, status: signal.aborted ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
         result: boundedResult(result), traceDir: result.traceDir || null,
         error: signal.aborted ? 'completion_event_cancelled' : outcome.ok ? null : 'agent_turn_failed' };
-    } catch {
-      receipt = { ownerId, ownerLockId: event.ownerLockId, status: signal.aborted ? 'interrupted' : 'failed', error: signal.aborted ? 'completion_event_cancelled' : 'agent_turn_failed' };
+    } catch (error) {
+      receipt = { ownerId, ownerLockId: event.ownerLockId, status: signal.aborted ? 'interrupted' : 'failed', error: signal.aborted ? 'completion_event_cancelled' : safeOperationalError(error).errorCode };
     }
     // Model outcome and receipt persistence are different failure domains.
     // Retain the exact result/trace for retry; never execute the turn again.
@@ -85,11 +91,62 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
     finally { activeRun?.finish?.(); }
   }
 
+  async function runTaskWait(event, signal) {
+    let persistTask = null;
+    let result;
+    let failure;
+    try {
+      if (typeof executeTask !== 'function') throw new Error('completion_event_task_executor_required');
+      const admitted = await executeTask(event.taskId, {
+        workflowWaitId: event.taskWaitId, eventId: event.id, eventOwnerId: ownerId, eventOwnerLockId: event.ownerLockId,
+        runId: event.chatRunId, agentId: event.agentId,
+        completionEvent: completionEventMetadata(event), abortSignal: signal,
+        onTerminalReceipt: persist => { persistTask = persist; },
+      });
+      if (admitted.completion) result = await admitted.completion;
+      else failure = new Error(admitted.error || 'task_workflow_wait_not_admitted');
+    } catch (error) { failure = error; }
+
+    // Retain a closure before any more DB work. A failed task terminal write
+    // must be retried before completing the event, without another dispatch.
+    const finish = async () => {
+      if (persistTask) {
+        const written = await persistTask();
+        const persisted = written?.execution ? { ...written.execution, ...written.execution.result } : written;
+        if (persisted?.status && !['running', 'queued'].includes(persisted.status)) result = persisted;
+      }
+      if (!result) {
+        const wait = await stores.taskWorkflowWaits.get(event.taskWaitId);
+        if (wait?.status === 'resumed') {
+          result = wait.outcome ? { ...wait.outcome, ...wait.outcome.result } : { ok: false, status: 'interrupted', error: 'task_workflow_wait_admitted_without_dispatch_receipt' };
+        } else if (!wait || wait.status === 'skipped' || /^task_workflow_wait_(not_matched|event_mismatch|task_ineligible)$/.test(failure?.message || '') || ['task_not_found','task_not_executable','task_assigned_agent_required','task_assigned_agent_changed'].includes(failure?.message)) {
+          result = { ok: false, decision: 'skipped', error: (wait?.status === 'skipped' ? wait.reasonCode : null) || failure?.message || 'task_workflow_wait_missing', blockers: [(wait?.status === 'skipped' ? wait.reason : null) || failure?.message || 'task_workflow_wait_missing'] };
+        } else {
+          // Only defer's locked proof authorizes a later admission attempt.
+          await store.defer(event.id, { ownerId, ownerLockId: event.ownerLockId });
+          deferredUntil = Date.now() + retryMs;
+          return;
+        }
+      }
+      const outcome = classifyRuntimeOutcome(result, { cancelled: signal.aborted });
+      const retainedReason = result.error === 'task_workflow_wait_admitted_without_dispatch_receipt'
+        || (result.decision === 'skipped' && /^[a-z][a-z0-9_]{0,127}$/.test(result.error || ''));
+      const errorCode = retainedReason ? result.error : safeOperationalError(new Error(result.error || failure?.message || 'agent_turn_failed')).errorCode;
+      await store.complete(event.id, { ownerId, ownerLockId: event.ownerLockId,
+        status: signal.aborted || result.status === 'interrupted' ? 'interrupted' : outcome.ok ? 'succeeded' : 'failed',
+        result: boundedResult(result), traceDir: result.traceDir || null,
+        error: signal.aborted ? 'completion_event_cancelled' : outcome.ok ? null : errorCode });
+    };
+    terminalReceipts.set(event.id, finish);
+    await flushReceipts();
+  }
+
   function flushReceipts() {
     flushing ||= (async () => {
       for (const [id, receipt] of terminalReceipts) {
         try {
-          await store.complete(id, receipt);
+          if (typeof receipt === 'function') await receipt();
+          else await store.complete(id, receipt);
           terminalReceipts.delete(id);
         } catch (error) {
           if (error?.message === 'completion_event_owner_fenced') terminalReceipts.delete(id);
@@ -106,16 +163,17 @@ export function createCompletionEventRunner({ store, stores, rootDir, resolveAge
     if (pumping) return pumping.then(() => lifecycle.stopped ? undefined : wake());
     pumping = lifecycle.track(async () => {
       if (!initialized) {
+        await stores.tasks?.reconcileInterruptedExecutions?.();
         await store.reconcileInterrupted();
         if (lifecycle.stopped) return;
         initialized = true;
       }
       await flushReceipts();
-      while (!lifecycle.stopped && new Set([...active, ...terminalReceipts.keys()]).size < maxConcurrent) {
+      while (!lifecycle.stopped && Date.now() >= deferredUntil && new Set([...active, ...terminalReceipts.keys()]).size < maxConcurrent) {
         const event = await store.claim({ ownerId });
         if (!event) break;
         if (lifecycle.stopped) {
-          terminalReceipts.set(event.id, { ownerId, ownerLockId: event.ownerLockId, status: 'interrupted', error: 'service_shutdown' });
+          terminalReceipts.set(event.id, event.taskWaitId ? () => store.defer(event.id, { ownerId, ownerLockId: event.ownerLockId }) : { ownerId, ownerLockId: event.ownerLockId, status: 'interrupted', error: 'service_shutdown' });
           await flushReceipts();
           break;
         }

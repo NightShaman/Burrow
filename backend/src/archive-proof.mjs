@@ -382,8 +382,9 @@ function contextEventSummary(event = {}) {
   const outcome = event.compression?.compressed ? 'compression applied' : event.compression?.attempted ? `compression not applied${event.compression?.reason ? ` (${event.compression.reason.replace(/[_-]+/gu, ' ')})` : ''}` : 'compression not evaluated';
   return [event.phase.replace(/[_-]+/gu, ' '), tokens, usage, threshold, outcome].filter(Boolean).join(' · ');
 }
-function timelineFor({ receipt, answer, request, workflowEvent, activities, executionEntries, trace, evidence, context, subagents, lastActivityAt = null }) {
+function timelineFor({ receipt, answer, request, workflowEvent, taskWorkflowWait, activities, executionEntries, trace, evidence, context, subagents, lastActivityAt = null }) {
   const timeline = [];
+  if (taskWorkflowWait) timeline.push({kind:'observation',status:'observed',ts:taskWorkflowWait.resumedAt || request?.ts || null,evidence:'runtime_receipt',summary:`Task ${taskWorkflowWait.taskId} resumed workflow wait ${taskWorkflowWait.id} from its durable checkpoint: ${safeDetail(taskWorkflowWait.checkpoint)}. Triggering event: ${taskWorkflowWait.trigger.id}. Workflow conclusion is not publication verification.`});
   if (workflowEvent) timeline.push({ kind: 'observation', status: 'observed', ts: request?.ts || null,
     summary: `Workflow event ${workflowEvent.id}: ${workflowEvent.repository} · ${workflowEvent.workflow} · GitHub run ${workflowEvent.runId}, attempt ${workflowEvent.runAttempt}, conclusion ${workflowEvent.conclusion}. Handling request: ${safeDetail(request?.content)}`,
     evidence: 'runtime_receipt' });
@@ -421,7 +422,7 @@ export function workflowEventFor(entries) {
   const entry = entries.find(item => item.type === 'message' && item.role === 'user' && item.metadata?.source === 'workflow-event' && item.metadata?.completionEvent);
   const value = entry?.metadata?.completionEvent;
   if (!value || !['id', 'repository', 'workflow', 'runId', 'headSha', 'conclusion', 'url'].every(key => typeof value[key] === 'string' && value[key]) || !Number.isInteger(value.runAttempt)) return null;
-  return Object.fromEntries(['id', 'repository', 'workflow', 'runId', 'runAttempt', 'headSha', 'conclusion', 'url'].map(key => [key, value[key]]));
+  return { ...Object.fromEntries(['id', 'repository', 'workflow', 'runId', 'runAttempt', 'headSha', 'conclusion', 'url'].map(key => [key, value[key]])), ...(typeof value.taskWaitId === 'string' && typeof value.taskId === 'string' ? { taskWaitId: value.taskWaitId, taskId: value.taskId } : {}) };
 }
 
 // Canonical tool results survive an interrupted terminal commit or metadata
@@ -445,6 +446,8 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
   const answer = answerFor(entries);
   const request = requestFor(entries);
   const workflowEvent = workflowEventFor(entries);
+  const waitMetadata = entries.find(item => item.type === 'message' && item.role === 'user' && item.metadata?.source === 'workflow-event' && item.metadata?.taskWorkflowWait)?.metadata.taskWorkflowWait;
+  const taskWorkflowWait = workflowEvent && waitMetadata?.id === workflowEvent.taskWaitId && waitMetadata?.trigger?.id === workflowEvent.id && waitMetadata?.continuation?.runId === runId && waitMetadata?.taskId === workflowEvent.taskId ? waitMetadata : null;
   const activities = activitiesFor(entries);
   const executionEntries = executionEntriesFor(entries);
   const options = { signal, deadline };
@@ -493,8 +496,9 @@ async function proofDetail({ conversationStore, agentId, agentName, sessionId, r
     },
     context,
     ...(workflowEvent ? { workflowEvent } : {}),
+    ...(taskWorkflowWait ? { taskWorkflowWait } : {}),
     subagents,
-    timeline: timelineFor({ receipt, answer, request, workflowEvent, activities, executionEntries, trace: trace?.exists ? trace : null, evidence, context, subagents, lastActivityAt: bounds.lastActivityAt }),
+    timeline: timelineFor({ receipt, answer, request, workflowEvent, taskWorkflowWait, activities, executionEntries, trace: trace?.exists ? trace : null, evidence, context, subagents, lastActivityAt: bounds.lastActivityAt }),
     references: {
       trace: traceDir ? { runId, url: `/api/traces/${encodeURIComponent(runId)}?sessionId=${encodeURIComponent(sessionId)}` } : null,
       sourceRefs: evidence?.sourceRefs || [],

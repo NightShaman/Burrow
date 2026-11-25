@@ -10028,6 +10028,65 @@
           }
         }
       }
+    },
+    "/api/task-board/tasks/{taskId}/workflow-waits": {
+      "get": {
+        "tags": [
+          "Task board"
+        ],
+        "summary": "Read durable workflow checkpoints and exact continuation outcomes for one task",
+        "operationId": "getTaskBoardWorkflowWaits",
+        "description": "Normally authenticated read-only inspection. No registration, webhook polling or dispatch. Missing task returns 404. Unknown or wrong-task pagination cursor returns 400; operational read failures return 500 rather than an empty page.",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque task-scoped keyset cursor from nextCursor."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retained task workflow waits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskWorkflowWaitListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorResponse"
+          },
+          "500": {
+            "$ref": "#/components/responses/ErrorResponse"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -14205,6 +14264,20 @@
           "agentName": {
             "type": "string",
             "description": "Current agent name, falling back to agentId."
+          },
+          "taskWaitId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Task wait source snapshot; null for ordinary standing watches."
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Task wait source snapshot; null for ordinary standing watches."
           }
         },
         "additionalProperties": false
@@ -15243,6 +15316,12 @@
               "runAttempt": {
                 "type": "integer",
                 "minimum": 1
+              },
+              "taskWaitId": {
+                "type": "string"
+              },
+              "taskId": {
+                "type": "string"
               }
             },
             "required": [
@@ -15257,6 +15336,9 @@
             ],
             "additionalProperties": false,
             "description": "Trusted canonical workflow-event provenance of this exact handling run. id is the retained completion delivery UUID, not the GitHub run ID; combine with run.agentId for the exact Archive event backlink. Availability may change with retention; the event detail route returns a truthful 404 instead of another delivery."
+          },
+          "taskWorkflowWait": {
+            "$ref": "#/components/schemas/TaskWorkflowWait"
           }
         },
         "additionalProperties": false
@@ -23087,6 +23169,253 @@
             "$ref": "#/components/schemas/ArchiveWorkflowHandlingProof"
           }
         },
+        "additionalProperties": false
+      },
+      "TaskWorkflowWait": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "headSha": {
+            "type": "string"
+          },
+          "checkpoint": {
+            "type": "string"
+          },
+          "runAttempt": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "matched",
+              "resumed",
+              "skipped"
+            ],
+            "description": "Resumed means canonical continuation admitted, not success. outcome records the eventual canonical result separately."
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registeredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "matchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resumedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "agentId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "agentId",
+              "sessionId",
+              "runId"
+            ],
+            "additionalProperties": false
+          },
+          "trigger": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  },
+                  "workflow": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  },
+                  "headSha": {
+                    "type": "string"
+                  },
+                  "conclusion": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "completedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "runAttempt": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "repository",
+                  "workflow",
+                  "runId",
+                  "runAttempt",
+                  "headSha",
+                  "conclusion",
+                  "url",
+                  "completedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "continuation": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentId",
+                  "sessionId",
+                  "runId"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Exact canonical task execution receipt after completion/reconciliation, not publication proof."
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "agentId",
+          "sessionId",
+          "repository",
+          "workflow",
+          "runId",
+          "headSha",
+          "checkpoint",
+          "runAttempt",
+          "status",
+          "reasonCode",
+          "reason",
+          "registeredAt",
+          "matchedAt",
+          "resumedAt",
+          "finishedAt",
+          "source",
+          "trigger",
+          "continuation",
+          "outcome"
+        ],
+        "additionalProperties": false,
+        "description": "Durable task checkpoint and exact GitHub target. Source comes from the runtime; trigger is signed external data, not authority. Terminal snapshots remain readable."
+      },
+      "TaskWorkflowWaitListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "waits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskWorkflowWait"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "waits",
+          "hasMore",
+          "nextCursor"
+        ],
         "additionalProperties": false
       }
     },

@@ -1,3 +1,4 @@
+import { waitRow, waitId } from './task-workflow-wait.mjs';
 import { continuityOwner } from './postgres-continuity-owner.mjs';
 import { taskArchiveState } from './task-archive-state.mjs';
 import { normalizePostgresPool } from './postgres-foundation.mjs';
@@ -457,7 +458,28 @@ export class PostgresTaskBoardStore {
     await owner.ready();
     return withPostgresTransaction(this.pool, async (c) => {
       const current = await this.lockTask(c, taskId);
-      if (!current) return null;
+      if (!current) {
+        if (execution.workflowWaitId) {
+          const deletedWait=(await c.query('SELECT * FROM task_workflow_waits WHERE id=$1 AND task_id=$2 FOR UPDATE',[waitId(execution.workflowWaitId),taskId])).rows[0];
+          if (deletedWait?.status === 'skipped') return { workflowWait: waitRow(deletedWait) };
+        }
+        return null;
+      }
+      let workflowWait = null;
+      if (execution.workflowWaitId) {
+        workflowWait = (await c.query('SELECT * FROM task_workflow_waits WHERE id=$1 AND task_id=$2 FOR UPDATE',[waitId(execution.workflowWaitId),current.id])).rows[0];
+        if (!workflowWait) throw new Error('task_workflow_wait_not_matched');
+        if (['resumed','skipped'].includes(workflowWait.status)) return { ...current, workflowWait: waitRow(workflowWait) };
+        if (workflowWait.status !== 'matched') throw new Error('task_workflow_wait_not_matched');
+        const event = (await c.query('SELECT * FROM github_completion_events WHERE id=$1 AND task_wait_id=$2 FOR UPDATE',[waitId(execution.eventId),workflowWait.id])).rows[0];
+        if (!execution.eventOwnerId || !execution.eventOwnerLockId || !event || event.owner_id !== execution.eventOwnerId || event.owner_lock_id !== execution.eventOwnerLockId || event.status !== 'running' || event.chat_run_id !== execution.runId || workflowWait.trigger?.id !== event.id || workflowWait.agent_id !== execution.agentId || workflowWait.session_id !== (execution.sessionId || 'default')) throw new Error('task_workflow_wait_event_mismatch');
+        if (!['todo','in_progress'].includes(current.status) || current.assignedAgentId !== workflowWait.agent_id) {
+          workflowWait = (await c.query(`UPDATE task_workflow_waits SET status='skipped',reason_code='task_no_longer_eligible',reason='Task status, assignment or execution superseded wait',finished_at=now() WHERE id=$1 RETURNING *`,[workflowWait.id])).rows[0];
+          return { ...current, workflowWait: waitRow(workflowWait) };
+        }
+        // A live source may finish after event claim. Leave the matched wait
+        // intact and let the dispatcher defer/retry task_execution_running.
+      }
       if (execution.requiredStatus && current.status !== execution.requiredStatus) throw new Error('scheduled_job_task_not_todo');
       // The row lock is the claim authority, not the dispatcher's earlier read.
       // A running receipt owns this task even while its turn is queued.
@@ -478,6 +500,8 @@ export class PostgresTaskBoardStore {
           taskId: current.id,
           ownerId: owner.id,
           scheduledRunId: execution.scheduledRunId || null,
+          workflowWaitId: workflowWait?.id || null,
+          eventId: workflowWait ? execution.eventId : null,
           agentId: current.assignedAgentId,
           sessionId: text(execution.sessionId) || "default",
           runId,
@@ -490,12 +514,15 @@ export class PostgresTaskBoardStore {
           error: null,
           result: null,
         };
+      if (workflowWait) {
+        workflowWait = (await c.query(`UPDATE task_workflow_waits SET status='resumed',reason_code='canonical_task_admitted',reason='Continuation claimed on original task',resumed_at=now(),continuation=$2::jsonb WHERE id=$1 RETURNING *`,[workflowWait.id,json({agentId:receipt.agentId,sessionId:receipt.sessionId,runId:receipt.runId})])).rows[0];
+      }
       await c.query(
         "UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3",
         [json(receipt), stamp, current.id],
       );
-      await this.audit.append(c, current.id, 'execution_started', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId } });
-      return this.getTask(current.id, c);
+      await this.audit.append(c, current.id, 'execution_started', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId, ...(workflowWait ? { workflowWaitId: workflowWait.id, eventId: execution.eventId, checkpoint: workflowWait.checkpoint } : {}) } });
+      return { ...await this.getTask(current.id, c), ...(workflowWait ? { workflowWait: waitRow(workflowWait), workflowWaitAdmitted: true } : {}) };
     });
   }
   async recordExecution(taskId, execution = {}, audit = {}) {
@@ -535,7 +562,8 @@ export class PostgresTaskBoardStore {
         "UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3",
         [json(receipt), stamp, current.id],
       );
-      await this.audit.append(c, current.id, receipt.ok ? 'execution_completed' : 'execution_failed', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId, status: receipt.status, ok: receipt.ok, error: receipt.error, decision: receipt.decision } });
+      await this.recordWaitOutcome(c, receipt);
+      await this.audit.append(c, current.id, receipt.ok ? 'execution_completed' : 'execution_failed', { ...audit, at: stamp, sessionId: receipt.sessionId, runId: receipt.runId, details: { agentId: receipt.agentId, workflowWaitId: receipt.workflowWaitId || null, eventId: receipt.eventId || null, status: receipt.status, ok: receipt.ok, error: receipt.error, decision: receipt.decision } });
       return this.getTask(current.id, c);
     });
   }
@@ -560,11 +588,16 @@ export class PostgresTaskBoardStore {
         const stamp = this.clock();
         const receipt = { ...execution, status: 'failed', ok: false, completedAt: stamp, error: 'task_execution_interrupted_reconcile_before_retry' };
         await c.query('UPDATE task_board_tasks SET execution_json=$1::jsonb,updated_at=$2 WHERE id=$3', [json(receipt),stamp,taskId]);
+        await this.recordWaitOutcome(c, receipt);
         await this.audit.append(c, taskId, 'execution_failed', { actor: { type: 'agent', id: execution.agentId }, at: stamp, sessionId: execution.sessionId, runId: execution.runId, details: { status: receipt.status, error: receipt.error } });
         count++;
       });
     }
     return count;
+  }
+  async recordWaitOutcome(c, receipt) {
+    if (!receipt.workflowWaitId) return;
+    await c.query(`UPDATE task_workflow_waits SET outcome=$2::jsonb,finished_at=now() WHERE id=$1 AND status='resumed' AND continuation->>'runId'=$3 AND continuation->>'agentId'=$4 AND continuation->>'sessionId'=$5`,[receipt.workflowWaitId,json(receipt),receipt.runId,receipt.agentId,receipt.sessionId]);
   }
   async taskHistory(taskId, options = {}) { return this.audit.history(taskId, options); }
   async listAttachments(taskId) { return this.audit.listAttachments(taskId); }

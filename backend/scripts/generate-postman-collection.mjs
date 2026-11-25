@@ -264,6 +264,7 @@ const collection = {
       req('Create task', 'POST', '/api/task-board/tasks', { body: { projectId: '{{projectId}}', title: 'Task title', description: 'Task details', priority: 'normal', status: 'todo', assignedAgentId: '{{agentId}}' } }),
       req('Get task', 'GET', '/api/task-board/tasks/{{taskId}}'),
       req('Read task audit history', 'GET', '/api/task-board/tasks/{{taskId}}/history', { query: [['limit', '50'], ['before', '']] }),
+      req('Read task workflow checkpoints', 'GET', '/api/task-board/tasks/{{taskId}}/workflow-waits', { query: [['limit', '50'], ['cursor', '']], description: 'Read durable waits, exact targets/triggers, skip reasons and canonical continuation outcomes. A resumed wait is admission, not success; no polling or dispatch.' }),
       req('List task documents', 'GET', '/api/task-board/tasks/{{taskId}}/attachments'),
       req('Attach task document', 'POST', '/api/task-board/tasks/{{taskId}}/attachments', { body: { name: 'notes.txt', mimeType: 'text/plain', content: 'data:text/plain;base64,bm90ZXM=' } }),
       req('Download task document', 'GET', '/api/task-board/tasks/{{taskId}}/attachments/{{taskAttachmentId}}'),

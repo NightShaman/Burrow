@@ -30,6 +30,8 @@ it.each(['save', 'delete', 'execute', 'failure', 'reopen'])(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.includes('/workflow-waits?'))
+          return response({ waits: [], hasMore: false, nextCursor: null });
         if (url.endsWith('/projects'))
           return response({ projects: [{ id: 'p', name: 'Project' }] });
         if (

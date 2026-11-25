@@ -335,7 +335,13 @@ function WorkflowEventReader({
               ['Agent', agentName(selected)],
               ['Destination session', selected.sessionId],
               ['Event ID', selected.id],
-              ['Watch ID', selected.watchId],
+              [
+                selected.taskWaitId ? 'Task wait ID' : 'Watch ID',
+                selected.taskWaitId ?? selected.watchId,
+              ],
+              ...(selected.taskWaitId && selected.taskId
+                ? [['Task ID', selected.taskId] as [string, string]]
+                : []),
               ['Burrow run', handlingRun],
               ['Completed', eventTime(selected.completedAt)],
               ['Received', eventTime(selected.createdAt)],

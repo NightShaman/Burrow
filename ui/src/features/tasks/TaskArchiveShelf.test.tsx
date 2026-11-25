@@ -22,6 +22,8 @@ const response = (body: unknown) =>
 function setup(fail = false) {
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.includes('/workflow-waits?'))
+      return response({ waits: [], hasMore: false, nextCursor: null });
     if (url.endsWith('/projects')) return response({ projects: [{ id: 'p', name: 'Burrow' }] });
     if (init?.method === 'PATCH')
       return fail

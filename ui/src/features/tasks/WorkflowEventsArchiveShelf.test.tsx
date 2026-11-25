@@ -106,6 +106,8 @@ it('reads literal event details and separates GitHub conclusion from Burrow hand
   expect(reader.getByText('succeeded')).toBeTruthy();
   expect(reader.getByText(payload)).toBeTruthy();
   expect(reader.getByText(/"output": "<script>bad/)).toBeTruthy();
+  expect(reader.getByText('Watch ID')).toBeTruthy();
+  expect(reader.queryByText('Task wait ID')).toBeNull();
   expect(reader.getByText('ci-session')).toBeTruthy();
   expect(reader.getByText('burrow-run')).toBeTruthy();
   expect(reader.getByText('Agent A')).toBeTruthy();
@@ -235,4 +237,20 @@ it('drops an available reply for a prior selection and never links a preallocate
   );
   expect(screen.queryByRole('button', { name: /Open run proof/ })).toBeNull();
   expect(screen.getByText('reserved')).toBeTruthy();
+});
+
+it('identifies a retained task wait by its typed source, not its instruction or watch name', async () => {
+  const item = {
+    ...event('one'),
+    taskWaitId: 'actual-wait-id',
+    taskId: 'original-task',
+    watchId: 'legacy-watch-field',
+  };
+  vi.spyOn(archiveRepository, 'listWorkflowEvents').mockResolvedValue(page([item]));
+  fireEvent.click(await screenRow());
+  const reader = within(screen.getByRole('region', { name: 'Workflow event details' }));
+  expect(reader.getByText('Task wait ID').nextElementSibling?.textContent).toBe(item.taskWaitId);
+  expect(reader.getByText('Task ID').nextElementSibling?.textContent).toBe(item.taskId);
+  expect(reader.queryByText('Watch ID')).toBeNull();
+  expect(reader.queryByText(item.watchId)).toBeNull();
 });

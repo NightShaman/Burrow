@@ -718,6 +718,40 @@
   color: var(--muted);
   font-size: 11px;
 }
+.task-workflow-waits h4 {
+  margin: 8px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.task-wait-record {
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.task-wait-record summary {
+  padding: 3px 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.task-wait-record small {
+  margin-left: 1rem;
+}
+.task-wait-record dl {
+  margin: 4px 0 4px 1rem;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.task-wait-record dl > div {
+  display: grid;
+  grid-template-columns: min(11em, 32%) minmax(0, 1fr);
+  gap: 8px;
+  padding: 3px 0;
+}
+.task-wait-record dt {
+  color: var(--muted);
+}
+.task-wait-record dd {
+  margin: 0;
+}
 .task-detail-form {
   gap: 10px;
   padding-bottom: 12px;

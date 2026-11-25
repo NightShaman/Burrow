@@ -13,7 +13,7 @@ function sendAttachment(res, attachment) {
   res.end(bytes);
 }
 
-export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses, taskPriorities, executeBoardTask } = {}) {
+export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses, taskPriorities, executeBoardTask, workflowWaits } = {}) {
   return async function handleTaskBoardRoute({ req, res, url } = {}) {
     if (req.method === 'GET' && url.pathname === '/api/task-board/statuses') {
       sendJson(res, 200, { ok: true, statuses: taskStatuses }); return true;
@@ -70,6 +70,20 @@ export function createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundary
     if (url.pathname.startsWith('/api/task-board/tasks/')) {
       const parts = url.pathname.slice('/api/task-board/tasks/'.length).split('/').map(decodeURIComponent);
       const taskId = parts[0], action = parts[1] || null, attachmentId = action === 'attachments' ? parts[2] || null : null;
+      if (req.method === 'GET' && action === 'workflow-waits' && parts.length === 2) {
+        try {
+          const exists = await withTaskBoard(store => store.getTask(taskId));
+          if (!exists) { sendJson(res,404,{ok:false,error:'task_not_found'}); return true; }
+          const rawLimit = url.searchParams.get('limit');
+          if (rawLimit !== null && !/^[1-9][0-9]*$/.test(rawLimit)) throw new Error('task_workflow_wait_invalid_limit');
+          const page = await workflowWaits.listForTask(taskId,{limit:rawLimit === null ? 50 : Number(rawLimit),cursor:url.searchParams.get('cursor')});
+          sendJson(res,200,{ok:true,...page});
+        } catch (error) {
+          const code = error?.message || 'task_workflow_wait_read_failed';
+          sendJson(res,/^task_workflow_wait_invalid_/.test(code) ? 400 : 500,{ok:false,error:code});
+        }
+        return true;
+      }
       if (req.method === 'POST' && action === 'execute') { sendJson(res, 200, await executeBoardTask(taskId)); return true; }
       if (action === 'history' && req.method === 'GET') {
         const page = await withTaskBoard((store) => store.taskHistory(taskId, { limit: url.searchParams.get('limit'), before: url.searchParams.get('before') }));

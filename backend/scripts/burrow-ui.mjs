@@ -288,7 +288,8 @@ const chatInputRunner = createChatInputRunner({ store: postgresApplication.store
 });
 chatSession.configureChatInputRunner(chatInputRunner);
 const chatInputs = createChatInputService({ stores: postgresApplication.stores, activeRuns: activeChatRuns, runner: chatInputRunner, resolveAgentRuntime });
-const completionEventRunner = createCompletionEventRunner({ store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
+const completionEventRunner = createCompletionEventRunner({ executeTask: executeBoardTask, store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
+postgresApplication.stores.taskWorkflowWaits.wake = () => completionEventRunner.wake();
 const externalTurnDispatcher = createModExternalTurnDispatcher({ logger: serverLogger, store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 const NODE_GOBLIN_OTEL_CONFIGURATION_REASONS = new Set([
   'provider_configuration_unsupported', 'configuration_failed',
@@ -417,7 +418,10 @@ async function executeBoardTask(taskId, options = {}) {
     activeChatRuns, sessionContinuityHeads, activeChatRunKey, sessionContinuityHeadKey,
     RUN_CANCELLATION_GRACE_MS, retireCancelledRun, registerRuntimeActiveRun,
     publicChatProgress, observeModelRecovery, serverLogger, applyModelRecoveryProgress,
-  })(taskId, options);
+  })(taskId, options).then(result => {
+    if (result.completion) void result.completion.finally(() => completionEventRunner.wake()).catch(() => {});
+    return result;
+  });
 }
 
 function groupChannelRunKey(channelId, agentId, runId) {
@@ -1625,7 +1629,7 @@ const { importPreview, applyImport, exportSnapshot } = createImportExportApplica
 const exportRoute = createExportRoutes({ readJsonBody, sendJson, exportCatalog, normalizeImportRequest, decodeExport, buildExport, exportSnapshot, importPreview, applyImport });
 const completionEventReceiverSettings = createCompletionEventSettings({ store: postgresApplication.stores.completionEventSettings });
 const completionEventRoute = createCompletionEventRoutes({ store: postgresApplication.stores.completionEvents, readJsonBody, sendJson, resolveAgentRuntime, wake: () => completionEventRunner.wake(), getWebhookSecret: () => completionEventReceiverSettings.secret(), receiverSettings: completionEventReceiverSettings });
-const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask });
+const taskBoardRoute = createTaskBoardRoutes({ readJsonBody, sendJson, validateBoundaryBody, withTaskBoard, taskStatuses: TASK_STATUSES, taskPriorities: TASK_PRIORITIES, executeBoardTask, workflowWaits: postgresApplication.stores.taskWorkflowWaits });
 const workbenchRoute = createWorkbenchRoutes({ readJsonBody, sendJson, selectedAgentRuntime, dataRootForAgent, listWorkItemSummaries, createWorkbenchItem, readWorkItem, runWorkbenchItemStep, continueWorkbenchItem, archiveWorkbenchItem, workbenchPlan, workbenchRun });
 const forgeStoreFactory = () => postgresApplication.stores.forge;
 configureForgeStoreFactory(forgeStoreFactory);

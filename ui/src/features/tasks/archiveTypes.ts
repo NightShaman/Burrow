@@ -88,6 +88,8 @@ export type ContinuityCardGroup = {
 export type ArchiveWorkflowEvent = {
   id: string;
   watchId: string;
+  taskWaitId?: string | null;
+  taskId?: string | null;
   repository: string;
   workflow: string;
   runId: string;

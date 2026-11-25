@@ -1,3 +1,4 @@
+import { normalizeWaitTarget, lockWaitIdentity, matchTaskWaits } from './task-workflow-wait.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { archiveCursorBoundary, archiveCursor, archiveUtcDay, archiveUtcMonth } from './archive-pagination.mjs';
@@ -75,7 +76,7 @@ function validateConclusions(value) {
   return value;
 }
 function watchRow(r) { return { id: r.id, repository: r.repository, workflow: r.workflow, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, enabled: r.enabled, conclusions: r.conclusions, createdAt: r.created_at, updatedAt: r.updated_at }; }
-function eventRow(r) { return { id: r.id, watchId: r.watch_id, repository: r.repository, workflow: r.workflow, runId: r.run_id, runAttempt: r.run_attempt, headSha: r.head_sha, conclusion: r.conclusion, url: r.url, completedAt: r.completed_at, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, status: r.status, ownerId: r.owner_id, chatRunId: r.chat_run_id, result: r.result, error: r.error, traceDir: r.trace_dir, createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at }; }
+function eventRow(r) { return { id: r.id, watchId: r.watch_id, taskWaitId: r.task_wait_id ?? null, taskId: r.task_id ?? null, repository: r.repository, workflow: r.workflow, runId: r.run_id, runAttempt: r.run_attempt, headSha: r.head_sha, conclusion: r.conclusion, url: r.url, completedAt: r.completed_at, agentId: r.agent_id, sessionId: r.session_id, instruction: r.instruction, status: r.status, ownerId: r.owner_id, chatRunId: r.chat_run_id, result: r.result, error: r.error, traceDir: r.trace_dir, createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at }; }
 
 export class PostgresCompletionEventStore {
   constructor({ pool } = {}) {
@@ -109,17 +110,27 @@ export class PostgresCompletionEventStore {
     return rowCount > 0;
   }
   async accept({ repository, workflow, runId, runAttempt, headSha, conclusion, url, completedAt } = {}) {
-    repository = repositoryValue(repository);
-    workflow = bounded(workflow, 'workflow', 255);
-    runId = bounded(String(runId ?? ''), 'runId', 128, { pattern: /^[0-9]+$/ });
-    if (!Number.isSafeInteger(runAttempt) || runAttempt < 1 || runAttempt > 2147483647) throw new Error('completion_event_invalid_runAttempt');
-    headSha = bounded(headSha, 'headSha', 64, { pattern: /^[0-9a-f]{40,64}$/i });
+    const normalized = normalizeWaitTarget({ repository, workflow, runId: String(runId ?? ''), runAttempt, headSha });
+    runId = String(runId);
     conclusion = bounded(conclusion, 'conclusion', 128);
     url = bounded(url, 'url', 2048, { pattern: /^https:\/\// });
     if (typeof completedAt !== 'string' || !Number.isFinite(Date.parse(completedAt))) throw new Error('completion_event_invalid_completedAt');
     const completed = new Date(completedAt).toISOString();
     return withPostgresTransaction(this.pool, async client => {
-      const { rows: watches } = await client.query('SELECT * FROM github_workflow_watches WHERE enabled AND repository=$1 AND workflow=$2 ORDER BY id', [repository, workflow]);
+      await lockWaitIdentity(client, normalized.repository, normalized.runId, runAttempt);
+      const completion = { ...normalized, conclusion, url, completedAt: completed };
+      // Upgrade boundary: immutable watch snapshots may predate the inbox.
+      // Check their actual run identity before recording a first inbox snapshot.
+      const legacy = await client.query('SELECT workflow,head_sha,conclusion,url,completed_at FROM github_completion_events WHERE lower(repository)=$1 AND run_id=$2 AND run_attempt=$3',[normalized.repository,normalized.runId,runAttempt]);
+      for (const prior of legacy.rows) {
+        if (prior.workflow !== workflow || prior.head_sha.toLowerCase() !== normalized.headSha || prior.conclusion !== conclusion || prior.url !== url || new Date(prior.completed_at).getTime() !== new Date(completed).getTime()) throw new Error('completion_event_conflict');
+      }
+      await client.query(`INSERT INTO github_completion_inbox(repository,run_id,run_attempt,completion) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING`,[normalized.repository,normalized.runId,runAttempt,JSON.stringify(completion)]);
+      const priorCompletion = (await client.query('SELECT completion FROM github_completion_inbox WHERE repository=$1 AND run_id=$2 AND run_attempt=$3',[normalized.repository,normalized.runId,runAttempt])).rows[0]?.completion;
+      if (!isDeepStrictEqual(priorCompletion,completion)) throw new Error('completion_event_conflict');
+      const matchedIds = await matchTaskWaits(client,completion);
+      const { rows: watches } = await client.query(`SELECT * FROM github_workflow_watches w WHERE enabled AND workflow=$2 AND
+        (repository=$1 OR EXISTS (SELECT 1 FROM github_completion_events e WHERE e.watch_id=w.id AND lower(e.repository)=$3 AND e.run_id=$4 AND e.run_attempt=$5)) ORDER BY id`, [repository, workflow, normalized.repository, runId, runAttempt]);
       const accepted = [];
       for (const watch of watches) {
         if (!watch.conclusions.includes(conclusion)) continue;
@@ -127,14 +138,15 @@ export class PostgresCompletionEventStore {
         const { rows } = await client.query(`INSERT INTO github_completion_events(id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,agent_id,session_id,instruction,chat_run_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz,$11,$12,$13,$14)
           ON CONFLICT (repository,run_id,run_attempt,watch_id) DO NOTHING RETURNING *`,
-        [id, watch.id, repository, workflow, runId, runAttempt, headSha, conclusion, url, completed, watch.agent_id, watch.session_id, watch.instruction, `event-${id}`]);
+        [id, watch.id, watch.repository, workflow, runId, runAttempt, headSha, conclusion, url, completed, watch.agent_id, watch.session_id, watch.instruction, `event-${id}`]);
         if (rows.length) { accepted.push({ ...eventRow(rows[0]), accepted: true }); continue; }
-        const { rows: existing } = await client.query('SELECT * FROM github_completion_events WHERE repository=$1 AND run_id=$2 AND run_attempt=$3 AND watch_id=$4', [repository, runId, runAttempt, watch.id]);
+        const { rows: existing } = await client.query('SELECT * FROM github_completion_events WHERE repository=$1 AND run_id=$2 AND run_attempt=$3 AND watch_id=$4', [watch.repository, runId, runAttempt, watch.id]);
         const prior = existing[0];
         if (!prior || prior.workflow !== workflow || prior.head_sha !== headSha || prior.conclusion !== conclusion || prior.url !== url || new Date(prior.completed_at).getTime() !== new Date(completed).getTime()) throw new Error('completion_event_conflict');
         accepted.push({ ...eventRow(prior), accepted: false });
       }
-      return accepted;
+      const waits = await client.query('SELECT * FROM github_completion_events WHERE task_wait_id IS NOT NULL AND repository=$1 AND run_id=$2 AND run_attempt=$3',[normalized.repository,normalized.runId,runAttempt]);
+      return [...accepted,...waits.rows.map(row => ({ ...eventRow(row), accepted: matchedIds.includes(row.task_wait_id) }))];
     });
   }
   async list({ limit = 50, agentId } = {}) {
@@ -154,7 +166,7 @@ export class PostgresCompletionEventStore {
     const boundary = archiveCursorBoundary(cursor, { scope });
     if (boundary && (boundary.t.startsWith('0000-') || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/.test(boundary.t) || !Number.isFinite(Date.parse(boundary.t)) || new Date(boundary.t).toISOString().slice(0,19) !== boundary.t.slice(0,19) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(boundary.i))) throw new Error('archive_cursor_invalid');
     const read = signal || deadline !== undefined ? (sql, values) => archiveReadQuery(this.pool, sql, values, { signal, deadline }) : (sql, values) => this.pool.query(sql, values);
-    const { rows } = await read(`SELECT id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
+    const { rows } = await read(`SELECT id,watch_id,task_wait_id,task_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
       agent_id,session_id,instruction,status,chat_run_id,result,error,created_at,started_at,finished_at,
       to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS archive_cursor_timestamp
       FROM github_completion_events
@@ -173,7 +185,7 @@ export class PostgresCompletionEventStore {
   async getArchive({ agentId, eventId, signal, deadline } = {}) {
     if (typeof agentId !== 'string' || !agentId.trim() || agentId !== agentId.trim() || agentId.length > 255
       || typeof eventId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) throw new Error('archive_workflow_event_target_invalid');
-    const { rows } = await archiveReadQuery(this.pool, `SELECT id,watch_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
+    const { rows } = await archiveReadQuery(this.pool, `SELECT id,watch_id,task_wait_id,task_id,repository,workflow,run_id,run_attempt,head_sha,conclusion,url,completed_at,
       agent_id,session_id,instruction,status,chat_run_id,result,error,created_at,started_at,finished_at
       FROM github_completion_events WHERE agent_id=$1 AND id=$2::uuid`, [agentId, eventId], { signal, deadline });
     return rows[0] ? eventRow(rows[0]) : null;
@@ -215,6 +227,7 @@ export class PostgresCompletionEventStore {
       // and the running-lane unique index is a second database-level guarantee.
       const { rows } = await client.query(`SELECT e.* FROM github_completion_events e
         JOIN agents a ON a.id=e.agent_id WHERE e.status='pending'
+        AND (e.task_wait_id IS NULL OR NOT EXISTS (SELECT 1 FROM task_board_tasks t WHERE t.id=e.task_id AND t.execution_json->>'status' IN ('running','queued')))
         AND NOT EXISTS (SELECT 1 FROM github_completion_events r WHERE r.agent_id=e.agent_id AND r.session_id=e.session_id AND r.status='running')
         ORDER BY e.created_at,e.id LIMIT 1 FOR UPDATE OF a,e SKIP LOCKED`);
       if (!rows.length) return null;
@@ -250,18 +263,47 @@ export class PostgresCompletionEventStore {
     if (ownerId !== undefined) bounded(ownerId, 'ownerId', 255);
     const probe = createContinuityOwner(this.pool);
     try { return await withPostgresTransaction(this.pool, async client => {
-      const { rows } = await client.query("SELECT id,owner_lock_id FROM github_completion_events WHERE status='running' AND ($1::text IS NULL OR owner_id=$1) FOR UPDATE", [ownerId ?? null]);
+      const { rows } = await client.query("SELECT id,owner_lock_id,task_wait_id FROM github_completion_events WHERE status='running' AND ($1::text IS NULL OR owner_id=$1)", [ownerId ?? null]);
       const interrupted = [];
       for (const row of rows) {
         if (!row.owner_lock_id || await probe.alive(row.owner_lock_id)) continue;
-        const { rows: updated } = await client.query(`UPDATE github_completion_events SET status='interrupted',error='completion_event_owner_lost',owner_id=NULL,owner_lock_id=NULL,finished_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='running' RETURNING *`, [row.id]);
+        let w = null;
+        if (row.task_wait_id) w = (await client.query('SELECT status FROM task_workflow_waits WHERE id=$1 FOR UPDATE',[row.task_wait_id])).rows[0];
+        const liveRow = (await client.query('SELECT status,owner_lock_id FROM github_completion_events WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+        if (liveRow?.status !== 'running' || liveRow.owner_lock_id !== row.owner_lock_id) continue;
+        if (row.task_wait_id) {
+          // A matched/skipped wait proves canonical admission never committed.
+          if (w && ['matched','skipped'].includes(w.status)) {
+            await client.query("UPDATE github_completion_events SET status='pending',owner_id=NULL,owner_lock_id=NULL,started_at=NULL WHERE id=$1",[row.id]);
+            continue;
+          }
+        }
+        const { rows: updated } = await client.query(`UPDATE github_completion_events SET status='interrupted',result=COALESCE(result,(SELECT outcome FROM task_workflow_waits WHERE id=task_wait_id)),error='completion_event_owner_lost',owner_id=NULL,owner_lock_id=NULL,finished_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='running' RETURNING *`, [row.id]);
         interrupted.push(eventRow(updated[0]));
       }
       return interrupted;
     }); } finally { await probe.close(); }
   }
+  // Retry only a task-wait dispatch that provably has no canonical admission.
+  async defer(id, { ownerId, ownerLockId = this.owners.get(ownerId)?.id } = {}) {
+    uuidValue(id);
+    return withPostgresTransaction(this.pool, async client => {
+      const e = (await client.query('SELECT task_wait_id FROM github_completion_events WHERE id=$1',[id])).rows[0];
+      if (!e?.task_wait_id) throw new Error('completion_event_not_task_wait');
+      const w = (await client.query('SELECT status FROM task_workflow_waits WHERE id=$1 FOR UPDATE',[e.task_wait_id])).rows[0];
+      if (!w || !['matched','skipped'].includes(w.status)) throw new Error('completion_event_canonical_admission_exists');
+      const { rows } = await client.query(`UPDATE github_completion_events SET status='pending',owner_id=NULL,owner_lock_id=NULL,started_at=NULL WHERE id=$1 AND status='running' AND owner_id=$2 AND owner_lock_id=$3 RETURNING *`,[id,ownerId,ownerLockId]);
+      if (!rows.length) throw new Error('completion_event_owner_fenced');
+      return eventRow(rows[0]);
+    });
+  }
   async interruptOwner(ownerId) {
     bounded(ownerId, 'ownerId', 255);
+    const pending = (await this.pool.query("SELECT id FROM github_completion_events WHERE status='running' AND owner_id=$1 AND task_wait_id IS NOT NULL",[ownerId])).rows;
+    for (const row of pending) {
+      try { await this.defer(row.id,{ownerId}); }
+      catch (error) { if (error.message !== 'completion_event_canonical_admission_exists' && error.message !== 'completion_event_owner_fenced') throw error; }
+    }
     const { rows } = await this.pool.query(`UPDATE github_completion_events SET status='interrupted',error='completion_event_owner_shutdown',owner_id=NULL,owner_lock_id=NULL,finished_at=CURRENT_TIMESTAMP WHERE status='running' AND owner_id=$1 AND owner_lock_id=$2 RETURNING *`, [ownerId, this.owners.get(ownerId)?.id ?? null]);
     const owner = this.owners.get(ownerId);
     if (owner) { this.owners.delete(ownerId); await owner.close(); }

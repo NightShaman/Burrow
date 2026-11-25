@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, fetchApi, jsonMutation } from '../../app/api';
+import { TaskWorkflowWaitHistory } from './TaskWorkflowWaitHistory';
 import { useConfirm } from '../../app/ConfirmDialog';
 
 type Actor = { type: string; id: string | null; name: string | null };
@@ -58,6 +59,7 @@ export function TaskActivity({
   const [error, setError] = useState('');
   const mounted = useRef(true);
   const generation = useRef(0);
+  const [readVersion, setReadVersion] = useState(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -68,6 +70,7 @@ export function TaskActivity({
 
   async function refresh() {
     const request = ++generation.current;
+    setReadVersion(request);
     setLoading(true);
     setError('');
     try {
@@ -241,6 +244,7 @@ export function TaskActivity({
           </button>
         </header>
 
+        {readVersion > 0 && <TaskWorkflowWaitHistory base={base} readVersion={readVersion} />}
         {history.hasMore && history.nextCursor && (
           <button type="button" disabled={busy || loading} onClick={() => void older()}>
             Load older activity

@@ -185,6 +185,7 @@ async function runAskChatUnserialized({
   // Core-attested external ingress metadata; never taken from request body.
   externalTurnMetadata = null,
   completionEvent = null,
+  taskWorkflowWait = null,
   chatInput = null,
   // Trusted server-side context for a participant in an operator group room.
   // The room transcript is prompt context, not the participant's private session.
@@ -601,6 +602,7 @@ async function runAskChatUnserialized({
         operatorInputAt: turnStartedAt,
         ...(turnSource ? { source: turnSource } : {}),
         ...(completionEvent ? { completionEvent } : {}),
+        ...(taskWorkflowWait ? { taskWorkflowWait } : {}),
         ...(chatInput ? { chatInput } : {}),
         ...(externalTurnMetadata ? { externalTurn: { ownerModId: externalTurnMetadata.ownerModId, externalTurnId: externalTurnMetadata.externalTurnId } } : {}),
         ...(earlyContinuationPlan ? { continuationPlan: earlyContinuationPlan } : {}),

@@ -1,3 +1,5 @@
+import { executeTaskWorkflowWaitTool } from './task-workflow-wait-tools.mjs';
+import { createCompletionEventSettings } from './completion-event-settings.mjs';
 import { createNativeToolExecutor } from './native-tool-executor.mjs';
 import { REFERENCE_IMAGE_ATTACHMENT_PREFIX, OPERATOR_REFERENCE_IMAGE_ATTACHMENT_PREFIX } from './postgres-agent-reference-image-store.mjs';
 import { searchAgentRunEvidence } from './run-evidence.mjs';
@@ -383,6 +385,17 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const result = await executeContinuityHandoffWriteTool({ arguments: { title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.continuity });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_write_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, handoff: result.handoff || null, error: result.error || null });
+      continue;
+    }
+
+    if (['tasks_wait_for_workflow', 'tasks_list_workflow_waits'].includes(action.tool)) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, taskId: action.workflowWaitArguments?.taskId, toolCallId: action.toolCallId || null });
+      const result = await executeTaskWorkflowWaitTool({ tool: action.tool, arguments: action.workflowWaitArguments,
+        agentId, sessionId: sessionId || executionContext?.sessionId, runId: traceLogger?.runId || executionContext?.parentRunId,
+        store: executionContext?.stores?.taskWorkflowWaits, tasks: executionContext?.stores?.tasks,
+        receiverSettings: executionContext?.stores?.completionEventSettings ? createCompletionEventSettings({store:executionContext.stores.completionEventSettings}) : null });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({tool:action.tool, toolCallId:action.toolCallId || null, ...(started?.payload?.activityId ? {activityId:started.payload.activityId} : {}),ok:result.ok,waitId:result.wait?.id || null,error:result.error || null});
       continue;
     }
 

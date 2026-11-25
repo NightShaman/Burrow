@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TaskActivity } from './TaskActivity';
 import { ConfirmProvider } from '../../app/ConfirmDialog';
@@ -19,7 +19,10 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-function fixture(failUpload = false) {
+function fixture(
+  failUpload = false,
+  waits = async (_url: string) => response({ waits: [], hasMore: false, nextCursor: null }),
+) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   vi.stubGlobal(
     'fetch',
@@ -30,6 +33,7 @@ function fixture(failUpload = false) {
         return failUpload
           ? response({ error: 'task_attachment_too_large' }, 413)
           : response({ ok: true });
+      if (url.includes('/workflow-waits?')) return waits(url);
       if (url.includes('/attachments')) return response({ attachments: [] });
       return response(
         url.includes('before=')
@@ -101,20 +105,22 @@ it('shows unknown attribution honestly without exposing an actor ID', async () =
     'fetch',
     vi.fn(async (input: RequestInfo | URL) =>
       response(
-        String(input).includes('/attachments')
-          ? { attachments: [] }
-          : {
-              events: [
-                {
-                  ...event('created'),
-                  actor: { type: 'unknown', id: null, name: null },
-                  runId: null,
-                  sessionId: null,
-                },
-              ],
-              hasMore: false,
-              nextCursor: null,
-            },
+        String(input).includes('/workflow-waits?')
+          ? { waits: [], hasMore: false, nextCursor: null }
+          : String(input).includes('/attachments')
+            ? { attachments: [] }
+            : {
+                events: [
+                  {
+                    ...event('created'),
+                    actor: { type: 'unknown', id: null, name: null },
+                    runId: null,
+                    sessionId: null,
+                  },
+                ],
+                hasMore: false,
+                nextCursor: null,
+              },
       ),
     ),
   );
@@ -124,4 +130,119 @@ it('shows unknown attribution honestly without exposing an actor ID', async () =
     </ConfirmProvider>,
   );
   expect(await screen.findByText('Unknown actor')).toBeTruthy();
+});
+
+const wait = {
+  id: 'wait1',
+  repository: 'NightShaman/Burrow',
+  workflow: 'Public release',
+  runId: '991',
+  runAttempt: 2,
+  headSha: 'b'.repeat(40),
+  checkpoint: 'Verify the frozen tree.\nDo not publish.',
+  status: 'waiting',
+  reason: null,
+  reasonCode: null,
+  registeredAt: '2026-11-24T18:10:00Z',
+  matchedAt: null,
+  resumedAt: null,
+  finishedAt: null,
+  source: { agentId: 'hatchet', sessionId: 'default', runId: 'source-run' },
+  trigger: null,
+  continuation: null,
+  outcome: null,
+};
+const waitsPage = (waits: unknown[], nextCursor: string | null = null) =>
+  response({ ok: true, waits, nextCursor, hasMore: !!nextCursor });
+
+it('refreshes a wait on the same task and keeps admission, GitHub conclusion and actual outcome separate', async () => {
+  const resumed = {
+    ...wait,
+    status: 'resumed',
+    reason: 'Exact workflow completion admitted',
+    trigger: { id: 'delivery2', conclusion: 'failure', completedAt: '2026-11-24T18:15:00Z' },
+    continuation: { agentId: 'hatchet', sessionId: 'default', runId: 'resumed-run' },
+  };
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(waitsPage([wait]))
+    .mockResolvedValueOnce(waitsPage([resumed]))
+    .mockResolvedValueOnce(
+      waitsPage([
+        {
+          ...resumed,
+          outcome: {
+            status: 'completed',
+            result: { answerText: 'Reviewed upstream failure; nothing published.' },
+          },
+        },
+      ]),
+    );
+  fixture(false, read);
+  fireEvent.click((await screen.findByText('Waiting')).closest('summary')!);
+  expect(screen.getByText('NightShaman/Burrow · #991 · attempt 2')).toBeTruthy();
+  expect(screen.getByText(wait.headSha)).toBeTruthy();
+  expect(screen.getByText('Verify the frozen tree. Do not publish.').textContent).toBe(
+    wait.checkpoint,
+  );
+  expect(screen.queryByText('Continuation outcome')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh history' }));
+  await screen.findByText('No outcome recorded yet');
+  expect(screen.getByText('failure')).toBeTruthy();
+  expect(screen.getByText('delivery2')).toBeTruthy();
+  expect(screen.getByText('hatchet / default / resumed-run')).toBeTruthy();
+  expect(screen.getByText('Exact workflow completion admitted')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh history' }));
+  await screen.findByText('Reviewed upstream failure; nothing published.');
+  expect(screen.getByText('completed')).toBeTruthy();
+  expect(read.mock.calls.map(([url]) => url)).toEqual(
+    Array(3).fill('/api/task-board/tasks/t/workflow-waits?limit=50'),
+  );
+});
+
+it('retains documents/history on wait read failure and retries the failed older page without duplicating waits', async () => {
+  const expired = {
+    ...wait,
+    id: 'older',
+    status: 'skipped',
+    reason: 'Task was cancelled before admission',
+  };
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(response({ error: 'wait_read_failed' }, 503))
+    .mockResolvedValueOnce(waitsPage([wait], 'wait+/='))
+    .mockResolvedValueOnce(response({ error: 'page_read_failed' }, 503))
+    .mockResolvedValueOnce(waitsPage([wait, expired]));
+  fixture(false, read);
+  expect((await screen.findByRole('alert')).textContent).toContain('wait_read_failed');
+  expect(screen.getByText('middle')).toBeTruthy();
+  expect(screen.getByText('No documents attached.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry workflow waits' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Load older waits' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('page_read_failed');
+  expect(screen.getByText('Waiting')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry workflow waits' }));
+  fireEvent.click((await screen.findByText('Skipped')).closest('summary')!);
+  expect(screen.getByText(expired.reason)).toBeTruthy();
+  expect(screen.queryByText('Continuation run')).toBeNull();
+  expect(document.querySelectorAll('.task-wait-record')).toHaveLength(2);
+  expect(read.mock.calls.slice(2).map(([url]) => url)).toEqual(
+    Array(2).fill('/api/task-board/tasks/t/workflow-waits?limit=50&cursor=wait%2B%2F%3D'),
+  );
+});
+
+it('discards a superseded wait page when the first page is refreshed', async () => {
+  let finish!: (value: Response) => void;
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(waitsPage([wait], 'older'))
+    .mockReturnValueOnce(new Promise<Response>((resolve) => (finish = resolve)))
+    .mockResolvedValueOnce(waitsPage([{ ...wait, status: 'matched' }]));
+  fixture(false, read);
+  fireEvent.click(await screen.findByRole('button', { name: 'Load older waits' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh history' }));
+  await screen.findByText('Matched');
+  await act(async () => finish(waitsPage([{ ...wait, id: 'stale', workflow: 'Stale wait' }])));
+  expect(screen.queryByText(/Stale wait/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Load older waits' })).toBeNull();
 });
