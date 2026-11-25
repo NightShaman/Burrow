@@ -17,6 +17,13 @@ function run(agentId = 'smatchet'): ArchiveRunDetail {
     agentId,
     sessionId: 'default',
     status: 'completed',
+    execution: {
+      status: 'completed',
+      reasonCode: 'run_completed',
+      reason: 'Runtime completion recorded.',
+      source: 'runtime_receipt',
+    },
+    toolHistory: { total: 0, completed: 0, failed: 0, pending: 0, unknown: 0 },
     objective: `${agentId} objective`,
     counts: {
       observations: 0,
@@ -204,9 +211,9 @@ it('copies archived proof with real Markdown newlines while preserving literal r
   fireEvent.click(await screen.findByRole('button', { name: 'Copy proof as Markdown' }));
   expect(copy).toHaveBeenCalledOnce();
   const text = copy.mock.calls[0][0] as string;
-  expect(text).toContain('# smatchet objective\n- Agent: smatchet\n- Status: Completed');
+  expect(text).toContain('# smatchet objective\n- Agent: smatchet\n- Execution: Completed');
   expect(text).toContain('## Request\n\nKeep literal \\n in user text');
-  expect(text).toContain('## Final outcome\n\nFinished');
+  expect(text).toContain('## Agent response\n\nFinished');
   expect(text).toContain('### Actions / changes\n- **validated** First\n- **validated** Second');
   expect(text).toContain('## Timeline\n_No timeline evidence recorded._');
   expect(text.replace(value.request, '')).not.toContain('\\n');
@@ -377,7 +384,7 @@ for (const status of ['verified', 'mismatch', 'unverified'] as const) {
       expect(
         screen.getByText('GitHub conclusion: success · Public promotion #421 · attempt 2'),
       ).toBeTruthy();
-      expect(screen.getByText('smatchet · Burrow handling: Completed')).toBeTruthy();
+      expect(screen.getByText('Completed', { selector: '.proof-status-badge' })).toBeTruthy();
       expect(screen.getByText(check.reason)).toBeTruthy();
       const expected = within(screen.getByText('Expected (caller supplied)').parentElement!);
       const observed = within(screen.getByText('Observed', { exact: true }).parentElement!);
@@ -411,7 +418,7 @@ for (const status of ['verified', 'mismatch', 'unverified'] as const) {
         check.reason,
         check.evidenceSources[0].url,
         `HTTP ${check.evidenceSources[0].statusCode}`,
-        'Burrow handling: Completed',
+        'Burrow handling / execution: Completed',
         'GitHub conclusion: success',
         `Public release: ${verdict.textContent}`,
         'Expected (caller supplied)',
@@ -442,7 +449,7 @@ it('does not infer a publication check from plain evidence or the agent’s fina
 });
 it('keeps historical Proof empty states without inventing workflow handling or a missing check', async () => {
   await openProof(run());
-  expect(screen.getByText('No verification recorded.')).toBeTruthy();
+  expect(screen.getAllByText('No verification recorded.').length).toBeGreaterThan(0);
   expect(
     screen.queryByText(/GitHub conclusion|Burrow handling|No outcome check recorded/),
   ).toBeNull();
@@ -500,6 +507,7 @@ it('preserves meaningful counts and does not headline an ID-only objective', asy
   const value = run();
   value.objective = `  ${value.runId} `;
   value.status = 'warning';
+  value.toolHistory = { total: 1, completed: 0, failed: 1, pending: 0, unknown: 0 };
   Object.assign(value.counts, {
     toolActivities: 1,
     unresolved: 2,
@@ -510,7 +518,128 @@ it('preserves meaningful counts and does not headline an ID-only objective', asy
   vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
   render(<ArchiveRunsProof selectedAgent="" search="" />);
   const card = within(await screen.findByRole('button', { name: /No objective recorded/ }));
-  expect(card.getByText('Warning')).toBeTruthy();
-  expect(card.getByText('1 tool activity · 2 unresolved')).toBeTruthy();
+  expect(card.getByText('Completed')).toBeTruthy();
+  expect(card.getByText('2 verification records · Tools: 1 failed attempt')).toBeTruthy();
   expect(card.getByText('6 evidence')).toBeTruthy();
+});
+
+it('separates completed execution, failed attempts, and missing verification without active todo claims', async () => {
+  const value = run();
+  value.status = 'warning';
+  value.toolHistory = { total: 3, completed: 1, failed: 2, pending: 0, unknown: 0 };
+  value.counts.unresolved = 2;
+  value.finalAnswer = 'Done, and verified!';
+  value.evidence.unresolved = [
+    { text: 'An earlier tool attempt failed.', status: 'unresolved', sourceRefs: [] },
+  ];
+  value.timeline = [
+    {
+      kind: 'tool_result',
+      status: 'failed',
+      summary: 'Command failed · exit: 2 · Invalid argument',
+      evidence: 'session_execution',
+    },
+  ];
+  await openProof(value);
+  const summary = within(document.querySelector('.proof-run-summary')! as HTMLElement);
+  expect(summary.getByText('Completed')).toBeTruthy();
+  expect(summary.getByText('No verification recorded')).toBeTruthy();
+  expect(summary.getByText('2 failed attempts · 1 completed')).toBeTruthy();
+  expect(summary.getByText('Recorded attempts, not an open-work list.')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Agent response' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Final outcome' })).toBeNull();
+  expect(screen.queryByText('Warning')).toBeNull();
+  expect(screen.getByText('Command failed · exit: 2 · Invalid argument')).toBeTruthy();
+  expect(
+    screen.getByText('Recorded during this run; may include earlier failed attempts.'),
+  ).toBeTruthy();
+});
+
+for (const status of [
+  'running',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'superseded',
+  'not_recorded',
+] as const) {
+  it(`uses canonical ${status} in both list and detail despite legacy completed`, async () => {
+    const value = run();
+    value.execution = {
+      status,
+      reason: `Reason for ${status}`,
+      reasonCode: status,
+      source:
+        status === 'running'
+          ? 'continuity_state'
+          : status === 'not_recorded'
+            ? 'not_recorded'
+            : 'runtime_receipt',
+    };
+    value.finalAnswer = 'A response does not establish completion.';
+    await openProof(value);
+    const row = screen.getByRole('button', { name: /smatchet objective/ });
+    const expected =
+      status === 'not_recorded' ? 'Not recorded' : status[0].toUpperCase() + status.slice(1);
+    expect(within(row).getByText(expected)).toBeTruthy();
+    const summary = within(screen.getByRole('region', { name: 'Run proof' })).getByText(expected, {
+      selector: '.proof-status-badge',
+    });
+    expect(summary).toBeTruthy();
+    expect(screen.getByText(`Reason for ${status}`)).toBeTruthy();
+    expect(screen.queryByText('Completed', { selector: '.proof-status-badge' })).toBeNull();
+  });
+}
+
+it('is honest with older Core: no canonical execution or tool summary is not inferred from legacy success', async () => {
+  const value = run();
+  delete value.execution;
+  delete value.toolHistory;
+  value.finalAnswer = 'Successfully completed and verified.';
+  await openProof(value);
+  expect(screen.getByText('Not recorded', { selector: '.proof-status-badge' })).toBeTruthy();
+  expect(screen.getByText('Tool results not summarized')).toBeTruthy();
+  expect(
+    screen.getByText('This archive does not include a canonical execution record.'),
+  ).toBeTruthy();
+  expect(screen.queryByText('Verified', { exact: true })).toBeNull();
+});
+
+it('shows pending results as history for terminal runs, and awaiting only for canonical running', async () => {
+  const value = run();
+  value.toolHistory = { total: 2, completed: 0, failed: 0, pending: 1, unknown: 1 };
+  await openProof(value);
+  expect(screen.getByText('1 result not recorded · 1 unknown')).toBeTruthy();
+  expect(screen.queryByText(/awaiting result/)).toBeNull();
+});
+
+it('does not let a verified release check mask another failed verification record', async () => {
+  const value = run();
+  value.evidence.verifications = [
+    {
+      text: 'Release receipt',
+      status: 'observed',
+      sourceRefs: [],
+      outcomeCheck: checkReceipt('verified'),
+    },
+    { text: 'Browser check failed', status: 'failed', sourceRefs: [] },
+  ];
+  value.counts.verifications = 2;
+  await openProof(value);
+  const label = within(document.querySelector('.proof-run-summary')! as HTMLElement).getByText(
+    '1 verified · 1 other record · 1 failed',
+  );
+  expect(label.classList.contains('proof-status-failed')).toBe(true);
+  expect(label.classList.contains('proof-status-verified')).toBe(false);
+});
+
+it('headlines failed plain verification evidence without calling other records verified', async () => {
+  const value = run();
+  value.evidence.verifications = [{ text: 'A failed test', status: 'failed', sourceRefs: [] }];
+  value.counts.verifications = 1;
+  await openProof(value);
+  const label = within(document.querySelector('.proof-run-summary')! as HTMLElement).getByText(
+    '1 verification record · 1 failed',
+  );
+  expect(label.classList.contains('proof-status-failed')).toBe(true);
 });

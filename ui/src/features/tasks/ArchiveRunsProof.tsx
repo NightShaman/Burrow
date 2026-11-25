@@ -3,7 +3,12 @@ import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { markdownPlugins, MarkdownImage, MarkdownTable } from '../../app/markdownTables';
 import { ProofOutcomeCheck, outcomeMarkdown, publicReleaseCheck } from './ProofOutcomeCheck';
-import type { ArchiveRunDetail, ArchiveVerification, WorkflowCompletionEvent } from '../../app/api';
+import type {
+  ArchiveRunDetail,
+  ArchiveRunSummary,
+  ArchiveVerification,
+  WorkflowCompletionEvent,
+} from '../../app/api';
 import { archiveRepository, type ArchiveRepository } from './archiveRepository';
 import type { EventKey, ProofKey } from './archiveTypes';
 import { ProviderRequestHistory } from './ProviderRequestHistory';
@@ -17,7 +22,7 @@ function date(value?: string | null) {
         parsed,
       );
 }
-function duration(run: ArchiveRunDetail) {
+function duration(run: ArchiveRunSummary) {
   if (!run.startedAt || !run.completedAt) return '—';
   const ms = new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime();
   return Number.isFinite(ms) && ms >= 0
@@ -27,7 +32,7 @@ function duration(run: ArchiveRunDetail) {
     : '—';
 }
 
-function runListTitle(run: ArchiveRunDetail) {
+function runListTitle(run: ArchiveRunSummary) {
   const objective = run.objective?.trim().replace(/\s+/g, ' ');
   if (!objective || objective === run.runId) return 'No objective recorded';
   // The button's accessible name should be an excerpt too, not the whole message.
@@ -35,37 +40,131 @@ function runListTitle(run: ArchiveRunDetail) {
   return excerpt === objective ? objective : `${excerpt.trimEnd()}…`;
 }
 
-function RunActivity({ run }: { run: ArchiveRunDetail }) {
-  const elapsed = duration(run);
-  const { toolActivities, unresolved } = run.counts;
-  const facts = [
-    elapsed !== '—' && elapsed,
-    toolActivities > 0 &&
-      `${toolActivities} tool ${toolActivities === 1 ? 'activity' : 'activities'}`,
-    unresolved > 0 && `${unresolved} unresolved`,
-  ].filter(Boolean);
-  return facts.length ? <p>{facts.join(' · ')}</p> : null;
+function executionInfo(run: ArchiveRunSummary) {
+  const status = run.execution?.status ?? 'not_recorded';
+  const labels = {
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+    interrupted: 'Interrupted',
+    superseded: 'Superseded',
+    not_recorded: 'Not recorded',
+  };
+  return {
+    label: labels[status],
+    status,
+    reason: run.execution?.reason || 'This archive does not include a canonical execution record.',
+  };
 }
-
-type ArchiveRunStatusPresentation = { label: string; detail?: string };
-
-const archiveRunStatus: Record<ArchiveRunDetail['status'], ArchiveRunStatusPresentation> = {
-  completed: { label: 'Completed' },
-  warning: { label: 'Warning' },
-  failed: { label: 'Failed' },
-  unverified: {
-    label: 'Unverified',
-    detail:
-      'A final answer was recorded, but no terminal receipt was captured. Treat this outcome as unverified.',
-  },
-  incomplete: {
-    label: 'Incomplete',
-    detail: 'Neither a final answer nor a terminal receipt was captured for this run.',
-  },
-};
-
-function statusInfo(status: ArchiveRunDetail['status']) {
-  return archiveRunStatus[status];
+function toolHistoryText(run: ArchiveRunSummary) {
+  const history = run.toolHistory;
+  if (!history) return 'Tool results not summarized';
+  if (!history.total) return 'No tool activity recorded';
+  return (
+    [
+      history.failed > 0 &&
+        `${history.failed} failed ${history.failed === 1 ? 'attempt' : 'attempts'}`,
+      history.completed > 0 && `${history.completed} completed`,
+      history.pending > 0 &&
+        `${history.pending} ${run.execution?.status === 'running' ? 'awaiting result' : 'result not recorded'}`,
+      history.unknown > 0 && `${history.unknown} unknown`,
+    ]
+      .filter(Boolean)
+      .join(' · ') || `${history.total} tool activities`
+  );
+}
+function verificationHint(run: ArchiveRunSummary) {
+  const count = run.counts.verifications;
+  return count
+    ? `${count} verification ${count === 1 ? 'record' : 'records'}`
+    : 'No verification recorded';
+}
+function verificationInfo(run: ArchiveRunDetail) {
+  const items = run.evidence.verifications;
+  const checks = items.map(publicReleaseCheck).filter((check) => !!check);
+  const other = items.filter((item) => !publicReleaseCheck(item));
+  const failures = other.filter((item) => item.status === 'failed').length;
+  if (!checks.length)
+    return {
+      label: `${verificationHint(run)}${failures ? ` · ${failures} failed` : ''}`,
+      status: failures ? 'failed' : 'not_recorded',
+      detail: items.length ? 'See recorded evidence below.' : '',
+    };
+  const statuses = ['mismatch', 'unverified', 'verified'] as const;
+  const label = [
+    ...statuses.map((status) => {
+      const count = checks.filter((check) => check.status === status).length;
+      return count ? `${count} ${status}` : '';
+    }),
+    other.length &&
+      `${other.length} other ${other.length === 1 ? 'record' : 'records'}${failures ? ` · ${failures} failed` : ''}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return {
+    label,
+    status: checks.some((c) => c.status === 'mismatch')
+      ? 'mismatch'
+      : failures
+        ? 'failed'
+        : checks.some((c) => c.status === 'unverified')
+          ? 'unverified'
+          : other.length
+            ? 'not_recorded'
+            : 'verified',
+    detail: other.length
+      ? 'Recorded checks and evidence · details below'
+      : 'Public release checks · details below',
+  };
+}
+function RunActivity({ run }: { run: ArchiveRunSummary }) {
+  return (
+    <p className="proof-run-hints">
+      {[
+        duration(run) !== '—' && duration(run),
+        verificationHint(run),
+        run.toolHistory?.total && `Tools: ${toolHistoryText(run)}`,
+      ]
+        .filter(Boolean)
+        .join(' · ')}
+    </p>
+  );
+}
+function RunSummary({ run }: { run: ArchiveRunDetail }) {
+  const execution = executionInfo(run),
+    verification = verificationInfo(run);
+  return (
+    <dl className="proof-run-summary" aria-label="Run summary">
+      <div>
+        <dt>Execution</dt>
+        <dd>
+          <strong className={`proof-status-badge proof-status-${execution.status}`}>
+            {execution.label}
+          </strong>
+          <p>{execution.reason}</p>
+        </dd>
+      </div>
+      <div>
+        <dt>Verification</dt>
+        <dd>
+          <strong className={`proof-summary-verification proof-status-${verification.status}`}>
+            {verification.label}
+          </strong>
+          {verification.detail && <p>{verification.detail}</p>}
+        </dd>
+      </div>
+      <div>
+        <dt>Tool history</dt>
+        <dd>
+          <strong>{toolHistoryText(run)}</strong>
+          {!!(run.toolHistory?.failed || run.toolHistory?.pending || run.toolHistory?.unknown) && (
+            <p>Recorded attempts, not an open-work list.</p>
+          )}
+        </dd>
+      </div>
+    </dl>
+  );
 }
 type ChildVerification = NonNullable<ArchiveRunDetail['subagents'][number]['verification']>;
 const childVerificationStatus: Record<
@@ -139,7 +238,10 @@ function proofMarkdown(run: ArchiveRunDetail) {
   return [
     `# ${run.objective || run.runId}`,
     `- Agent: ${run.agentName || run.agentId}`,
-    `- ${run.workflowEvent ? 'Burrow handling' : 'Status'}: ${statusInfo(run.status).label}`,
+    `- ${run.workflowEvent ? 'Burrow handling / execution' : 'Execution'}: ${executionInfo(run).label}`,
+    `- Execution reason: ${executionInfo(run).reason}`,
+    `- Verification: ${verificationInfo(run).label}`,
+    `- Tool history: ${toolHistoryText(run)}`,
     run.workflowEvent ? `- ${workflowLabel(run.workflowEvent)}` : '',
     `- Started: ${date(run.startedAt)}`,
     `- Completed: ${date(run.completedAt)}`,
@@ -147,12 +249,12 @@ function proofMarkdown(run: ArchiveRunDetail) {
     `- Decision: ${run.decision || 'No terminal decision'}`,
     '',
     run.request ? `## Request\n\n${run.request}` : '',
-    run.finalAnswer ? `## Final outcome\n\n${run.finalAnswer}` : '',
+    run.finalAnswer ? `## Agent response\n\n${run.finalAnswer}` : '',
     '## Counts',
     `- Observations: ${run.counts.observations}`,
     `- Changes: ${run.counts.changes}`,
     `- Verifications: ${run.counts.verifications}`,
-    `- Unresolved: ${run.counts.unresolved}`,
+    `- Recorded issues: ${run.counts.unresolved}`,
     `- Tool activity: ${run.counts.toolActivities}`,
     `- Minions: ${run.counts.subagents}`,
     '',
@@ -160,7 +262,13 @@ function proofMarkdown(run: ArchiveRunDetail) {
     '',
     evidence('Verification', run.evidence.verifications, missingOutcome(run)),
     '',
-    evidence('Unresolved', run.evidence.unresolved),
+    evidence(
+      'Recorded issues',
+      run.evidence.unresolved,
+      run.evidence.unresolved.length
+        ? 'Recorded during this run; may include earlier failed attempts.'
+        : undefined,
+    ),
     '',
     '## Timeline',
     timeline,
@@ -314,12 +422,7 @@ function ProofDetail({
     <div className="archive-proof-detail">
       <header className="proof-detail-header">
         <div>
-          <span className="eyebrow">
-            {run.agentName || run.agentId} ·{' '}
-            {run.workflowEvent
-              ? `Burrow handling: ${statusInfo(run.status).label}`
-              : statusInfo(run.status).label}
-          </span>
+          <span className="eyebrow">{run.agentName || run.agentId}</span>
           <h2>{run.objective || run.runId}</h2>
           {run.workflowEvent && (
             <p className="proof-workflow-result archive-related-record">
@@ -351,20 +454,9 @@ function ProofDetail({
                 ? 'Copy failed'
                 : 'Copy proof'}
           </button>
-          <span className={`proof-status-badge proof-status-${run.status}`}>
-            {statusInfo(run.status).label}
-          </span>
         </div>
       </header>
-      {statusInfo(run.status).detail ? (
-        <section
-          className="proof-status-notice"
-          aria-label={`${statusInfo(run.status).label} run status`}
-        >
-          <strong>{statusInfo(run.status).label}</strong>
-          <p>{statusInfo(run.status).detail}</p>
-        </section>
-      ) : null}
+      <RunSummary run={run} />
       {run.request ? (
         <section className="proof-final">
           <h3>Your request</h3>
@@ -378,7 +470,7 @@ function ProofDetail({
       ) : null}
       {run.finalAnswer ? (
         <section className="proof-final">
-          <h3>Final outcome</h3>
+          <h3>Agent response</h3>
           <ReactMarkdown
             remarkPlugins={markdownPlugins}
             components={{ table: MarkdownTable, img: MarkdownImage }}
@@ -391,16 +483,15 @@ function ProofDetail({
         {Object.entries({
           Observations: run.counts.observations,
           Changes: run.counts.changes,
-          Verifications: run.counts.verifications,
-          Unresolved: run.counts.unresolved,
-          'Tool activity': run.counts.toolActivities,
           Minions: run.counts.subagents,
-        }).map(([label, count]) => (
-          <div key={label}>
-            <strong>{count}</strong>
-            <span>{label}</span>
-          </div>
-        ))}
+        })
+          .filter(([, count]) => count > 0)
+          .map(([label, count]) => (
+            <div key={label}>
+              <strong>{count}</strong>
+              <span>{label}</span>
+            </div>
+          ))}
       </div>
       <div className="proof-evidence-grid">
         <EvidenceList title="Actions / changes" items={run.evidence.changes} />
@@ -409,7 +500,15 @@ function ProofDetail({
           items={run.evidence.verifications}
           note={missingOutcome(run)}
         />
-        <EvidenceList title="Unresolved" items={run.evidence.unresolved} />
+        <EvidenceList
+          title="Recorded issues"
+          items={run.evidence.unresolved}
+          note={
+            run.evidence.unresolved.length
+              ? 'Recorded during this run; may include earlier failed attempts.'
+              : undefined
+          }
+        />
       </div>
       <FullToolEvidence repository={repository} key={occurrenceKey(run)} run={run} />
       <ProviderRequestHistory
@@ -541,7 +640,7 @@ function ProofDetail({
 
 const occurrenceKey = (run: ProofKey) => JSON.stringify([run.agentId, run.sessionId, run.runId]);
 
-function mergeOccurrences(current: ArchiveRunDetail[], incoming: ArchiveRunDetail[]) {
+function mergeOccurrences(current: ArchiveRunSummary[], incoming: ArchiveRunSummary[]) {
   const seen = new Set(current.map(occurrenceKey));
   return [
     ...current,
@@ -578,7 +677,7 @@ function ProofShelf({
     if (linkedEntry) readerRef.current?.focus();
   }, [linkedEntry]);
   const moreRequest = useRef<AbortController | null>(null);
-  const [runs, setRuns] = useState<ArchiveRunDetail[]>([]);
+  const [runs, setRuns] = useState<ArchiveRunSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [moreLoading, setMoreLoading] = useState(false);
@@ -703,8 +802,8 @@ function ProofShelf({
                     <RunActivity run={run} />
                   </div>
                   <div className="archive-session-side">
-                    <span className={`proof-status-text proof-status-${run.status}`}>
-                      {statusInfo(run.status).label}
+                    <span className={`proof-status-text proof-status-${executionInfo(run).status}`}>
+                      {executionInfo(run).label}
                     </span>
                     {run.counts.observations + run.counts.changes + run.counts.verifications >
                       0 && (

@@ -1,0 +1,638 @@
+[
+  {
+    "summary": {
+      "id": "execution-completed",
+      "runId": "execution-completed",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "completed",
+      "execution": {
+        "status": "completed",
+        "reasonCode": "run_completed",
+        "reason": "The runtime recorded completion. This does not establish that the intended outcome was verified.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-completed",
+      "decision": "answered",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-completed",
+      "runId": "execution-completed",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "completed",
+      "execution": {
+        "status": "completed",
+        "reasonCode": "run_completed",
+        "reason": "The runtime recorded completion. This does not establish that the intended outcome was verified.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-completed",
+      "request": "Inspect execution-completed",
+      "finalAnswer": "Agent response.",
+      "decision": "answered",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-completed-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "completed",
+          "ts": null,
+          "summary": "Run completed.",
+          "evidence": "runtime_receipt"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  },
+  {
+    "summary": {
+      "id": "execution-failed",
+      "runId": "execution-failed",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "failed",
+      "execution": {
+        "status": "failed",
+        "reasonCode": "run_failed",
+        "reason": "The model did not complete the run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-failed",
+      "decision": "model_failed",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-failed",
+      "runId": "execution-failed",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "failed",
+      "execution": {
+        "status": "failed",
+        "reasonCode": "run_failed",
+        "reason": "The model did not complete the run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-failed",
+      "request": "Inspect execution-failed",
+      "finalAnswer": "Agent response.",
+      "decision": "model_failed",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-failed-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "failed",
+          "ts": null,
+          "summary": "Run failed: the model did not complete.",
+          "evidence": "runtime_receipt"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  },
+  {
+    "summary": {
+      "id": "execution-cancelled",
+      "runId": "execution-cancelled",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "cancelled",
+      "execution": {
+        "status": "cancelled",
+        "reasonCode": "run_cancelled",
+        "reason": "The runtime cancelled this run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-cancelled",
+      "decision": "cancelled",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-cancelled",
+      "runId": "execution-cancelled",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "cancelled",
+      "execution": {
+        "status": "cancelled",
+        "reasonCode": "run_cancelled",
+        "reason": "The runtime cancelled this run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-cancelled",
+      "request": "Inspect execution-cancelled",
+      "finalAnswer": "Agent response.",
+      "decision": "cancelled",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-cancelled-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "cancelled",
+          "ts": null,
+          "summary": "Run cancelled.",
+          "evidence": "runtime_receipt"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  },
+  {
+    "summary": {
+      "id": "execution-interrupted",
+      "runId": "execution-interrupted",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "interrupted",
+      "execution": {
+        "status": "interrupted",
+        "reasonCode": "run_interrupted",
+        "reason": "The runtime recorded an interrupted run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-interrupted",
+      "decision": "interrupted",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-interrupted",
+      "runId": "execution-interrupted",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "interrupted",
+      "execution": {
+        "status": "interrupted",
+        "reasonCode": "run_interrupted",
+        "reason": "The runtime recorded an interrupted run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-interrupted",
+      "request": "Inspect execution-interrupted",
+      "finalAnswer": "Agent response.",
+      "decision": "interrupted",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-interrupted-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "interrupted",
+          "ts": null,
+          "summary": "Run interrupted.",
+          "evidence": "runtime_receipt"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  },
+  {
+    "summary": {
+      "id": "execution-superseded",
+      "runId": "execution-superseded",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "superseded",
+      "execution": {
+        "status": "superseded",
+        "reasonCode": "run_superseded",
+        "reason": "The runtime superseded this run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-superseded",
+      "decision": "superseded",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-superseded",
+      "runId": "execution-superseded",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "superseded",
+      "execution": {
+        "status": "superseded",
+        "reasonCode": "run_superseded",
+        "reason": "The runtime superseded this run.",
+        "source": "runtime_receipt"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-superseded",
+      "request": "Inspect execution-superseded",
+      "finalAnswer": "Agent response.",
+      "decision": "superseded",
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-superseded-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "superseded",
+          "ts": null,
+          "summary": "Run superseded.",
+          "evidence": "runtime_receipt"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  },
+  {
+    "summary": {
+      "id": "execution-not_recorded",
+      "runId": "execution-not_recorded",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "incomplete",
+      "execution": {
+        "status": "not_recorded",
+        "reasonCode": "completion_not_recorded",
+        "reason": "No completion or active execution state is recorded for this run.",
+        "source": "not_recorded"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-not_recorded",
+      "decision": null,
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      }
+    },
+    "detail": {
+      "id": "execution-not_recorded",
+      "runId": "execution-not_recorded",
+      "agentId": "a",
+      "agentName": null,
+      "sessionId": "default",
+      "status": "incomplete",
+      "execution": {
+        "status": "not_recorded",
+        "reasonCode": "completion_not_recorded",
+        "reason": "No completion or active execution state is recorded for this run.",
+        "source": "not_recorded"
+      },
+      "toolHistory": {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "pending": 0,
+        "unknown": 0
+      },
+      "startedAt": null,
+      "completedAt": null,
+      "lastActivityAt": null,
+      "objective": "Inspect execution-not_recorded",
+      "request": "Inspect execution-not_recorded",
+      "finalAnswer": null,
+      "decision": null,
+      "route": null,
+      "counts": {
+        "observations": 0,
+        "changes": 0,
+        "verifications": 0,
+        "failures": 0,
+        "unresolved": 0,
+        "toolActivities": 0,
+        "subagents": 0
+      },
+      "evidence": {
+        "observations": [],
+        "changes": [],
+        "verifications": [],
+        "failures": [],
+        "unresolved": []
+      },
+      "context": null,
+      "subagents": [],
+      "timeline": [
+        {
+          "kind": "tool_result",
+          "status": "failed",
+          "ts": null,
+          "summary": "Command failed · exit: 128 · fatal: actual sanitized error reason",
+          "evidence": "session_execution",
+          "callId": "execution-not_recorded-native"
+        },
+        {
+          "kind": "terminal",
+          "status": "unknown",
+          "ts": null,
+          "summary": "No completion or active execution state is recorded for this run.",
+          "evidence": "archive_inference"
+        }
+      ],
+      "references": {
+        "trace": null,
+        "sourceRefs": []
+      }
+    }
+  }
+]

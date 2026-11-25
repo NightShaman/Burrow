@@ -516,7 +516,32 @@ export function attachmentDisplayName(file: File, ordinal = 1, timestamp = Date.
   return `pasted-${timestamp}-${ordinal}.${extension}`;
 }
 
-export type ArchiveRunStatus = 'completed' | 'warning' | 'failed' | 'unverified' | 'incomplete';
+export type ArchiveExecutionStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | 'superseded'
+  | 'not_recorded';
+export type ArchiveRunStatus =
+  | Exclude<ArchiveExecutionStatus, 'not_recorded'>
+  | 'warning'
+  | 'unverified'
+  | 'incomplete';
+export type ArchiveExecution = {
+  status: ArchiveExecutionStatus;
+  reasonCode: string;
+  reason: string;
+  source: 'runtime_receipt' | 'assistant_metadata' | 'continuity_state' | 'not_recorded';
+};
+export type ArchiveToolHistory = {
+  total: number;
+  completed: number;
+  failed: number;
+  pending: number;
+  unknown: number;
+};
 export type ArchiveEvidenceItem = {
   text: string;
   status: 'observed' | 'validated' | 'failed' | 'unresolved' | 'unknown';
@@ -561,6 +586,9 @@ export type ArchiveRunDetail = {
   agentName?: string | null;
   sessionId: string;
   status: ArchiveRunStatus;
+  // Optional for compatibility with older Core; never infer canonical state from prose.
+  execution?: ArchiveExecution;
+  toolHistory?: ArchiveToolHistory;
   workflowEvent?: WorkflowCompletionEvent | null;
   startedAt?: string | null;
   lastActivityAt?: string | null;
@@ -644,7 +672,25 @@ export type ArchiveRunDetail = {
     trace: Record<string, unknown>;
   }>;
 };
-export type ArchiveRunListResponse = { ok: true; runs: ArchiveRunDetail[] };
+export type ArchiveRunSummary = Pick<
+  ArchiveRunDetail,
+  | 'id'
+  | 'runId'
+  | 'agentId'
+  | 'agentName'
+  | 'sessionId'
+  | 'status'
+  | 'execution'
+  | 'toolHistory'
+  | 'startedAt'
+  | 'completedAt'
+  | 'lastActivityAt'
+  | 'objective'
+  | 'decision'
+  | 'route'
+  | 'counts'
+>;
+export type ArchiveRunListResponse = { ok: true; runs: ArchiveRunSummary[] };
 export type ArchiveRunResponse = { ok: true; run: ArchiveRunDetail };
 
 export type ChatSession = {

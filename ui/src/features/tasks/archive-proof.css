@@ -106,12 +106,27 @@
   margin-bottom: 0;
 }
 .proof-counts {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
   margin-top: 18px;
 }
-.proof-counts div,
+.proof-counts:empty {
+  display: none;
+}
+.proof-counts div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.proof-counts strong {
+  color: var(--text);
+  font-size: 12px;
+}
+.proof-counts span {
+  color: var(--muted);
+  font-size: 10px;
+}
 .proof-context-grid div {
   display: grid;
   gap: 4px;
@@ -120,11 +135,6 @@
   border-radius: 7px;
   background: var(--surface-raised);
 }
-.proof-counts strong {
-  color: var(--accent-strong);
-  font-size: 18px;
-}
-.proof-counts span,
 .proof-context-grid span {
   color: var(--muted);
   font-size: 9px;
@@ -265,15 +275,11 @@
   font-size: 11px;
 }
 @media (max-width: 900px) {
-  .proof-counts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
   .proof-evidence-grid {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 760px) {
-  .proof-counts,
   .proof-context-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -286,28 +292,6 @@
     margin-top: 3px;
   }
 }
-.proof-status-notice {
-  margin-top: 18px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--warn, #f5b942) 40%, var(--line));
-  border-left: 3px solid var(--warn, #f5b942);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--warn, #f5b942) 8%, var(--panel));
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.proof-status-notice strong {
-  color: var(--warn, #f5b942);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.proof-status-notice p {
-  margin: 3px 0 0;
-}
-
 .proof-full-evidence {
   margin-top: 18px;
   border: 1px solid var(--line);
@@ -523,4 +507,85 @@
 }
 .proof-section ul + .proof-muted {
   margin-top: 8px;
+}
+
+/* Execution, outcome evidence and tool history are independent. */
+.proof-run-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.proof-run-summary > div {
+  min-width: 0;
+}
+.proof-run-summary dt {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.proof-run-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.proof-run-summary dd > strong {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.proof-run-summary .proof-status-badge {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+.proof-run-summary p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.proof-status-not_recorded,
+.proof-status-cancelled,
+.proof-status-superseded {
+  color: var(--muted);
+}
+.proof-status-running {
+  color: var(--accent-strong);
+}
+.proof-status-interrupted {
+  color: var(--warn, #f5b942);
+}
+@media (max-width: 1100px) {
+  .proof-run-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .proof-run-summary dt {
+    margin-bottom: 3px;
+  }
+  .proof-run-summary p {
+    margin-top: 3px;
+  }
+}
+.archive-proof-detail {
+  container-type: inline-size;
+}
+.proof-section li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.proof-section li > span:last-child {
+  min-width: 0;
+}
+@container (max-width: 760px) {
+  .proof-evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .proof-run-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
 }
