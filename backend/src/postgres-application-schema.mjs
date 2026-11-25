@@ -341,4 +341,12 @@ BEGIN
 END $$;
 CREATE TRIGGER task_workflow_wait_invalidation AFTER UPDATE OR DELETE ON task_board_tasks FOR EACH ROW EXECUTE FUNCTION burrow_invalidate_task_waits();
 ` },
+  { version: 108, name: 'archive-run-occurrence-order-indexes', sql: `
+-- Match the exact bytewise occurrence tiebreakers used by Archive cursors.
+-- Existing published indexes/migrations stay unchanged.
+CREATE INDEX conversation_archive_runs_occurrence_order_idx
+ ON conversation_archive_runs(agent_id,sort_timestamp DESC,run_id COLLATE "C" DESC,session_id COLLATE "C" DESC);
+CREATE INDEX conversation_archive_runs_session_occurrence_order_idx
+ ON conversation_archive_runs(agent_id,session_id,sort_timestamp DESC,run_id COLLATE "C" DESC);
+` },
 ]);

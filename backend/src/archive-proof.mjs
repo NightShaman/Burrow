@@ -560,6 +560,37 @@ export async function listArchiveRunSummariesPage({ rootDir, conversationStore, 
   return { runs, hasMore: directory.hasMore };
 }
 
+// Use the shared native directory to choose a global page before touching any
+// run evidence. Compatibility stores keep their existing per-scope path.
+export async function listArchiveRunSummariesForScopes({ scopes = [], sessionId = null, query = '', limit = 100, boundary = null, signal, deadline } = {}) {
+  const options = { signal, deadline };
+  archiveReadCheckpoint(options);
+  if (!scopes.length) return { runs: [], hasMore: false };
+  const store = scopes[0].conversationStore;
+  if (typeof store?.listArchiveRunDirectoryForAgents !== 'function'
+    || scopes.some(scope => scope.conversationStore !== store)) return null;
+  const byAgent = new Map(scopes.map(scope => [scope.agentId, scope]));
+  const directory = await store.listArchiveRunDirectoryForAgents({ agentIds: [...byAgent.keys()],
+    agentNames: Object.fromEntries(scopes.map(scope => [scope.agentId, scope.agentName])),
+    sessionId, query, limit, boundary, ...options });
+  archiveReadCheckpoint(options);
+  const selectedAgents = [...new Set(directory.rows.map(row => row.agentId))];
+  const children = new Map(await archiveReadTasks(selectedAgents.map(agentId => async readOptions => {
+    const { dataRoot } = byAgent.get(agentId);
+    return [agentId, dataRoot ? await listSubagentRecords({ dataRoot, includeFinal: true, limit: 500, ...readOptions }) : []];
+  }), options));
+  const runs = directory.rows.map(row => {
+    const scope = byAgent.get(row.agentId);
+    return {
+      ...proofSummary({ agentId: row.agentId, agentName: scope.agentName, sessionId: row.sessionId,
+        runId: row.runId, entries: row.entries || [], evidence: row.evidence,
+        continuityHead: row.continuityHead, subagentRecords: children.get(row.agentId) || [] }),
+      _sortTimestamp: row.sortTimestamp,
+    };
+  });
+  return { runs, hasMore: directory.hasMore };
+}
+
 export async function readArchiveRun({ rootDir, conversationStore, dataRoot = null, traceRoot = null, resolveTraceRoot = null, agentId, agentName = null, sessionId = null, runId, signal, deadline } = {}) {
   if (!rootDir || !agentId || !runId) throw new Error('archive_run_target_required');
   const options = { signal, deadline };

@@ -1,6 +1,6 @@
 import { archiveReadCheckpoint, archiveReadTasks } from '../../src/archive-read-scope.mjs';
 import { archiveRunOccurrence, archiveRunBoundary, compareArchiveRunPosition, archiveCursorBoundary, archiveCursor } from '../../src/archive-pagination.mjs';
-import { listArchiveRuns, listArchiveRunSummariesPage } from '../../src/archive-proof.mjs';
+import { listArchiveRuns, listArchiveRunSummariesPage, listArchiveRunSummariesForScopes } from '../../src/archive-proof.mjs';
 
 export async function archiveRunListPage({ scopes, agentId = null, sessionId = null, query = '', limit = 100, cursor = null, signal, deadline }) {
   const options = { signal, deadline };
@@ -14,7 +14,8 @@ export async function archiveRunListPage({ scopes, agentId = null, sessionId = n
   const boundaryPosition = boundary ? [boundary.t, ...archiveRunBoundary(boundary.i)] : null;
   // PostgreSQL text cannot contain NUL, so no stored summary can match it.
   if (search.includes('\0')) return { runs: [], hasMore: false, nextCursor: null };
-  const pages = await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRunSummariesPage({ ...scope, sessionId, query: search, limit: size, boundary, ...readOptions })), options);
+  const globalPage = await listArchiveRunSummariesForScopes({ scopes, sessionId, query: search, limit: size, boundary, ...options });
+  const pages = globalPage ? [globalPage] : await archiveReadTasks(scopes.map(scope => readOptions => listArchiveRunSummariesPage({ ...scope, sessionId, query: search, limit: size, boundary, ...readOptions })), options);
   let ordered, moreInStore = false;
   if (pages.every(page => page !== null)) {
     ordered = pages.flatMap(page => page.runs);

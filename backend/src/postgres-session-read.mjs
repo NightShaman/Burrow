@@ -1,4 +1,5 @@
 import { archiveRunExecution, archiveRunStatus } from './archive-run-state.mjs';
+import { archiveReadTasks } from './archive-read-scope.mjs';
 import { archiveRunBoundary } from './archive-pagination.mjs';
 import { archiveReadQuery, withArchiveRead } from './postgres-archive-read.mjs';
 import { readArchiveTranscriptPage } from './postgres-archive-page.mjs';
@@ -579,14 +580,23 @@ export class PostgresSessionReadStore {
       session: { id: row.archive_id, metadata: { ...row.metadata, createdAt: row.created_at, updatedAt: row.created_at, archivedAt: row.created_at, chatTurnCount: null } }, entries };
   }
 
-  async listArchiveRunDirectory({ agentId: rawAgentId, agentName = null, sessionId: rawSessionId = null, query = '', limit = 100, boundary = null, signal, deadline } = {}) {
+  async listArchiveRunDirectoryForAgents(args = {}) {
+    if (!Array.isArray(args.agentIds)) throw new Error('archive_run_scope_required');
+    return this.listArchiveRunDirectory(args);
+  }
+
+  async listArchiveRunDirectory({ agentId: rawAgentId, agentIds = null, agentName = null, agentNames = {}, sessionId: rawSessionId = null, query = '', limit = 100, boundary = null, signal, deadline } = {}) {
     const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
-    const agentId = required(rawAgentId, 'agentId');
+    const multiple = Array.isArray(agentIds);
+    const allowed = multiple ? [...new Set(agentIds.map(id => required(id, 'agentId')))] : [required(rawAgentId, 'agentId')];
+    if (!allowed.length) return { rows: [], hasMore: false };
     const sessionId = rawSessionId == null ? null : required(rawSessionId, 'sessionId');
     const size = limitValue(limit);
     if (boundary && (typeof boundary.t !== 'string' || boundary.t.includes('\0'))) throw new Error('archive_cursor_invalid');
     if (boundary) archiveRunBoundary(boundary.i);
     const search = text(query).trim().toLowerCase();
+    // Global selection must precede evidence hydration: an all-agent page is
+    // not a full page per agent. Registry-resolved IDs remain the read scope.
     // Seek bounded directory pages, then batch only their compact canonical
     // execution fields. Missing/evicted runEvidence is not execution state.
     // Filtering uses the same canonical state as detail, never a metadata guess.
@@ -594,24 +604,40 @@ export class PostgresSessionReadStore {
     const selected = [];
     while (selected.length <= size) {
       const [run, session, agent] = position ? archiveRunBoundary(position.i) : [];
-      const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp
+      // Each registry scope has an ordered index prefix. Bound those cheap
+      // candidates before the global merge, rather than joining every retained
+      // run to session metadata and sorting the entire multi-agent history.
+      const candidateSQL = `SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp
         FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
-        WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
+        WHERE ${multiple ? 'r.agent_id=scope.agent_id' : 'r.agent_id=$1'} AND ($2::text IS NULL OR r.session_id=$2)
         AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)
         AND ($3::text IS NULL OR (r.sort_timestamp,r.run_id COLLATE "C",r.session_id COLLATE "C",r.agent_id COLLATE "C")<($3,$4,$6,$7))
-        ORDER BY r.sort_timestamp DESC,r.run_id COLLATE "C" DESC,r.session_id COLLATE "C" DESC,r.agent_id COLLATE "C" DESC LIMIT $5`,
-      [agentId, sessionId, position?.t ?? null, run ?? null, size + 1, session ?? null, agent ?? null]);
+        ORDER BY r.sort_timestamp DESC,r.run_id COLLATE "C" DESC,r.session_id COLLATE "C" DESC,r.agent_id COLLATE "C" DESC LIMIT $5`;
+      const sql = multiple ? `SELECT r.* FROM unnest($1::text[]) AS scope(agent_id)
+        CROSS JOIN LATERAL (${candidateSQL}) r
+        ORDER BY r.sort_timestamp DESC,r.run_id COLLATE "C" DESC,r.session_id COLLATE "C" DESC,r.agent_id COLLATE "C" DESC LIMIT $5` : candidateSQL;
+      const { rows } = await readQuery(sql,
+      [multiple ? allowed : allowed[0], sessionId, position?.t ?? null, run ?? null, size + 1, session ?? null, agent ?? null]);
       if (!rows.length) break;
-      const sources = await this.readArchiveRunSources({ agentId, runs: rows.map(row => ({ sessionId: row.session_id, runId: row.run_id })), summaryOnly: true, signal, deadline });
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i], source = sources[i];
+      const byAgent = new Map();
+      for (const row of rows) {
+        if (!byAgent.has(row.agent_id)) byAgent.set(row.agent_id, []);
+        byAgent.get(row.agent_id).push({ sessionId: row.session_id, runId: row.run_id });
+      }
+      const batches = await archiveReadTasks([...byAgent].map(([agentId, runs]) => async options =>
+        [agentId, await this.readArchiveRunSources({ agentId, runs, summaryOnly: true, ...options })]), { signal, deadline });
+      const sources = new Map(batches.flatMap(([agentId, batch]) => batch.map(source =>
+        [JSON.stringify([agentId, source.sessionId, source.runId]), source])));
+      for (const row of rows) {
+        const agentId = row.agent_id;
+        const source = sources.get(JSON.stringify([agentId, row.session_id, row.run_id]));
         const receipt = source.entries.filter(entry => entry.type === 'receipt').at(-1)?.metadata?.receiptRef || null;
         const answer = source.entries.filter(entry => entry.type === 'message' && entry.role === 'assistant').at(-1) || null;
         const request = source.entries.filter(entry => entry.type === 'message' && entry.role === 'user').at(-1) || null;
         const execution = archiveRunExecution({ receipt, answer, continuityHead: source.continuityHead, runId: row.run_id });
         const status = archiveRunStatus(execution, answer);
         const objective = source.evidence?.objective || request?.content?.slice(0, 900) || '';
-        if (search && !`${agentName || agentId} ${objective} ${status} ${row.run_id}`.toLowerCase().includes(search)) continue;
+        if (search && !`${(multiple ? agentNames[agentId] : agentName) || agentId} ${objective} ${status} ${row.run_id}`.toLowerCase().includes(search)) continue;
         selected.push({ agentId, sessionId: row.session_id, runId: row.run_id,
           startedAt: row.started_at?.toISOString?.() || row.started_at || null,
           completedAt: row.completed_at?.toISOString?.() || row.completed_at || null,
