@@ -475,3 +475,42 @@ it.each(['missing', 'wrong delivery'] as const)(
     expect(back).toHaveBeenCalledWith({ id: 'delivery-b', agentId: value.agentId });
   },
 );
+
+it('keeps verbose objectives out of list names while opening the full scoped proof', async () => {
+  const first = { ...run('sender'), objective: null };
+  const objective = `A quiet afternoon.\n\n${'Another paragraph about the afternoon. '.repeat(16)}Final sentence.`;
+  const second = { ...run('recipient'), objective };
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([first, second]));
+  const load = vi.spyOn(archiveRepository, 'loadRun').mockResolvedValue(second);
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  const list = within(await screen.findByRole('region', { name: 'Archive proof runs' }));
+  const missing = await list.findByRole('button', { name: /sender.*No objective recorded/ });
+  expect(missing.textContent).not.toContain(first.runId);
+  expect(missing.textContent).not.toMatch(/0 tool|0 unresolved|0 evidence|—/);
+  expect(within(missing).getAllByText('Completed')).toHaveLength(1);
+  const card = list.getByRole('button', { name: /A quiet afternoon\. Another paragraph/ });
+  expect(within(card).getByRole('heading').textContent).toMatch(/^.{1,140}…$/u);
+  expect(card.textContent).not.toContain('Final sentence.');
+  fireEvent.click(card);
+  await screen.findByRole('heading', { level: 2, name: /A quiet afternoon\..*Final sentence\./ });
+  expect(load).toHaveBeenCalledWith(first.runId, 'recipient', expect.any(AbortSignal), 'default');
+});
+
+it('preserves meaningful counts and does not headline an ID-only objective', async () => {
+  const value = run();
+  value.objective = `  ${value.runId} `;
+  value.status = 'warning';
+  Object.assign(value.counts, {
+    toolActivities: 1,
+    unresolved: 2,
+    observations: 1,
+    changes: 3,
+    verifications: 2,
+  });
+  vi.spyOn(archiveRepository, 'listRuns').mockResolvedValue(runsPage([value]));
+  render(<ArchiveRunsProof selectedAgent="" search="" />);
+  const card = within(await screen.findByRole('button', { name: /No objective recorded/ }));
+  expect(card.getByText('Warning')).toBeTruthy();
+  expect(card.getByText('1 tool activity · 2 unresolved')).toBeTruthy();
+  expect(card.getByText('6 evidence')).toBeTruthy();
+});

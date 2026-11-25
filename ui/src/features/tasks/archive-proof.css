@@ -1,22 +1,39 @@
 /* Operator-readable Archive proof */
 .archive-proof-view .archive-results-pane {
+  container-type: inline-size;
   min-width: 0;
 }
-.proof-run-card {
-  min-height: 104px;
-}
 .archive-results-pane .proof-run-card {
-  grid-template-columns: minmax(0, 1fr) 120px;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+}
+.proof-run-card h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.proof-run-card .archive-session-meta {
+  overflow-wrap: anywhere;
 }
 .archive-results-pane .proof-run-card .archive-session-side {
-  inline-size: 120px;
-  overflow: visible;
+  inline-size: auto;
 }
-.archive-results-pane .proof-run-card .proof-status-text {
-  font-size: 17px;
-  line-height: 1;
-  letter-spacing: normal;
-  white-space: nowrap;
+.proof-run-card .proof-status-text {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+@container (max-width: 330px) {
+  .archive-results-pane .proof-run-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .proof-run-card .archive-session-side {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
 }
 .proof-status-completed,
 .proof-status-ok,

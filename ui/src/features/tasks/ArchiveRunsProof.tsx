@@ -27,6 +27,26 @@ function duration(run: ArchiveRunDetail) {
     : '—';
 }
 
+function runListTitle(run: ArchiveRunDetail) {
+  const objective = run.objective?.trim().replace(/\s+/g, ' ');
+  if (!objective || objective === run.runId) return 'No objective recorded';
+  // The button's accessible name should be an excerpt too, not the whole message.
+  const excerpt = Array.from(objective).slice(0, 140).join('');
+  return excerpt === objective ? objective : `${excerpt.trimEnd()}…`;
+}
+
+function RunActivity({ run }: { run: ArchiveRunDetail }) {
+  const elapsed = duration(run);
+  const { toolActivities, unresolved } = run.counts;
+  const facts = [
+    elapsed !== '—' && elapsed,
+    toolActivities > 0 &&
+      `${toolActivities} tool ${toolActivities === 1 ? 'activity' : 'activities'}`,
+    unresolved > 0 && `${unresolved} unresolved`,
+  ].filter(Boolean);
+  return facts.length ? <p>{facts.join(' · ')}</p> : null;
+}
+
 type ArchiveRunStatusPresentation = { label: string; detail?: string };
 
 const archiveRunStatus: Record<ArchiveRunDetail['status'], ArchiveRunStatusPresentation> = {
@@ -679,20 +699,20 @@ function ProofShelf({
                       <span>{run.agentName || run.agentId}</span>
                       <span>{date(run.completedAt || run.startedAt)}</span>
                     </div>
-                    <h3>{run.objective || run.runId}</h3>
-                    <p>
-                      {statusInfo(run.status).label} · {duration(run)} · {run.counts.toolActivities}{' '}
-                      tool activities · {run.counts.unresolved} unresolved
-                    </p>
+                    <h3>{runListTitle(run)}</h3>
+                    <RunActivity run={run} />
                   </div>
                   <div className="archive-session-side">
-                    <strong className={`proof-status-text proof-status-${run.status}`}>
+                    <span className={`proof-status-text proof-status-${run.status}`}>
                       {statusInfo(run.status).label}
-                    </strong>
-                    <span>
-                      {run.counts.observations + run.counts.changes + run.counts.verifications}{' '}
-                      evidence
                     </span>
+                    {run.counts.observations + run.counts.changes + run.counts.verifications >
+                      0 && (
+                      <span>
+                        {run.counts.observations + run.counts.changes + run.counts.verifications}{' '}
+                        evidence
+                      </span>
+                    )}
                   </div>
                 </button>
               ))
