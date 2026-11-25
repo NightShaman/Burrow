@@ -73,6 +73,7 @@ function targetSignals({ toolResults } = {}) {
 }
 
 function resultText(result = {}) {
+  if (result.ok === false) return bounded(result.tool === 'mcp_call' ? (result.diagnostic || result.error || '') : (result.error || result.stderr || result.message || result.summary || result.stdout || ''));
   return bounded(result.summary || result.preview || result.content || result.stdout || result.stderr || result.error || result.message || '');
 }
 function commandLabel(result = {}) {

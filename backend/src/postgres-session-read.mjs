@@ -1,3 +1,4 @@
+import { archiveRunExecution, archiveRunStatus } from './archive-run-state.mjs';
 import { archiveRunBoundary } from './archive-pagination.mjs';
 import { archiveReadQuery, withArchiveRead } from './postgres-archive-read.mjs';
 import { readArchiveTranscriptPage } from './postgres-archive-page.mjs';
@@ -584,34 +585,46 @@ export class PostgresSessionReadStore {
     const sessionId = rawSessionId == null ? null : required(rawSessionId, 'sessionId');
     const size = limitValue(limit);
     if (boundary && (typeof boundary.t !== 'string' || boundary.t.includes('\0'))) throw new Error('archive_cursor_invalid');
-    const [lastRun, lastSession, lastAgent] = boundary ? archiveRunBoundary(boundary.i) : [];
+    if (boundary) archiveRunBoundary(boundary.i);
     const search = text(query).trim().toLowerCase();
-    // Search the displayed directory status, not the detail's terminal status.
-    // The evidence conditions mirror archive-proof's failure/unresolved counts.
-    const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp,evidence.item AS evidence,summary.status
-      FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
-      LEFT JOIN LATERAL (SELECT item FROM jsonb_array_elements(COALESCE(s.metadata->'runEvidence','[]'::jsonb)) item WHERE item->>'runId'=r.run_id LIMIT 1) evidence ON true
-      CROSS JOIN LATERAL (SELECT CASE WHEN evidence.item IS NULL THEN 'incomplete'
-        WHEN EXISTS (SELECT 1 FROM unnest(ARRAY['observations','changes','validations','unresolved']) AS fields(key)
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(evidence.item->key)='array' THEN evidence.item->key ELSE '[]'::jsonb END) AS items(item)
-          WHERE NOT (items.item ? 'outcomeCheck') AND (items.item->>'status'='failed' OR items.item->>'text' ~* '^[[:space:]]*shell_exec:[[:space:]]*(command )?failed'
-          OR (key='unresolved' AND items.item->>'status'='unresolved'
-            AND COALESCE(items.item->>'text','') !~* '^[[:space:]]*(command|run|tool)?[[:space:]]*completed[.]?[[:space:]]*$'))) THEN 'warning'
-        ELSE 'completed' END AS status) summary
-      WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
-      AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)
-      AND ($3::text IS NULL OR (r.sort_timestamp,r.run_id COLLATE "C",r.session_id COLLATE "C",r.agent_id COLLATE "C")<($3,$4,$8,$9))
-      AND ($6::text='' OR strpos(lower(concat_ws(' ', $7::text,COALESCE(evidence.item->>'objective',''),'',summary.status,r.run_id)), $6)>0)
-      ORDER BY r.sort_timestamp DESC,r.run_id COLLATE "C" DESC,r.session_id COLLATE "C" DESC,r.agent_id COLLATE "C" DESC LIMIT $5`,
-    [agentId, sessionId, boundary?.t ?? null, lastRun ?? null, size + 1, search, agentName || agentId, lastSession ?? null, lastAgent ?? null]);
-    const hasMore = rows.length > size;
-    return { rows: (hasMore ? rows.slice(0, size) : rows).map(row => ({
-      agentId: row.agent_id, sessionId: row.session_id, runId: row.run_id,
-      startedAt: row.started_at?.toISOString?.() || row.started_at || null,
-      completedAt: row.completed_at?.toISOString?.() || row.completed_at || null,
-      lastActivityAt: row.last_activity_at?.toISOString?.() || row.last_activity_at || null,
-      sortTimestamp: row.sort_timestamp, evidence: row.evidence || null, status: row.status,
-    })), hasMore };
+    // Seek bounded directory pages, then batch only their compact canonical
+    // execution fields. Missing/evicted runEvidence is not execution state.
+    // Filtering uses the same canonical state as detail, never a metadata guess.
+    let position = boundary;
+    const selected = [];
+    while (selected.length <= size) {
+      const [run, session, agent] = position ? archiveRunBoundary(position.i) : [];
+      const { rows } = await readQuery(`SELECT r.agent_id,r.session_id,r.run_id,r.started_at,r.completed_at,r.last_activity_at,r.sort_timestamp
+        FROM conversation_archive_runs r LEFT JOIN conversation_sessions s ON s.agent_id=r.agent_id AND s.session_id=r.session_id
+        WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
+        AND ($2::text IS NOT NULL OR NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL)
+        AND ($3::text IS NULL OR (r.sort_timestamp,r.run_id COLLATE "C",r.session_id COLLATE "C",r.agent_id COLLATE "C")<($3,$4,$6,$7))
+        ORDER BY r.sort_timestamp DESC,r.run_id COLLATE "C" DESC,r.session_id COLLATE "C" DESC,r.agent_id COLLATE "C" DESC LIMIT $5`,
+      [agentId, sessionId, position?.t ?? null, run ?? null, size + 1, session ?? null, agent ?? null]);
+      if (!rows.length) break;
+      const sources = await this.readArchiveRunSources({ agentId, runs: rows.map(row => ({ sessionId: row.session_id, runId: row.run_id })), summaryOnly: true, signal, deadline });
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i], source = sources[i];
+        const receipt = source.entries.filter(entry => entry.type === 'receipt').at(-1)?.metadata?.receiptRef || null;
+        const answer = source.entries.filter(entry => entry.type === 'message' && entry.role === 'assistant').at(-1) || null;
+        const request = source.entries.filter(entry => entry.type === 'message' && entry.role === 'user').at(-1) || null;
+        const execution = archiveRunExecution({ receipt, answer, continuityHead: source.continuityHead, runId: row.run_id });
+        const status = archiveRunStatus(execution, answer);
+        const objective = source.evidence?.objective || request?.content?.slice(0, 900) || '';
+        if (search && !`${agentName || agentId} ${objective} ${status} ${row.run_id}`.toLowerCase().includes(search)) continue;
+        selected.push({ agentId, sessionId: row.session_id, runId: row.run_id,
+          startedAt: row.started_at?.toISOString?.() || row.started_at || null,
+          completedAt: row.completed_at?.toISOString?.() || row.completed_at || null,
+          lastActivityAt: row.last_activity_at?.toISOString?.() || row.last_activity_at || null,
+          sortTimestamp: row.sort_timestamp, evidence: source.evidence, entries: source.entries,
+          continuityHead: source.continuityHead, status });
+        if (selected.length > size) break;
+      }
+      if (selected.length > size || rows.length < size + 1) break;
+      const last = rows.at(-1);
+      position = { t: last.sort_timestamp, i: JSON.stringify([last.run_id,last.session_id,last.agent_id]) };
+    }
+    return { rows: selected.slice(0, size), hasMore: selected.length > size };
   }
 
   async listArchiveRunSessions({ agentId: rawAgentId, runId: rawRunId, signal, deadline } = {}) {
@@ -627,7 +640,7 @@ export class PostgresSessionReadStore {
     return rows.map(row => row.session_id);
   }
 
-  async readArchiveRunSources({ agentId: rawAgentId, runs = [], signal, deadline } = {}) {
+  async readArchiveRunSources({ agentId: rawAgentId, runs = [], summaryOnly = false, signal, deadline } = {}) {
     const readQuery = (sql, values) => sessionReadQuery(this.pool, sql, values, { signal, deadline });
     const agentId = required(rawAgentId, 'agentId');
     const requested = (Array.isArray(runs) ? runs : []).filter(item => item?.sessionId && item?.runId);
@@ -638,16 +651,43 @@ export class PostgresSessionReadStore {
     // exact requested (session, run) pairs through the existing run indexes;
     // both stores are read in one statement so compaction cannot hide a row.
     // Do not reserialize the JSON originals or select just the newest snapshot.
+    const compactEntry = alias => {
+      if (!summaryOnly) return `${alias}.entry`;
+      // Reuse the one-pass lossless lexical projection. Ordinary ->/->> reject
+      // unrelated NUL/surrogate strings; repeated scalar scans are too costly.
+      // OFFSET 0 materializes each small array once rather than inlining scans.
+      const top = ['id','runId','ts','type','role','visibility','content','metadata'];
+      const metadata = ['canonicalExecution','iteration','callId','tool','ok','terminalStatus','decision','receiptRef','toolCalls','toolActivity','normalizedResult'];
+      const result = ['tool','ok','toolCallId','activityId','outcomeCheck','execution'];
+      const fields = (alias,keys) => keys.flatMap((key,index) => [`'${key}'`,`${alias}.fields[${index+1}]`]).join(',');
+      const array = keys => `ARRAY[${keys.map(key => `'${key}'`).join(',')}]`;
+      return `(SELECT json_build_object(
+        ${fields('t',top.slice(0,6))},
+        'content',CASE WHEN t.fields[5]::text='"user"' OR (t.fields[4]::text='"tool_result"' AND m.fields[11] IS NULL) THEN t.fields[7] ELSE '""'::json END,
+        'metadata',json_build_object(
+          ${fields('m',metadata.slice(0,7))},
+          'receiptRef',CASE WHEN t.fields[4]::text='"receipt"' THEN json_build_object(${fields('r',['decision','terminalStatus','route'])}) END,
+          'toolCalls',m.fields[9],
+          'toolActivity',CASE WHEN t.fields[6]::text='"activity"' THEN json_build_object('totalCalls',a.fields[1]) END,
+          'normalizedResult',CASE WHEN json_typeof(m.fields[11])='object' THEN json_build_object(
+            ${fields('n',result.slice(0,5))},'execution',json_build_object('toolCallId',x.fields[1])) END))
+        FROM (SELECT burrow_json_members(${alias}.entry,${array(top)}) AS fields OFFSET 0) t
+        CROSS JOIN LATERAL (SELECT burrow_json_members(t.fields[8],${array(metadata)}) AS fields OFFSET 0) m
+        CROSS JOIN LATERAL (SELECT burrow_json_members(m.fields[8],ARRAY['decision','terminalStatus','route']) AS fields OFFSET 0) r
+        CROSS JOIN LATERAL (SELECT burrow_json_members(m.fields[10],ARRAY['totalCalls']) AS fields OFFSET 0) a
+        CROSS JOIN LATERAL (SELECT burrow_json_members(m.fields[11],${array(result)}) AS fields OFFSET 0) n
+        CROSS JOIN LATERAL (SELECT burrow_json_members(n.fields[6],ARRAY['toolCallId']) AS fields OFFSET 0) x)`;
+    };
     const { rows } = await readQuery(`WITH requested AS MATERIALIZED (
       SELECT DISTINCT session_id,run_key FROM unnest($2::text[],$3::text[]) AS r(session_id,run_key)
       WHERE run_key IS NOT NULL
     ), occurrences AS (
-      SELECT e.session_id,e.run_key,e.entry_id,e.entry,e.sequence::text AS sequence,
+      SELECT e.session_id,e.run_key,e.entry_id,${compactEntry('e')} AS entry,e.sequence::text AS sequence,
         1 AS priority,NULL::bigint AS generation,NULL::text AS source_id
       FROM conversation_entries e JOIN requested r USING(session_id,run_key)
       WHERE e.agent_id=$1 AND e.session_id=ANY($2::text[]) AND e.run_key=ANY($3::text[])
       UNION ALL
-      SELECT e.session_id,e.run_key,e.entry_id,e.entry,e.ordinal::text AS sequence,
+      SELECT e.session_id,e.run_key,e.entry_id,${compactEntry('e')} AS entry,e.ordinal::text AS sequence,
         0 AS priority,e.generation,e.source_id
       FROM conversation_archive_entries e JOIN requested r USING(session_id,run_key)
       WHERE e.agent_id=$1 AND e.session_id=ANY($2::text[]) AND e.run_key=ANY($3::text[])
@@ -666,8 +706,9 @@ export class PostgresSessionReadStore {
       if (source !== group.source) { group.snapshots.push([]); group.source = source; }
       group.snapshots.at(-1).push({ entry: rowEntry(row), occurrence: row.entry_id });
     }
-    const metadataRows = await readQuery('SELECT session_id,metadata FROM conversation_sessions WHERE agent_id=$1 AND session_id=ANY($2::text[])', [agentId,[...new Set(sessions)]]);
+    const metadataRows = await readQuery('SELECT s.session_id,s.metadata,c.head FROM conversation_sessions s LEFT JOIN continuity_state c ON c.agent_id=s.agent_id AND c.session_id=s.session_id WHERE s.agent_id=$1 AND s.session_id=ANY($2::text[])', [agentId,[...new Set(sessions)]]);
     const metadata = new Map(metadataRows.rows.map(row => [row.session_id,row.metadata]));
+    const heads = new Map(metadataRows.rows.map(row => [row.session_id,row.head]));
     return requested.map((item,index) => {
       const group = grouped.get(JSON.stringify([sessions[index],keys[index]]));
       const entries = mergeTranscriptSnapshots(group?.snapshots || []).sort((left,right) => {
@@ -677,7 +718,7 @@ export class PostgresSessionReadStore {
         return a < b ? -1 : a > b ? 1 : 0;
       });
       const evidence = (Array.isArray(metadata.get(sessions[index])?.runEvidence) ? metadata.get(sessions[index]).runEvidence : []).find(value => value?.runId===item.runId) || null;
-      return { sessionId:sessions[index],runId:item.runId,entries,evidence };
+      return { sessionId:sessions[index],runId:item.runId,entries,evidence,continuityHead:heads.get(sessions[index]) || null };
     });
   }
 
@@ -692,7 +733,7 @@ export class PostgresSessionReadStore {
     const sid = located.rows[0]?.session_id;
     if (!sid) return null;
     const [source] = await this.readArchiveRunSources({ agentId, runs: [{ sessionId: sid, runId }], signal, deadline });
-    return { sessionId: sid, entries: source.entries, evidence: source.evidence };
+    return { sessionId: sid, entries: source.entries, evidence: source.evidence, continuityHead: source.continuityHead };
   }
 
   async listArchiveSessions({ agentId: rawAgentId, includeArchived = true, query = '', date = null, month = null, timezone = 'UTC', limit = 100, boundary = null, signal, deadline } = {}) {

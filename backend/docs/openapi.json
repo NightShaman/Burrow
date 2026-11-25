@@ -14961,8 +14961,13 @@
           "warning",
           "failed",
           "unverified",
-          "incomplete"
-        ]
+          "incomplete",
+          "running",
+          "cancelled",
+          "interrupted",
+          "superseded"
+        ],
+        "description": "Execution state only. Legacy warning is retained for older clients; failed tool attempts and independent outcome checks are separate. incomplete/unverified mean completion was not recorded, not proof of execution failure."
       },
       "ArchiveEvidenceItem": {
         "type": "object",
@@ -15095,7 +15100,8 @@
               "runtime_receipt",
               "subagent_record",
               "archive_inference",
-              "outcome_check"
+              "outcome_check",
+              "session_execution+trace_receipt"
             ]
           },
           "callId": {
@@ -15121,7 +15127,9 @@
           "evidence",
           "timeline",
           "references",
-          "subagents"
+          "subagents",
+          "execution",
+          "toolHistory"
         ],
         "properties": {
           "id": {
@@ -15339,6 +15347,12 @@
           },
           "taskWorkflowWait": {
             "$ref": "#/components/schemas/TaskWorkflowWait"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ArchiveRunExecution"
+          },
+          "toolHistory": {
+            "$ref": "#/components/schemas/ArchiveToolHistory"
           }
         },
         "additionalProperties": false
@@ -15358,7 +15372,7 @@
           "runs": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ArchiveRunDetail"
+              "$ref": "#/components/schemas/ArchiveRunSummary"
             }
           },
           "nextCursor": {
@@ -23417,6 +23431,167 @@
           "nextCursor"
         ],
         "additionalProperties": false
+      },
+      "ArchiveRunExecution": {
+        "type": "object",
+        "required": [
+          "status",
+          "reasonCode",
+          "reason",
+          "source"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "interrupted",
+              "superseded",
+              "not_recorded"
+            ]
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "runtime_receipt",
+              "assistant_metadata",
+              "continuity_state",
+              "not_recorded"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "description": "Runtime execution facts, independent of tool history and outcome verification. Only an exact persisted active continuity head establishes running. Missing terminal state is not a failed run."
+      },
+      "ArchiveToolHistory": {
+        "type": "object",
+        "required": [
+          "total",
+          "completed",
+          "failed",
+          "pending",
+          "unknown"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "description": "Counts of canonical session tool records, after strong call-ID correlation. Failed attempts remain historical failures, not proof of unfinished work or recovery. Unknown means a result or its explicit outcome is not recorded. Trace-only supplemental records are not counted."
+      },
+      "ArchiveRunSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "runId",
+          "agentId",
+          "sessionId",
+          "status",
+          "execution",
+          "toolHistory",
+          "counts"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ArchiveRunStatus"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ArchiveRunExecution"
+          },
+          "toolHistory": {
+            "$ref": "#/components/schemas/ArchiveToolHistory"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastActivityAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "objective": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "route": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ArchiveRunCounts"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Compact canonical list projection. Execution and toolHistory match detail, without loading traces, tool output, response prose, or detail packets."
       }
     },
     "securitySchemes": {
