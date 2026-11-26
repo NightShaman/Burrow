@@ -425,7 +425,8 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       // Existing consumers keep the visible directory unless they opt in.
       return await withStore('agents', async (store) => (await store.list())
         .filter(agent => value.includeHidden || !agent.modAgent || agent.modAgent.visibility.agents)
-        .map(({ id, name, enabled }) => ({ id, name, enabled })));
+        .map(({ id, name, enabled, modAgent }) => ({ id, name, enabled,
+          identity: modAgent ? { type: 'mod-owned', ownerModId: modAgent.ownerModId } : { type: 'agent', ownerModId: null } })));
     },
     async getOperatorIdentity() {
       // Deliberately project only public display identity. Avatars and the rest of
