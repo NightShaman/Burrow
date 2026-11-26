@@ -6,16 +6,25 @@ import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { externalTurnOutputAttachments, readExternalTurnOutputAttachment } from './mod-external-turn-output.mjs';
 import { sameExternalTurnInput } from './mod-external-turn-attachments.mjs';
 
+// PostgreSQL JSONB rejects NUL and unpaired UTF-16 surrogates. Keep the
+// existing code-unit limits, dropping a pair that would cross the boundary.
+function boundedReceiptString(value, limit) {
+  const text = value.toWellFormed().replaceAll('\0', '\uFFFD');
+  let end = Math.min(text.length, limit);
+  if (end < text.length && end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) end--;
+  return text.slice(0, end);
+}
+
 function boundedResult(result = {}, attachments = []) {
   return {
     attachments,
-    answerText: typeof result.answerText === 'string' ? result.answerText.slice(0, 24_000) : null,
-    decision: typeof result.decision === 'string' ? result.decision.slice(0, 128) : null,
-    blockers: Array.isArray(result.blockers) ? result.blockers.slice(0, 20).map(value => String(value).slice(0, 512)) : [],
+    answerText: typeof result.answerText === 'string' ? boundedReceiptString(result.answerText, 24_000) : null,
+    decision: typeof result.decision === 'string' ? boundedReceiptString(result.decision, 128) : null,
+    blockers: Array.isArray(result.blockers) ? result.blockers.slice(0, 20).map(value => boundedReceiptString(String(value), 512)) : [],
     verification: result.verification ? {
       required: Boolean(result.verification.required),
       ok: result.verification.ok ?? null,
-      reason: result.verification.reason ? String(result.verification.reason).slice(0, 512) : null,
+      reason: result.verification.reason ? boundedReceiptString(String(result.verification.reason), 512) : null,
     } : null,
   };
 }
