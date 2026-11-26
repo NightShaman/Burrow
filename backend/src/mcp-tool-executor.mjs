@@ -28,7 +28,7 @@ export async function executeMcpTool({ action, executionContext = null, agentId 
     }
     abortSignal?.throwIfAborted();
     const output = selected.connection.transport === 'mod'
-      ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null }, abortSignal })
+      ? await selected.connection.invoke(action.mcpToolName, action.mcpArguments, { context: { agentId, sessionId, conversationId, runId: executionContext?.parentRunId || null, followThroughOrigin: executionContext?.followThroughOrigin || null }, abortSignal })
       : await invokeMcp(selected.connection, { apiKey: selected.connection.apiKey, headers: selected.connection.headers, environmentVariables: selected.connection.environmentVariables, toolName: action.mcpToolName, arguments: action.mcpArguments, preserveContentResults: true, signal: abortSignal });
     const protectedOutput = selected.connection.transport === 'mod'
       ? protectToolOutput(output, { registry: executionContext?.protectedValues,

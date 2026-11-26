@@ -257,6 +257,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   }
   const outputDiagnostics = () => ({ stdout: { ...output.stdout }, stderr: { ...output.stderr } });
   let runCompletionHandler = false;
+  let minionCompletionHandler = false;
   let agentDeletedHandler = false;
   let stopped = false;
   let closing = false;
@@ -284,12 +285,13 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     const controller = new AbortController();
     const parentInvocationId = String(message.parentInvocationId || "");
     const invocation = pending.get(parentInvocationId);
-    const parentRequired = message.method === 'readRuntimeDiagnostics' || message.method === 'requestCoreApi' || message.method.startsWith('management');
+    const followThroughRegister = message.method === 'registerFollowThrough';
+    const parentRequired = message.method === 'readRuntimeDiagnostics' || message.method === 'requestCoreApi' || message.method.startsWith('management') || followThroughRegister;
     if (parentRequired && parentInvocationId && !invocation) {
-      child.send({ type: "capability-result", requestId, error: message.method === 'requestCoreApi' ? 'core_api_caller_required' : message.method.startsWith('management') ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
+      child.send({ type: "capability-result", requestId, error: message.method === 'requestCoreApi' ? 'core_api_caller_required' : message.method.startsWith('management') ? 'mod_management_caller_required' : followThroughRegister ? 'mod_follow_through_caller_required' : 'mod_diagnostic_caller_required' }, () => {}); return;
     }
     if (!parentRequired && parentInvocationId && !invocation) { child.send({ type: "capability-result", requestId, error: "mod_capability_cancelled" }, () => {}); return; }
-    if (!capabilities || !["requestCoreApi", "managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listOwnedAgents", "createOwnedAgent", "readOwnedAgent", "updateOwnedAgent", "removeOwnedAgent", "getOwnedAgentReferenceImage", "putOwnedAgentReferenceImage", "removeOwnedAgentReferenceImage", "listAgents", "listAgentRunCompletions", "readAgentRunActivity", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "minionCatalog", "submitMinion", "readMinion", "cancelMinion", "submitExternalTurn", "readExternalTurn", "readExternalTurnAttachment", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "getForgeReferenceImage", "putForgeReferenceImage", "removeForgeReferenceImage", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
+    if (!capabilities || !["requestCoreApi", "managementInventory", "managementSubmit", "managementOperation", "readRuntimeDiagnostics", "listOwnedAgents", "createOwnedAgent", "readOwnedAgent", "updateOwnedAgent", "removeOwnedAgent", "getOwnedAgentReferenceImage", "putOwnedAgentReferenceImage", "removeOwnedAgentReferenceImage", "listAgents", "listAgentRunCompletions", "readAgentRunActivity", "getOperatorIdentity", "getOperatorTimezone", "listConversations", "readConversation", "listModels", "generateText", "submitGeneration", "readGeneration", "minionCatalog", "submitMinion", "readMinion", "cancelMinion", "registerFollowThrough", "completeFollowThrough", "submitExternalTurn", "readExternalTurn", "readExternalTurnAttachment", "cancelExternalTurn", "createExternalSession", "readExternalSessionModel", "setExternalSessionModel", "getForgeImageStatus", "createForgeImage", "readForgeImageJob", "getForgeReferenceImage", "putForgeReferenceImage", "removeForgeReferenceImage", "listScheduledJobs", "readScheduledJob", "createScheduledJob", "updateScheduledJob", "deleteScheduledJob", "listScheduledJobRuns", "triggerScheduledJob"].includes(message.method)) {
       child.send({ type: "capability-result", requestId, error: "mod_capability_unavailable" }, () => {}); return;
     }
     // Capability methods validate their own inputs; transport does not impose a
@@ -322,8 +324,13 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
           if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:')) throw hostError(coreApi ? 'core_api_caller_required' : management ? 'mod_management_caller_required' : 'mod_diagnostic_caller_required');
           caller = parent.trustedCaller;
         }
+        if (followThroughRegister) {
+          parent = pending.get(String(message.parentInvocationId || ''));
+          if (!parent?.trustedCaller || !parent.routeId?.startsWith('tool:') || parent.trustedCaller.groupChannelId || parent.trustedCaller.groupChannelContext) throw hostError('mod_follow_through_caller_required');
+          caller = parent.trustedCaller;
+        }
         const assertCallerActive = () => {
-          if (controller.signal.aborted || !parent || pending.get(String(message.parentInvocationId || '')) !== parent) throw hostError(coreApi ? 'core_api_caller_required' : 'mod_management_caller_required');
+          if (controller.signal.aborted || !parent || pending.get(String(message.parentInvocationId || '')) !== parent) throw hostError(coreApi ? 'core_api_caller_required' : followThroughRegister ? 'mod_follow_through_caller_required' : 'mod_management_caller_required');
         };
         return capabilities[message.method](message.input, { signal: controller.signal, caller, assertCallerActive, waitForCaller: parent?.completed });
       })]);
@@ -566,6 +573,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       routes.secretReferenceSchemes = Array.isArray(message.secretReferenceSchemes) && message.secretReferenceSchemes.every(scheme => typeof scheme === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(scheme)) ? [...new Set(message.secretReferenceSchemes)] : [];
       if (message.runCompletionHandler !== undefined && typeof message.runCompletionHandler !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       runCompletionHandler = message.runCompletionHandler === true;
+      if (message.minionCompletionHandler !== undefined && typeof message.minionCompletionHandler !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
+      minionCompletionHandler = message.minionCompletionHandler === true;
       if (message.agentDeletedHandler !== undefined && typeof message.agentDeletedHandler !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       agentDeletedHandler = message.agentDeletedHandler === true;
       if (typeof message.agentContext !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
@@ -601,7 +610,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       error.statusCode = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
       entry.reject(error);
     } else {
-      try { entry.resolve((entry.routeId === 'agent-run-completion' || entry.routeId === 'agent-deleted')
+      try { entry.resolve((entry.routeId === 'agent-run-completion' || entry.routeId === 'agent-deleted' || entry.routeId === 'minion-completion')
         ? (message.result == null ? null : validateJsonBody(message.result))
         : (entry.routeId === 'agent-context' || entry.routeId === 'shared-context') ? message.result
           : entry.routeId?.startsWith('diagnostic-') || entry.routeId?.startsWith('secret-reference-') || entry.routeId?.startsWith('tool:')
@@ -962,5 +971,5 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return closePromise;
   }
 
-  return { child, activated, commitActivation, get hasRunCompletionHandler() { return runCompletionHandler; }, get hasAgentDeletedHandler() { return agentDeletedHandler; }, isAvailable: () => activationSucceeded && !unavailable && !stopped && !closing && !admissionsPaused && child.connected, get exitDetails() { return exitDetails; }, outputDiagnostics, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, closed, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, commitActivation, get hasRunCompletionHandler() { return runCompletionHandler; }, get hasMinionCompletionHandler() { return minionCompletionHandler; }, get hasAgentDeletedHandler() { return agentDeletedHandler; }, isAvailable: () => activationSucceeded && !unavailable && !stopped && !closing && !admissionsPaused && child.connected, get exitDetails() { return exitDetails; }, outputDiagnostics, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, closed, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }

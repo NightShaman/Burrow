@@ -42,6 +42,7 @@ import PostgresOtelSettingsStore from './postgres-otel-settings-store.mjs';
 import PostgresRetentionSettingsStore from './postgres-retention-settings-store.mjs';
 import { PostgresModGenerationStore } from './postgres-mod-generation-store.mjs';
 import { PostgresModMinionStore } from './postgres-mod-minion-store.mjs';
+import { PostgresModFollowThroughStore } from './postgres-mod-follow-through-store.mjs';
 import { PostgresModExternalTurnStore } from './postgres-mod-external-turn-store.mjs';
 import PostgresWorkingMemoryRetentionSettingsStore from './postgres-working-memory-retention-settings-store.mjs';
 
@@ -88,6 +89,7 @@ export async function createPostgresApplication({
     tasks: new PostgresTaskBoardStore({ ...common, ...(clock ? { clock } : {}) }),
     generations: new PostgresModGenerationStore({ ...common, ...(clock ? { clock } : {}) }),
     minions: new PostgresModMinionStore({ ...common, ...(clock ? { clock } : {}) }),
+    followThrough: new PostgresModFollowThroughStore(common),
     externalTurns: new PostgresModExternalTurnStore({ ...common, ...(clock ? { clock } : {}) }),
     scheduledJobs: new PostgresScheduledJobStore({ ...common, ...(clock ? { clock } : {}) }),
     dreamSettings: new PostgresDreamSettingsStore(common),

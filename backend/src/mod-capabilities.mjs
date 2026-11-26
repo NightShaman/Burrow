@@ -1,3 +1,4 @@
+import { continuityStateStore } from './postgres-continuity-state-store.mjs';
 import { isInternalContextSession } from './model-context-boundary.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -620,6 +621,30 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const job = await minionDispatcher.cancel(schedulerOwner(), bounded(value.jobId, 96));
       if (!job) throw new Error('mod_minion_not_found');
       return { job };
+    },
+    async registerFollowThrough(input, { caller, assertCallerActive } = {}) {
+      const value = exactKeys(plain(input), ['key']);
+      if (!caller?.agentId || !caller?.sessionId || !caller?.runId || !Number.isSafeInteger(caller.followThroughOrigin?.resetGeneration)) throw new Error('mod_follow_through_caller_required');
+      bounded(value.key, 160);
+      if (!value.key.trim()) invalid();
+      assertCallerActive?.();
+      const store = stores?.followThrough;
+      if (!store) throw new Error('mod_follow_through_unavailable');
+      const session = await stores?.conversations?.getMetadata?.({ agentId: caller.agentId, sessionId: caller.sessionId });
+      const { continuityHead } = await continuityStateStore(stores.conversations, caller.agentId).read(caller.sessionId);
+      if (!session?.createdAt || session.archived || session.deleted || continuityHead?.runId !== caller.runId
+        || continuityHead?.state !== 'running' || Number(session.resetGeneration || 0) !== caller.followThroughOrigin.resetGeneration) throw new Error('mod_follow_through_session_unavailable');
+      assertCallerActive?.();
+      return store.register({ ownerModId: schedulerOwner(), agentId: caller.agentId, sessionId: caller.sessionId,
+        conversationId: String(session.conversationId || caller.sessionId), resetIdentity: `${Number(session.resetGeneration || 0)}:${new Date(session.createdAt).toISOString()}`, originRunId: caller.runId, key: value.key });
+    },
+    async completeFollowThrough(input) {
+      const value = exactKeys(plain(input), ['id', 'result']);
+      const id = bounded(value.id, 64);
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) invalid();
+      plain(value.result);
+      return stores?.followThrough?.complete({ ownerModId: schedulerOwner(), id, result: value.result })
+        ?? Promise.reject(new Error('mod_follow_through_unavailable'));
     },
   });
 }

@@ -59,10 +59,17 @@ export function createModLifecycleService({
     managedSkillSynchronizer = synchronizer;
   }
 
+  function reconcileMinionCompletions(mods) {
+    for (const mod of mods) {
+      if (mod.host?.hasMinionCompletionHandler) modLoadOptions.minionDispatcher?.reconcile?.(mod.host);
+    }
+  }
+
   async function initialize() {
     if (!starting || initialized) throw new Error('mod_lifecycle_already_initialized');
     initialized = true;
     loadedMods = await loadMods({ ...modLoadOptions, deletionDispatch });
+    reconcileMinionCompletions(loadedMods);
     void deletionDispatch?.wake().catch(() => {});
     return getMods();
   }
@@ -134,6 +141,7 @@ export function createModLifecycleService({
       loadedMods = old
         ? loadedMods.map((entry) => entry.id === modId ? next : entry)
         : [...loadedMods, next];
+      reconcileMinionCompletions([next]);
       void deletionDispatch?.wake().catch(() => {});
     } catch (error) {
       await cleanupMods([next], { logger });

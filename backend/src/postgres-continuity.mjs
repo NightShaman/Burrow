@@ -52,7 +52,9 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     }
     const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',...(head.recoveryPolicy?{recoveryPolicy:head.recoveryPolicy}:{}),reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
     if(!manifest)return metadata;
-    const assessment=finalizing && head.finalizationId
+    const assessment=manifest.recoveryPolicy === 'mod-follow-through'
+     ? {action:'needs_user_input',autoResume:false,reason:'mod_follow_through_interrupted',transcriptMessages:transcript.length}
+     : finalizing && head.finalizationId
      ? {action:'needs_user_input',autoResume:false,reason:'terminal_receipt_requires_repair',transcriptMessages:transcript.length}
      : await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
     return {...metadata,interruptedRun:manifest,recoveryQueue:{version:1,key:`${manifest.runId}:${manifest.generation}`,status:'pending',decision:assessment.action,decisionReason:assessment.reason,autoResume:assessment.autoResume,transcriptMessages:assessment.transcriptMessages,queuedAt:clock(),attempts:Number(queue?.attempts||0)},...(abandoned?{continuityHead:{...head,state:'interrupted',interruptedAt:clock()}}:{})};
@@ -61,11 +63,17 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
   },
   async read({sessionId}) {return (await state.read(sessionId))?.continuityHead || null;},
   async current(args) {await owner.ready();return matches(await this.read(args),args);},
-  async claim({sessionId,runId,objective=null,expectedResetGeneration,chatInputId,recoveryPolicy=null,requireRecoveryClaim=false}) {
+  async claim({sessionId,runId,objective=null,expectedResetGeneration,expectedFollowThroughOrigin,chatInputId,recoveryPolicy=null,requireRecoveryClaim=false}) {
    await this.reconcile({sessionId});
    let result;
    await updateMetadata({...scope(sessionId),update:async (metadata,client)=>{
     if(expectedResetGeneration!==undefined && Number(metadata.resetGeneration||0)!==expectedResetGeneration) throw Object.assign(new Error('chat_input_generation_conflict'),{statusCode:409});
+    if (expectedFollowThroughOrigin) {
+      const { rows } = await client.query('SELECT created_at FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2', [agentId, sessionId]);
+      const origin = expectedFollowThroughOrigin;
+      if (metadata.archived || metadata.deleted || String(metadata.conversationId || sessionId) !== origin.conversationId
+        || (!rows[0]?.created_at ? null : `${Number(metadata.resetGeneration || 0)}:${new Date(rows[0].created_at).toISOString()}`) !== origin.resetIdentity) throw new Error('mod_follow_through_origin_changed');
+    }
     if(chatInputId){
      const input=await client.query("SELECT i.status,i.generation,i.cancel_requested,(h.held AND h.generation=i.generation) AS held FROM chat_inputs i LEFT JOIN chat_input_sessions h USING(agent_id,session_id) WHERE i.id=$1 AND i.agent_id=$2 AND i.session_id=$3 AND i.run_id=$4",[chatInputId,agentId,sessionId,runId]);
      if(!input.rows[0] || input.rows[0].status!=='running' || Number(input.rows[0].generation)!==Number(metadata.resetGeneration||0) || input.rows[0].held || input.rows[0].cancel_requested) throw Object.assign(new Error('chat_input_not_admitted'),{statusCode:409});
@@ -78,7 +86,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     if(requireRecoveryClaim && (!ownsCurrentRecovery || metadata.interruptedRun?.status!=='interrupted')) throw new Error('recovery_manifest_required');
     const uncertain=recoveryBusy || prior?.state==='finalizing' || (prior?.state==='running' && prior.ownerId!==ownerId);
     if(uncertain){result={...prior,current:false,reason:'active_or_abandoned_owner_requires_reconciliation'};return metadata;}
-    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(recoveryPolicy==='scheduled-task'?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
+    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(['scheduled-task','mod-follow-through'].includes(recoveryPolicy)?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
     const recoveryManifest=metadata.interruptedRun?.status==='interrupted' && (recovery?.status==='pending' || ownsCurrentRecovery)
      ? metadata.interruptedRun : null;
     result={...head,current:true,recoveryManifest};

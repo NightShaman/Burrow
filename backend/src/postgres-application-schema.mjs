@@ -374,4 +374,15 @@ CREATE TABLE identity_deletion_reconciliation (
 ` },
   { version: 110, name: 'session-recall-provenance-and-exactness', sql: POSTGRES_SESSION_RECALL_RELEVANCE_SQL },
   { version: 111, name: 'generic-mod-minion-jobs', sql: POSTGRES_MOD_MINION_SCHEMA_SQL },
+  { version: 112, name: 'generic-mod-follow-through-returns', sql: `
+CREATE TABLE mod_follow_through_returns (
+ id UUID PRIMARY KEY, owner_mod_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+ session_id TEXT NOT NULL, conversation_id TEXT NOT NULL, reset_identity TEXT NOT NULL,
+ origin_run_id TEXT NOT NULL, key TEXT NOT NULL, result JSON,
+ state TEXT NOT NULL CHECK(state IN ('waiting','ready','delivering','delivered','fenced')),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ,
+ delivery_run_id TEXT, error TEXT, UNIQUE(owner_mod_id,agent_id,session_id,origin_run_id,key)
+);
+CREATE INDEX mod_follow_through_ready_idx ON mod_follow_through_returns(completed_at,id) WHERE state='ready';
+` },
 ]);

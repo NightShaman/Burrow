@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
 
@@ -27,7 +28,7 @@ export function publicMinionJob(job) {
   };
 }
 
-export function createModMinionDispatcher({ store, resolveCatalog, execute, maxConcurrent = null, logger = console } = {}) {
+export function createModMinionDispatcher({ store, resolveCatalog, execute, getHosts = () => [], maxConcurrent = null, logger = console } = {}) {
   if (!store || typeof resolveCatalog !== 'function' || typeof execute !== 'function') {
     throw new Error('mod_minion_dispatcher_dependencies_required');
   }
@@ -43,19 +44,47 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
   const drainFailures = [];
   let running = 0;
 
+  function deliverHint(host, event) {
+    return lifecycle.track(async () => {
+      // A particular failed notification is retryable. Never poll job status;
+      // a replacement host performs its own durable receipt reconciliation.
+      for (let attempt = 0; ; attempt++) {
+        if (lifecycle.stopped || !host.isAvailable()) return;
+        try { await host.invoke('minion-completion', event); return; }
+        catch (error) {
+          if (lifecycle.stopped || !host.isAvailable()) return;
+          lifecycle.reportFailure(error, 'completion_delivery');
+          const wait = Math.min(30_000, 100 * 2 ** Math.min(attempt, 9));
+          await delay(wait, undefined, { signal: lifecycle.signal }).catch(() => {});
+        }
+      }
+    }, 'completion_hint');
+  }
+  function notify(job) {
+    if (!job || !TERMINAL.has(job.status) || lifecycle.stopped) return;
+    for (const {ownerModId,host} of getHosts()) {
+      if (ownerModId === job.ownerModId && host?.hasMinionCompletionHandler && host.isAvailable()) {
+        // Never await a callback from a capability the same mod is waiting on.
+        void deliverHint(host, { jobId: job.id }).catch(() => {});
+      }
+    }
+  }
+
   async function run(job) {
     const controller = new AbortController();
     active.set(job.id, controller);
     try {
       if (lifecycle.stopped) {
-        await store.completeQueued(job.id, { status: 'interrupted', error: 'service_shutdown' });
+        const completed = await store.completeQueued(job.id, { status: 'interrupted', error: 'service_shutdown' });
+        notify(completed);
         return;
       }
       const claimed = await store.markRunning(job.id);
       if (!claimed) return; // An atomic queued cancellation/shutdown won.
       if (lifecycle.stopped || controller.signal.aborted) {
-        await store.complete(job.id, { status: lifecycle.stopped ? 'interrupted' : 'cancelled',
+        const completed = await store.complete(job.id, { status: lifecycle.stopped ? 'interrupted' : 'cancelled',
           error: lifecycle.stopped ? 'service_shutdown' : 'cancelled' });
+        notify(completed);
         return;
       }
       let result;
@@ -72,9 +101,10 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
         : !executionError && result?.ok === true ? 'succeeded' : 'failed';
       // Store failures propagate to the lifecycle owner and shutdown health;
       // never report a terminal receipt when it was not durably written.
-      await store.complete(job.id, { status, result: result ?? null,
+      const completed = await store.complete(job.id, { status, result: result ?? null,
         error: status === 'interrupted' ? 'service_shutdown' : status === 'cancelled' ? 'cancelled'
           : executionError ? executionFailureCode(executionError) : null });
+      notify(completed);
     } finally {
       active.delete(job.id);
     }
@@ -99,8 +129,10 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
     lifecycle.stop(new Error('service_shutdown'));
     for (const controller of active.values()) controller.abort(new Error('service_shutdown'));
     for (const job of queue.splice(0)) {
-      const work = lifecycle.track(() => store.completeQueued(job.id,
-        { status: 'interrupted', error: 'service_shutdown' }), 'queued-interrupt');
+      const work = lifecycle.track(async () => {
+        const completed = await store.completeQueued(job.id, { status: 'interrupted', error: 'service_shutdown' });
+        notify(completed);
+      }, 'queued-interrupt');
       void work.then(undefined, error => { drainFailures.push(error); });
     }
   }
@@ -126,6 +158,7 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
           if (lifecycle.stopped) {
             const interrupted = await store.completeQueued(created.job.id,
               { status: 'interrupted', error: 'service_shutdown' });
+            notify(interrupted);
             return { job: publicMinionJob(interrupted || created.job), replayed: false };
           }
           queue.push(created.job);
@@ -138,6 +171,9 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
       const job = await store.getOwned(owner, id);
       return job ? publicMinionJob(job) : null;
     },
+    reconcile(host) {
+      if (host?.hasMinionCompletionHandler && host.isAvailable()) void deliverHint(host, { jobId: null }).catch(() => {});
+    },
     async cancel(owner, id) {
       const job = await store.getOwned(owner, id);
       if (!job) return null;
@@ -145,6 +181,7 @@ export function createModMinionDispatcher({ store, resolveCatalog, execute, maxC
         active.get(id)?.abort(new Error('cancelled'));
         const cancelled = await store.completeQueued(id, { status: 'cancelled', error: 'cancelled' });
         if (cancelled) {
+          notify(cancelled);
           const index = queue.findIndex(candidate => candidate.id === id);
           if (index !== -1) queue.splice(index, 1);
         }
