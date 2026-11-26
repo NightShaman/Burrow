@@ -32,8 +32,10 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
 - The public Burrow image is smoke-tested once, archived with its image ID and
   checksum, restored in the publish job, and pushed under both tags without a
   rebuild. Local tested-image ID and remote per-tag manifest digests are checked
-  and written to the promotion run summary; do not confuse image ID with manifest
-  digest. There is one runtime platform; BuildKit may wrap its manifest and
+  and written to the promotion run summary. The local-store ID from Docker
+  `.Id` can be either a config digest (classic store) or an OCI index digest
+  (containerd store); it remains the publisher's restore/tag/pull identity.
+  There is one runtime platform; BuildKit may wrap its manifest and
   provenance attestations in an OCI index. The terminal verifier follows the
   digest-bound runtime manifest without mistaking its config ID for that index.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
@@ -72,12 +74,21 @@ The publish job makes **one terminal outcome check**, after the final Burrow
 publication step or after an earlier publication failure when the validated
 artifact was restored successfully. `verify-public-outcome.mjs prepare` runs
 before any publication. It validates the intended date, original run/manifest,
-frozen plan sources, publish disposition and `tested-image.json`, then records:
+frozen plan sources, publish disposition and `tested-image.json`. From the
+checksum-validated `tested-image.tar.gz`, it reads the single Docker-save
+`manifest.json` entry and hashes its referenced config bytes, checking the
+content-addressed filename. Classic `<digest>.json` and containerd
+`blobs/sha256/<digest>` layouts are supported without changing old artifact
+schemas. Missing/malformed metadata, duplicate members, multiple image entries
+or checksum/config-digest disagreement fail before publication. It records:
 
 - the Git tree of the restored `staged/Burrow` payload, calculated with a
   disposable Git directory/index and the publisher's `git add -A` / `write-tree`
   semantics (not the development assembly commit SHA);
-- the exact smoke-tested image ID and fixed public image repository;
+- the exact archived smoke-tested **config digest** required by the canonical
+  verifier and fixed public image repository, not an assumed Docker `.Id`.
+  `tested-image.json.imageId` is unchanged: the publisher still compares the
+  smoke-tested local-store identity on restore, tag and existing-date pull;
 - the original Actions run, the named `public-promotion-YYYY.MM.DD` tar artifact
   (`actions-artifact:` provenance reference, not a download URL), and the current
   handling run/attempt URL. A resumed run keeps the **original date and artifact
@@ -116,7 +127,7 @@ node scripts/promotion/validate-public-readiness.mjs ..
 ```
 
 The outcome adapter tests use injected inert verification and disposable local
-Git fixtures; workflow tests assert string contracts. They do not dispatch
+Git and synthetic Docker archive fixtures; workflow tests assert string contracts. They do not dispatch
 Actions, publish/pull an image, or validate a live public release.
 
 `targets.json` describes target repositories, provenance source subsets and asset

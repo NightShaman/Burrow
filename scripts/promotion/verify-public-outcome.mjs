@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -51,6 +52,50 @@ export function stagedSourceTree(payloadRoot) {
   }
 }
 
+/** Docker .Id is a local-store identity (possibly an OCI index), not always
+ * the config digest required by the canonical verifier. Read the single saved
+ * image's Docker compatibility manifest instead; never consult a live daemon,
+ * registry, or later build. This also works with existing schema-v1 artifacts. */
+export function testedImageConfigId(artifactRoot) {
+  try {
+    const archive = path.join(artifactRoot, 'tested-image.tar.gz');
+    const checksum = fs.readFileSync(`${archive}.sha256`, 'utf8');
+    if (!fullMatch(/^[0-9a-f]{64} [ *]tested-image\.tar\.gz\n?$/, checksum)) throw new Error('checksum invalid');
+    const hash = createHash('sha256');
+    const fd = fs.openSync(archive, 'r');
+    try {
+      const chunk = Buffer.alloc(1024 * 1024);
+      let size;
+      while ((size = fs.readSync(fd, chunk, 0, chunk.length, null))) hash.update(chunk.subarray(0, size));
+    } finally { fs.closeSync(fd); }
+    if (hash.digest('hex') !== checksum.slice(0, 64)) throw new Error('checksum mismatch');
+    // Bounded metadata only, no filesystem extraction or layer buffering. Count
+    // members so duplicate tar entries cannot be concatenated into valid JSON.
+    const tar = args => execFileSync('tar', args, {
+      maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, TAR_OPTIONS: '' },
+    });
+    const members = tar(['-tzf', archive]).toString('utf8').split('\n');
+    const member = name => {
+      if (members.filter(item => item === name).length !== 1) throw new Error('member missing or ambiguous');
+      return tar(['-xOzf', archive, '--', name]);
+    };
+    const manifest = JSON.parse(member('manifest.json'));
+    if (!Array.isArray(manifest) || manifest.length !== 1 || !record(manifest[0])) throw new Error('image ambiguous');
+    const configPath = manifest[0].Config;
+    if (!fullMatch(/^(?:[0-9a-f]{64}\.json|blobs\/sha256\/[0-9a-f]{64})$/, configPath)) throw new Error('config path invalid');
+    const bytes = member(configPath);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (digest !== path.basename(configPath, '.json')) throw new Error('config digest mismatch');
+    const config = JSON.parse(bytes);
+    if (!record(config) || typeof config.architecture !== 'string' || !config.architecture ||
+        typeof config.os !== 'string' || !config.os || !record(config.rootfs) ||
+        config.rootfs.type !== 'layers' || !Array.isArray(config.rootfs.diff_ids) ||
+        !config.rootfs.diff_ids.every(id => fullMatch(IMAGE_ID, id))) throw new Error('config invalid');
+    return `sha256:${digest}`;
+  } catch { fail('promotion_outcome_tested_image_archive_invalid'); }
+}
+
 export function preparePublicOutcomeIntent({
   artifactRoot = '.', releaseDate, originRunId, handlingRepository,
   handlingRunId, handlingRunAttempt, serverUrl = 'https://github.com',
@@ -89,7 +134,7 @@ export function preparePublicOutcomeIntent({
     expectedArtifact: {
       sourceTreeSha: stagedSourceTree(payloadRoot),
       imageRepository: IMAGE_REPOSITORY,
-      imageId: image.imageId,
+      imageId: testedImageConfigId(root),
     },
     sourceRefs: [
       originRun,

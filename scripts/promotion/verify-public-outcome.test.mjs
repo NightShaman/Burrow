@@ -1,5 +1,6 @@
 import test from 'node:test';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,17 +8,55 @@ import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  preparePublicOutcomeIntent, stagedSourceTree, verifyPreparedPublicOutcome,
+  preparePublicOutcomeIntent, stagedSourceTree, testedImageConfigId, verifyPreparedPublicOutcome,
 } from './verify-public-outcome.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./verify-public-outcome.mjs', import.meta.url));
 const NOW = new Date('2026-11-24T23:59:00.000Z');
-const IMAGE_ID = `sha256:${'b'.repeat(64)}`;
+const CONFIG_BYTES = Buffer.from(JSON.stringify({ architecture: 'amd64', os: 'linux', rootfs: { type: 'layers', diff_ids: [] }, config: {} }));
+const IMAGE_ID = `sha256:${createHash('sha256').update(CONFIG_BYTES).digest('hex')}`;
 const MANIFEST_DIGEST = `sha256:${'c'.repeat(64)}`;
 const DISPOSITION = { publishable: true, validateOnly: false };
 const json = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+function archiveChecksum(root) {
+  const archive = path.join(root, 'tested-image.tar.gz');
+  const checksum = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+  fs.writeFileSync(`${archive}.sha256`, `${checksum}  tested-image.tar.gz\n`);
+}
+
+// Tiny real Docker-save-shaped gzip/tar archives: no Docker or network I/O.
+function savedImage(root, { containerd = false, files: overrides = {}, manifest, duplicate } = {}) {
+  const input = fs.mkdtempSync(path.join(root, 'archive-input-'));
+  const configPath = containerd ? `blobs/sha256/${IMAGE_ID.slice(7)}` : `${IMAGE_ID.slice(7)}.json`;
+  const files = {
+    'manifest.json': JSON.stringify(manifest ?? [{ Config: configPath, RepoTags: ['burrow-public-candidate:latest'], Layers: [] }]),
+    [configPath]: CONFIG_BYTES,
+  };
+  let runtimeId = IMAGE_ID;
+  if (containerd) {
+    const runtimeManifest = JSON.stringify({ schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json', config: { digest: IMAGE_ID, size: CONFIG_BYTES.length }, layers: [] });
+    const digest = createHash('sha256').update(runtimeManifest).digest('hex');
+    const index = JSON.stringify({ schemaVersion: 2, manifests: [{ digest: `sha256:${digest}`, platform: { os: 'linux', architecture: 'amd64' } }] });
+    runtimeId = `sha256:${createHash('sha256').update(index).digest('hex')}`;
+    files[`blobs/sha256/${digest}`] = runtimeManifest;
+    files[`blobs/sha256/${runtimeId.slice(7)}`] = index;
+    files['index.json'] = JSON.stringify({ schemaVersion: 2, manifests: [{ digest: runtimeId }] });
+  }
+  Object.assign(files, overrides);
+  for (const [name, content] of Object.entries(files)) {
+    if (content === null) { delete files[name]; continue; }
+    fs.mkdirSync(path.dirname(path.join(input, name)), { recursive: true });
+    fs.writeFileSync(path.join(input, name), content);
+  }
+  const archive = path.join(root, 'tested-image.tar.gz');
+  execFileSync('tar', ['-czf', archive, '-C', input, '--', ...Object.keys(files), ...(duplicate ? [duplicate] : [])]);
+  archiveChecksum(root);
+  fs.rmSync(input, { recursive: true, force: true });
+  return { configPath, runtimeId };
+}
 
 function fixture(t, { releaseDate = '2026.11.24', originRunId = '1234' } = {}) {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'burrow-outcome-test-'));
@@ -30,6 +69,7 @@ function fixture(t, { releaseDate = '2026.11.24', originRunId = '1234' } = {}) {
     schemaVersion: 1, releaseDate, sources, publishable: true, resumeRunId: null,
     targets: [{ id: 'burrow', repository: 'GoblinKing-Burrow/Burrow', version: releaseDate, action: 'stage' }],
   });
+  savedImage(root);
   json(path.join(root, 'tested-image.json'), { schemaVersion: 1, imageId: IMAGE_ID });
   fs.writeFileSync(path.join(payload, '.gitignore'), 'ignored.tmp\n');
   fs.writeFileSync(path.join(payload, 'ignored.tmp'), 'not added by the publisher');
@@ -48,6 +88,78 @@ function fixture(t, { releaseDate = '2026.11.24', originRunId = '1234' } = {}) {
     outputFile: path.join(root, 'public-outcome.json'),
   };
 }
+
+test('classic Docker archive prepares the config digest equal to its schema-v1 runtime ID', t => {
+  const f = fixture(t);
+  assert.equal(testedImageConfigId(f.root), IMAGE_ID);
+  assert.equal(preparePublicOutcomeIntent(f.options).expectedArtifact.imageId, IMAGE_ID);
+});
+
+test('containerd index runtime ID stays unchanged while intent uses the archived config digest', async t => {
+  const f = fixture(t);
+  const { runtimeId } = savedImage(f.root, { containerd: true });
+  assert.notEqual(runtimeId, IMAGE_ID);
+  const identityFile = path.join(f.root, 'tested-image.json');
+  json(identityFile, { schemaVersion: 1, imageId: runtimeId });
+  const before = fs.readFileSync(identityFile);
+  const intent = preparePublicOutcomeIntent(f.options);
+  assert.equal(intent.expectedArtifact.imageId, IMAGE_ID);
+  assert.deepEqual(fs.readFileSync(identityFile), before, 'publisher still receives the original local-store ID');
+  let calls = 0;
+  const result = await verifyPreparedPublicOutcome(verifyOptions(f, intent), { verifyOutcome: async input => {
+    calls++;
+    assert.equal(input.expectedArtifact.imageId, IMAGE_ID);
+    assert.notEqual(input.expectedArtifact.imageId, runtimeId);
+    return nativeResult(input);
+  } });
+  assert.equal(calls, 1);
+  assert.equal(result.exitCode, 0);
+});
+
+test('missing, malformed, ambiguous or checksum-unbound saved image metadata fails closed', async t => {
+  const configPath = `${IMAGE_ID.slice(7)}.json`;
+  for (const [name, mutate] of [
+    ['missing archive', f => fs.rmSync(path.join(f.root, 'tested-image.tar.gz'))],
+    ['missing checksum', f => fs.rmSync(path.join(f.root, 'tested-image.tar.gz.sha256'))],
+    ['wrong checksum', f => fs.writeFileSync(path.join(f.root, 'tested-image.tar.gz.sha256'), `${'0'.repeat(64)}  tested-image.tar.gz\n`)],
+    ['malformed checksum path', f => fs.writeFileSync(path.join(f.root, 'tested-image.tar.gz.sha256'), `${'0'.repeat(64)}  other.tar.gz\n`)],
+    ['extra checksum record', f => fs.appendFileSync(path.join(f.root, 'tested-image.tar.gz.sha256'), '\n')],
+    ['invalid gzip despite matching checksum', f => {
+      fs.writeFileSync(path.join(f.root, 'tested-image.tar.gz'), 'not a gzip archive');
+      archiveChecksum(f.root);
+    }],
+    ['invalid tar despite matching checksum', f => {
+      fs.writeFileSync(path.join(f.root, 'tested-image.tar.gz'), gzipSync('not a tar archive'));
+      archiveChecksum(f.root);
+    }],
+    ['missing manifest', f => savedImage(f.root, { files: { 'manifest.json': null } })],
+    ['invalid JSON manifest', f => savedImage(f.root, { files: { 'manifest.json': '{' } })],
+    ['nonarray manifest', f => savedImage(f.root, { manifest: {} })],
+    ['empty manifest', f => savedImage(f.root, { manifest: [] })],
+    ['multiple images', f => savedImage(f.root, { manifest: [{ Config: configPath }, { Config: configPath }] })],
+    ['missing config reference', f => savedImage(f.root, { manifest: [{}] })],
+    ['unsafe config reference', f => savedImage(f.root, { manifest: [{ Config: '../config.json' }] })],
+    ['missing config member', f => savedImage(f.root, { files: { [configPath]: null } })],
+    ['config digest mismatch', f => savedImage(f.root, { files: { [configPath]: '{}' } })],
+    ['duplicate manifest member', f => savedImage(f.root, { duplicate: 'manifest.json' })],
+    ['duplicate config member', f => savedImage(f.root, { duplicate: configPath })],
+    ['invalid config JSON', f => {
+      const bytes = '{';
+      const member = `${createHash('sha256').update(bytes).digest('hex')}.json`;
+      savedImage(f.root, { manifest: [{ Config: member }], files: { [member]: bytes } });
+    }],
+    ['nonconfig JSON blob', f => {
+      const bytes = '{}';
+      const member = `${createHash('sha256').update(bytes).digest('hex')}.json`;
+      savedImage(f.root, { manifest: [{ Config: member }], files: { [member]: bytes } });
+    }],
+  ]) await t.test(name, t => {
+    const f = fixture(t);
+    mutate(f);
+    assert.throws(() => preparePublicOutcomeIntent(f.options), /promotion_outcome_tested_image_archive_invalid/);
+    assert.equal(fs.existsSync(f.outputFile), false);
+  });
+});
 
 // These are inert native-verifier-shaped receipts, not HTTP observations.
 function nativeResult(intent, status = 'verified') {
