@@ -47,6 +47,8 @@ const RUNTIME_CODES = new Set([
   'mod_host_exited', 'mod_host_error', 'mod_host_send_failed', 'mod_host_closed', 'mod_host_disconnected',
   'mod_host_unavailable', 'mod_busy', 'mod_capability_cancelled', 'mod_capability_unavailable',
   'mod_route_failed', 'mod_route_response_invalid', 'mod_route_timeout', 'mod_tool_cancelled',
+  'mod_identity_cleanup_failed',
+  'agent_reference_image_cleanup_failed',
   'mod_tool_description_invalid', 'mod_route_description_invalid', 'mod_route_parameter_invalid',
   'mod_store_required', 'mod_store_cleanup_failed', 'mod_management_caller_required',
   'system_controller_registration_failed', 'system_controller_registration_invalid',

@@ -6,6 +6,7 @@ import {
   reconcileManagedSkills as reconcileManagedSkillFiles,
 } from '../../src/managed-skills.mjs';
 import { fetchGitSkill } from '../../src/git-skill-fetch.mjs';
+import { createAgentDeletionDispatch } from '../../src/agent-deletion-dispatch.mjs';
 
 const CORE_MANAGED_SKILLS = Object.freeze([
   Object.freeze({ id: 'burrow-runtime', repository: 'https://github.com/GoblinKing-Burrow/Burrow-Skills.git', path: 'burrow-runtime/SKILL.md' }),
@@ -33,6 +34,8 @@ export function createModLifecycleService({
   if (typeof getManagedSkillRoot !== 'function') throw new Error('mod_lifecycle_managed_skill_root_required');
 
   let loadedMods = [];
+  const deletionDispatch = modLoadOptions.stores?.agents?.pendingIdentityDeletions
+    ? createAgentDeletionDispatch({ agents: modLoadOptions.stores.agents, getHosts: () => loadedMods, logger }) : null;
   let starting = true;
   let initialized = false;
   let managedSkillCoreDeclarations = [...coreManagedSkills];
@@ -59,7 +62,8 @@ export function createModLifecycleService({
   async function initialize() {
     if (!starting || initialized) throw new Error('mod_lifecycle_already_initialized');
     initialized = true;
-    loadedMods = await loadMods(modLoadOptions);
+    loadedMods = await loadMods({ ...modLoadOptions, deletionDispatch });
+    void deletionDispatch?.wake().catch(() => {});
     return getMods();
   }
 
@@ -87,9 +91,10 @@ export function createModLifecycleService({
     // host/catalog entry was removed. Re-discover a disabled mod as well as
     // reactivating an enabled one so memory, filesystem, and PostgreSQL converge.
     if (action === 'uninstall-recovery' && installed && !enabled && !old) {
-      const [restored] = await loadMods({ ...modLoadOptions, onlyModIds: [modId] });
+      const [restored] = await loadMods({ ...modLoadOptions, deletionDispatch, onlyModIds: [modId] });
       if (!restored) throw Object.assign(new Error('mod_recovery_failed'), { statusCode: 500 });
       loadedMods = [...loadedMods, restored];
+      void deletionDispatch?.wake().catch(() => {});
       return;
     }
 
@@ -111,7 +116,7 @@ export function createModLifecycleService({
       Object.assign(old, { host: null, routes: [], store: null, lifecycleCleanup: null, status: 'disabled' });
     }
 
-    const [next] = await loadMods({ ...modLoadOptions, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
+    const [next] = await loadMods({ ...modLoadOptions, deletionDispatch, onlyModIds: [modId], replaceExecutionProviders: action === 'update' });
     if (!next || next.status !== 'loaded') {
       if (next) await cleanupMods([next], { logger });
       throw Object.assign(new Error(next?.error || 'mod_activation_failed'), { statusCode: 409 });
@@ -129,6 +134,7 @@ export function createModLifecycleService({
       loadedMods = old
         ? loadedMods.map((entry) => entry.id === modId ? next : entry)
         : [...loadedMods, next];
+      void deletionDispatch?.wake().catch(() => {});
     } catch (error) {
       await cleanupMods([next], { logger });
       resumeAdmissions?.();
@@ -144,6 +150,7 @@ export function createModLifecycleService({
 
   return Object.freeze({
     getMods,
+    async close() { await deletionDispatch?.close(); await cleanupMods(loadedMods, { logger }); },
     initialize,
     markReady,
     isReady: () => !starting,

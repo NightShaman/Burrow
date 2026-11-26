@@ -1,4 +1,5 @@
 import { boundaryFailure, boundaryDiagnostic } from './diagnostic-boundary.mjs';
+import { createAgentDeletionDispatch } from './agent-deletion-dispatch.mjs';
 import { publishModAgentProvider, unpublishModAgentProvider, revokeModAgentProvider } from './mod-agent-runtime.mjs';
 import { publishModTools, unpublishModTools } from './mod-agent-tools.mjs';
 import { createModCapabilities } from './mod-capabilities.mjs';
@@ -220,7 +221,9 @@ async function closeModStore(mod, logger) {
 }
 
 export async function cleanupMods(mods = [], { logger = console } = {}) {
+  await mods.deletionDispatch?.close?.();
   for (const mod of mods) {
+    clearInterval(mod.deletionRetryTimer);
     unpublishModAgentProvider(mod);
     const cleanup = mod.lifecycleCleanup;
     mod.lifecycleCleanup = null;
@@ -233,7 +236,7 @@ export async function cleanupMods(mods = [], { logger = console } = {}) {
   }
 }
 
-export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, runtimeDiagnostics = null, activeAgentRuns = null, pendingHttpRuns = null, modManagement = null, coreApi = null, modAuthority = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null } = {}) {
+export async function loadMods({ runtimeRoot, logger = console, executionProviders = null, replaceExecutionProviders = false, resolveAgentRuntime = null, resolveAgentWorkspaceRoot = null, capabilityFetch = fetch, capabilityTimeoutMs, modelCapabilityTimeoutMs, activationTimeoutMs, routeTimeoutMs, cleanupTimeoutMs, systemProcessWatchdogGraceMs, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, runtimeDiagnostics = null, activeAgentRuns = null, pendingHttpRuns = null, modManagement = null, coreApi = null, modAuthority = null, onlyModIds = null, modStoreFactory = null, enabledModIds = null, modCatalogWriter = null, deletionDispatch = null } = {}) {
   const discoveredAll = await discoverMods({ runtimeRoot, logger });
   const selectedIds = onlyModIds ? new Set(onlyModIds) : null;
   const discovered = selectedIds ? discoveredAll.filter((mod) => selectedIds.has(mod.id)) : discoveredAll;
@@ -291,6 +294,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
         const activation = await host.activated;
         const descriptions = activation;
         mod.agentContextSupported = activation.agentContextSupported;
+        mod.agentDeletedSupported = activation.agentDeletedSupported === true;
         mod.sharedContextSupported = activation.sharedContextSupported;
         mod.diagnosticsSupported = activation.diagnosticsSupported;
         mod.secretReferenceSchemes = activation.secretReferenceSchemes || [];
@@ -325,6 +329,7 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
       if (mod.status === 'loaded' && !replaceExecutionProviders) await publishModTools(mod, modCatalogWriter);
       if (host && !host.commitActivation()) throw Object.assign(new Error('mod_host_unavailable'), { code: 'mod_host_unavailable' });
       if (host && !replaceExecutionProviders) publishModAgentProvider(mod);
+      if (host) await stores?.agents?.registerIdentityDeletionHandler?.(mod.id, mod.agentDeletedSupported);
       emitModEvent(logger, 'mod_activation_succeeded', { modId: modLogIdentity(mod), runtime: host ? 'child' : 'static', routeCount: routes.length, toolCount: mod.tools?.length || 0 });
       loaded.push(mod);
     } catch (error) {
@@ -345,6 +350,8 @@ export async function loadMods({ runtimeRoot, logger = console, executionProvide
       loaded.push({ ...mod, routes: [], store: null, host: null, status: 'failed', error: ACTIVATION_LOG_CODES.has(candidate) ? candidate : 'mod_activation_failed', diagnostic: boundaryDiagnostic(error, 'activation') });
     }
   }
+  if (deletionDispatch) loaded.deletionDispatch = deletionDispatch;
+  else if (stores?.agents?.pendingIdentityDeletions) loaded.deletionDispatch = createAgentDeletionDispatch({ agents: stores.agents, getHosts: () => loaded, logger });
   return loaded;
 }
 

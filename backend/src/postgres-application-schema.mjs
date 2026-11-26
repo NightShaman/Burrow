@@ -349,4 +349,25 @@ CREATE INDEX conversation_archive_runs_occurrence_order_idx
 CREATE INDEX conversation_archive_runs_session_occurrence_order_idx
  ON conversation_archive_runs(agent_id,session_id,sort_timestamp DESC,run_id COLLATE "C" DESC);
 ` },
+  { version: 109, name: 'identity-deletion-lifecycle', sql: `
+CREATE TABLE identity_deletion_events (
+ event_id UUID PRIMARY KEY, agent_id TEXT NOT NULL, owner_mod_id TEXT, storage_reference TEXT, deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','complete','failed')),
+ attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, retry_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX identity_deletion_events_pending_idx ON identity_deletion_events(retry_at,deleted_at) WHERE state <> 'complete';
+CREATE TABLE identity_deletion_recipients (
+ event_id UUID NOT NULL REFERENCES identity_deletion_events(event_id) ON DELETE CASCADE,
+ mod_id TEXT NOT NULL, acknowledged_at TIMESTAMPTZ, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT, retry_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(event_id,mod_id)
+);
+CREATE INDEX identity_deletion_recipients_pending_idx ON identity_deletion_recipients(mod_id,retry_at) WHERE acknowledged_at IS NULL;
+CREATE TABLE identity_deletion_handlers (
+ mod_id TEXT PRIMARY KEY, registered_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE identity_deletion_reconciliation (
+ agent_id TEXT PRIMARY KEY, event_id UUID NOT NULL UNIQUE REFERENCES identity_deletion_events(event_id) ON DELETE CASCADE,
+ recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+` },
 ]);

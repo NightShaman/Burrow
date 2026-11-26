@@ -10087,6 +10087,92 @@
           }
         }
       }
+    },
+    "/api/agents/deletions": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "List pending or failed identity cleanup receipts",
+        "operationId": "listAgentDeletionCleanup",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending and failed cleanup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "deletions"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "deletions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "eventId": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "ownerModId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "failed"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "lastError": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "storagePending": {
+                            "type": "boolean"
+                          },
+                          "recipients": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12109,6 +12195,35 @@
           },
           "agent": {
             "$ref": "#/components/schemas/AgentCreate"
+          },
+          "cleanup": {
+            "type": "object",
+            "description": "Durable deletion cleanup receipt state (returned by DELETE).",
+            "properties": {
+              "eventId": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "failed",
+                  "complete"
+                ]
+              },
+              "attempts": {
+                "type": "integer"
+              },
+              "lastError": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "storagePending": {
+                "type": "boolean"
+              }
+            }
           }
         },
         "additionalProperties": true

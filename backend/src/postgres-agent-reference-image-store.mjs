@@ -127,10 +127,10 @@ export class PostgresAgentReferenceImageStore {
     if (!result.rowCount) fail('agent_reference_image_not_found', 404);
     return this.view(result.rows[0].agent_id, attachmentId);
   }
-  async discard(storageReference) {
+  async discard(storageReference, { throwOnError = false } = {}) {
     if (!storageReference) return;
     try { await deleteGeneratedArtifact({ agentWorkspaceRoot: this.runtimeRoot, storageReference }); }
-    catch { this.logger.warn?.('Agent reference image file cleanup failed'); }
+    catch (error) { this.logger.warn?.('Agent reference image file cleanup failed'); if (throwOnError) throw error; }
   }
   async put(agentId, body) {
     const { bytes, mimeType, fileName } = validateReferenceImageUpload(body);

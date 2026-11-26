@@ -225,7 +225,7 @@ function projectModLog(args, protectedValues) {
 }
 
 const STORE_METHODS = Object.freeze({
-  settings: Object.freeze({ get: 'get', set: 'set', delete: 'delete' }),
+  settings: Object.freeze({ get: 'get', set: 'set', delete: 'delete', keys: 'listKeys' }),
   secrets: Object.freeze({ get: 'getSecret', set: 'setSecret', clear: 'clearSecret', has: 'hasSecret' }),
 });
 
@@ -257,6 +257,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   }
   const outputDiagnostics = () => ({ stdout: { ...output.stdout }, stderr: { ...output.stderr } });
   let runCompletionHandler = false;
+  let agentDeletedHandler = false;
   let stopped = false;
   let closing = false;
   let admissionsPaused = false;
@@ -547,8 +548,11 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       routes.secretReferenceSchemes = Array.isArray(message.secretReferenceSchemes) && message.secretReferenceSchemes.every(scheme => typeof scheme === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(scheme)) ? [...new Set(message.secretReferenceSchemes)] : [];
       if (message.runCompletionHandler !== undefined && typeof message.runCompletionHandler !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       runCompletionHandler = message.runCompletionHandler === true;
+      if (message.agentDeletedHandler !== undefined && typeof message.agentDeletedHandler !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
+      agentDeletedHandler = message.agentDeletedHandler === true;
       if (typeof message.agentContext !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       routes.agentContextSupported = message.agentContext;
+      routes.agentDeletedSupported = agentDeletedHandler;
       // Older hosts without shared registration remain compatible.
       if (message.sharedContext !== undefined && typeof message.sharedContext !== 'boolean') { rejectActivation(hostError('mod_activation_failed')); return; }
       routes.sharedContextSupported = message.sharedContext === true;
@@ -571,12 +575,15 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     clearTimeout(entry.timer);
     entry.abortSignal?.removeEventListener('abort', entry.cancel);
     if (message.error) {
+      const diagnostic = message.diagnostic && typeof message.diagnostic === 'object' && /^[a-z0-9_]{1,80}$/.test(String(message.diagnostic.errorCode || ''))
+        ? { errorCode: String(message.diagnostic.errorCode), errorType: ['Error','TypeError','RangeError'].includes(message.diagnostic.errorType) ? message.diagnostic.errorType : 'Error', stage: 'mod_route' } : null;
       const error = hostError('mod_route_failed');
+      if (diagnostic) error.diagnostic = diagnostic;
       const status = Number(message.statusCode);
       error.statusCode = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
       entry.reject(error);
     } else {
-      try { entry.resolve(entry.routeId === 'agent-run-completion'
+      try { entry.resolve((entry.routeId === 'agent-run-completion' || entry.routeId === 'agent-deleted')
         ? (message.result == null ? null : validateJsonBody(message.result))
         : (entry.routeId === 'agent-context' || entry.routeId === 'shared-context') ? message.result
           : entry.routeId?.startsWith('diagnostic-') || entry.routeId?.startsWith('secret-reference-') || entry.routeId?.startsWith('tool:')
@@ -917,5 +924,5 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     return closePromise;
   }
 
-  return { child, activated, commitActivation, get hasRunCompletionHandler() { return runCompletionHandler; }, isAvailable: () => activationSucceeded && !unavailable && !stopped && !closing && !admissionsPaused && child.connected, get exitDetails() { return exitDetails; }, outputDiagnostics, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, closed, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
+  return { child, activated, commitActivation, get hasRunCompletionHandler() { return runCompletionHandler; }, get hasAgentDeletedHandler() { return agentDeletedHandler; }, isAvailable: () => activationSucceeded && !unavailable && !stopped && !closing && !admissionsPaused && child.connected, get exitDetails() { return exitDetails; }, outputDiagnostics, pauseAdmissions, invoke, invokeTool, resolveProtectedReference, close, exited, closed, pendingCount: () => pending.size, activeOperationCount: () => pending.size + activeCapabilities.size + pendingSystemProcess.size + pendingSystemFilesystem.size, pendingDiagnostics: () => [...activeCapabilities.values()].map(({ method, startedAt }) => ({ kind: "capability", operation: method, status: "pending", elapsedMs: Math.max(0, Date.now() - startedAt) })), pendingSystemProcessCount: () => pendingSystemProcess.size, pendingSystemFilesystemCount: () => pendingSystemFilesystem.size, controllerInstanceId };
 }

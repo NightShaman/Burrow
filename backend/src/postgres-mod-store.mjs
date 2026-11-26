@@ -49,6 +49,15 @@ export class PostgresModSettingsStore {
     if (!result.rows[0]) return fallback;
     return parseStoredJson(result.rows[0].value_json, 'mod_settings_corrupt');
   }
+  async listKeys(input = {}) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['prefix','cursor','limit'].includes(key))) throw new Error('mod_settings_keys_invalid');
+    const { prefix = '', cursor = null, limit = 100 } = input;
+    if (typeof prefix !== 'string' || (cursor !== null && typeof cursor !== 'string') || !Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('mod_settings_keys_invalid');
+    const { rows } = await this.pool.query(`SELECT name FROM mod_settings WHERE mod_id=$1 AND starts_with(name,$2)
+      AND ($3::text IS NULL OR name COLLATE "C">$3 COLLATE "C") ORDER BY name COLLATE "C" LIMIT $4`, [this.modId,prefix,cursor,limit+1]);
+    const names = rows.slice(0,limit).map(row => row.name);
+    return { names, hasMore: rows.length>limit, nextCursor: rows.length>limit ? names.at(-1) : null };
+  }
   async set(name, value) {
     const stamp = this.clock();
     await this.pool.query(`INSERT INTO mod_settings(mod_id,name,value_json,created_at,updated_at) VALUES($1,$2,$3,$4,$4)

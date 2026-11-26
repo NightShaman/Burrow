@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resolveForgeConfig } from '../src/forge-config.mjs';
+import { boundaryDiagnostic } from '../src/diagnostic-boundary.mjs';
 import { classifyModelFailure, withProviderErrorScope } from '../src/model-failure.mjs';
 import { httpFailureResponse, postgresDiagnosticSecrets, otelDiagnosticSecrets } from './ui/http-error-response.mjs';
 import { uiPreferences, saveUiPreferences } from '../src/ui-preferences.mjs';
@@ -622,8 +623,8 @@ async function updateAgent(id, body = {}) {
 }
 
 async function deleteAgent(id) {
-  try { return { ok: true, agent: await agentsStore().delete(id) }; }
-  catch (error) { return { ok: false, status: error?.message === 'agent_managed_by_mod' ? 409 : (String(error?.message || error) === 'agent_not_found' ? 404 : 400), error: String(error?.message || error) }; }
+  try { return { ok: true, agent: await agentsStore().delete(id, { activeAgentRuns: activeChatRuns, sessionContinuityHeads }), cleanup: await postgresApplication.stores.agents.latestIdentityDeletionForAgent?.(id) || { state: 'pending' } }; }
+  catch (error) { const diagnostic = boundaryDiagnostic(error, 'agent_delete'); return { ok: false, status: error?.statusCode || (diagnostic.errorCode === 'agent_not_found' ? 404 : 400), ...diagnostic, error: diagnostic.errorCode }; }
 }
 
 async function agentProfileDocuments(agentId, body = null) {
@@ -772,7 +773,7 @@ function apiTokenScopeForRequest(req, url) {
   // Complete prompt records are an operator or agent diagnostic action, not
   // part of the general-purpose external diagnostics token projection.
   if (pathname.startsWith('/api/traces/') && pathname.endsWith('/provider-requests')) return null;
-  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/metrics/provider-pools' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/brains' || pathname === '/api/diagnostics/brains/memories' || pathname === '/api/diagnostics/brains/embedding-jobs' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/calendar' || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
+  if (pathname === '/api/health' || pathname === '/api/status' || pathname === '/api/metrics' || pathname === '/api/metrics/provider-pools' || pathname === '/api/diagnostics/inventory' || pathname === '/api/diagnostics/postgres' || pathname === '/api/diagnostics/brains' || pathname === '/api/diagnostics/brains/memories' || pathname === '/api/diagnostics/brains/embedding-jobs' || pathname === '/api/diagnostics/forge/jobs' || /^\/api\/diagnostics\/forge\/jobs\/[0-9a-f-]{36}$/i.test(pathname) || pathname === '/api/diagnostics/mods' || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/pending$/.test(pathname) || /^\/api\/diagnostics\/mods\/[a-z0-9-]+\/jobs(?:\/[A-Za-z0-9_-]+)?$/.test(pathname) || pathname === '/api/agents' || pathname === '/api/agents/deletions' || pathname === '/api/agent-status' || pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+$/.test(pathname) || pathname === '/api/session/context' || pathname === '/api/session/context-status' || pathname === '/api/context' || pathname === '/api/chat/runs/active' || pathname === '/api/traces' || pathname.startsWith('/api/traces/') || pathname === '/api/archive/calendar' || pathname === '/api/archive/runs' || pathname.startsWith('/api/archive/runs/') || pathname === '/api/archive/sessions' || pathname.startsWith('/api/archive/sessions/')) return 'diagnostics:read';
   return null;
 }
 
@@ -1651,7 +1652,7 @@ const settingsRoute = createSettingsRoutes({ globalProfileDocuments, timezoneSet
 const modReferenceImageRoute = createModReferenceImageContentRoute({ store: () => postgresApplication.stores.referenceImages, sendJson });
 const agentReferenceImageRoute = createAgentReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });
 const operatorReferenceImageRoute = createOperatorReferenceImageRoutes({ store: () => postgresApplication.stores.referenceImages, readJsonBody, sendJson });
-const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview });
+const agentRoute = createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview, listDeletionCleanup: options => postgresApplication.stores.agents.listIdentityDeletionCleanup(options) });
 const archiveAgentContext = createArchiveAgentContext({ agentsStore, rootDir: projectRoot });
 const { archiveSessions, archiveCalendar, archiveSessionDetail, archiveRuns, archiveRunDetail, archiveDreams, archiveDreamDetail, archiveDreamGroups, archiveDreamGroupDetail, archiveWorkflowEvents, archiveWorkflowEventDetail, archiveContinuityCards, archiveContinuityCardDetail } = createArchiveService({
   stores: () => postgresApplication.stores, agentsStore: archiveAgentContext.agentsStore, dreamDiaryStore,
@@ -2046,7 +2047,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     }
   },
   drainAdmission: () => httpClosePromise,
-  closers: () => [() => archiveReadProcess.close(), () => cleanupMods(modLifecycle.getMods(), { logger: serverLogger }), () => otelRuntime.shutdown(), () => postgresApplication.close()],
+  closers: () => [() => archiveReadProcess.close(), () => modLifecycle.close(), () => otelRuntime.shutdown(), () => postgresApplication.close()],
   onTimeout: () => server.closeAllConnections?.(),
 });
 let shutdownPromise = null;

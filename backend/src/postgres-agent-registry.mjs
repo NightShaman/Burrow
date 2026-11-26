@@ -9,6 +9,7 @@ import {
   normalizeAgentContextConfig,
 } from "./agent-context-config.mjs";
 import { assertAgent, executionEnvironment, normalizeModAgent } from "./agent-registry.mjs";
+import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
 
 const DEFAULT_CAPABILITIES = Object.freeze(["chat", "files", "skills"]);
 const text = (v) => String(v ?? "").trim();
@@ -68,6 +69,7 @@ export class PostgresAgentRegistryStore {
     this.pool = normalizePostgresPool(pool);
     this.ownsPool = ownsPool;
     this.referenceImages = referenceImages;
+    this.identityDeletionWake = null;
     this.bootstrapSampleIdentities = ["1", "true", "yes", "on"].includes(
       String(bootstrapSampleIdentities ?? "0")
         .trim()
@@ -150,15 +152,17 @@ export class PostgresAgentRegistryStore {
     );
     return r.rows.length === 1 ? row(r.rows[0]) : null;
   }
-  async create(input = {}) {
+  async create(input = {}, { activeAgentRuns = null } = {}) {
     await this.bootstrap();
     const a = assertAgent(input);
     return withPostgresTransaction(this.pool, async (c) => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))', [a.id]);
       if (
         (await c.query("SELECT 1 FROM agents WHERE id=$1 FOR UPDATE", [a.id]))
           .rows[0]
       )
         throw Error("agent_id_exists");
+      if ((await c.query("SELECT 1 FROM identity_deletion_events WHERE agent_id=$1 AND state<>'complete' LIMIT 1", [a.id])).rows[0]) throw Object.assign(new Error('agent_deletion_cleanup_pending'),{statusCode:409});
       const at = now();
       let r;
       try {
@@ -184,6 +188,7 @@ export class PostgresAgentRegistryStore {
   }
   async update(id, input = {}) {
     return withPostgresTransaction(this.pool, async (c) => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))', [text(id)]);
       const locked = await c.query(
         "SELECT * FROM agents WHERE id=$1 FOR UPDATE",
         [text(id)],
@@ -235,6 +240,8 @@ export class PostgresAgentRegistryStore {
     // sample identity as a fallback for a missing mod or reserve its ID.
     if (!metadata && this.bootstrapSampleIdentities && !await this.get(a.id)) await this.bootstrap();
     return withPostgresTransaction(this.pool, async c => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))', [a.id]);
+      if ((await c.query("SELECT 1 FROM identity_deletion_events WHERE agent_id=$1 AND state<>'complete' LIMIT 1", [a.id])).rows[0]) throw Object.assign(new Error('agent_deletion_cleanup_pending'),{statusCode:409});
       let locked = await c.query('SELECT * FROM agents WHERE id=$1 FOR UPDATE', [a.id]);
       let current = row(locked.rows[0]);
       if (!current) {
@@ -284,6 +291,8 @@ export class PostgresAgentRegistryStore {
     const a = assertAgent(input);
     const metadata = normalizeModAgent(input.modAgent, { ownerModId });
     return withPostgresTransaction(this.pool, async c => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))', [a.id]);
+      if ((await c.query("SELECT 1 FROM identity_deletion_events WHERE agent_id=$1 AND state<>'complete' LIMIT 1", [a.id])).rows[0]) throw Object.assign(new Error('agent_deletion_cleanup_pending'),{statusCode:409});
       await this.assertOwnedModel(c, modelConnectionId, model);
       const at = now();
       const r = await c.query(`INSERT INTO agents
@@ -347,16 +356,18 @@ export class PostgresAgentRegistryStore {
       connection_id=EXCLUDED.connection_id, model_id=EXCLUDED.model_id, reasoning_effort='off', thinking_mode=NULL, temperature=0.2, updated_at=EXCLUDED.updated_at`,
       [id, connectionId, model, at]);
   }
-  async delete(id) {
-    return this.deleteIdentity(id);
+  async delete(id, { activeAgentRuns = null, sessionContinuityHeads = null } = {}) {
+    return this.deleteIdentity(id, null, activeAgentRuns, sessionContinuityHeads);
   }
   async deleteOwned(id, { ownerModId, activeAgentRuns = null } = {}) {
     if (typeof ownerModId !== 'string' || !ownerModId) throw Error('mod_owned_agent_owner_required');
     return this.deleteIdentity(id, ownerModId, activeAgentRuns);
   }
-  async deleteIdentity(id, ownerModId = null, activeAgentRuns = null) {
+  async deleteIdentity(id, ownerModId = null, activeAgentRuns = null, sessionContinuityHeads = null) {
     let storageReference;
+    let deletionEventId;
     const deleted = await withPostgresTransaction(this.pool, async (c) => {
+      await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))', [text(id)]);
       const locked = await c.query(
         "SELECT * FROM agents WHERE id=$1 FOR UPDATE",
         [text(id)],
@@ -369,10 +380,10 @@ export class PostgresAgentRegistryStore {
       if (ownerModId ? current.modAgent?.ownerModId !== ownerModId : Boolean(current.modAgent)) {
         throw Object.assign(new Error(ownerModId ? 'mod_owned_agent_not_found' : 'agent_managed_by_mod'), { statusCode: ownerModId ? 404 : 409 });
       }
-      if (ownerModId) {
-        if ([...(activeAgentRuns?.values?.() || [])].some(run => run.agentId === current.id)) {
-          throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
-        }
+      if ([...(activeAgentRuns?.values?.() || []), ...(sessionContinuityHeads?.values?.() || [])].some(run => run.agentId === current.id)) {
+        throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
+      }
+      {
         // A registered or queued turn must finish before its identity disappears.
         for (const [table, statuses] of [
           ['chat_inputs', ['queued', 'held', 'running']],
@@ -386,23 +397,141 @@ export class PostgresAgentRegistryStore {
         const forge = await c.query("SELECT 1 FROM forge_jobs WHERE agent_id=$1 AND record->>'status' IN ('queued','running') LIMIT 1", [current.id]);
         if (forge.rows[0]) throw Object.assign(new Error('agent_has_active_work'), { statusCode: 409 });
       }
+      const continuity = await c.query("SELECT 1 FROM continuity_state WHERE agent_id=$1 AND (head_state IN ('running','finalizing') OR queue_status='running') LIMIT 1", [current.id]);
+      if (continuity.rowCount) throw Object.assign(new Error('agent_has_active_work'), {statusCode:409});
       if (this.referenceImages) {
         const image = await c.query('SELECT storage_reference FROM agent_reference_images WHERE agent_id=$1', [text(id)]);
         storageReference = image.rows[0]?.storage_reference;
       }
-      if (ownerModId) {
-        // These native records do not have cascading agent foreign keys.
-        await c.query("DELETE FROM github_completion_events WHERE agent_id=$1", [current.id]);
-        await c.query("DELETE FROM github_workflow_watches WHERE agent_id=$1", [current.id]);
-        await c.query("DELETE FROM mod_external_turns WHERE agent_id=$1", [current.id]);
-        await c.query("DELETE FROM conversation_sessions WHERE agent_id=$1", [current.id]);
-        await c.query("DELETE FROM chat_identities WHERE kind='agent' AND id=$1", [current.id]);
-      }
+      // The deletion receipt commits with identity removal. Reuse is fenced while
+      // this event is pending so delayed mod cleanup cannot hit a successor.
+      const eventId = (await c.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+      deletionEventId = eventId;
+      await c.query('INSERT INTO identity_deletion_events(event_id,agent_id,owner_mod_id,storage_reference) VALUES($1,$2,$3,$4)', [eventId,current.id,current.modAgent?.ownerModId || null,storageReference || null]);
+      await c.query('INSERT INTO identity_deletion_reconciliation(agent_id,event_id) VALUES($1,$2) ON CONFLICT(agent_id) DO UPDATE SET event_id=EXCLUDED.event_id,recorded_at=now()', [current.id,eventId]);
+      await c.query(`INSERT INTO identity_deletion_recipients(event_id,mod_id)
+        SELECT $1,h.mod_id FROM identity_deletion_handlers h JOIN mod_installations i USING(mod_id) ON CONFLICT DO NOTHING`,[eventId]);
+      await this.cleanupDeletedIdentityState(c, current.id);
+      await c.query(`UPDATE identity_deletion_events SET state='complete' WHERE event_id=$1 AND storage_reference IS NULL
+        AND NOT EXISTS(SELECT 1 FROM identity_deletion_recipients WHERE event_id=$1 AND acknowledged_at IS NULL)`,[eventId]);
       await c.query("DELETE FROM agents WHERE id=$1", [text(id)]);
       return current;
     });
-    if (storageReference) await this.referenceImages.discard(storageReference);
+    if (storageReference) { try { await this.cleanupIdentityDeletionArtifact(deletionEventId); } catch (error) { await this.failIdentityDeletionArtifact(deletionEventId, boundaryDiagnostic(error,'agent_reference_image_cleanup','agent_reference_image_cleanup_failed').errorCode); } }
+    if (deleted && this.identityDeletionWake) void this.identityDeletionWake().catch(() => {});
     return deleted;
+  }
+  async cleanupDeletedIdentityState(c, agentId) {
+      // Erase owned live state for both identity kinds. Archive history and
+      // operator audit tables are intentionally retained.
+      for (const [table,column] of [
+        ['brain_memories','agent_id'],['agent_model_selections','agent_id'],['conversation_sessions','agent_id'],
+        ['conversation_entries','agent_id'],['conversation_archives','agent_id'],['conversation_archive_runs','agent_id'],
+        ['conversation_archive_entries','agent_id'],['continuity_state','agent_id'],['continuity_log','agent_id'],
+        ['continuity_handoffs','agent_id'],['working_memory','agent_id'],['rolling_continuity_cards','agent_id'],
+        ['github_completion_events','agent_id'],['github_workflow_watches','agent_id'],['mod_external_turns','agent_id'],
+        ['dream_extraction_batches','agent_id'],['dream_diary_entries','agent_id'],
+      ]) await c.query(`DELETE FROM ${table} WHERE ${column}=$1`,[agentId]);
+      await c.query('DELETE FROM tiddle_envelopes WHERE agent_id=$1', [agentId]);
+      await c.query('DELETE FROM dream_state_envelopes WHERE agent_id=$1', [agentId]);
+      await c.query(`DELETE FROM working_memory_meta WHERE value_json->>'agentId'=$1 OR
+        key=ANY(ARRAY['brain-promotion-candidates:' || $1,'preference-signals:' || $1,'preference-learning:' || $1,'preference-audit:' || $1]) OR starts_with(key,'dream-ledger:' || $1 || ':') OR starts_with(key,'dream-preload:' || $1 || ':') OR starts_with(key,'dream-scope-review:' || $1 || ':')`, [agentId]);
+      await c.query(`UPDATE core_mod_authority SET
+        admin_agent_ids=admin_agent_ids - $1,
+        diagnostic_agent_ids=diagnostic_agent_ids - $1,
+        mod_management_agent_ids=mod_management_agent_ids - $1,
+        core_api_agent_ids=core_api_agent_ids - $1
+        WHERE admin_agent_ids ? $1 OR diagnostic_agent_ids ? $1 OR mod_management_agent_ids ? $1 OR core_api_agent_ids ? $1`, [agentId]);
+      const evidence = await c.query("DELETE FROM albdruck_evidence WHERE source_ref->>'agentId'=$1 RETURNING knowledge_id", [agentId]);
+      const evidenceIds = [...new Set(evidence.rows.map(row => row.knowledge_id))];
+      await c.query(`DELETE FROM albdruck_knowledge k WHERE scope=$2 OR (k.id=ANY($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM albdruck_evidence e WHERE e.knowledge_id=k.id)
+        AND NOT EXISTS (SELECT 1 FROM albdruck_revisions r WHERE r.knowledge_id=k.id AND r.operation='correct'))`, [evidenceIds, `agent:${agentId}`]);
+      await c.query("DELETE FROM chat_identities WHERE kind='agent' AND id=$1", [agentId]);
+      await c.query('UPDATE task_board_tasks SET assigned_agent_id=NULL WHERE assigned_agent_id=$1',[agentId]);
+  }
+  setIdentityDeletionWake(wake) { this.identityDeletionWake = typeof wake === 'function' ? wake : null; }
+  async pendingIdentityDeletions(modId, limit=50) {
+    return (await this.pool.query(`SELECT e.event_id AS "eventId",e.agent_id AS "agentId",e.owner_mod_id AS "ownerModId",e.deleted_at AS "deletedAt"
+      FROM identity_deletion_recipients r JOIN identity_deletion_events e USING(event_id)
+      WHERE r.mod_id=$1 AND r.acknowledged_at IS NULL AND r.retry_at<=now() AND e.state<>'complete'
+      ORDER BY e.deleted_at,e.event_id LIMIT $2`,[modId,Math.min(100,Math.max(1,limit))])).rows.map(event => ({ ...event, deletedAt: new Date(event.deletedAt).toISOString() }));
+  }
+  async registerIdentityDeletionHandler(modId, registered) {
+    if (typeof modId !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(modId) || typeof registered !== 'boolean') throw Error('mod_agent_deleted_handler_invalid');
+    await withPostgresTransaction(this.pool, async c => {
+      if (!registered) { await c.query('DELETE FROM identity_deletion_handlers WHERE mod_id=$1',[modId]); return; }
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('identity-deletion-reconciliation'))");
+      await c.query(`INSERT INTO identity_deletion_handlers(mod_id) VALUES($1) ON CONFLICT(mod_id) DO UPDATE SET last_seen_at=now()`,[modId]);
+      // Historical archived IDs are exact Core identity records. Deliver those
+      // IDs to newly activated cleanup handlers once; never inspect mod JSON or
+      // infer ownership from names or prose.
+      const candidates = await c.query(`SELECT r.agent_id FROM agent_identity_registry r LEFT JOIN agents a ON a.id=r.agent_id
+        LEFT JOIN identity_deletion_reconciliation x USING(agent_id)
+        WHERE r.archived AND a.id IS NULL AND x.agent_id IS NULL ORDER BY r.agent_id COLLATE "C"`);
+      for (const candidate of candidates.rows) {
+        await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 109))',[candidate.agent_id]);
+        if ((await c.query('SELECT 1 FROM agents WHERE id=$1',[candidate.agent_id])).rowCount) continue;
+        await this.cleanupDeletedIdentityState(c,candidate.agent_id);
+        const receipt = await c.query(`INSERT INTO identity_deletion_events(event_id,agent_id,owner_mod_id,state)
+          VALUES(gen_random_uuid(),$1,NULL,'pending') RETURNING event_id`,[candidate.agent_id]);
+        await c.query('INSERT INTO identity_deletion_reconciliation(agent_id,event_id) VALUES($1,$2) ON CONFLICT(agent_id) DO NOTHING',[candidate.agent_id,receipt.rows[0].event_id]);
+      }
+      await c.query(`WITH inserted AS (
+        INSERT INTO identity_deletion_recipients(event_id,mod_id)
+        SELECT x.event_id,$1 FROM identity_deletion_reconciliation x WHERE NOT EXISTS (SELECT 1 FROM agents a WHERE a.id=x.agent_id)
+        ON CONFLICT(event_id,mod_id) DO NOTHING RETURNING event_id
+      ) UPDATE identity_deletion_events e SET state='pending',retry_at=now(),last_error=NULL
+        FROM inserted i WHERE e.event_id=i.event_id`,[modId]);
+    });
+    if (registered && this.identityDeletionWake) void this.identityDeletionWake().catch(() => {});
+  }
+  async pendingIdentityDeletionArtifacts(limit=50) {
+    return (await this.pool.query(`SELECT event_id AS "eventId",storage_reference AS "storageReference" FROM identity_deletion_events
+      WHERE storage_reference IS NOT NULL AND retry_at<=now() ORDER BY deleted_at,event_id LIMIT $1`,[Math.min(100,Math.max(1,limit))])).rows;
+  }
+  async clearIdentityDeletionArtifact(eventId) {
+    await this.pool.query(`UPDATE identity_deletion_events SET storage_reference=NULL,
+      state=CASE WHEN NOT EXISTS(SELECT 1 FROM identity_deletion_recipients WHERE event_id=$1 AND acknowledged_at IS NULL) THEN 'complete' ELSE 'pending' END
+      WHERE event_id=$1`,[eventId]);
+  }
+  async cleanupIdentityDeletionArtifact(eventId) {
+    if (!this.referenceImages) return false;
+    const row=(await this.pool.query('SELECT storage_reference FROM identity_deletion_events WHERE event_id=$1',[eventId])).rows[0];
+    if (!row?.storage_reference) return true;
+    await this.referenceImages.discard(row.storage_reference, { throwOnError: true });
+    await this.clearIdentityDeletionArtifact(eventId);
+    return true;
+  }
+  async failIdentityDeletionArtifact(eventId,errorCode='agent_reference_image_cleanup_failed') {
+    const code=/^[a-z0-9_]{1,80}$/.test(String(errorCode))?String(errorCode):'agent_reference_image_cleanup_failed';
+    await this.pool.query(`UPDATE identity_deletion_events SET state='failed',attempts=attempts+1,last_error=$2,
+      retry_at=now()+LEAST(interval '1 hour',interval '2 seconds'*power(2,LEAST(attempts,10))) WHERE event_id=$1 AND storage_reference IS NOT NULL`,[eventId,code]);
+  }
+  async acknowledgeIdentityDeletion(eventId,modId) {
+    await withPostgresTransaction(this.pool, async c => {
+      await c.query(`UPDATE identity_deletion_recipients SET acknowledged_at=now(),last_error=NULL WHERE event_id=$1 AND mod_id=$2 AND acknowledged_at IS NULL`,[eventId,modId]);
+      await c.query(`UPDATE identity_deletion_events SET state=CASE WHEN storage_reference IS NULL AND NOT EXISTS(SELECT 1 FROM identity_deletion_recipients WHERE event_id=$1 AND acknowledged_at IS NULL) THEN 'complete' ELSE 'pending' END,last_error=NULL WHERE event_id=$1`,[eventId]);
+    });
+  }
+  async failIdentityDeletion(eventId,modId,errorCode='mod_identity_cleanup_failed') {
+    const code=/^[a-z0-9_]{1,80}$/.test(String(errorCode))?String(errorCode):'mod_identity_cleanup_failed';
+    await withPostgresTransaction(this.pool, async c => {
+      await c.query(`UPDATE identity_deletion_recipients SET attempts=attempts+1,last_error=$3,
+        retry_at=now()+LEAST(interval '1 hour', interval '2 seconds' * power(2,LEAST(attempts,10))) WHERE event_id=$1 AND mod_id=$2 AND acknowledged_at IS NULL`,[eventId,modId,code]);
+      await c.query(`UPDATE identity_deletion_events SET state='failed',attempts=attempts+1,last_error=$2 WHERE event_id=$1`,[eventId,code]);
+    });
+  }
+  async listIdentityDeletionCleanup({ limit = 100 } = {}) {
+    if (!Number.isInteger(limit) || limit<1 || limit>500) throw Object.assign(new Error('agent_deletion_query_invalid'),{statusCode:400});
+    return (await this.pool.query(`SELECT e.event_id AS "eventId",e.agent_id AS "agentId",e.owner_mod_id AS "ownerModId",e.state,e.attempts,e.last_error AS "lastError",e.deleted_at AS "deletedAt",e.storage_reference IS NOT NULL AS "storagePending",
+      COALESCE(jsonb_agg(jsonb_build_object('modId',r.mod_id,'acknowledged',r.acknowledged_at IS NOT NULL,'attempts',r.attempts,'lastError',r.last_error)) FILTER(WHERE r.mod_id IS NOT NULL),'[]'::jsonb) AS recipients
+      FROM identity_deletion_events e LEFT JOIN identity_deletion_recipients r USING(event_id)
+      WHERE e.state<>'complete' GROUP BY e.event_id ORDER BY e.deleted_at DESC LIMIT $1`,[Math.min(500,Math.max(1,limit))])).rows;
+  }
+  async latestIdentityDeletionForAgent(agentId) {
+    const row = (await this.pool.query(`SELECT event_id AS "eventId",state,attempts,last_error AS "lastError",deleted_at AS "deletedAt",storage_reference IS NOT NULL AS "storagePending" FROM identity_deletion_events WHERE agent_id=$1 ORDER BY deleted_at DESC LIMIT 1`, [agentId])).rows[0];
+    return row || null;
   }
 }
 export const __postgresAgentRegistry = Object.freeze({

@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
+import { boundaryDiagnostic } from './diagnostic-boundary.mjs';
 
 // Validate, never coerce, default, or silently strip model-supplied arguments.
 const toolSchemaValidator = new Ajv({ strict: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
@@ -23,6 +24,7 @@ let diagnosticHandlers = null;
 let agentContextProvider = null;
 let sharedContextProvider = null;
 let runCompletionHandler = null;
+let agentDeletedHandler = null;
 const pendingStore = new Map();
 const pendingCapabilities = new Map();
 const invocationScope = new AsyncLocalStorage();
@@ -119,6 +121,7 @@ function storeRequest(scope, method, args) {
 function settingsApi() {
   return Object.freeze({
     get: (name, fallback = null) => storeRequest('settings', 'get', [name, fallback]),
+    keys: (input = {}) => storeRequest('settings', 'keys', [input]),
     set: (name, value) => storeRequest('settings', 'set', [name, value]),
     delete: (name) => storeRequest('settings', 'delete', [name]),
   });
@@ -146,6 +149,7 @@ function registrar(modId) {
   let registrationOpen = true;
   return {
     routes, tools, closeRegistration() { registrationOpen = false; },
+    onDeleted(handler) { if (!registrationOpen || agentDeletedHandler || typeof handler !== 'function') throw new Error('mod_agent_deleted_handler_invalid'); agentDeletedHandler = handler; },
     agentContext: Object.freeze({ register(provider) {
       if (!registrationOpen || agentContextProvider || typeof provider !== 'function') throw new Error('mod_agent_context_registration_invalid');
       agentContextProvider = provider;
@@ -212,7 +216,7 @@ async function activate(message) {
     conversations: Object.freeze({ list: (input) => capabilityRequest("listConversations", input), read: (input, options) => capabilityRequest("readConversation", input, options) }),
     models: Object.freeze({ list: () => capabilityRequest("listModels", {}), generateText: (input, options) => capabilityRequest("generateText", input, options), generations: Object.freeze({ submit: (input) => capabilityRequest("submitGeneration", input), read: (jobId) => capabilityRequest("readGeneration", { jobId }) }) }),
     forge: Object.freeze({ references: Object.freeze({ get: key => capabilityRequest('getForgeReferenceImage', { key }), put: (key, body) => capabilityRequest('putForgeReferenceImage', { key, body }), remove: key => capabilityRequest('removeForgeReferenceImage', { key }) }), images: Object.freeze({ status: () => capabilityRequest("getForgeImageStatus", {}), create: (input) => capabilityRequest("createForgeImage", input) }), jobs: Object.freeze({ read: (jobId) => capabilityRequest("readForgeImageJob", { jobId }) }) }),
-    agents: Object.freeze({ runs: Object.freeze({ list: (input = {}) => capabilityRequest("listAgentRunCompletions", input), activity: (input = {}) => capabilityRequest("readAgentRunActivity", input), onCompleted(handler) { if (runCompletionHandler || typeof handler !== "function") throw new Error("mod_agent_run_handler_invalid"); runCompletionHandler = handler; } }), owned: Object.freeze({ referenceImages: Object.freeze({ get: agentId => capabilityRequest('getOwnedAgentReferenceImage', {agentId}), put: (agentId, body) => capabilityRequest('putOwnedAgentReferenceImage', {agentId, body}), remove: agentId => capabilityRequest('removeOwnedAgentReferenceImage', {agentId}) }), list: () => capabilityRequest('listOwnedAgents', {}), create: input => capabilityRequest('createOwnedAgent', input), read: agentId => capabilityRequest('readOwnedAgent', { agentId }), update: (agentId, patch) => capabilityRequest('updateOwnedAgent', { agentId, patch }), remove: agentId => capabilityRequest('removeOwnedAgent', { agentId }) }), context: registration.agentContext, sessions: Object.freeze({ create: input => capabilityRequest("createExternalSession", input), model: input => capabilityRequest("readExternalSessionModel", input), setModel: input => capabilityRequest("setExternalSessionModel", input) }), list: (input = {}) => capabilityRequest("listAgents", input), turns: Object.freeze({ submit: (input) => capabilityRequest("submitExternalTurn", input), read: (turnId) => capabilityRequest("readExternalTurn", { turnId }), readAttachment: (turnId, attachmentId) => capabilityRequest("readExternalTurnAttachment", { turnId, attachmentId }), cancel: (turnId) => capabilityRequest("cancelExternalTurn", { turnId }) }) }),
+    agents: Object.freeze({ onDeleted: registration.onDeleted, runs: Object.freeze({ list: (input = {}) => capabilityRequest("listAgentRunCompletions", input), activity: (input = {}) => capabilityRequest("readAgentRunActivity", input), onCompleted(handler) { if (runCompletionHandler || typeof handler !== "function") throw new Error("mod_agent_run_handler_invalid"); runCompletionHandler = handler; } }), owned: Object.freeze({ referenceImages: Object.freeze({ get: agentId => capabilityRequest('getOwnedAgentReferenceImage', {agentId}), put: (agentId, body) => capabilityRequest('putOwnedAgentReferenceImage', {agentId, body}), remove: agentId => capabilityRequest('removeOwnedAgentReferenceImage', {agentId}) }), list: () => capabilityRequest('listOwnedAgents', {}), create: input => capabilityRequest('createOwnedAgent', input), read: agentId => capabilityRequest('readOwnedAgent', { agentId }), update: (agentId, patch) => capabilityRequest('updateOwnedAgent', { agentId, patch }), remove: agentId => capabilityRequest('removeOwnedAgent', { agentId }) }), context: registration.agentContext, sessions: Object.freeze({ create: input => capabilityRequest("createExternalSession", input), model: input => capabilityRequest("readExternalSessionModel", input), setModel: input => capabilityRequest("setExternalSessionModel", input) }), list: (input = {}) => capabilityRequest("listAgents", input), turns: Object.freeze({ submit: (input) => capabilityRequest("submitExternalTurn", input), read: (turnId) => capabilityRequest("readExternalTurn", { turnId }), readAttachment: (turnId, attachmentId) => capabilityRequest("readExternalTurnAttachment", { turnId, attachmentId }), cancel: (turnId) => capabilityRequest("cancelExternalTurn", { turnId }) }) }),
     operator: Object.freeze({ timezone: () => capabilityRequest("getOperatorTimezone", {}), displayIdentity: () => capabilityRequest("getOperatorIdentity", {}) }),
     scheduler: Object.freeze({ list: (input = {}) => capabilityRequest("listScheduledJobs", input), read: (jobId) => capabilityRequest("readScheduledJob", { jobId }), create: (input) => capabilityRequest("createScheduledJob", input), update: (jobId, patch) => capabilityRequest("updateScheduledJob", { jobId, patch }), delete: (jobId) => capabilityRequest("deleteScheduledJob", { jobId }), runs: (jobId, input = {}) => capabilityRequest("listScheduledJobRuns", { ...input, jobId }), trigger: (jobId) => capabilityRequest("triggerScheduledJob", { jobId }) }),
     logger: logger(modId),
@@ -250,13 +254,13 @@ async function activate(message) {
   const result = await module.activate(Object.freeze(context));
   registration.closeRegistration();
   cleanup = typeof result === 'function' ? result : result && typeof result.close === 'function' ? () => result.close() : null;
-  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers), secretReferenceSchemes: [...secretReferenceProviders.keys()], runCompletionHandler: Boolean(runCompletionHandler), agentContext: Boolean(agentContextProvider), sharedContext: Boolean(sharedContextProvider) });
+  send({ type: 'activated', routes: registration.routes, tools: registration.tools, diagnostics: Boolean(diagnosticHandlers), secretReferenceSchemes: [...secretReferenceProviders.keys()], runCompletionHandler: Boolean(runCompletionHandler), agentDeletedHandler: Boolean(agentDeletedHandler), agentContext: Boolean(agentContextProvider), sharedContext: Boolean(sharedContextProvider) });
 }
 
 async function invoke(message) {
   const secretListScheme = message.routeId?.startsWith("secret-reference-list:") ? message.routeId.slice(22) : null;
   const secretResolveScheme = message.routeId?.startsWith("secret-reference-resolve:") ? message.routeId.slice(25) : null;
-  const handler = message.routeId === 'agent-run-completion' ? runCompletionHandler : message.routeId === 'agent-context' ? agentContextProvider : message.routeId === 'shared-context' ? sharedContextProvider : secretListScheme ? secretReferenceProviders.get(secretListScheme)?.list : secretResolveScheme ? secretReferenceProviders.get(secretResolveScheme)?.resolve : message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
+  const handler = message.routeId === 'agent-deleted' ? agentDeletedHandler : message.routeId === 'agent-run-completion' ? runCompletionHandler : message.routeId === 'agent-context' ? agentContextProvider : message.routeId === 'shared-context' ? sharedContextProvider : secretListScheme ? secretReferenceProviders.get(secretListScheme)?.list : secretResolveScheme ? secretReferenceProviders.get(secretResolveScheme)?.resolve : message.routeId?.startsWith("protected:") ? protectedResolvers.get(message.routeId.slice(10)) : message.routeId?.startsWith("tool:") ? toolHandlers.get(message.routeId.slice(5)) : message.routeId === "diagnostic-list" ? diagnosticHandlers?.listJobs : message.routeId === "diagnostic-detail" ? diagnosticHandlers?.getJob : handlers.get(message.routeId);
   if (!handler) throw new Error('mod_route_handler_not_found');
   const controller = new AbortController();
   activeInvocations.set(message.requestId, controller);
@@ -424,7 +428,7 @@ process.on('message', async (message) => {
       process.disconnect();
     }
   } catch (error) {
-    if (message?.type === 'invoke') { if (!cancelledInvocations.delete(message.requestId)) send({ type: 'result', requestId: message.requestId, error: errorText(error), statusCode: Number(error?.statusCode) || 500 }); }
+    if (message?.type === 'invoke') { if (!cancelledInvocations.delete(message.requestId)) send({ type: 'result', requestId: message.requestId, error: 'mod_route_failed', diagnostic: boundaryDiagnostic(error, 'mod_route'), statusCode: Number(error?.statusCode) || 500 }); }
     else {
       try { await shutdown(); } catch {}
       send({ type: 'activation-failed', error: errorText(error) });

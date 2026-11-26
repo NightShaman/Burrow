@@ -1,9 +1,15 @@
-export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview } = {}) {
+export function createAgentRoutes({ readJsonBody, sendJson, validateBoundaryBody, agentsStore, createAgent, updateAgent, deleteAgent, agentProfileDocuments, selectedAgentRuntime, agentStatusForSession, agentOverview, listDeletionCleanup = async () => [] } = {}) {
   const resultResponse = (res, result, success = 200) => {
     sendJson(res, result.ok ? success : (result.status || 500), result);
     return true;
   };
   return async function handleAgentRoute({ req, res, url } = {}) {
+    if (req.method === 'GET' && url.pathname === '/api/agents/deletions') {
+      const raw=url.searchParams.get('limit'); const limit=raw===null?100:Number(raw);
+      if (!Number.isInteger(limit) || limit<1 || limit>500) { sendJson(res,400,{ok:false,error:'agent_deletion_query_invalid'}); return true; }
+      sendJson(res, 200, { ok: true, deletions: await listDeletionCleanup({ limit }) });
+      return true;
+    }
     if (req.method === 'GET' && url.pathname === '/api/agents') {
       sendJson(res, 200, { ok: true, agents: await agentsStore().list({ includeDisabled: url.searchParams.get('includeDisabled') !== 'false' }) });
       return true;
