@@ -466,6 +466,8 @@ Checked **18 November 2026**: Minion tool activity stays visible during executio
 
 **Archive → Proof** searches retained server-side run summaries, rather than only the first page already loaded in the browser. Search can match a run ID, displayed agent name (or ID when unnamed), objective or status. **Load more** continues the same search and scope. This is summary search, not full-text search of every raw tool output.
 
+On builds with the updated Proof summary, the list badge and selected run use the same execution state. The selected run shows **Execution** with its reason, **Verification**, and **Tool history**. A completed run may still show failed attempts; those are recorded history, not an open-work list. An older run with no recorded state shows **Not recorded**. A retained **Agent response** or a successful tool call does not establish the requested outcome.
+
 Open a run's **Redacted provider requests** section to list recorded requests and select a body. **Compare requests** opens two independent selectors; choose the actual before/after requests rather than assuming they are automatically paired. Bodies are retained for three days. Expired, not captured, unavailable and an empty request list are distinct states. Review these private contents before sharing, even after redaction.
 
 ## Scope-safe chat and Archive refresh

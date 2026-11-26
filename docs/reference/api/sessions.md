@@ -73,6 +73,10 @@ The current UI allows 120 seconds for reset instead of the ordinary 30-second JS
 
 Use server-returned cursors and completeness/continuation information. A visible page or “copy loaded” UI action is not necessarily a full-history export. Calendar grouping uses the requested timezone. Invalid calendar/date/timezone/cursor arguments return a 400-class error.
 
+On builds with canonical Archive run summaries, run list and detail return the same additive `execution` and `toolHistory` fields for the selected occurrence. Read `execution.status`, `reasonCode`, `reason`, and `source` instead of inferring execution from the compatibility `status` field. The states are `running`, `completed`, `failed`, `cancelled`, `interrupted`, `superseded`, and `not_recorded`. A running state requires recorded active continuity for that exact run, not just an absent completion.
+
+`toolHistory` reports `total`, `completed`, `failed`, `pending`, and `unknown`. Missing or uncorrelated results are not proof of failure; a result that was never recorded is not proof of ongoing execution. Verification remains a separate record. Read the selected run's detail for evidence rather than expecting raw tool output or the full response in the list.
+
 Authority endpoints return execution explanations, not a new permission grant. Archive proof success, child completion, verification and final delivery are separate pieces of evidence.
 See [Archive UI](../../concepts/interface.md)
 

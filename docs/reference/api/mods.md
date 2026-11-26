@@ -63,6 +63,10 @@ The full page was reconciled on **2026-11-08** against Backend commit `6b682eae6
 - [backend/src/mod-distribution.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-distribution.mjs)
 - [backend/src/mod-runtime.mjs](https://github.com/GoblinKing-Burrow/Burrow/blob/aa5a30da683a3a8ea919025f107ff53f182ef8d6/backend/src/mod-runtime.mjs)
 
+## Mod agent directory
+
+On hosts exposing registry identity metadata, `context.agents.list({ includeHidden? })` returns each visible directory entry's `identity.type` and `identity.ownerModId`. Ordinary agents report `agent` and a null owner; mod-owned agents report `mod-owned` and the owning mod's ID. This is an internal mod-host capability, not a new HTTP route or a grant to run or inspect another agent.
+
 ## External agent turns with images
 
 Current Core's host capability `context.agents.turns.submit` accepts optional `attachments` beside `agentId`, `sessionId`, `message`, optional `displayMessage`, and `idempotencyKey`. This is an internal mod capability, not a new public HTTP route. Attachments use normal ChatAttachment fields (`name`, `type` or `mimeType`, `size`, `encoding`, `content`); actual nonempty content is required. Images must be matching `data:image/...;base64,...` content with canonical padded base64, never provider download URLs, private storage paths or credentials.
