@@ -498,7 +498,7 @@ const reset = r => `(${r}.source_store='archive' AND (${r}.archive_kind='reset' 
  ${r}.generation<=COALESCE((SELECT max(a.generation) FROM conversation_archives a WHERE a.agent_id=${r}.agent_id AND a.session_id=${r}.session_id AND a.kind='reset'),-1)
  OR ${r}.created_at<=burrow_legacy_instant(s.metadata->>'resetAt')))`;
 const visibleSession = `NULLIF(s.metadata->'contextIsolation'->>'historySessionId','') IS NULL`;
-const order = `score DESC,(r.session_id=$8) DESC,r.ts_key COLLATE "C" DESC,r.session_id,r.source_store,r.source_id,r.ordinal`;
+const order = `lexical_exact DESC,score DESC,(r.session_id=$8) DESC,r.ts_key COLLATE "C" DESC,r.session_id,r.source_store,r.source_id,r.ordinal`;
 const hydrate = `SELECT p.*,COALESCE(l.entry,a.entry) AS entry FROM selected p
  LEFT JOIN LATERAL (SELECT entry FROM conversation_entries l WHERE p.source_store='live' AND l.agent_id=p.agent_id AND l.session_id=p.session_id AND l.sequence=p.ordinal OFFSET 0) l ON true
  LEFT JOIN LATERAL (SELECT entry FROM conversation_archive_entries a WHERE p.source_store='archive' AND a.agent_id=p.agent_id AND a.session_id=p.session_id AND a.source_store=p.source_store AND a.source_id=p.source_id AND a.ordinal=p.ordinal OFFSET 0) a ON true`;
@@ -521,8 +521,8 @@ export function recallCandidateQuery({agentId,query='',sourceId=null,sourceSessi
   const sql=`WITH ranked AS MATERIALIZED (
  SELECT r.agent_id,r.session_id,r.source_store,r.source_id,r.ordinal,r.entry_key,r.archive_kind,r.generation,r.created_at,
  COALESCE(${reset('r')},false) AS reset_archive,r.ts_key,
- scored.score FROM conversation_recall_rows r JOIN conversation_sessions s USING(agent_id,session_id)
- CROSS JOIN LATERAL burrow_recall_score(r.haystack,r.rank_weight,$6,$7) scored
+ scored.score,scored.exact_match AS lexical_exact FROM conversation_recall_rows r JOIN conversation_sessions s USING(agent_id,session_id)
+ CROSS JOIN LATERAL burrow_recall_score(r.haystack,CASE WHEN s.metadata->>'sessionKind'='subagent' OR s.metadata->>'parentChild'='true' THEN 0 ELSE r.rank_weight END,$6,$7) scored
  WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2)
  AND ($3::text IS NULL OR r.logical_key=$3)
  AND ${visibleSession} AND r.eligible AND ($11 OR NOT r.summary)
@@ -536,7 +536,7 @@ export function recallCandidateQuery({agentId,query='',sourceId=null,sourceSessi
  AND ${canonical()}
  ), selected AS MATERIALIZED (
  SELECT r.*,count(*) OVER() AS total_matches FROM ranked r ORDER BY ${order} LIMIT $9
- ) ${hydrate} ORDER BY p.score DESC,(p.session_id=$8) DESC,p.ts_key COLLATE "C" DESC,p.session_id,p.source_store,p.source_id,p.ordinal`;
+ ) ${hydrate} ORDER BY p.lexical_exact DESC,p.score DESC,(p.session_id=$8) DESC,p.ts_key COLLATE "C" DESC,p.session_id,p.source_store,p.source_id,p.ordinal`;
  const legacySql=`SELECT DISTINCT r.ts_fallback COLLATE "C" AS ts_fallback FROM conversation_recall_rows r JOIN conversation_sessions s USING(agent_id,session_id)
  WHERE r.agent_id=$1 AND ($2::text IS NULL OR r.session_id=$2) AND ($3::text IS NULL OR r.logical_key=$3)
  AND ${visibleSession} AND r.eligible AND ($11 OR NOT r.summary) AND r.entry_at IS NULL AND r.ts_fallback IS NOT NULL

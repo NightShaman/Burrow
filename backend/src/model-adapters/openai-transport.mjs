@@ -139,6 +139,12 @@ function normalizeResponseChoice(data = {}) {
     message: { role: 'assistant', content: text },
     text,
     toolCalls: normalizeResponseToolCalls(data),
+    outputOrder: (Array.isArray(data.output) ? data.output : []).flatMap(item => {
+      if (item?.type === 'function_call' || item?.type === 'tool_call') return [{ kind: 'call', callId: item.call_id || item.id }];
+      if (item?.type === 'reasoning' && typeof item.id === 'string' && typeof item.encrypted_content === 'string') return [{ kind: 'reasoning', id: item.id }];
+      const text = (Array.isArray(item?.content) ? item.content : []).filter(part => typeof part?.text === 'string').map(part => part.text).join('');
+      return text ? [{ kind: 'text', text }] : [];
+    }),
   };
 }
 
@@ -157,6 +163,28 @@ function messagesToResponsesInput(messages, prompt, reasoningOwner = null, estim
   if (!messages?.length) return String(prompt || '');
   const input = [];
   for (const message of messages) {
+    const order = message?.role === 'assistant' && message.responsesOutputOrder;
+    if (Array.isArray(order) && message.tool_calls?.length) {
+      const calls = message.tool_calls;
+      let callIndex = 0;
+      for (const part of order) {
+        if (part.kind === 'text' && part.text) input.push({ role: 'assistant', content: part.text });
+        else if (part.kind === 'call') {
+          const call = calls[callIndex++];
+          if (!call) continue;
+          const fn = call.function || call;
+          input.push({ type: 'function_call', call_id: String(call.id || call.call_id).slice(0, 256), name: String(fn.name || ''), arguments: typeof fn.arguments === 'string' ? fn.arguments : jsonText(fn.arguments ?? {}) });
+        } else if (part.kind === 'reasoning' && (estimate || message.responsesOutputOwner === reasoningOwner)) {
+          const state = message.responsesReasoning?.items?.find(item => item.id === part.id);
+          if (state) input.push(responseReasoningItem({ ...state, type: 'reasoning' }));
+        }
+      }
+      for (; callIndex < calls.length; callIndex++) {
+        const call = calls[callIndex], fn = call.function || call;
+        input.push({ type: 'function_call', call_id: String(call.id || call.call_id).slice(0, 256), name: String(fn.name || ''), arguments: typeof fn.arguments === 'string' ? fn.arguments : jsonText(fn.arguments ?? {}) });
+      }
+      continue;
+    }
     const state = message?.role === 'assistant' && message.responsesReasoning;
     const items = isResponsesReasoning(state) && (estimate || (reasoningOwner !== null && state.owner === reasoningOwner)) ? state.items : [];
     let reasoningIndex = 0;
@@ -335,6 +363,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   const toolCalls = [];
   const responseToolCalls = [];
   const responseReasoning = new Map();
+  const responseOutputItems = new Map();
   const collectReasoning = (item, index) => {
     const reasoning = responseReasoningItem(item);
     if (!reasoning || !Number.isInteger(index) || index < 0) return;
@@ -387,6 +416,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
       if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') await emit(event.delta);
       if ((event?.type === 'response.reasoning.delta' || event?.type === 'response.reasoning_summary_text.delta') && typeof event.delta === 'string') await emitThought(event.delta);
       if (event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') collectReasoning(event.item, event.output_index);
+      if (event?.type === 'response.output_item.done' && Number.isInteger(event.output_index) && event.item && !['function_call', 'tool_call', 'reasoning'].includes(event.item.type)) responseOutputItems.set(event.output_index, event.item);
       if ((event?.type === 'response.output_item.added' || event?.type === 'response.output_item.done') && (event.item?.type === 'function_call' || event.item?.type === 'tool_call')) {
         recordToolCallFailure(responseFunctionCallFailure(responseToolCalls, event));
         if (!toolCallFailure && !mergeResponseFunctionCall(responseToolCalls, event)) recordToolCallFailure('model_tool_call_conflict');
@@ -548,7 +578,7 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   }
   const orderedResponseOutput = mode === 'openai-responses' ? [
     ...Object.keys(responseToolCalls).map(index => ({ index: Number(index), item: responseToolCalls[index] })),
-    ...responseReasoning.values(),
+    ...responseReasoning.values(), ...[...responseOutputItems].map(([index, item]) => ({ index, item })),
   ].sort((a, b) => a.index - b.index).map(entry => entry.item) : null;
   const data = mode === 'openai-responses'
     ? { ...finalData, ...(text ? { output_text: text } : {}), output: orderedResponseOutput }
@@ -558,7 +588,9 @@ async function readResponseSseBounded(response, { mode, maxBytes = DEFAULT_MAX_R
   // responses. Do this before returning any data so callers cannot execute
   // tool calls or persist a transcript from length/content-filter/refusal,
   // incomplete, malformed, or empty terminals.
-  const terminalError = openAIEnvelopeError(data, mode);
+  const terminalError = mode === 'openai-responses' && Array.isArray(data?.output) && data.output.length === 0 && !data.output_text
+    ? 'model_response_malformed_envelope'
+    : openAIEnvelopeError(data, mode);
   if (terminalError) return { ok: false, bytes, error: terminalError, data: null, streamedTextChars: text.length };
   return { ok: !streamError, bytes, error: streamError, errorDetails: streamErrorDetails, data, streamedTextChars: text.length };
 }

@@ -74,7 +74,7 @@ function queryMatch(entry, query) {
     entry.metadata?.compressionSummary?.text,
   ].map(normalized).join('\n');
   const exact = normalized(query).trim();
-  if (exact && haystack.includes(exact)) return { matches: true, score: 1000 };
+  if (exact && exactPhrasePosition(haystack, exact) >= 0) return { matches: true, exact: true, score: 2000 };
   const terms = queryTerms(query);
   if (!terms.length) return { matches: true, score: 0 };
   const positions = terms.map((term) => haystack.indexOf(term));
@@ -88,8 +88,21 @@ function queryMatch(entry, query) {
   const proximity = Number.isFinite(span) ? Math.max(0, 100 - Math.floor(span / 8)) : 0;
   return {
     matches: true,
+    exact: false,
     score: (allTerms ? 700 : 0) + Math.round(coverage * 400) + (matchedCount * 20) + proximity,
   };
+}
+
+function exactPhrasePosition(haystack, phrase) {
+  const word = character => character !== '' && (character.charCodeAt(0) > 127 || /[A-Za-z0-9_]/u.test(character));
+  let at = 0;
+  while ((at = haystack.indexOf(phrase, at)) >= 0) {
+    const before = at > 0 ? haystack[at - 1] : '';
+    const after = haystack[at + phrase.length] || '';
+    if (!word(before) && !word(after)) return at;
+    at += 1;
+  }
+  return -1;
 }
 
 export function matchesQuery(entry, query) {
@@ -119,10 +132,11 @@ function operatorRank(left, right, query) {
 
 function recallScore(entry, query) {
   const content = normalized(entry.metadata?.compressionSummary?.text || entry.content);
+  const lexical = queryMatch(entry, query);
   const decisionLanguage = /\b(?:decid(?:e|ed|ing)|agreed|require(?:s|d)?|must|should|need(?:s|ed)?|will|won't|do not|don't|keep|remain|stay|real)\b/iu.test(content);
   const incidentalLanguage = /\b(?:fake|mock|dead code|cleanup|remove|removed)\b/iu.test(content);
   const roleWeight = entry.role === 'user' ? 5 : entry.role === 'assistant' ? 4 : entry.role === 'agent' ? 3 : 1;
-  return queryMatch(entry, query).score + (decisionLanguage ? 30 : 0) + roleWeight - (incidentalLanguage ? 15 : 0);
+  return (lexical.exact ? 1_000_000_000 : lexical.score) + (decisionLanguage ? 30 : 0) + roleWeight - (incidentalLanguage ? 15 : 0);
 }
 
 function matchesRole(entry, role) {
@@ -413,9 +427,10 @@ async function indexedAgentSessionEvidence({ conversationStore, continuityStore,
   const found = await conversationStore.searchRecallCandidates({ agentId, query, role, includeSummaries, limit, since, until, sourceId, sourceSessionId, currentSessionId, includeResetHistory: true, ...options });
   archiveReadCheckpoint(options);
   // Query embeddings locate passages only. Original expansion remains exact and
-  // never contacts a provider. Lexical hits retain priority for names/IDs.
+  // never contacts a provider. Whole lexical matches retain priority for
+  // names/IDs; semantic evidence precedes incidental substring fallbacks.
   let semanticRows = [];
-  const enoughExact = found.rows.length >= limit && found.rows.every(row => Number(row.score) >= 1000);
+  const enoughExact = found.rows.length >= limit && found.rows.every(row => row.lexical_exact === true);
   if (!sourceId && query && !enoughExact && conversationStore.embeddings && found.readiness?.ready !== false) {
     // Optional semantic ranking must not consume the whole lexical owner budget.
     // A provider outage returns proven keyword hits, not a failed history search.
@@ -426,16 +441,24 @@ async function indexedAgentSessionEvidence({ conversationStore, continuityStore,
     archiveReadCheckpoint(options);
   }
   const rows = [...found.rows];
-  const identities = new Set(rows.map(row => JSON.stringify([row.session_id,row.entry?.id || [row.source_store,row.source_id,String(row.ordinal)]])));
+  const identityOf = row => JSON.stringify([row.session_id,row.entry?.id || [row.source_store,row.source_id,String(row.ordinal)]]);
+  const identities = new Map(rows.map((row,index) => [identityOf(row),index]));
   for (const row of semanticRows) {
-    const identity=JSON.stringify([row.session_id,row.entry?.id || [row.source_store,row.source_id,String(row.ordinal)]]);
-    if (!identities.has(identity)) { identities.add(identity); rows.push(row); }
+    const identity=identityOf(row);
+    if (!identities.has(identity)) { identities.set(identity,rows.length); rows.push(row); }
+    else {
+      const index=identities.get(identity);
+      rows[index]={...rows[index],semantic_score:row.semantic_score};
+    }
   }
   const matches = rows.map(row => {
     const entry = recallRowEntry(row);
     return { ...compactEntry(entry, query), original: sourceId ? entry : undefined,
       sourceRef: { kind: 'conversation_entry', agentId, sessionId: row.session_id, entryId: entry.id },
-      expandable: Boolean(entry.id), recallScore: row.semantic_score !== undefined ? 100 + Math.max(0,Number(row.semantic_score))*100 : recallScore(entry, query),
+      expandable: Boolean(entry.id),
+      _relevanceTier: row.lexical_exact === true ? 2 : row.semantic_score !== undefined ? 1 : 0,
+      recallScore: row.lexical_exact === true ? Number(row.score ?? 2000)
+        : row.semantic_score !== undefined ? Number(row.semantic_score) : Number(row.score ?? recallScore(entry, query)),
       ...(row.semantic_score !== undefined ? {semanticScore:Number(row.semantic_score)} : {}),
       source: { kind: 'session_transcript', sessionId: row.session_id, currentSession: row.session_id === currentSessionId, resetArchive: Boolean(row.reset_archive), store: 'postgres' },
       _occurrence: row };
@@ -449,7 +472,8 @@ async function indexedAgentSessionEvidence({ conversationStore, continuityStore,
       contentSnippet: snippet(h.content, query), handoff: { title: h.title, sourceRefs: h.sourceRefs, evidenceSummary: h.evidenceSummary, expiresAt: h.expiresAt },
       source: { kind: 'session_handoff', sessionId: h.sessionId, currentSession: h.sessionId === currentSessionId, store: 'postgres' },
       recallScore: 45 + (h.sessionId === currentSessionId ? 5 : 0) }));
-  const selected = [...matches, ...handoffMatches].sort((a,b) => b.recallScore-a.recallScore
+  const selected = [...matches, ...handoffMatches].sort((a,b) => (b._relevanceTier||0)-(a._relevanceTier||0)
+    || b.recallScore-a.recallScore
     || Number(b.source.currentSession)-Number(a.source.currentSession)
     || String(b.ts||'').localeCompare(String(a.ts||''))).slice(0,limit);
   // A maximum of two owned archive reads execute concurrently (shared gate).
@@ -465,7 +489,7 @@ async function indexedAgentSessionEvidence({ conversationStore, continuityStore,
     searchedSessionCount: found.searchedSessionCount, count: selected.length,
     totalMatches: Math.max(found.totalMatches, matches.length) + handoffMatches.length,
     retrieval: {mode: semanticRows.length ? 'hybrid' : 'lexical', semanticCandidates:semanticRows.length,...(found.readiness?{readiness:found.readiness}:{})},
-    results: selected.map(({ recallScore: _score, _occurrence: _row, ...entry }) => entry) };
+    results: selected.map(({ recallScore: _score, _occurrence: _row, _relevanceTier: _tier, ...entry }) => entry) };
 }
 
 export async function searchBurrowSessionEvidence({ conversationStore = null, agents = [], query = '', role = 'any', limit = 50, includeSummaries = true, since = null, until = null, includeArchived = true } = {}) {

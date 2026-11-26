@@ -5,7 +5,7 @@ import { normalizeProviderMessages } from '../provider-messages.mjs';
 
 const fail = (reason) => { throw new Error(`provider_pool_replay_${reason}`); };
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const MESSAGE_KEYS = ['role', 'content', 'tool_calls', 'tool_call_id', 'continuationRecap'];
+const MESSAGE_KEYS = ['role', 'content', 'tool_calls', 'tool_call_id', 'continuationRecap', 'responsesOutputOrder', 'responsesOutputOwner'];
 const validReplayFields = (message, family) => Object.keys(message).every(key => MESSAGE_KEYS.includes(key) ||
   (key === 'responsesReasoning' && family === 'openai' && message.role === 'assistant' && isResponsesReasoning(message.responsesReasoning)));
 
@@ -74,7 +74,8 @@ export function portableReplayMessages(messages, family) {
       !call?.id || call.type !== 'function' || !call.function?.name || typeof call.function.arguments !== 'string' ||
       Object.keys(call).some(key => !['id', 'type', 'function'].includes(key)) ||
       Object.keys(call.function).some(key => !['name', 'arguments'].includes(key))))) fail('nonportable_history');
-    return { role: message.role, content, ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}), ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}) };
+    return { role: message.role, content, ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}), ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+      ...(Array.isArray(message.responsesOutputOrder) ? { responsesOutputOrder: message.responsesOutputOrder.filter(item => item.kind !== 'reasoning') } : {}) };
   });
 }
 

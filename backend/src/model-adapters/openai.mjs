@@ -13,13 +13,11 @@ import { readResponseTextBounded, chatToolContinuationMessages, buildProviderMes
 // Move only the current support item on the freshly serialized message list.
 function orderChatGptRuntimeSupport(input) {
   const task = input.findLastIndex(item => item.role === 'user' && item.metadata?.providerMessageSource === 'current-task');
-  for (let index = task - 1; index >= 0 && input[index].role === 'developer'; index--) {
-    if (input[index].metadata?.providerMessageSource === 'support-context-provider') {
-      const [support] = input.splice(index, 1);
-      input.splice(task, 0, support);
-      return;
-    }
-  }
+  if (task < 0) return;
+  const index = input.findIndex((item, position) => position < task && item.role === 'developer' && item.metadata?.providerMessageSource === 'support-context-provider');
+  if (index < 0) return;
+  const [support] = input.splice(index, 1);
+  input.splice(task, 0, support);
 }
 
 export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = globalThis.fetch, clock = () => new Date().toISOString(), idFactory = randomUUID } = {}) {
@@ -41,6 +39,12 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
   // adapter without a configured account may only reuse its own state.
   const reasoningOwner = reasoningEnabled ? createHash('sha256').update(JSON.stringify([config.connectionId || randomUUID(), url, config.extra?.model ?? wireModel])).digest('hex') : null;
   const compatibleTranscript = (transcript, estimate = false) => transcript?.map(message => {
+    if (!message) return message;
+    if (Array.isArray(message?.responsesOutputOrder) && message.responsesOutputOwner !== reasoningOwner && !estimate) {
+      const { responsesOutputOwner: _orderOwner, responsesReasoning: _opaque, ...plain } = message;
+      plain.responsesOutputOrder = message.responsesOutputOrder.filter(item => item.kind !== 'reasoning');
+      return plain;
+    }
     if (!message || !Object.hasOwn(message, 'responsesReasoning') || (isResponsesReasoning(message.responsesReasoning) &&
         (estimate || message.responsesReasoning.owner === reasoningOwner))) return message;
     const { responsesReasoning: _opaque, ...plain } = message;
@@ -250,11 +254,14 @@ export function createOpenAICompatibleModelAdapter({ config = {}, fetchImpl = gl
         content: choice.text,
         ...(choice.toolCalls.length ? { tool_calls: choice.toolCalls.map(nativeToolCall) } : {}),
       }) : null;
-      // Opaque rounds already own their prose and pending calls. Without an
-      // encrypted item, preparation supplies the call round separately; retain
-      // only its nonempty prose here so neither text nor calls are duplicated.
-      const replayAssistant = opaqueAssistant || (ok && mode === 'openai-responses' && choice.toolCalls.length && choice.text
-        ? { role: 'assistant', content: choice.text } : null);
+      // Keep each Responses output round together even without encrypted state;
+      // separating prose from calls would lose their original item order.
+      const replayAssistant = opaqueAssistant || (ok && mode === 'openai-responses' && choice.toolCalls.length
+        ? { role: 'assistant', content: choice.text, tool_calls: choice.toolCalls.map(nativeToolCall) } : null);
+      if (replayAssistant && mode === 'openai-responses' && choice.outputOrder?.length) {
+        replayAssistant.responsesOutputOrder = choice.outputOrder.filter(item => item.kind !== 'reasoning' || reasoningEnabled);
+        replayAssistant.responsesOutputOwner = reasoningOwner;
+      }
       const result = {
         ok,
         requestId,

@@ -206,10 +206,16 @@ function nativeToolReceipt(result = {}) {
   const receipt = {};
   // Identity and outcome fields let the model reason about all results without
   // retaining arbitrary result graphs in the provider-native transcript.
-  for (const key of ['tool', 'ok', 'error', 'filePath', 'path', 'dirPath', 'command', 'query', 'pattern', 'id', 'resultCount', 'contentHash', 'resultFingerprint', 'truncated', 'entryBudgetExhausted', 'depthTruncated', 'incomplete', 'durationMs']) {
+  for (const key of ['tool', 'ok', 'error', 'readiness', 'retryable', 'retrieval', 'filePath', 'path', 'dirPath', 'command', 'query', 'pattern', 'id', 'resultCount', 'contentHash', 'resultFingerprint', 'truncated', 'entryBudgetExhausted', 'depthTruncated', 'incomplete', 'durationMs']) {
     const value = result?.[key];
     if (value === null || typeof value === 'boolean' || typeof value === 'number') receipt[key] = value;
     else if (typeof value === 'string') receipt[key] = truncatedNativeText(value, 1_000);
+  }
+  if (result.readiness && typeof result.readiness === 'object') receipt.readiness = result.readiness;
+  if (result.retrieval && typeof result.retrieval === 'object') {
+    const retrieval = result.retrieval;
+    receipt.retrieval = { ...(typeof retrieval.mode === 'string' ? { mode: retrieval.mode } : {}),
+      ...(retrieval.readiness && typeof retrieval.readiness === 'object' ? { readiness: retrieval.readiness } : {}) };
   }
   if (Array.isArray(result.warnings)) receipt.warnings = result.warnings.filter(value => typeof value === 'string');
   // Preserve compact execution origin and correlation so observations from
@@ -432,7 +438,7 @@ function chatToolContinuationMessages({ baseMessages = [], toolCalls = [], toolR
   // Responses may return a pending assistant with encrypted reasoning around
   // its calls. Attach the outputs to that assistant rather than replaying the
   // same calls a second time. Other protocols keep their existing projection.
-  if (pending?.responsesReasoning && pending.tool_calls?.length && round.length &&
+  if ((pending?.responsesReasoning || pending?.responsesOutputOrder) && pending.tool_calls?.length && round.length &&
       JSON.stringify(pending.tool_calls) === JSON.stringify(round[0].tool_calls)) {
     return normalizeProviderMessages([...baseMessages, ...round.slice(1)]);
   }

@@ -63,6 +63,8 @@ export function normalizeProviderMessage(message = {}) {
   if (role === 'tool' && message.tool_call_id) normalized.tool_call_id = String(message.tool_call_id).slice(0, 256);
   if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length) normalized.tool_calls = message.tool_calls;
   if (role === 'assistant' && isResponsesReasoning(message.responsesReasoning)) normalized.responsesReasoning = message.responsesReasoning;
+  if (role === 'assistant' && Array.isArray(message.responsesOutputOrder) && message.responsesOutputOrder.every(item => item && ['call', 'text', 'reasoning'].includes(item.kind))) normalized.responsesOutputOrder = message.responsesOutputOrder;
+  if (role === 'assistant' && typeof message.responsesOutputOwner === 'string') normalized.responsesOutputOwner = message.responsesOutputOwner;
   return normalized;
 }
 
@@ -243,7 +245,17 @@ export function pruneProviderToolResults(messages = [], { maxChars, maxToolRound
     }
   }
   return insertEvidenceBeforeCurrentTask(
-    [...withoutPriorEvidence.slice(0, baseEnd), ...rounds.flatMap((round, index) => retained.includes(protocolRounds[index]) ? round : round.slice(1).filter(message => message.role !== 'tool'))],
+    [...withoutPriorEvidence.slice(0, baseEnd), ...rounds.flatMap((round, index) => {
+      if (retained.includes(protocolRounds[index])) return round;
+      // Encrypted Responses rounds can attach visible assistant prose to the
+      // call-bearing message. Dropping the protocol pair must not drop that
+      // conversation state with it.
+      const pending = round[0];
+      const prose = pending?.role === 'assistant' && Array.isArray(pending.tool_calls) && renderedContent(pending.content)
+        ? [{ ...pending, tool_calls: undefined, responsesReasoning: undefined, responsesOutputOrder: undefined, responsesOutputOwner: undefined }]
+        : [];
+      return [...prose, ...round.slice(1).filter(message => message.role !== 'tool')];
+    })],
     exchangeEvidenceMessage(displaced, priorEvidence, remaining),
   );
 }
