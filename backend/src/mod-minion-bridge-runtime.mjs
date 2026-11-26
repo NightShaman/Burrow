@@ -42,6 +42,8 @@ function supportedEfforts(harness, model) {
 
 async function eligiblePair(models, harness, connection, model) {
   if (connection.enabled === false || model.selected === false || !model.id) return false;
+  const outputs = model.acceptedOutputOverride ?? model.acceptedOutput ?? model.discoveredOutput;
+  if (Array.isArray(outputs) && !outputs.includes('text')) return false;
   if (harness === 'burrow') {
     // Configuration metadata only. Dispatch still resolves live credentials
     // (and performs OAuth refresh) through resolveModelConfig.
@@ -65,14 +67,21 @@ export function createModMinionBridgeRuntime({ stores, runtimeRoot, executionPro
 
   async function hostRows(executionHostIds) {
     const ids = new Set(['local', ...executionHostIds]);
-    // Enumeration is optional. Describing explicitly known targets works with
-    // providers that expose no listHosts IPC (including Node Goblin).
-    if (typeof executionProviders?.listHosts === 'function') {
+    const names = new Map();
+    let discovery = { complete: true, errors: [] };
+    if (executionProviders) {
       try {
-        for (const host of await executionProviders.listHosts()) {
-          if (host?.providerId && host?.id) ids.add(`${host.providerId}:${host.id}`);
+        const result = typeof executionProviders.discoverHosts === 'function'
+          ? await executionProviders.discoverHosts()
+          : { hosts: await executionProviders.listHosts(), errors: [] };
+        if (!Array.isArray(result.hosts) || !Array.isArray(result.errors)) throw new Error('invalid');
+        for (const host of result.hosts) if (host?.providerId && host?.id) {
+          const id = `${host.providerId}:${host.id}`;
+          ids.add(id);
+          if (typeof host.name === 'string' && host.name) names.set(id, host.name);
         }
-      } catch { /* Known hosts are still individually described below. */ }
+        discovery = { complete: result.errors.length === 0, errors: result.errors };
+      } catch { discovery = { complete: false, errors: [{ providerId: '*', error: 'remote_host_listing_failed' }] }; }
     }
     const localCli = Object.fromEntries(await Promise.all(Object.entries(DISCOVER).map(async ([harness, discover]) => {
       try { await discover(); return [harness, true]; } catch { return [harness, false]; }
@@ -91,23 +100,27 @@ export function createModMinionBridgeRuntime({ stores, runtimeRoot, executionPro
         if (!available) blockers.push('execution_host_unavailable');
         if (available && harness !== 'burrow') {
           if (id === 'local' && !localCli[harness]) blockers.push(`${harness}_executable_unavailable`);
-          if (remote && typeof controller.codexRpc !== 'function') blockers.push(`${harness}_remote_transport_unavailable`);
-          // A provider can disclose a stricter per-harness readiness projection.
-          const advertised = description?.harnesses?.[harness];
-          if (advertised === false || advertised?.available === false) blockers.push(`${harness}_execution_host_unavailable`);
+          if (remote) {
+            if (typeof controller.codexRpc !== 'function') blockers.push(`${harness}_remote_transport_unavailable`);
+            const capability = description?.[harness];
+            if (!capability || typeof capability !== 'object' || capability.protocol == null || typeof capability.available !== 'boolean')
+              blockers.push(`${harness}_capability_unknown`);
+            else if (capability.protocol !== 1) blockers.push(`${harness}_protocol_unsupported`);
+            else if (!capability.available) blockers.push(`${harness}_executable_unavailable`);
+          }
         }
         return { id: harness, available: blockers.length === 0, blockers };
       });
-      hosts.push({ id, name: description?.name || (id === 'local' ? 'Local Core host' : id),
+      hosts.push({ id, name: names.get(id) || description?.name || description?.hostname || (id === 'local' ? 'Local Core host' : id),
         available, blockers: available ? [] : ['execution_host_unavailable'], harnesses });
     }
-    return hosts;
+    return { hosts, discovery };
   }
 
   async function catalog({ executionHostIds = [] } = {}) {
     const settings = await readMinionSettings(stores.metadata, null);
     const rows = await stores.models.list();
-    const hosts = await hostRows(executionHostIds);
+    const { hosts, discovery } = await hostRows(executionHostIds);
     const harnesses = [];
     for (const id of HARNESSES) {
       const globallyAllowed = settings.maxDepth > 0;
@@ -129,7 +142,7 @@ export function createModMinionBridgeRuntime({ stores, runtimeRoot, executionPro
       harnesses.push({ id, name: id === 'burrow' ? 'Burrow' : id[0].toUpperCase() + id.slice(1),
         available: blockers.length === 0, blockers, connections });
     }
-    return { harnesses, hosts };
+    return { harnesses, hosts, discovery };
   }
 
   function validate(payload, current) {

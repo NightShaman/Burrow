@@ -331,6 +331,23 @@ process.on('message', async (message) => {
     }
     return;
   }
+  if (message?.type === 'system-controller-list-hosts') {
+    if (!validSystemMessage(message, 'system-controller-list-hosts', { operation: false }) || stopping) return;
+    if (typeof systemController?.listHosts !== 'function') {
+      send({ type: 'system-controller-host-list-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId,
+        requestId: message.requestId, ok: false, unsupported: true }, () => {});
+      return;
+    }
+    try {
+      const result = await systemController.listHosts();
+      send({ type: 'system-controller-host-list-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId,
+        requestId: message.requestId, ok: true, result }, () => {});
+    } catch {
+      send({ type: 'system-controller-host-list-result', protocol: SYSTEM_PROTOCOL, controllerInstanceId,
+        requestId: message.requestId, ok: false }, () => {});
+    }
+    return;
+  }
   if (message?.type === 'system-controller-filesystem-cancel') {
     if (!validSystemMessage(message, 'system-controller-filesystem-cancel')) return;
     activeSystemFilesystems.get(message.requestId)?.abort.abort();

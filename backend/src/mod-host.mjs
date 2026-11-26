@@ -269,6 +269,7 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
   const pendingSystemProcess = new Map();
   const pendingSystemConfiguration = new Map();
   const pendingSystemHostDescriptions = new Map();
+  const pendingSystemHostLists = new Map();
   const pendingCodex = new Map();
   const activeCapabilities = new Map();
   const cancelCapabilities = () => { for (const { controller } of activeCapabilities.values()) controller.abort(hostError("mod_capability_shutdown")); activeCapabilities.clear(); capabilities?.dispose?.(); };
@@ -349,6 +350,8 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
     pendingSystemConfiguration.clear();
     for (const entry of pendingSystemHostDescriptions.values()) { clearTimeout(entry.timer); entry.reject(error); }
     pendingSystemHostDescriptions.clear();
+    for (const entry of pendingSystemHostLists.values()) { clearTimeout(entry.timer); entry.reject(error); }
+    pendingSystemHostLists.clear();
     for (const entry of pendingCodex.values()) { clearTimeout(entry.timer); entry.reject(error); }
     pendingCodex.clear();
   };
@@ -501,6 +504,21 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
       const entry = pendingCodex.get(message.requestId); if (!entry) return;
       pendingCodex.delete(message.requestId); clearTimeout(entry.timer);
       if (message.ok === true) entry.resolve(message.result); else entry.reject(hostError('codex_remote_rpc_failed'));
+      return;
+    }
+    if (message?.type === 'system-controller-host-list-result') {
+      if (message.protocol !== systemCapability || message.controllerInstanceId !== controllerInstanceId) return;
+      const entry = pendingSystemHostLists.get(message.requestId);
+      if (!entry) return;
+      pendingSystemHostLists.delete(message.requestId);
+      clearTimeout(entry.timer);
+      if (message.ok !== true) entry.reject(hostError(message.unsupported === true ? 'remote_host_listing_unsupported' : 'remote_host_listing_failed'));
+      else if (!Array.isArray(message.result)
+        || message.result.some(row => !row || typeof row !== 'object' || Array.isArray(row)
+          || typeof row.id !== 'string' || !row.id.trim() || row.id.length > 240
+          || (row.name != null && (typeof row.name !== 'string' || row.name.length > 240))))
+        entry.reject(hostError('remote_host_listing_invalid'));
+      else entry.resolve(message.result.map(row => ({ id: row.id, name: row.name || row.id })));
       return;
     }
     if (message?.type === 'system-controller-host-description-result') {
@@ -725,6 +743,26 @@ export function startModHost({ mod, store, logger = console, systemCapability = 
             pendingSystemHostDescriptions.delete(requestId);
             clearTimeout(timer);
             reject(hostError('remote_host_description_send_failed'));
+          });
+        });
+      },
+      async listHosts() {
+        if (!modAuthority) throw hostError('mod_authority_forbidden');
+        await modAuthority.assertAllowed(mod.id, 'execution-provider-v1');
+        if (admissionsPaused || !systemControllerReady || closing || stopped || !child.connected) throw hostError('remote_host_listing_unavailable');
+        const requestId = randomUUID();
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingSystemHostLists.delete(requestId);
+            reject(hostError('remote_host_listing_timeout'));
+          }, 1_000);
+          timer.unref?.();
+          pendingSystemHostLists.set(requestId, { resolve, reject, timer });
+          child.send({ type: 'system-controller-list-hosts', protocol: systemCapability, controllerInstanceId, requestId }, error => {
+            if (!error || !pendingSystemHostLists.has(requestId)) return;
+            pendingSystemHostLists.delete(requestId);
+            clearTimeout(timer);
+            reject(hostError('remote_host_listing_send_failed'));
           });
         });
       },
