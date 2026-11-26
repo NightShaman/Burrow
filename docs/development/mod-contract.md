@@ -36,6 +36,16 @@ export async function activate(context) {
 }
 ```
 
+## Deleted identities
+
+On Core versions exposing the lifecycle, register `context.agents.onDeleted(handler)` **once during activation**. The callback receives `{eventId,agentId,ownerModId,deletedAt}`; `deletedAt` is ISO UTC text and `ownerModId` is a mod ID or null (including historical deletions whose owner was not retained). Remove that identity's owned state and live permissions/targets in your own namespace; do not substring-match names in shared prose.
+
+Core commits the event with deletion and retains per-installed-mod acknowledgements. Resolve only after durable cleanup finishes; throw on failure. Delivery is at least once: persist a resumable inventory before destructive steps, make retries idempotent, and tolerate a crash after your write but before acknowledgement. Disabled/unavailable mods receive their pending work after reactivation. Core replays exact archived identity IDs for pre-lifecycle orphan repair; currently registered successor identities are excluded. Disabled/hidden identities are **not deleted**. Core never edits opaque mod JSON.
+
+Pending/error receipts are read-only at `GET /api/agents/deletions`; deletion responses include cleanup state. Identity reuse is fenced until pending cleanup completes. No additional daemon is required.
+
+`await context.settings.keys({prefix?,cursor?,limit?})` returns `{names,hasMore,nextCursor}` in bytewise key order, scoped to the caller's manifest. Defaults: empty prefix, null cursor, limit100; limit must be1–100. Follow all pages before erasing indexed references. Only setting names are returned—neither setting values nor secret names/values. This supports complete mod-owned cleanup of historical unindexed rows.
+
 ## JSON routes
 
 Use `context.api.get/post/put/patch/delete(path, handler)`. Paths are beneath `/api/mods/<id>`, `/` is the root, and `:parameters` are supported. Traversal, query/fragment text, encoded segments, malformed params, and duplicate method/path pairs fail activation.
