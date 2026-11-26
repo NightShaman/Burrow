@@ -41,6 +41,7 @@ import PostgresUiAuthSecretStore from './postgres-ui-auth-secret-store.mjs';
 import PostgresOtelSettingsStore from './postgres-otel-settings-store.mjs';
 import PostgresRetentionSettingsStore from './postgres-retention-settings-store.mjs';
 import { PostgresModGenerationStore } from './postgres-mod-generation-store.mjs';
+import { PostgresModMinionStore } from './postgres-mod-minion-store.mjs';
 import { PostgresModExternalTurnStore } from './postgres-mod-external-turn-store.mjs';
 import PostgresWorkingMemoryRetentionSettingsStore from './postgres-working-memory-retention-settings-store.mjs';
 
@@ -86,6 +87,7 @@ export async function createPostgresApplication({
     mcp: new PostgresMcpSettingsStore({ ...common, key: encryptionKey }),
     tasks: new PostgresTaskBoardStore({ ...common, ...(clock ? { clock } : {}) }),
     generations: new PostgresModGenerationStore({ ...common, ...(clock ? { clock } : {}) }),
+    minions: new PostgresModMinionStore({ ...common, ...(clock ? { clock } : {}) }),
     externalTurns: new PostgresModExternalTurnStore({ ...common, ...(clock ? { clock } : {}) }),
     scheduledJobs: new PostgresScheduledJobStore({ ...common, ...(clock ? { clock } : {}) }),
     dreamSettings: new PostgresDreamSettingsStore(common),

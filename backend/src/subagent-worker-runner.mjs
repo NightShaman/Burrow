@@ -346,14 +346,15 @@ function retainChildResults(history, results, { limit = CHAT_TOOL_RESULT_HISTORY
   }
 }
 
-function subagentResult({ ok, summary, outcome = null, blockers = [], warnings = [], verification = null, toolResults = [], target = null } = {}) {
+function subagentResult({ ok, summary, outcome = null, blockers = [], warnings = [], verification = null,
+  toolResults = [], target = null, preserveSummary = false } = {}) {
   const evidence = compactEvidenceForHandoff(toolResults);
   const evidenceDelivery = evidenceDeliveryCounts(evidence, toolResults.consequences?.executed ?? toolResults.length);
   return {
     evidenceTraceDir: toolResults.evidenceTraceDir || null, evidenceDelivery,
     ok: Boolean(ok),
     ...(outcome ? { outcome } : {}),
-    summary: compactText(summary, 12_000) || (ok ? 'Minion completed.' : 'Minion failed.'),
+    summary: (preserveSummary ? summary : compactText(summary, 12_000)) || (ok ? 'Minion completed.' : 'Minion failed.'),
     blockers: blockers.slice(0, 20),
     warnings: warnings.slice(0, 20),
     // Full raw tool output is preserved in the child trace artifacts. The IPC
@@ -393,13 +394,13 @@ function subagentTerminalMissingResult({ toolResults = [], target = null, text =
   return subagentResult({ ok: false, summary, blockers: ['subagent_terminal_signal_missing'], toolResults, target });
 }
 
-function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target = null } = {}) {
+function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target = null, preserveSummary = false } = {}) {
   const call = toolCalls.find((item) => item?.name === 'finish_subagent');
   if (!call) return null;
   if (toolCalls.length !== 1) return subagentResult({ ok: false, summary: 'Mixed terminal batch rejected; requested actions were not executed.', blockers: ['subagent_terminal_must_be_sole_call'], toolResults, target });
   const args = call.arguments || {};
   const status = compactString(args.status || 'completed');
-  const summary = compactString(args.summary);
+  const summary = preserveSummary && typeof args.summary === 'string' ? args.summary : compactString(args.summary);
   const blockers = Array.isArray(args.blockers) ? args.blockers.map(compactString).filter(Boolean) : [];
   const warnings = Array.isArray(args.warnings) ? args.warnings.map(compactString).filter(Boolean) : [];
   const verification = args.verification && typeof args.verification === 'object' ? {
@@ -408,9 +409,9 @@ function terminalResultFromToolCalls(toolCalls = [], { toolResults = [], target 
     observed: compactString(args.verification.observed) || null,
     actionRequired: Boolean(args.verification.actionRequired),
   } : null;
-  if (!summary) return subagentResult({ ok: false, summary: 'Minion terminal signal omitted summary.', blockers: ['subagent_terminal_summary_required'], warnings, verification, toolResults, target });
-  if (status === 'completed') return subagentResult({ ok: true, summary, outcome: status, blockers, warnings, verification, toolResults, target });
-  return subagentResult({ ok: false, summary, outcome: status, blockers: blockers.length ? blockers : [`subagent_${status || 'incomplete'}`], warnings, verification, toolResults, target });
+  if (!summary.trim()) return subagentResult({ ok: false, summary: 'Minion terminal signal omitted summary.', blockers: ['subagent_terminal_summary_required'], warnings, verification, toolResults, target });
+  if (status === 'completed') return subagentResult({ ok: true, summary, outcome: status, blockers, warnings, verification, toolResults, target, preserveSummary });
+  return subagentResult({ ok: false, summary, outcome: status, blockers: blockers.length ? blockers : [`subagent_${status || 'incomplete'}`], warnings, verification, toolResults, target, preserveSummary });
 }
 
 function finalSynthesisPrompt({ prompt, toolResults = [] } = {}) {
@@ -499,6 +500,8 @@ async function runRegisteredSpawnSubagentChild({
   modelAdapter = null,
   modelRecoveryOptions = {},
   traceDir = null,
+  preserveTerminalReport = false,
+  workerProfile = 'spawn_subagent',
   executionPolicy: executionPolicyInput = null,
   progress = null,
   parentExecutionContext = null,
@@ -668,11 +671,11 @@ async function runRegisteredSpawnSubagentChild({
   const completedCalls = [];
   if (Array.isArray(first.nativeTranscript)) messages.splice(0, messages.length, ...first.nativeTranscript);
   let current = first;
-  let terminalResult = terminalResultFromToolCalls(firstToolCalls, { toolResults, target });
+  let terminalResult = terminalResultFromToolCalls(firstToolCalls, { toolResults, target, preserveSummary: preserveTerminalReport });
   const forcedContinuations = new Map();
   for (let round = 0; !terminalResult; round += 1) {
     let toolCalls = choiceToolCalls(current.choice);
-    terminalResult = terminalResultFromToolCalls(toolCalls, { toolResults, target });
+    terminalResult = terminalResultFromToolCalls(toolCalls, { toolResults, target, preserveSummary: preserveTerminalReport });
     if (terminalResult) break;
     if (!toolCalls.length) {
       const forced = continuationToolCallsForTruncatedEvidence(toolResults, forcedContinuations);
@@ -775,7 +778,7 @@ async function runRegisteredSpawnSubagentChild({
     }
     current = next;
     const nextToolCalls = choiceToolCalls(next.choice);
-    terminalResult = terminalResultFromToolCalls(nextToolCalls, { toolResults, target });
+    terminalResult = terminalResultFromToolCalls(nextToolCalls, { toolResults, target, preserveSummary: preserveTerminalReport });
     const nextText = choiceText(next.choice);
     if (compactString(nextText)) lastText = nextText;
     if (compactString(nextText)) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: nextText, runId: id, traceDir, metadata: { chatResultVersion: CHAT_RESULT_VERSION, kind: nextToolCalls.length ? 'subagent-model-response' : 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: nextToolCalls.length } });
@@ -785,7 +788,7 @@ async function runRegisteredSpawnSubagentChild({
     terminalResult = withRecovery(terminalResult);
     const status = terminalResult.ok ? 'succeeded' : 'failed';
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result: terminalResult, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: terminalResult.ok ? 'completed' : 'error', label: terminalResult.ok ? 'Subagent completed' : 'Subagent failed', completedAt: nowIso(), counts: { evidence: terminalResult.evidence?.length || 0 } }), provenance: { source: 'spawn-subagent-child', reason: terminalResult.ok ? 'terminal_completed' : 'terminal_not_completed' } });
-    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' }) });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile }) });
     return terminalResult;
   }
 
@@ -806,26 +809,26 @@ async function runRegisteredSpawnSubagentChild({
   if (synthesis.ok) signal?.throwIfAborted();
   if (!synthesis.ok && synthesis.error !== 'model_response_empty') {
     const result = await finishModelFailure(synthesis, 'Minion final synthesis model call failed', toolResults, target, 'final_synthesis_failed');
-    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: result.blockers.includes('subagent_cancelled') ? 'cancelled' : 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: result.blockers.includes('subagent_cancelled') ? 'cancelled' : 'failed', subagentOk: false, workerProfile }) });
     return result;
   }
   const synthesisText = choiceText(synthesis.choice);
   if (compactString(synthesisText)) lastText = synthesisText;
   const synthesisToolCalls = choiceToolCalls(synthesis.choice);
-  terminalResult = terminalResultFromToolCalls(synthesisToolCalls, { toolResults, target });
+  terminalResult = terminalResultFromToolCalls(synthesisToolCalls, { toolResults, target, preserveSummary: preserveTerminalReport });
   if (compactString(synthesisText) || !terminalResult) await authority.appendTurn({ visibility: terminalResult ? 'debug' : 'chat', entersPrompt: !terminalResult, sessionId: childSessionId, role: 'assistant', content: synthesisText || (synthesisToolCalls.length ? '[terminal signal]' : '[missing terminal signal]'), runId: id, traceDir, metadata: { chatResultVersion: CHAT_RESULT_VERSION, kind: 'subagent-final-response', evidenceCount: toolResults.length, toolCallCount: synthesisToolCalls.length, finalSynthesis: true } });
 
   if (terminalResult) {
     terminalResult = withRecovery(terminalResult);
     const status = terminalResult.ok ? 'succeeded' : 'failed';
     await updateSubagentStatus({ dataRoot, id, status, phase: 'idle', result: terminalResult, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: terminalResult.ok ? 'completed' : 'error', label: terminalResult.ok ? 'Subagent completed' : 'Subagent failed', completedAt: nowIso(), counts: { evidence: terminalResult.evidence?.length || 0 } }), provenance: { source: 'spawn-subagent-child', reason: terminalResult.ok ? 'terminal_completed' : 'terminal_not_completed' } });
-    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile: 'spawn_subagent' }) });
+    await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: status, subagentOk: terminalResult.ok, workerProfile }) });
     return terminalResult;
   }
 
   const result = withRecovery(subagentTerminalMissingResult({ toolResults, target, text: lastText }), synthesis.ok ? {} : synthesis);
   await updateSubagentStatus({ dataRoot, id, status: 'failed', phase: 'idle', result, activity: subagentLiveActivity({ kind: 'terminal', phase: 'idle', status: 'error', label: 'Subagent failed', completedAt: nowIso(), error: result.blockers?.[0] || null }), provenance: { source: 'spawn-subagent-child', reason: 'terminal_signal_missing' } });
-  await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile: 'spawn_subagent' }) });
+  await conversationStore.updateMetadata({ agentId, sessionId: childSessionId, update: old => ({ ...old, sessionKind: 'subagent', parentSessionId: owner.sessionId || null, parentConversationId: owner.conversationId || null, parentRunId: owner.parentRunId || null, parentChild: true, subagentId: id, subagentStatus: 'failed', subagentOk: false, workerProfile }) });
   return result;
 
 

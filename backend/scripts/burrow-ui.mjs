@@ -29,6 +29,8 @@ import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs
 
 import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
+import { createModMinionDispatcher } from '../src/mod-minions.mjs';
+import { createModMinionBridgeRuntime } from '../src/mod-minion-bridge-runtime.mjs';
 import { createModTextGenerator } from '../src/mod-capabilities.mjs';
 import { migrateLegacyExecutionProviderApproval } from '../src/execution-provider-approval.mjs';
 import { createCoreApiDispatcher, coreApiCaller } from '../src/core-api-dispatch.mjs';
@@ -147,7 +149,7 @@ import { createObservabilityRoutes } from './ui/observability-routes.mjs';
 import { createScheduledChannelRoutes } from './ui/scheduled-channel-routes.mjs';
 import { createAuthRoutes } from './ui/auth-routes.mjs';
 import { createChatRoutes } from './ui/chat-routes.mjs';
-import { cleanupMods, createModRoute, discoverMods } from '../src/mod-runtime.mjs';
+import { createModRoute, discoverMods } from '../src/mod-runtime.mjs';
 import { inspectManagedSkills } from '../src/managed-skills.mjs';
 import { createModManagement } from '../src/mod-management.mjs';
 import { createModDistribution, createModManagementRoute } from '../src/mod-distribution.mjs';
@@ -250,6 +252,8 @@ await postgresApplication.stores.forge.reconcileAbandonedRuntimeJobs(runtimeOwne
 await postgresApplication.stores.tasks.reconcileInterruptedExecutions();
 await postgresApplication.stores.scheduledJobs.markMissedRuns();
 const generationDispatcher = createModGenerationDispatcher({ logger: serverLogger, store: postgresApplication.stores.generations, generateText: createModTextGenerator({ models: postgresApplication.stores.models }) });
+const minionBridgeRuntime = createModMinionBridgeRuntime({ stores: postgresApplication.stores, runtimeRoot, executionProviders, telemetry: otelRuntime, logger: serverLogger });
+const minionDispatcher = createModMinionDispatcher({ logger: serverLogger, store: postgresApplication.stores.minions, resolveCatalog: minionBridgeRuntime.catalog, execute: minionBridgeRuntime.execute });
 const {
   modelConnections, startClaudeCodeLoginApi, claudeCodeLoginStatus,
   submitClaudeCodeLoginApi, cancelClaudeCodeLoginApi, importClaudeCodeLoginApi,
@@ -1761,7 +1765,7 @@ const coreApi = createCoreApiDispatcher({
     sessionId: actor?.caller.sessionId, runId: actor?.caller.runId,
   }, { component: 'api' }),
 });
-const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, runtimeDiagnostics, activeAgentRuns: activeChatRuns, pendingHttpRuns: () => completionDispatch?.pendingHttpRuns() || [], resolveAgentWorkspaceRoot: async (id) => {
+const modLoadOptions = { coreApi, logger: serverLogger, modAuthority, modManagement: modManagementCapability, onExecutionProviderActivated: async modId => { if (modId === 'node-goblin') await applyOtelConfigurationToNodeGoblins(); }, stores: postgresApplication.stores, modStoreFactory: postgresApplication.modStoreFactory, enabledModIds: postgresApplication.enabledModIds, modCatalogWriter: postgresApplication.modCatalogWriter, runtimeRoot: modsRuntimeRoot, executionProviders, resolveAgentRuntime, scheduledJobScheduler: scheduler(), externalTurnDispatcher, generationDispatcher, minionDispatcher, runtimeDiagnostics, activeAgentRuns: activeChatRuns, pendingHttpRuns: () => completionDispatch?.pendingHttpRuns() || [], resolveAgentWorkspaceRoot: async (id) => {
   const agent = await agentsStore().get(id);
   if (!agent) throw new Error('agent_not_found');
   return agentRuntimeContext({ runtimeState: (await runtimeConfig()).runtimeState, agent }).agentWorkspaceRoot;
@@ -2037,7 +2041,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, forgeProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, forgeProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, minionDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });

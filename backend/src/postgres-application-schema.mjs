@@ -20,6 +20,7 @@ import { POSTGRES_PROVIDER_POOL_METRICS_SQL } from './postgres-provider-pool-met
 import { POSTGRES_FORGE_ARCHIVE_SQL } from './postgres-forge-archive.mjs';
 import { POSTGRES_COMPACTION_PROJECTIONS_SQL } from './postgres-compaction-projections.mjs';
 import { POSTGRES_MOD_GENERATION_SCHEMA_SQL } from './postgres-mod-generation-store.mjs';
+import { POSTGRES_MOD_MINION_SCHEMA_SQL } from './postgres-mod-minion-store.mjs';
 import { POSTGRES_MOD_EXTERNAL_TURN_SCHEMA_SQL } from './postgres-mod-external-turn-store.mjs';
 import { POSTGRES_MOD_AUTHORITY_SCHEMA_SQL } from './mod-authority.mjs';
 import { POSTGRES_SKILL_SOURCES_SQL } from './postgres-skill-sources.mjs';
@@ -372,4 +373,5 @@ CREATE TABLE identity_deletion_reconciliation (
 );
 ` },
   { version: 110, name: 'session-recall-provenance-and-exactness', sql: POSTGRES_SESSION_RECALL_RELEVANCE_SQL },
+  { version: 111, name: 'generic-mod-minion-jobs', sql: POSTGRES_MOD_MINION_SCHEMA_SQL },
 ]);

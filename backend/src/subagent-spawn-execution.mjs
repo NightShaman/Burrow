@@ -176,7 +176,7 @@ function childFrom({ parentSessionId, parentConversationId, parentRunId, childSe
   };
 }
 
-async function resolveRemoteTarget(targetRequest, executionContext, runId, abortSignal) {
+export async function resolveRemoteTarget(targetRequest, executionContext, runId, abortSignal) {
   if (!targetRequest || typeof targetRequest !== 'object') throw new Error('target_required');
   if (targetRequest.kind !== 'filesystem') throw new Error(`unsupported_target_kind:${targetRequest.kind || 'missing'}`);
   const root = compactString(targetRequest.root);

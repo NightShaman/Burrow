@@ -52,7 +52,8 @@ export async function startSubagentChildSession({ dataRoot, id, workerProfile, h
   return sessionId;
 }
 
-export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null, finalReplyPersisted = false, conversationStore = null } = {}) {
+export async function finishSubagentChildSession({ dataRoot, sessionId, id, workerProfile, owner = {}, result = {}, trace = {}, status = null, model = null,
+  finalReplyPersisted = false, preserveSummary = false, conversationStore = null } = {}) {
   if (!conversationStore) throw new Error('conversation_store_required');
   if (!dataRoot || !sessionId) return null;
   const agentId = owner?.agentId;
@@ -63,7 +64,8 @@ export async function finishSubagentChildSession({ dataRoot, sessionId, id, work
       sessionId,
       type: 'message',
       role: 'assistant',
-      content: compact(result.summary, `${workerProfile || 'Minion'} finished.`),
+      content: preserveSummary && typeof result.summary === 'string' && result.summary.trim()
+        ? result.summary : compact(result.summary, `${workerProfile || 'Minion'} finished.`),
       runId: trace.runId || null,
       metadata: { kind: 'subagent-result', workerProfile, subagentId: id, status, ok: Boolean(result.ok) },
     });

@@ -116,6 +116,20 @@ export function createExecutionProviderRegistry() {
       return unregister;
     },
     get(providerId) { return controllers.get(String(providerId || '')) || null; },
+    async listHosts() {
+      const hosts = [];
+      for (const [providerId, controller] of controllers) {
+        if (typeof controller.listHosts !== 'function') continue;
+        const rows = await controller.listHosts();
+        if (!Array.isArray(rows)) continue;
+        for (const row of rows) {
+          if (!row || typeof row.id !== 'string' || !row.id.trim()) continue;
+          hosts.push({ providerId, id: row.id,
+            name: typeof row.name === 'string' && row.name ? row.name : row.id });
+        }
+      }
+      return hosts;
+    },
     async describeHost(providerId, targetId) {
       const controller = controllers.get(requiredId(providerId, 'provider_id'));
       if (!controller || typeof controller.describeHost !== 'function') return null;

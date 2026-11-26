@@ -52,7 +52,9 @@ export async function acquirePostgresRuntimeOwnership({ pool, config = pool?.opt
         const externalTurns = await stores.externalTurns.interruptIncomplete('core_restart_before_completion');
         await assertOwned();
         const generations = await stores.generations.interruptIncomplete('core_restart_before_completion');
-        return { externalTurns, generations };
+        await assertOwned();
+        const minions = stores.minions ? await stores.minions.interruptIncomplete('core_restart_before_completion') : 0;
+        return { externalTurns, generations, minions };
       },
       // Production retains ownership through drain/store teardown until exit.
       // Explicit close is for callers that have already stopped all owned work.

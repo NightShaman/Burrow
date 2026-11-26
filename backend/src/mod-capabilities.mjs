@@ -1,5 +1,6 @@
 import { isInternalContextSession } from './model-context-boundary.mjs';
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { readModConversationPage } from './mod-conversation-pager.mjs';
 import { MODEL_REASONING_EFFORT_VALUES, modelSupportsTemperature, normalizeModelReasoningEffort, resolveModelConfig } from './config.mjs';
 import { createModelAdapter } from './model-adapter.mjs';
@@ -75,7 +76,7 @@ function summarizedRun(run) {
 }
 
 // Only this core-side service has access to PostgreSQL secrets and provider credentials.
-export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, activeAgentRuns = null, pendingHttpRuns = null, modManagement = null, coreApi = null, modAuthority = null } = {}) {
+export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspaceRoot, fetchImpl = fetch, ownerModId, scheduledJobScheduler = null, externalTurnDispatcher = null, generationDispatcher = null, minionDispatcher = null, stores = null, modStore = null, runtimeDiagnostics = null, activeAgentRuns = null, pendingHttpRuns = null, modManagement = null, coreApi = null, modAuthority = null } = {}) {
   if (typeof resolveAgentRuntime !== 'function') throw new Error('mod_agent_resolver_required');
   const injected = stores || {};
   for (const key of ['agents','models','scheduledJobs','conversations']) if (!injected[key]) throw new Error(`mod_${key}_store_required`);
@@ -578,6 +579,47 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       const job = await generationDispatcher.read(schedulerOwner(), bounded(value.jobId, 96));
       if (!job) throw new Error('mod_generation_not_found');
       return job;
+    },
+    async minionCatalog(input = {}) {
+      if (!minionDispatcher) throw new Error('mod_minions_unavailable');
+      const value = exactKeys(plain(input), ['executionHostIds']);
+      const ids = value.executionHostIds ?? [];
+      if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' ||
+        !id.trim() || id !== id.trim() || id.length > 256 || (id !== 'local' && !/^[^:\s]+:[^\s]+$/.test(id)))) invalid();
+      return minionDispatcher.catalog({ executionHostIds: [...new Set(ids)] });
+    },
+    async submitMinion(input) {
+      if (!minionDispatcher) throw new Error('mod_minions_unavailable');
+      const value = exactKeys(plain(input), ['idempotencyKey', 'task', 'harness', 'connectionId', 'model',
+        'reasoningEffort', 'executionHostId', 'target']);
+      const idempotencyKey = bounded(value.idempotencyKey, 256);
+      const task = bounded(value.task, 100_000);
+      if (!idempotencyKey.trim() || !task.trim() || !['burrow', 'codex', 'claude', 'gemini'].includes(value.harness)) invalid();
+      bounded(value.connectionId, 128);
+      bounded(value.model, 256);
+      if (value.reasoningEffort !== undefined && value.reasoningEffort !== null) bounded(value.reasoningEffort, 32);
+      const executionHostId = value.executionHostId === undefined ? 'local' : bounded(value.executionHostId, 256);
+      if (executionHostId !== 'local' && !/^[^:\s]+:[^\s]+$/.test(executionHostId)) invalid();
+      const target = exactKeys(plain(value.target), ['kind', 'root']);
+      if (target.kind !== 'filesystem' || !path.isAbsolute(bounded(target.root, 4096))) invalid();
+      const payload = { task, harness: value.harness, connectionId: value.connectionId, model: value.model,
+        reasoningEffort: value.reasoningEffort ?? null, executionHostId,
+        target: { kind: 'filesystem', root: target.root } };
+      return minionDispatcher.submit({ ownerModId: schedulerOwner(), idempotencyKey, payload });
+    },
+    async readMinion(input) {
+      if (!minionDispatcher) throw new Error('mod_minions_unavailable');
+      const value = exactKeys(plain(input), ['jobId']);
+      const job = await minionDispatcher.read(schedulerOwner(), bounded(value.jobId, 96));
+      if (!job) throw new Error('mod_minion_not_found');
+      return { job };
+    },
+    async cancelMinion(input) {
+      if (!minionDispatcher) throw new Error('mod_minions_unavailable');
+      const value = exactKeys(plain(input), ['jobId']);
+      const job = await minionDispatcher.cancel(schedulerOwner(), bounded(value.jobId, 96));
+      if (!job) throw new Error('mod_minion_not_found');
+      return { job };
     },
   });
 }
