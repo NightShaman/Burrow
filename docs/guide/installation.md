@@ -12,7 +12,7 @@ Burrow starts with authentication set to **None**. Keep the first-run interface 
 
 ## Install counting
 
-When a Public release starts, Burrow sends a randomly generated installation ID to its Cloudflare install counter. The ID lives in the persistent data directory (`install-id`), so upgrades and container replacements using that directory are not counted again. The request contains no account, host, or usage data. Burrow keeps working if the counter is unreachable and stops sending once the ID is acknowledged.
+On first startup and whenever the running release version changes, Burrow reports a randomly generated installation ID and its version to the Cloudflare install counter. The same ID stays in the persistent data directory (`install-id`) across updates, rollbacks, and container replacements. Development and Public versions are counted separately by the last reported version of each installation. No account, host, or usage data is sent. Once a version is acknowledged, ordinary restarts do not send it again. Burrow keeps working if the counter is unreachable.
 
 ## Native Linux installation
 
