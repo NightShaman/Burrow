@@ -321,6 +321,8 @@ function nativeToolReceipt(result = {}) {
   const nativeFields = {
     verify_outcome: ['outcomeCheck', 'message'],
     tasks_wait_for_workflow: ['wait'],
+    workflow_wait: ['wait'],
+    workflow_wait_status: ['wait'],
     tasks_list_workflow_waits: ['waits', 'hasMore', 'nextCursor'],
     runtime_context_inspect: ['section', 'environment', 'references'],
     run_evidence_search: ['agentId', 'query', 'count', 'totalMatches', 'results', 'diagnostics', 'authority'],

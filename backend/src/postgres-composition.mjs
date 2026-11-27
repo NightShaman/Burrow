@@ -1,4 +1,5 @@
 import { PostgresTaskWorkflowWaitStore } from './postgres-task-workflow-wait-store.mjs';
+import { PostgresWorkflowFollowThroughStore } from './postgres-workflow-follow-through-store.mjs';
 import path from 'node:path';
 import { PostgresAgentRunFeed } from './postgres-agent-run-feed.mjs';
 import { createSessionRecallBackfillWorker } from './postgres-session-recall-backfill.mjs';
@@ -111,10 +112,12 @@ export async function createPostgresApplication({
     chatInputs: new PostgresChatInputStore({ ...common, ...(clock ? { clock } : {}) }),
     completionEvents: new PostgresCompletionEventStore(common),
     taskWorkflowWaits: new PostgresTaskWorkflowWaitStore(common),
+    workflowFollowThrough: new PostgresWorkflowFollowThroughStore(common),
     completionEventSettings: new PostgresCompletionEventSettingsStore({ ...common, key: encryptionKey, ...(clock ? { clock } : {}) }),
     conversations: new PostgresSessionStore({ ...common, ...(clock ? { clock } : {}) }),
     };
     stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models, logger });
+    stores.completionEvents.workflowFollowThroughWake = () => stores.workflowFollowThrough.publish();
     stores.brains.embeddings = stores.brainEmbeddings;
     stores.conversationEmbeddings = new PostgresConversationEmbeddings({ pool: sharedPool, models: stores.models, settings: stores.brainEmbeddings, logger });
     stores.brainEmbeddings.conversations = stores.conversationEmbeddings;

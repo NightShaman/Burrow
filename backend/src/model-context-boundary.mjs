@@ -28,7 +28,8 @@ export function withContextHistory(store, { agentId, sessionId, historySessionId
 
 // Internal execution projections are recovery addresses, not browse sources.
 export function isInternalContextSession(record) {
-  return Boolean((record?.metadata || record)?.contextIsolation?.historySessionId);
+  const metadata = record?.metadata || record;
+  return Boolean(metadata?.contextIsolation?.historySessionId || metadata?.workflowFollowThroughExecution?.waitId);
 }
 
 export async function canonicalHistorySessionId(store, { agentId, sessionId }) {

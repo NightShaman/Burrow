@@ -52,8 +52,8 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     }
     const manifest=abandoned ? {version:1,sessionId,runId:head.runId,generation:head.generation,status:'interrupted',...(head.recoveryPolicy?{recoveryPolicy:head.recoveryPolicy}:{}),reason:head.state==='finalizing'?'terminal_finalization_abandoned':'process_lost',interruptedAt:clock(),objective:head.objective || transcript.findLast(entry=>entry.role==='user' || entry.role==='agent')?.content || null,pendingVerification:['Reconcile durable effects and terminal receipts before continuing.']} : metadata.interruptedRun;
     if(!manifest)return metadata;
-    const assessment=manifest.recoveryPolicy === 'mod-follow-through'
-     ? {action:'needs_user_input',autoResume:false,reason:'mod_follow_through_interrupted',transcriptMessages:transcript.length}
+    const assessment=['mod-follow-through','workflow-follow-through'].includes(manifest.recoveryPolicy)
+     ? {action:'needs_user_input',autoResume:false,reason:manifest.recoveryPolicy==='workflow-follow-through'?'workflow_follow_through_interrupted':'mod_follow_through_interrupted',transcriptMessages:transcript.length}
      : finalizing && head.finalizationId
      ? {action:'needs_user_input',autoResume:false,reason:'terminal_receipt_requires_repair',transcriptMessages:transcript.length}
      : await assessInterruptedRunRecovery({sessionId,manifest,readChatMessages:async()=>transcript});
@@ -86,7 +86,7 @@ export function postgresContinuity({ store, agentId, ownerId = runtimeOwner, clo
     if(requireRecoveryClaim && (!ownsCurrentRecovery || metadata.interruptedRun?.status!=='interrupted')) throw new Error('recovery_manifest_required');
     const uncertain=recoveryBusy || prior?.state==='finalizing' || (prior?.state==='running' && prior.ownerId!==ownerId);
     if(uncertain){result={...prior,current:false,reason:'active_or_abandoned_owner_requires_reconciliation'};return metadata;}
-    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(['scheduled-task','mod-follow-through'].includes(recoveryPolicy)?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
+    const head={version:1,sessionId,ownerId,ownershipProtocol:'postgres-session-lock-v1',objective,...(['scheduled-task','mod-follow-through','workflow-follow-through'].includes(recoveryPolicy)?{recoveryPolicy}:{}),processId:process.pid,generation:Number(prior?.generation||0)+1,runId:String(runId),latestRunId:prior?.latestRunId||metadata.lastRunId||null,state:'running',claimedAt:clock(),completedAt:null};
     const recoveryManifest=metadata.interruptedRun?.status==='interrupted' && (recovery?.status==='pending' || ownsCurrentRecovery)
      ? metadata.interruptedRun : null;
     result={...head,current:true,recoveryManifest};

@@ -298,7 +298,7 @@ export async function finalizePlainChatRuntimeResult({
 
   const acceptanceChecklist = { required: false, status: 'not_required', complete: false, requirements: [], evidence: { mutationCount: 0, diffMutationEvidenceCount: 0, validationReceiptCount: 0 } };
   const terminalIntegrity = model
-    ? model.ok && modelTurn.finishedByGroupReply
+    ? model.ok && (modelTurn.finishedByGroupReply || modelTurn.finishedByWorkflowWait)
       ? { decision: 'answered', answerText: null, integrityViolation: null }
       : enforcePlainChatTerminalIntegrity({ modelOk: Boolean(model.ok), answerText, chatToolLoop })
     : { decision: 'routed', answerText: null, integrityViolation: null };

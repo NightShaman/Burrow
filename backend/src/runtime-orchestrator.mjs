@@ -305,6 +305,7 @@ export async function runPlainModelTurn({
   let closePeerExchangeAfterReply = false;
   let canFinishGroupReply = false;
   let finishedByGroupReply = false;
+  let finishedByWorkflowWait = false;
   const continuationToolSchemas = () => {
     const tools = closePeerExchangeAfterReply
       ? executionToolSchemas.filter((tool) => tool?.function?.name !== 'agent_send_message')
@@ -570,7 +571,14 @@ export async function runPlainModelTurn({
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-after-continuation-prompt-build', { iteration, followupPrompt: useNativeContinuation ? '[provider-native tool continuation]' : followupPrompt, followupInput, chatToolLoop, promptEvidenceResults });
       if (abortSignal?.aborted) throw abortSignal.reason || new Error('agent_stopped');
       await logChatToolLoopHeapStage(traceLogger, 'chat-tool-loop-before-model-call', { iteration, followupInput, chatToolLoop, promptEvidenceResults });
-      const pendingSteering = await steeringMessages();
+      // A successful wait is a yield, not an intermediate operator update.
+      // A newly admitted steer still receives the real tool results and answer.
+      const waitBatch = !skipped.length && rawToolResults.length > 0 && rawToolResults.every(result => result.tool === 'workflow_wait' && result.ok);
+      const pendingSteering = await steeringMessages(waitBatch);
+      if (waitBatch && !pendingSteering.length) {
+        finishedByWorkflowWait = true;
+        break;
+      }
       // An incoming peer run still owes its own final reply to its caller.
       // Limit silent completion to an operator room turn after a clean batch of
       // room replies. A failed tool or new operator input can still need an answer.
@@ -698,7 +706,7 @@ export async function runPlainModelTurn({
 
     // Atomically check pending input and seal only if none exists. A final
     // response arriving concurrently with Send cannot silently drop the Send.
-    if (!model?.ok || outputOnlyArtifact || !liveSteering) break;
+    if (finishedByWorkflowWait || !model?.ok || outputOnlyArtifact || !liveSteering) break;
     const finalSteering = await steeringMessages(true);
     if (!finalSteering.length) break;
     canFinishGroupReply = false;
@@ -726,7 +734,8 @@ export async function runPlainModelTurn({
   if (finishedByGroupReply && model?.ok) {
     await traceLogger?.event?.('group-reply-finished', {});
   }
-  const proposal = finishedByGroupReply && model?.ok ? null : model ? parseActionProposal(model.choice?.text ?? '') : null;
+  if (finishedByWorkflowWait && model?.ok) await traceLogger?.event?.('workflow-wait-yielded', {});
+  const proposal = (finishedByGroupReply || finishedByWorkflowWait) && model?.ok ? null : model ? parseActionProposal(model.choice?.text ?? '') : null;
   // Keep source bytes/file handles on this ephemeral internal field only. They
   // are persisted by the plain-chat finalizer before any session serialization.
   const generatedArtifactSources = adapterOutputArtifactsFromResult(model);
@@ -744,7 +753,7 @@ export async function runPlainModelTurn({
     metadata: { calledModel: true, modelUsage: model?.usage ?? null, ...(outputArtifacts.length ? { outputArtifacts } : {}), attachments: { images: modelInput.imageCount || 0, visionUsed: Boolean(modelInput.vision), visionFallback: Boolean(modelInput.fallback) }, chatToolLoop: { enabled: chatToolLoop.enabled, iterations: chatToolLoop.iterations.length, toolResults: chatToolLoop.toolResults.length, noProgress: Boolean(chatToolLoop.noProgress), loopWarnings: chatToolLoop.loopWarnings.length, terminal: chatToolLoop.terminal, semanticInspectionStalls: chatToolLoop.semanticInspectionStalls.length, omittedPromptEvidenceResults: chatToolLoop.omittedPromptEvidenceResults || 0 } },
   });
 
-  return { model, proposal, answerText, finishedByGroupReply: finishedByGroupReply && Boolean(model?.ok), outputArtifacts, generatedArtifactSources, chatToolLoop, contextUsage: latestContextUsage || model?.contextUsage || null, runtime };
+  return { model, proposal, answerText, finishedByGroupReply: finishedByGroupReply && Boolean(model?.ok), finishedByWorkflowWait: finishedByWorkflowWait && Boolean(model?.ok), outputArtifacts, generatedArtifactSources, chatToolLoop, contextUsage: latestContextUsage || model?.contextUsage || null, runtime };
 }
 
 export const __test__ = Object.freeze({

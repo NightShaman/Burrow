@@ -6,6 +6,7 @@ import { validateTimezone } from './timezone.mjs';
 import { createContinuityOwner } from './postgres-continuity-owner.mjs';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
 import { archiveReadQuery } from './postgres-archive-read.mjs';
+import { matchWorkflowFollowThrough } from './postgres-workflow-follow-through-store.mjs';
 
 // Additive migration only: earlier manifest SQL/checksums must remain immutable.
 export const POSTGRES_COMPLETION_EVENT_SCHEMA_SQL = `
@@ -116,7 +117,7 @@ export class PostgresCompletionEventStore {
     url = bounded(url, 'url', 2048, { pattern: /^https:\/\// });
     if (typeof completedAt !== 'string' || !Number.isFinite(Date.parse(completedAt))) throw new Error('completion_event_invalid_completedAt');
     const completed = new Date(completedAt).toISOString();
-    return withPostgresTransaction(this.pool, async client => {
+    const acceptedEvents = await withPostgresTransaction(this.pool, async client => {
       await lockWaitIdentity(client, normalized.repository, normalized.runId, runAttempt);
       const completion = { ...normalized, conclusion, url, completedAt: completed };
       // Upgrade boundary: immutable watch snapshots may predate the inbox.
@@ -129,6 +130,7 @@ export class PostgresCompletionEventStore {
       const priorCompletion = (await client.query('SELECT completion FROM github_completion_inbox WHERE repository=$1 AND run_id=$2 AND run_attempt=$3',[normalized.repository,normalized.runId,runAttempt])).rows[0]?.completion;
       if (!isDeepStrictEqual(priorCompletion,completion)) throw new Error('completion_event_conflict');
       const matchedIds = await matchTaskWaits(client,completion);
+      await matchWorkflowFollowThrough(client, completion);
       const { rows: watches } = await client.query(`SELECT * FROM github_workflow_watches w WHERE enabled AND workflow=$2 AND
         (repository=$1 OR EXISTS (SELECT 1 FROM github_completion_events e WHERE e.watch_id=w.id AND lower(e.repository)=$3 AND e.run_id=$4 AND e.run_attempt=$5)) ORDER BY id`, [repository, workflow, normalized.repository, runId, runAttempt]);
       const accepted = [];
@@ -148,6 +150,9 @@ export class PostgresCompletionEventStore {
       const waits = await client.query('SELECT * FROM github_completion_events WHERE task_wait_id IS NOT NULL AND repository=$1 AND run_id=$2 AND run_attempt=$3',[normalized.repository,normalized.runId,runAttempt]);
       return [...accepted,...waits.rows.map(row => ({ ...eventRow(row), accepted: matchedIds.includes(row.task_wait_id) }))];
     });
+    // Wake subscribers only after the inbox and matched state commit.
+    this.workflowFollowThroughWake?.();
+    return acceptedEvents;
   }
   async list({ limit = 50, agentId } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error('completion_event_invalid_limit');

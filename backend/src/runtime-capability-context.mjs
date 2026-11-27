@@ -32,7 +32,7 @@ export async function loadRuntimeMcpCapabilities({ agentId, stores, agentRuntime
   return { mcpTools, mcpConnections };
 }
 
-export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, groupChannelContext = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [], sharedContextContinuation = null, followThroughOrigin = null } = {}) {
+export function createRuntimeExecutionContext({ stores = null, runtimeState, resolvedSessionId, conversationId, continuityScope, agentRuntime, resolveAgentRuntime, runAgentReply, agentMessageReplyTo = null, groupChannelContext = null, resolvedWorkingRoot, resolvedTarget, dataRoot, executionBoundaries, mcpTools, mcpConnections, parentRunId = null, traceContext = null, telemetry = null, abortSignal = null, skillOverrides = {}, minionDepth = null, minionProfiles = [], sharedContextContinuation = null, followThroughOrigin = null, workflowFollowThrough = null } = {}) {
   const includeAgentChat = Boolean(agentRuntime && typeof resolveAgentRuntime === 'function');
   const includeTaskBoard = Boolean(runtimeState.agentId);
   const context = createExecutionContext({
@@ -59,7 +59,7 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
     executionBoundaries,
     // The enabled profile catalog travels in the live spawn tool schema, so the
     // model can actually see which reusable minions it may select.
-    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeBrainMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeMcpMenu: mcpConnections.size > 0, minionProfiles }),
+    toolSchemas: nativeToolSchemas({ includeWorkingMemory: Boolean(runtimeState.agentId), includeBrainMemory: Boolean(runtimeState.agentId), includeAgentProfile: Boolean(runtimeState.agentId), includeAgentChat, includeTaskBoard, includeWorkflowFollowThrough: Boolean(stores?.workflowFollowThrough && (followThroughOrigin || workflowFollowThrough)), includeMcpMenu: mcpConnections.size > 0, minionProfiles }),
     mcpTools,
     mcpConnections,
     protectedValues: new Map(),
@@ -82,6 +82,7 @@ export function createRuntimeExecutionContext({ stores = null, runtimeState, res
       sessionId: agentMessageReplyTo.sessionId,
     }) : null, enumerable: false },
     groupChannelContext: { value: groupChannelContext, enumerable: false },
+    workflowFollowThrough: { value: workflowFollowThrough, enumerable: false },
     followThroughOrigin: { value: followThroughOrigin && Object.freeze({ ...followThroughOrigin }), enumerable: false },
   }));
 }

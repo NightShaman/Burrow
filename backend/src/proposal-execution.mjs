@@ -1,3 +1,4 @@
+import { executeWorkflowFollowThroughTool, WORKFLOW_FOLLOW_THROUGH_TOOLS } from './workflow-follow-through-tools.mjs';
 import { executeTaskWorkflowWaitTool } from './task-workflow-wait-tools.mjs';
 import { createCompletionEventSettings } from './completion-event-settings.mjs';
 import { createNativeToolExecutor } from './native-tool-executor.mjs';
@@ -385,6 +386,17 @@ export async function executeReviewedProposalActions({ conversationStore = null,
       const result = await executeContinuityHandoffWriteTool({ arguments: { title: action.title, content: action.content, sourceRefs: action.sourceRefs }, agentId, sessionId, runId: traceLogger?.runId || null, store: executionContext?.stores?.continuity });
       toolResults.push(result);
       await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: 'session_write_handoff', ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, handoff: result.handoff || null, error: result.error || null });
+      continue;
+    }
+
+    if (WORKFLOW_FOLLOW_THROUGH_TOOLS.includes(action.tool)) {
+      const started = await traceLogger?.toolStart?.({ tool: action.tool, toolCallId: action.toolCallId || null });
+      const settings = executionContext?.stores?.completionEventSettings;
+      const result = await executeWorkflowFollowThroughTool({ tool: action.tool, args: action.workflowWaitArguments,
+        agentId, context: executionContext, receiverSettings: settings && createCompletionEventSettings({ store: settings }) });
+      toolResults.push(result);
+      await (traceLogger?.toolEnd || traceLogger?.tool)?.({ tool: action.tool, toolCallId: action.toolCallId || null,
+        ...(started?.payload?.activityId ? { activityId: started.payload.activityId } : {}), ok: result.ok, waitId: result.wait?.id || null, error: result.error || null });
       continue;
     }
 

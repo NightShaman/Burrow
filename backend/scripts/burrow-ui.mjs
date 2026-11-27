@@ -30,6 +30,7 @@ import { createDreamMemoryPreviewService } from '../src/dream-memory-preview.mjs
 import { isInternalContextSession } from '../src/model-context-boundary.mjs';
 import { createModGenerationDispatcher } from '../src/mod-generations.mjs';
 import { createModFollowThroughRunner } from '../src/mod-follow-through-runner.mjs';
+import { createWorkflowFollowThroughRunner } from '../src/workflow-follow-through-runner.mjs';
 import { createModMinionDispatcher } from '../src/mod-minions.mjs';
 import { createModMinionBridgeRuntime } from '../src/mod-minion-bridge-runtime.mjs';
 import { createModTextGenerator } from '../src/mod-capabilities.mjs';
@@ -299,6 +300,7 @@ const chatInputs = createChatInputService({ stores: postgresApplication.stores, 
 const completionEventRunner = createCompletionEventRunner({ executeTask: executeBoardTask, store: postgresApplication.stores.completionEvents, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 postgresApplication.stores.taskWorkflowWaits.wake = () => completionEventRunner.wake();
 const followThroughRunner = createModFollowThroughRunner({ stores: postgresApplication.stores, rootDir: projectRoot, resolveAgentRuntime, telemetry: otelRuntime, logger: serverLogger });
+const workflowFollowThroughRunner = createWorkflowFollowThroughRunner({ stores: postgresApplication.stores, rootDir: projectRoot, resolveAgentRuntime, telemetry: otelRuntime, logger: serverLogger });
 const externalTurnDispatcher = createModExternalTurnDispatcher({ logger: serverLogger, store: postgresApplication.stores.externalTurns, stores: postgresApplication.stores, resolveAgentRuntime, rootDir: projectRoot, registerActiveRun: registerRuntimeActiveRun, telemetry: otelRuntime });
 const NODE_GOBLIN_OTEL_CONFIGURATION_REASONS = new Set([
   'provider_configuration_unsupported', 'configuration_failed',
@@ -2045,7 +2047,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
-  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, forgeProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, followThroughRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, minionDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
+  producers: () => [openaiResetScheduler, archiveReadProducer, skillSyncProducer, forgeProducer, managedSkillSynchronizer, modDistributionProducer, completionEventRunner, followThroughRunner, workflowFollowThroughRunner, chatInputRunner, externalTurnDispatcher, generationDispatcher, minionDispatcher, requestLifecycle, startupLifecycle, scheduledJobScheduler, dreamCycleScheduler, tiddleScheduler, retentionScheduler, installStagingCleanupScheduler, recoveryContinuationScheduler, versionRefreshProducer],
   beforeDrain: async () => {
     try {
       await recordActiveRunInterruptions({ stores: postgresApplication.stores, activeRuns: activeChatRuns, resolveAgentRuntime, reason: shutdownReason });
@@ -2139,6 +2141,7 @@ server.listen(port, host, () => {
     startCodexClientVersionRefresh();
   }
   followThroughRunner.start();
+  workflowFollowThroughRunner.start();
   console.log(`Burrow UI listening on http://${host}:${port}`);
   // Recovery uses the same durable per-session queue and runtime turn path as
   // ordinary chat. It starts only after the listener is live, and a queue claim

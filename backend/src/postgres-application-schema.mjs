@@ -385,4 +385,20 @@ CREATE TABLE mod_follow_through_returns (
 );
 CREATE INDEX mod_follow_through_ready_idx ON mod_follow_through_returns(completed_at,id) WHERE state='ready';
 ` },
+  { version: 113, name: 'native-workflow-follow-through-waits', sql: `
+CREATE TABLE workflow_follow_through_waits (
+ id UUID PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, session_id TEXT NOT NULL,
+ conversation_id TEXT NOT NULL, reset_identity TEXT NOT NULL,
+ repository TEXT NOT NULL, workflow TEXT NOT NULL, run_id TEXT NOT NULL, run_attempt INTEGER NOT NULL CHECK(run_attempt>0), head_sha TEXT NOT NULL,
+ checkpoint TEXT NOT NULL CHECK(char_length(checkpoint) BETWEEN 1 AND 20000),
+ source JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'waiting' CHECK(status IN ('waiting','matched','claimed','report_ready','delivered','continued','failed','fenced')),
+ completion JSONB, result JSONB, error TEXT, execution_session_id TEXT, execution_run_id TEXT,
+ registered_at TIMESTAMPTZ NOT NULL DEFAULT now(), matched_at TIMESTAMPTZ, claimed_at TIMESTAMPTZ, finished_at TIMESTAMPTZ,
+ UNIQUE(agent_id,session_id,conversation_id,reset_identity,source,repository,workflow,run_id,run_attempt,head_sha)
+);
+CREATE INDEX workflow_follow_through_waits_target_idx ON workflow_follow_through_waits(repository,run_id,run_attempt) WHERE status='waiting';
+CREATE INDEX workflow_follow_through_waits_ready_idx ON workflow_follow_through_waits(matched_at,id) WHERE status='matched';
+CREATE INDEX workflow_follow_through_parent_idx ON workflow_follow_through_waits(agent_id,(source->>'handoffId')) WHERE source ? 'handoffId';
+CREATE INDEX workflow_follow_through_reports_idx ON workflow_follow_through_waits(registered_at,id) WHERE status='report_ready';
+` },
 ]);
