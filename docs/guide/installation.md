@@ -10,6 +10,10 @@ Burrow starts with authentication set to **None**. Keep the first-run interface 
 !!! warning "Grant access deliberately"
     Burrow does not provide a comprehensive sandbox around agent actions. Its tools can use the host permissions and credentials you grant. Start with an unprivileged account, restricted network access, and a test workspace. Read [trust boundaries](../security/trust-boundaries.md) before enabling integrations.
 
+## Install counting
+
+When a Public release starts, Burrow sends a randomly generated installation ID to its Cloudflare install counter. The ID lives in the persistent data directory (`install-id`), so upgrades and container replacements using that directory are not counted again. The request contains no account, host, or usage data. Burrow keeps working if the counter is unreachable and stops sending once the ID is acknowledged.
+
 ## Native Linux installation
 
 The fully automated path is **Ubuntu with systemd**, using the ordinary, non-root account that will own Burrow. Have `curl` available and sudo permission for missing system packages and user-service setup.
