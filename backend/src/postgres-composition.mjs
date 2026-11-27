@@ -118,6 +118,7 @@ export async function createPostgresApplication({
     };
     stores.brainEmbeddings = new PostgresBrainEmbeddings({ pool: sharedPool, models: stores.models, logger });
     stores.completionEvents.workflowFollowThroughWake = () => stores.workflowFollowThrough.publish();
+    stores.followThrough.workflowFollowThrough = stores.workflowFollowThrough;
     stores.brains.embeddings = stores.brainEmbeddings;
     stores.conversationEmbeddings = new PostgresConversationEmbeddings({ pool: sharedPool, models: stores.models, settings: stores.brainEmbeddings, logger });
     stores.brainEmbeddings.conversations = stores.conversationEmbeddings;

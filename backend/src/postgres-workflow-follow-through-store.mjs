@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
 import { normalizeWaitTarget, waitText, waitId, lockWaitIdentity } from './task-workflow-wait.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
@@ -8,11 +9,12 @@ function row(r) {
   return { id:r.id, agentId:r.agent_id, sessionId:r.session_id, conversationId:r.conversation_id, resetIdentity:r.reset_identity,
     repository:r.repository, workflow:r.workflow, runId:r.run_id, runAttempt:r.run_attempt, headSha:r.head_sha, checkpoint:r.checkpoint,
     source:r.source, status:r.status, completion:r.completion, result:r.result, error:r.error,
+    modReturnId:r.mod_return_id,
     executionSessionId:r.execution_session_id, executionRunId:r.execution_run_id,
     registeredAt:r.registered_at, matchedAt:r.matched_at, claimedAt:r.claimed_at, finishedAt:r.finished_at };
 }
 
-/** Durable board-free exact workflow waits. Public API: register(target, owner), getOwned({id,agentId}),
+/** Durable board-free waits for exact GitHub workflows or passive mod receipts. Public API: register(target, owner), getOwned({id,agentId}),
  * subscribe(fn)/publish(), claim(), finish(id,{status,result,error}), reconcile(). Checkpoints must
  * contain no credentials. claim is one-shot: claimed rows are never replayed after restart. */
 export class PostgresWorkflowFollowThroughStore {
@@ -52,13 +54,40 @@ export class PostgresWorkflowFollowThroughStore {
     });
     this.publish(); return this.getOwned({id,agentId});
   }
+  async registerModWait({ id, checkpoint }, owner = {}) {
+    id=waitId(id); checkpoint=waitText(checkpoint,'checkpoint',20000);
+    const agentId=waitText(owner.agentId,'agentId'), sessionId=waitText(owner.sessionId,'sessionId'), conversationId=waitText(owner.conversationId,'conversationId'), resetIdentity=waitText(owner.resetIdentity,'resetIdentity');
+    const originRunId=waitText(owner.runId,'originRunId'), executionRunId=owner.executionRunId==null?null:waitText(owner.executionRunId,'executionRunId'), executionSessionId=owner.executionSessionId==null?null:waitText(owner.executionSessionId,'executionSessionId');
+    const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitText(owner.handoffId,'handoffId')}: {})};
+    const found=await withPostgresTransaction(this.pool,async c=>{
+      const receipt=(await c.query('SELECT * FROM mod_follow_through_returns WHERE id=$1 FOR UPDATE',[id])).rows[0];
+      if(!receipt || !receipt.wait_only) throw new Error('workflow_follow_through_mod_receipt_unavailable');
+      const expectedSession=executionSessionId||sessionId;
+      if(receipt.agent_id!==agentId || receipt.session_id!==expectedSession || receipt.origin_run_id!==(executionRunId||originRunId)) throw new Error('workflow_follow_through_owner_mismatch');
+      if(!executionSessionId && (receipt.conversation_id!==conversationId || receipt.reset_identity!==resetIdentity)) throw new Error('workflow_follow_through_owner_mismatch');
+      const prior=(await c.query('SELECT * FROM workflow_follow_through_waits WHERE mod_return_id=$1',[id])).rows[0];
+      if(prior) { if(prior.checkpoint!==checkpoint || prior.agent_id!==agentId || prior.session_id!==sessionId || !isDeepStrictEqual(prior.source,source)) throw new Error('workflow_follow_through_registration_conflict'); return prior.id; }
+      const waitIdValue=randomUUID();
+      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,mod_return_id)
+        VALUES($1,$2,$3,$4,$5,NULL,NULL,NULL,NULL,NULL,$6,$7::jsonb,$8)`,[waitIdValue,agentId,sessionId,conversationId,resetIdentity,checkpoint,JSON.stringify(source),id]);
+      if(receipt.state==='ready') {
+        const completion={modId:receipt.owner_mod_id,receiptId:receipt.id,result:receipt.result};
+        await c.query(`UPDATE workflow_follow_through_waits SET status='matched',completion=$2::jsonb,matched_at=now() WHERE id=$1 AND status='waiting'`,[waitIdValue,JSON.stringify(completion)]);
+      }
+      return waitIdValue;
+    });
+    this.publish(); return this.getOwned({id:found,agentId});
+  }
   async getOwned({id,agentId}={}) {
     id=waitId(id); agentId=waitText(agentId,'agentId');
     return row((await this.pool.query('SELECT * FROM workflow_follow_through_waits WHERE id=$1 AND agent_id=$2',[id,agentId])).rows[0]);
   }
   async claim() {
     return withPostgresTransaction(this.pool,async c=>{
-      const r=(await c.query(`SELECT * FROM workflow_follow_through_waits WHERE status='matched' ORDER BY matched_at,id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
+      const r=(await c.query(`SELECT w.* FROM workflow_follow_through_waits w WHERE w.status='matched'
+        AND (w.mod_return_id IS NULL OR NOT EXISTS (SELECT 1 FROM continuity_state s WHERE s.agent_id=w.agent_id
+          AND s.session_id=COALESCE(w.source->>'executionSessionId',w.session_id) AND s.head_state IN ('running','finalizing')))
+        ORDER BY w.matched_at,w.id FOR UPDATE OF w SKIP LOCKED LIMIT 1`)).rows[0];
       if(!r) return null;
       const session=`workflow-follow-through-${r.id}`, run=`workflow-follow-through-${r.id}`;
       return row((await c.query(`UPDATE workflow_follow_through_waits SET status='claimed',claimed_at=now(),execution_session_id=$2,execution_run_id=$3 WHERE id=$1 AND status='matched' RETURNING *`,[r.id,session,run])).rows[0]);
@@ -112,7 +141,7 @@ export class PostgresWorkflowFollowThroughStore {
         // The existing chat revalidation cursor is millisecond-resolution.
         // Publish a strictly newer revision even when two writes share a tick.
         const now=new Date(Math.max(Date.now(), new Date(conv.updated_at).getTime()+1)).toISOString();
-        const entry=buildSessionEntry({sessionId:selected.session_id,type:'message',role:'assistant',content:answer,runId:`${selected.execution_run_id}-report`,clock:()=>now,metadata:{source:'workflow-follow-through',workflowFollowThrough:{waitId:selected.id,originRunId:selected.source?.runId,completion:selected.completion,isolatedExecutionSessionId:selected.execution_session_id,isolatedExecutionRunId:selected.execution_run_id}}});
+        const entry=buildSessionEntry({sessionId:selected.session_id,type:'message',role:'assistant',content:answer,runId:`${selected.execution_run_id}-report`,clock:()=>now,metadata:{source:'workflow-follow-through',workflowFollowThrough:{waitId:selected.id,originRunId:selected.source?.runId,completion:selected.mod_return_id ? { modId:selected.completion?.modId,receiptId:selected.mod_return_id } : selected.completion,isolatedExecutionSessionId:selected.execution_session_id,isolatedExecutionRunId:selected.execution_run_id}}});
         await conversations.appendLocked(c,{agentId:selected.agent_id,sid:selected.session_id,entry,idempotencyKey:`workflow-follow-through:${selected.id}`,now});
         await c.query(`UPDATE workflow_follow_through_waits SET status='delivered',finished_at=$2 WHERE id=$1 AND status='report_ready'`,[selected.id,now]);
         return {id:selected.id,status:'delivered'};

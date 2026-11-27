@@ -104,7 +104,7 @@ export function summarizeToolResults(toolResults = []) {
     ok: toolResult.ok ?? null, error: toolResult.error || null,
     ...(toolResult.message ? { message: compactText(toolResult.message, RECEIPT_TEXT_LIMITS.error) } : {}),
     ...(toolResult.ok === true && normalizeOutcomeCheck(toolResult.outcomeCheck) ? { outcomeCheck: normalizeOutcomeCheck(toolResult.outcomeCheck) } : {}),
-  } : ['tasks_wait_for_workflow','tasks_list_workflow_waits','workflow_wait','workflow_wait_status'].includes(toolResult.tool) ? {
+  } : ['tasks_wait_for_workflow','tasks_list_workflow_waits','workflow_wait','mod_wait','workflow_wait_status'].includes(toolResult.tool) ? {
     activityId: toolResult.activityId || `tool-${index + 1}`, tool: toolResult.tool, toolCallId: toolResult.toolCallId || null, ok: toolResult.ok ?? null, error: toolResult.error || null,
     ...(toolResult.wait ? {wait:toolResult.wait} : {}),
     ...(Array.isArray(toolResult.waits) ? {waits:toolResult.waits,hasMore:toolResult.hasMore,nextCursor:toolResult.nextCursor ?? null} : {}),

@@ -623,7 +623,9 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
       return { job };
     },
     async registerFollowThrough(input, { caller, assertCallerActive } = {}) {
-      const value = exactKeys(plain(input), ['key']);
+      const value = exactKeys(plain(input), ['key', 'wait']);
+      if (value.wait !== undefined && typeof value.wait !== 'boolean') invalid();
+      if (caller?.followThroughOrigin?.waitOnly && value.wait !== true) throw new Error('mod_follow_through_caller_required');
       if (!caller?.agentId || !caller?.sessionId || !caller?.runId || !Number.isSafeInteger(caller.followThroughOrigin?.resetGeneration)) throw new Error('mod_follow_through_caller_required');
       bounded(value.key, 160);
       if (!value.key.trim()) invalid();
@@ -636,7 +638,7 @@ export function createModCapabilities({ resolveAgentRuntime, resolveAgentWorkspa
         || continuityHead?.state !== 'running' || Number(session.resetGeneration || 0) !== caller.followThroughOrigin.resetGeneration) throw new Error('mod_follow_through_session_unavailable');
       assertCallerActive?.();
       return store.register({ ownerModId: schedulerOwner(), agentId: caller.agentId, sessionId: caller.sessionId,
-        conversationId: String(session.conversationId || caller.sessionId), resetIdentity: `${Number(session.resetGeneration || 0)}:${new Date(session.createdAt).toISOString()}`, originRunId: caller.runId, key: value.key });
+        conversationId: String(session.conversationId || caller.sessionId), resetIdentity: `${Number(session.resetGeneration || 0)}:${new Date(session.createdAt).toISOString()}`, originRunId: caller.runId, key: value.key, wait: value.wait === true });
     },
     async completeFollowThrough(input) {
       const value = exactKeys(plain(input), ['id', 'result']);

@@ -401,4 +401,19 @@ CREATE INDEX workflow_follow_through_waits_ready_idx ON workflow_follow_through_
 CREATE INDEX workflow_follow_through_parent_idx ON workflow_follow_through_waits(agent_id,(source->>'handoffId')) WHERE source ? 'handoffId';
 CREATE INDEX workflow_follow_through_reports_idx ON workflow_follow_through_waits(registered_at,id) WHERE status='report_ready';
 ` },
+  { version: 114, name: 'mod-follow-through-wait-triggers', sql: `
+ALTER TABLE mod_follow_through_returns ADD COLUMN wait_only BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE workflow_follow_through_waits ALTER COLUMN repository DROP NOT NULL;
+ALTER TABLE workflow_follow_through_waits ALTER COLUMN workflow DROP NOT NULL;
+ALTER TABLE workflow_follow_through_waits ALTER COLUMN run_id DROP NOT NULL;
+ALTER TABLE workflow_follow_through_waits ALTER COLUMN run_attempt DROP NOT NULL;
+ALTER TABLE workflow_follow_through_waits ALTER COLUMN head_sha DROP NOT NULL;
+ALTER TABLE workflow_follow_through_waits ADD COLUMN mod_return_id UUID REFERENCES mod_follow_through_returns(id) ON DELETE CASCADE;
+ALTER TABLE workflow_follow_through_waits ADD CONSTRAINT workflow_follow_through_trigger_shape CHECK (
+ (mod_return_id IS NULL AND repository IS NOT NULL AND workflow IS NOT NULL AND run_id IS NOT NULL AND run_attempt IS NOT NULL AND head_sha IS NOT NULL)
+ OR (mod_return_id IS NOT NULL AND repository IS NULL AND workflow IS NULL AND run_id IS NULL AND run_attempt IS NULL AND head_sha IS NULL)
+);
+CREATE UNIQUE INDEX workflow_follow_through_mod_return_unique_idx ON workflow_follow_through_waits(mod_return_id) WHERE mod_return_id IS NOT NULL;
+CREATE INDEX mod_follow_through_report_ready_idx ON mod_follow_through_returns(completed_at,id) WHERE state='ready' AND wait_only=false;
+` },
 ]);
