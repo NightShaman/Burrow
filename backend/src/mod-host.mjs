@@ -93,7 +93,8 @@ const SYSTEM_CONTROLLER_ERROR_CODES = new Set([
   'gateway_not_connected', 'gateway_not_ready', 'gateway_disconnected', 'gateway_dispatch_failed',
   'gateway_configuration_failed', 'gateway_configuration_timeout', 'gateway_operation_id_mismatch',
   'gateway_terminal_evidence_missing', 'operation_id_conflict', 'operation_in_progress',
-  'protected_redelivery_forbidden', 'operation_correlation_conflict', 'operation_correlation_missing',
+  'protected_delivery_binding_invalid', 'protected_redelivery_forbidden',
+  'operation_correlation_conflict', 'operation_correlation_missing',
   'telemetry_configuration_invalid', 'telemetry_endpoint_invalid', 'telemetry_headers_invalid',
 ]);
 function safeSystemControllerError(value, fallback) {
