@@ -16,6 +16,9 @@ import { validateClaudeModelSelection, CLAUDE_SELECTION_ACTIONS } from './claude
 const RUNNER_ERROR = Symbol('claudeRunnerError');
 const fail = code => { throw Object.assign(new Error(code), { [RUNNER_ERROR]: code }); };
 const MAX_LINE = 1024 * 1024;
+// Claude Read can emit two base64 copies of the same image in one user event.
+// Bound the whole wire line before parsing, independently of the ordinary JSON budget.
+const MAX_IMAGE_LINE = 16 * MAX_LINE;
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function discoverClaudeExecutable(env = process.env) {
@@ -30,11 +33,30 @@ export async function discoverClaudeExecutable(env = process.env) {
   fail('claude_executable_unavailable');
 }
 
+function inlineImageChars(event) {
+  if (event?.type !== 'user' || event.message?.role !== 'user' || !Array.isArray(event.message.content)) return 0;
+  const mirror = event.tool_use_result?.type === 'image' ? event.tool_use_result.file : null;
+  let size = 0, mirrorMatches = false;
+  for (const result of event.message.content) {
+    if (result?.type !== 'tool_result' || !Array.isArray(result.content)) continue;
+    for (const part of result.content) {
+      const source = part?.type === 'image' ? part.source : null;
+      const data = source?.data;
+      if (source?.type !== 'base64' || typeof source.media_type !== 'string' || !source.media_type.startsWith('image/')
+        || typeof data !== 'string' || data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) continue;
+      size += data.length;
+      if (mirror?.type === source.media_type && mirror.base64 === data) mirrorMatches = true;
+    }
+  }
+  return size + (mirrorMatches ? mirror.base64.length : 0);
+}
+
 // Attach every listener before start()/stdin. Retain only sanitized diagnostics, not tool payloads,
 // or unbounded JSONL. Result is provisional until the actual process closes.
 function processClient(child, onEvent, redact) {
   const diagnostics = createProcessDiagnostics(redact);
-  let buffer = '', text = '', result, failure, closed = false;
+  let text = '', result, failure, closed = false, lineChars = 0;
+  const parts = [], groups = [];
   let resolveExit;
   const exit = new Promise(resolve => { resolveExit = resolve; });
   const reject = code => {
@@ -42,9 +64,11 @@ function processClient(child, onEvent, redact) {
     failure ||= code;
   };
   function line(raw) {
-    if (!raw.trim()) return;
+    const oversized = raw.length > MAX_LINE;
+    if (!oversized && !raw.trim()) return;
     let event;
-    try { event = JSON.parse(raw); } catch { reject('claude_invalid_stream'); return; }
+    try { event = JSON.parse(raw); } catch { reject(oversized ? 'claude_stream_line_limit' : 'claude_invalid_stream'); return; }
+    if (oversized && raw.length - inlineImageChars(event) > MAX_LINE) { reject('claude_stream_line_limit'); return; }
     if (!event || typeof event !== 'object') { reject('claude_invalid_stream'); return; }
     onEvent(event);
     if (event.type === 'assistant') for (const c of Array.isArray(event.message?.content) ? event.message.content : []) {
@@ -66,19 +90,30 @@ function processClient(child, onEvent, redact) {
       }
     }
   }
+  function clearLine() {
+    lineChars = 0;
+    parts.length = groups.length = 0;
+  }
+  function flushLine() {
+    const raw = groups.length ? groups.join('') + parts.join('') : parts.join('');
+    clearLine();
+    line(raw);
+  }
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', chunk => {
-    // Continue draining after a protocol failure; cancellation/cleanup owns kill.
-    if (failure) return;
-    buffer += chunk;
-    for (;;) {
-      const i = buffer.indexOf('\n');
-      if (i < 0) break;
-      if (i > MAX_LINE) { reject('claude_stream_line_limit'); buffer = ''; return; }
-      line(buffer.slice(0, i)); buffer = buffer.slice(i + 1);
-      if (failure) { buffer = ''; return; }
+    // Scan only the new chunk; remote transports may split an image over many frames.
+    for (let start = 0; !failure && start < chunk.length;) {
+      const newline = chunk.indexOf('\n', start);
+      const end = newline < 0 ? chunk.length : newline;
+      lineChars += end - start;
+      if (lineChars > MAX_IMAGE_LINE) { clearLine(); reject('claude_stream_line_limit'); return; }
+      if (end > start) parts.push(chunk.slice(start, end));
+      // Coalesce tiny chunks so fragmented input cannot retain one object per character.
+      if (parts.length === 128) { groups.push(parts.join('')); parts.length = 0; }
+      if (newline < 0) return;
+      flushLine();
+      start = end + 1;
     }
-    if (buffer.length > MAX_LINE) { buffer = ''; reject('claude_stream_line_limit'); }
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => diagnostics.stderr(chunk));
@@ -89,7 +124,8 @@ function processClient(child, onEvent, redact) {
   child.once('close', (code, signal) => {
     diagnostics.close(code, signal);
     closed = true;
-    if (buffer && !failure) line(buffer);
+    if (lineChars && !failure) flushLine();
+    clearLine();
     if (code !== 0) reject('claude_process_failed');
     resolveExit();
   });
