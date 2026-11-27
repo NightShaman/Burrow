@@ -13,7 +13,7 @@ test('accepts the complete frozen source set', () => {
 });
 
 test('public skills snapshot includes every supported skill directory', () => {
-  for (const directory of ['burrow-backdoor', 'burrow-runtime', 'goblin-secret-store', 'node-goblin-operations', 'burrow-menagerie']) {
+  for (const directory of ['burrow-backdoor', 'burrow-runtime', 'goblin-secret-store', 'node-goblin-operations', 'burrow-menagerie', 'burrow-auditor']) {
     assert.ok(PUBLIC_SKILL_IDS.includes(directory), `missing public skill version stamping: ${directory}`);
     assert.ok(TARGETS.burrowSkills.paths.includes(directory), `missing public skill directory: ${directory}`);
   }
