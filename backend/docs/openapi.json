@@ -12635,6 +12635,29 @@
             },
             "description": "Scoped descendant tree including ended ancestors needed by visible/live descendants. Includes metadata-only live children when durable records are absent."
           },
+          "backgroundFollowThrough": {
+            "type": "array",
+            "description": "Passive background work for the exact requested agent and session generation. Not a foreground run; cannot steer or stop via chat controls.",
+            "items": {
+              "type": "object",
+              "required": ["id", "agentId", "sessionId", "kind", "status"],
+              "properties": {
+                "id": { "type": "string", "description": "Stable across chained waits and resumed execution." },
+                "agentId": { "type": "string" },
+                "sessionId": { "type": "string" },
+                "originRunId": { "type": "string" },
+                "kind": { "type": "string", "enum": ["mod", "github"] },
+                "modId": { "type": "string" },
+                "status": { "type": "string", "enum": ["waiting", "running"] },
+                "progress": {
+                  "type": "array",
+                  "items": { "type": "object", "additionalProperties": true },
+                  "description": "Bounded tool activity identities and status; no checkpoint or raw tool payloads."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
           "pendingForgeDeliveries": {
             "type": "integer",
             "minimum": 0,

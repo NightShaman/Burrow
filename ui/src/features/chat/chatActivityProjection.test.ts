@@ -339,6 +339,7 @@ it('keeps pending Forge delivery refreshable without inventing a live run, then 
     runtimeRun: null,
     childActivities: [],
     a2aActivities: [],
+    backgroundActivities: [],
     shouldRefresh: true,
     hadRuns: true,
   });
@@ -407,3 +408,102 @@ it.each([
     expect(JSON.stringify(runtimeRun)).not.toContain('private-payload');
   },
 );
+
+it('projects passive follow-through only for its originating chat, outside the foreground run', () => {
+  const row = {
+    id: 'durable-wait',
+    originRunId: 'origin',
+    agentId: 'a',
+    sessionId: 'parent',
+    kind: 'github',
+    status: 'waiting',
+    progress: [
+      { type: 'tool.started', data: { tool: 'tasks_wait_for_workflow', activityId: 'accepted' } },
+      { type: 'tool.completed', data: { tool: 'tasks_wait_for_workflow', activityId: 'accepted' } },
+      { type: 'tool.completed', sessionId: 'other', data: { tool: 'foreign' } },
+    ],
+  } as const;
+  const activity = { ...row, progress: [...row.progress] };
+  const projected = projectChatActivity(
+    {
+      ok: true,
+      runs: [],
+      backgroundFollowThrough: [
+        activity,
+        { ...activity, id: 'foreign-agent', agentId: 'b' },
+        { ...activity, id: 'foreign-session', sessionId: 'elsewhere' },
+      ],
+    },
+    selection,
+  );
+  expect(projected.runtimeRun).toBeNull();
+  expect(projected.hadRuns).toBe(false);
+  expect(projected.shouldRefresh).toBe(false);
+  expect(projected.backgroundActivities).toMatchObject([
+    {
+      id: 'durable-wait',
+      waiting: true,
+      activity: { liveLabel: 'Waiting for GitHub', items: [{ id: 'accepted', status: 'ok' }] },
+    },
+  ]);
+  const resumed = projectChatActivity(
+    {
+      ok: true,
+      runs: [{ runId: 'foreground', status: 'running', agentId: 'a', sessionId: 'parent' }],
+      backgroundFollowThrough: [
+        {
+          ...activity,
+          status: 'running',
+          progress: [
+            ...activity.progress,
+            { type: 'tool.started', data: { tool: 'verify_outcome', activityId: 'verify' } },
+          ],
+        },
+      ],
+    },
+    selection,
+  );
+  expect(resumed.runtimeRun?.runId).toBe('foreground');
+  expect(resumed.backgroundActivities).toMatchObject([
+    {
+      id: 'durable-wait',
+      waiting: false,
+      activity: {
+        liveLabel: 'Following up on GitHub',
+        items: [
+          { id: 'accepted', status: 'ok' },
+          { id: 'verify', status: 'pending' },
+        ],
+      },
+    },
+  ]);
+});
+
+it.each([
+  ['burrow-auditor', 'Auditor'],
+  ['another-active-mod', 'mod result'],
+  [undefined, 'mod result'],
+])('labels passive mod receipt %s as %s without affecting the foreground', (modId, subject) => {
+  for (const status of ['waiting', 'running'] as const) {
+    const projected = projectChatActivity(
+      {
+        ok: true,
+        runs: [],
+        backgroundFollowThrough: [
+          { id: 'receipt', agentId: 'a', sessionId: 'parent', kind: 'mod', modId, status },
+        ],
+      },
+      selection,
+    );
+    expect(projected.runtimeRun).toBeNull();
+    expect(projected.backgroundActivities).toMatchObject([
+      {
+        id: 'receipt',
+        waiting: status === 'waiting',
+        activity: {
+          liveLabel: `${status === 'waiting' ? 'Waiting for' : 'Following up on'} ${subject}`,
+        },
+      },
+    ]);
+  }
+});

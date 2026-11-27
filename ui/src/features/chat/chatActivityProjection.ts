@@ -13,6 +13,13 @@ import type {
 } from '../../app/api';
 import { thoughtProgressFromEvents } from './chatThoughtProgress';
 
+export type BackgroundRuntimeActivity = {
+  id: string;
+  originRunId?: string;
+  waiting: boolean;
+  activity: ToolActivity;
+};
+
 export type RuntimeRunForSelection = {
   targetId: string;
   runId: string;
@@ -305,6 +312,34 @@ export function projectChatActivity(
       },
     ];
   });
+  const backgroundActivities = (
+    response.backgroundFollowThrough ?? []
+  ).flatMap<BackgroundRuntimeActivity>((row) => {
+    if (
+      !row.id ||
+      row.agentId !== agentId ||
+      row.sessionId !== sessionId ||
+      (row.kind !== 'mod' && row.kind !== 'github') ||
+      (row.status !== 'waiting' && row.status !== 'running')
+    )
+      return [];
+    const waiting = row.status === 'waiting';
+    const subject =
+      row.kind === 'github' ? 'GitHub' : row.modId === 'burrow-auditor' ? 'Auditor' : 'mod result';
+    const tools = runtimeToolActivity({ runId: row.id, sessionId, progress: row.progress });
+    return [
+      {
+        id: row.id,
+        originRunId: row.originRunId,
+        waiting,
+        activity: {
+          ...tools,
+          runId: row.id,
+          liveLabel: waiting ? `Waiting for ${subject}` : `Following up on ${subject}`,
+        },
+      },
+    ];
+  });
   const hasLiveSubagents = Boolean(matchingLiveSubagents.length);
   const hasPendingForgeDeliveries = (response.pendingForgeDeliveries ?? 0) > 0;
   const hasActivity = Boolean(liveRuns.length) || hasLiveSubagents || hasPendingForgeDeliveries;
@@ -314,6 +349,7 @@ export function projectChatActivity(
   return {
     runtimeRun: projectedRuntimeRun,
     childActivities,
+    backgroundActivities,
     a2aActivities: activities.slice(-12),
     shouldRefresh,
     hadRuns: hasActivity,

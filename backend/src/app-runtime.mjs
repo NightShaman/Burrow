@@ -1,3 +1,4 @@
+import { createWorkflowFollowThroughProgress } from './workflow-follow-through-progress.mjs';
 import { runCodexSessionFollowup } from './codex-session-followup.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
 import { operatorPreferenceTurn } from './preference-learning.mjs';
@@ -395,9 +396,12 @@ async function runAskChatUnserialized({
   telemetryRun = runtimeConfig.opentelemetry?.effective?.enabled || ownedTelemetryParent
     ? telemetry?.startRun?.({ runId: resolvedRunId, sessionId: resolvedSessionId, agentId: runtimeState.agentId, source: runSource || turnSource || command, parentRunId: telemetryParentRunId, parentTraceContext })
     : null;
-  const observeTrace = telemetryRun
-    ? (record) => { telemetry.observe?.(record); return onTraceRecord?.(record); }
-    : onTraceRecord;
+  const followThroughProgress = createWorkflowFollowThroughProgress(resolvedRunId, workflowFollowThrough?.activityProgress);
+  const observeTrace = (record) => {
+    if (telemetryRun) telemetry.observe?.(record);
+    followThroughProgress.observe(record);
+    return onTraceRecord?.(record);
+  };
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
   const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger,
@@ -471,7 +475,7 @@ async function runAskChatUnserialized({
     agentRuntime: agentRuntime || { agentId: runtimeState.agentId, agent: { id: runtimeState.agentId } },
     sessionId: historySessionId, route: sharedRoute, resolveAgentRuntime, signal: normalizedArgs.abort_signal,
   });
-  const executionContext = createRuntimeExecutionContext({ workflowFollowThrough, followThroughOrigin: !groupChannelContext && !contextBoundary && !modAgent &&
+  const executionContext = createRuntimeExecutionContext({ workflowFollowThrough, followThroughProgress, followThroughOrigin: !groupChannelContext && !contextBoundary && !modAgent &&
     ['operator-chat', 'chat', 'queue_next'].includes(turnSourceName) &&
     isOperatorRuntimeTurn({ source: turnSourceName, incomingAgentMessage, externalTurnMetadata, completionEvent }) ?
     { resetGeneration: Number(priorSession.metadata?.resetGeneration || 0) }

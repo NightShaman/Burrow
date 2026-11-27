@@ -21,7 +21,12 @@ type Options = {
   onRefresh: (context: RecoveryContext) => Promise<boolean>;
   onError: (message: string) => void;
 };
-const emptyActivity = { runtimeRun: null, childActivities: [], a2aActivities: [] };
+const emptyActivity = {
+  runtimeRun: null,
+  childActivities: [],
+  a2aActivities: [],
+  backgroundActivities: [],
+};
 
 /** Owns supplemental activity polling/cancellation, never a second transcript/cache. */
 export function useChatRecovery({
@@ -33,7 +38,9 @@ export function useChatRecovery({
   onError,
 }: Options) {
   const [activity, setActivity] =
-    useState<Pick<Projection, 'runtimeRun' | 'childActivities' | 'a2aActivities'>>(emptyActivity);
+    useState<
+      Pick<Projection, 'runtimeRun' | 'childActivities' | 'a2aActivities' | 'backgroundActivities'>
+    >(emptyActivity);
   const callbacks = useRef({ onRefresh, onError });
   useLayoutEffect(() => {
     callbacks.current = { onRefresh, onError };
@@ -70,6 +77,7 @@ export function useChatRecovery({
     const current = () => scope.current === owner && !controller.signal.aborted;
     let timer: number | undefined;
     let hadRuns = false;
+    let backgroundIds = new Set<string>();
     let refreshedTerminalRuns: ActiveChatRunsResponse['runs'] | undefined;
     let refreshedGeneration: number | undefined;
     const terminalScopeKey = JSON.stringify([agentId, sessionId]);
@@ -111,6 +119,9 @@ export function useChatRecovery({
         );
         if (projection.runtimeRun)
           recoveredProgress.current[projection.runtimeRun.runId] = projection.runtimeRun.progress;
+        const reportedBackground = new Map(
+          projection.backgroundActivities.map((row) => [row.id, row]),
+        );
         setActivity((previous) => {
           const runtimeRun = chatValuesEqual(previous.runtimeRun, projection.runtimeRun)
             ? previous.runtimeRun
@@ -120,14 +131,31 @@ export function useChatRecovery({
             projection.childActivities,
           );
           const a2aActivities = shareChatRows(previous.a2aActivities, projection.a2aActivities);
+          const backgroundActivities = shareChatRows(
+            previous.backgroundActivities,
+            // Keep settled rows mounted until their transcript refresh applies.
+            [
+              ...new Map([
+                ...previous.backgroundActivities.map((row) => [row.id, row] as const),
+                ...reportedBackground,
+              ]).values(),
+            ],
+          );
           return runtimeRun === previous.runtimeRun &&
             childActivities === previous.childActivities &&
-            a2aActivities === previous.a2aActivities
+            a2aActivities === previous.a2aActivities &&
+            backgroundActivities === previous.backgroundActivities
             ? previous
-            : { runtimeRun, childActivities, a2aActivities };
+            : { runtimeRun, childActivities, a2aActivities, backgroundActivities };
         });
         if (hadRuns && !projection.hadRuns) terminalRefreshNeeded.current.add(terminalScopeKey);
         hadRuns = projection.hadRuns;
+        // Reconcile when a passive wait settles, not on every poll while it is idle.
+        const nextBackgroundIds = new Set(reportedBackground.keys());
+        if ([...backgroundIds].some((id) => !nextBackgroundIds.has(id))) {
+          terminalRefreshNeeded.current.add(terminalScopeKey);
+        }
+        backgroundIds = nextBackgroundIds;
         // Child workers and Forge deliveries persist outside the active-run registry;
         // also refresh after the last activity disappears to pick up terminal writes.
         const settledRetired = [...retiredRefreshNeeded.current].filter((key) => {
@@ -156,6 +184,14 @@ export function useChatRecovery({
             refreshedTerminalRuns = response.runs;
             refreshedGeneration = generation;
             terminalRefreshNeeded.current.delete(terminalScopeKey);
+            setActivity((previous) => {
+              const rows = previous.backgroundActivities.filter(({ id }) =>
+                reportedBackground.has(id),
+              );
+              return rows.length === previous.backgroundActivities.length
+                ? previous
+                : { ...previous, backgroundActivities: rows };
+            });
             settledRetired.forEach((key) => retiredRefreshNeeded.current.delete(key));
           }
         }
@@ -221,6 +257,7 @@ export function useChatRecovery({
     a2aActivities: activity.a2aActivities,
     runtimeRun: activity.runtimeRun,
     runtimeChildActivities: activity.childActivities,
+    backgroundActivities: activity.backgroundActivities,
     clearActivity,
     cancelRuntimeRun,
     retireRuntimeRun,

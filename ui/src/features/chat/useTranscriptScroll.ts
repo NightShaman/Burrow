@@ -1,3 +1,4 @@
+import type { BackgroundRuntimeActivity } from './chatActivityProjection';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ProgressEntry, ToolActivity } from '../../app/api';
 import type { ChatInput } from './chatInputs';
@@ -10,6 +11,7 @@ type ScrollInputs = {
   liveProgress: ProgressEntry[];
   liveAnswer: string;
   activeActivity?: ToolActivity;
+  backgroundActivities?: BackgroundRuntimeActivity[];
   chatInputs: ChatInput[];
   error: string;
   onLoadOlder?: () => Promise<void>;
@@ -23,6 +25,7 @@ export function useTranscriptScroll({
   liveProgress,
   liveAnswer,
   activeActivity,
+  backgroundActivities,
   chatInputs,
   error,
   onLoadOlder,
@@ -64,6 +67,7 @@ export function useTranscriptScroll({
     liveProgress,
     liveAnswer,
     activeActivity,
+    backgroundActivities,
     chatInputs,
     error,
   ]);

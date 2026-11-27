@@ -819,16 +819,25 @@ export function A2AActivityCard({
   );
 }
 
-export function ToolActivityCard({ activity, live }: { activity: ToolActivity; live?: boolean }) {
+export function ToolActivityCard({
+  activity,
+  live,
+  waiting,
+}: {
+  activity: ToolActivity;
+  live?: boolean;
+  waiting?: boolean;
+}) {
   // Render a friendly label only; activity items remain the raw stored receipt.
   const items = (activity.items ?? []).map((item) => ({
     ...item,
     label: toolDisplayName(item.label),
   }));
   const activeItem = [...items].reverse().find((item) => item.status === 'pending') ?? items.at(-1);
-  const label = live
-    ? (activity.liveLabel ?? activeItem?.label ?? 'Working through it')
-    : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
+  const label =
+    live || waiting
+      ? (activity.liveLabel ?? activeItem?.label ?? 'Working through it')
+      : `${items.length} runtime ${items.length === 1 ? 'action' : 'actions'}`;
   const keepExpandedCardInView = (event: SyntheticEvent<HTMLDetailsElement>) => {
     const card = event.currentTarget;
     if (!card.open) return;
@@ -868,8 +877,8 @@ export function ToolActivityCard({ activity, live }: { activity: ToolActivity; l
   return (
     <details className="tool-activity" onToggle={keepExpandedCardInView}>
       <summary>
-        <span className="tool-activity-check" aria-hidden="true">
-          ✓
+        <span className={waiting ? 'tool-activity-wait' : 'tool-activity-check'} aria-hidden="true">
+          {waiting ? null : '✓'}
         </span>
         <strong>{label}</strong>
         <span className="tool-activity-chevron" aria-hidden="true">
@@ -891,7 +900,9 @@ export function ToolActivityCard({ activity, live }: { activity: ToolActivity; l
             </div>
           ))
         ) : (
-          <div className="tool-activity-empty">Waiting for the first tool call…</div>
+          <div className="tool-activity-empty">
+            {waiting ? 'No runtime actions recorded yet.' : 'Waiting for the first tool call…'}
+          </div>
         )}
       </div>
     </details>

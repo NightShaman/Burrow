@@ -4,12 +4,12 @@ import { withPostgresTransaction } from './postgres-foundation.mjs';
 import { normalizeWaitTarget, waitText, waitId, lockWaitIdentity } from './task-workflow-wait.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
 
-function row(r) {
+function row(r, includeProgress = false) {
   if (!r) return null;
   return { id:r.id, agentId:r.agent_id, sessionId:r.session_id, conversationId:r.conversation_id, resetIdentity:r.reset_identity,
     repository:r.repository, workflow:r.workflow, runId:r.run_id, runAttempt:r.run_attempt, headSha:r.head_sha, checkpoint:r.checkpoint,
     source:r.source, status:r.status, completion:r.completion, result:r.result, error:r.error,
-    modReturnId:r.mod_return_id,
+    modReturnId:r.mod_return_id, ...(includeProgress ? { activityProgress:r.activity_progress } : {}),
     executionSessionId:r.execution_session_id, executionRunId:r.execution_run_id,
     registeredAt:r.registered_at, matchedAt:r.matched_at, claimedAt:r.claimed_at, finishedAt:r.finished_at };
 }
@@ -32,7 +32,7 @@ export class PostgresWorkflowFollowThroughStore {
     const checkpoint=waitText(input.checkpoint,'checkpoint',20000);
     const agentId=waitText(owner.agentId,'agentId'), sessionId=waitText(owner.sessionId,'sessionId'), conversationId=waitText(owner.conversationId,'conversationId'), resetIdentity=waitText(owner.resetIdentity,'resetIdentity');
     const originRunId=waitText(owner.runId,'originRunId'), executionRunId=owner.executionRunId==null?null:waitText(owner.executionRunId,'executionRunId'), executionSessionId=owner.executionSessionId==null?null:waitText(owner.executionSessionId,'executionSessionId');
-    const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitText(owner.handoffId,'handoffId')}: {})};
+    const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitId(owner.handoffId)}: {})};
     const id=await withPostgresTransaction(this.pool,async c=>{
       await lockWaitIdentity(c,target.repository,target.runId,target.runAttempt);
       if (owner.handoffId) {
@@ -46,8 +46,8 @@ export class PostgresWorkflowFollowThroughStore {
       const prior=(await c.query(`SELECT * FROM workflow_follow_through_waits WHERE agent_id=$1 AND session_id=$2 AND conversation_id=$3 AND reset_identity=$4 AND source=$5::jsonb AND repository=$6 AND workflow=$7 AND run_id=$8 AND run_attempt=$9 AND head_sha=$10`,[agentId,sessionId,conversationId,resetIdentity,JSON.stringify(source),target.repository,target.workflow,target.runId,target.runAttempt,target.headSha])).rows[0];
       if(prior){ if(prior.checkpoint!==checkpoint) throw new Error('workflow_follow_through_registration_conflict'); return prior.id; }
       const id=randomUUID();
-      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,[id,agentId,sessionId,conversationId,resetIdentity,target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,checkpoint,JSON.stringify(source)]);
+      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,activity_progress)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)`,[id,agentId,sessionId,conversationId,resetIdentity,target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,checkpoint,JSON.stringify(source),JSON.stringify(owner.activityProgress || [])]);
       const early=(await c.query('SELECT completion FROM github_completion_inbox WHERE repository=$1 AND run_id=$2 AND run_attempt=$3',[target.repository,target.runId,target.runAttempt])).rows[0]?.completion;
       if(early) await matchWorkflowFollowThrough(c,early);
       return id;
@@ -58,7 +58,7 @@ export class PostgresWorkflowFollowThroughStore {
     id=waitId(id); checkpoint=waitText(checkpoint,'checkpoint',20000);
     const agentId=waitText(owner.agentId,'agentId'), sessionId=waitText(owner.sessionId,'sessionId'), conversationId=waitText(owner.conversationId,'conversationId'), resetIdentity=waitText(owner.resetIdentity,'resetIdentity');
     const originRunId=waitText(owner.runId,'originRunId'), executionRunId=owner.executionRunId==null?null:waitText(owner.executionRunId,'executionRunId'), executionSessionId=owner.executionSessionId==null?null:waitText(owner.executionSessionId,'executionSessionId');
-    const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitText(owner.handoffId,'handoffId')}: {})};
+    const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitId(owner.handoffId)}: {})};
     const found=await withPostgresTransaction(this.pool,async c=>{
       const receipt=(await c.query('SELECT * FROM mod_follow_through_returns WHERE id=$1 FOR UPDATE',[id])).rows[0];
       if(!receipt || !receipt.wait_only) throw new Error('workflow_follow_through_mod_receipt_unavailable');
@@ -68,8 +68,8 @@ export class PostgresWorkflowFollowThroughStore {
       const prior=(await c.query('SELECT * FROM workflow_follow_through_waits WHERE mod_return_id=$1',[id])).rows[0];
       if(prior) { if(prior.checkpoint!==checkpoint || prior.agent_id!==agentId || prior.session_id!==sessionId || !isDeepStrictEqual(prior.source,source)) throw new Error('workflow_follow_through_registration_conflict'); return prior.id; }
       const waitIdValue=randomUUID();
-      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,mod_return_id)
-        VALUES($1,$2,$3,$4,$5,NULL,NULL,NULL,NULL,NULL,$6,$7::jsonb,$8)`,[waitIdValue,agentId,sessionId,conversationId,resetIdentity,checkpoint,JSON.stringify(source),id]);
+      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,mod_return_id,activity_progress)
+        VALUES($1,$2,$3,$4,$5,NULL,NULL,NULL,NULL,NULL,$6,$7::jsonb,$8,$9::jsonb)`,[waitIdValue,agentId,sessionId,conversationId,resetIdentity,checkpoint,JSON.stringify(source),id,JSON.stringify(owner.activityProgress || [])]);
       if(receipt.state==='ready') {
         const completion={modId:receipt.owner_mod_id,receiptId:receipt.id,result:receipt.result};
         await c.query(`UPDATE workflow_follow_through_waits SET status='matched',completion=$2::jsonb,matched_at=now() WHERE id=$1 AND status='waiting'`,[waitIdValue,JSON.stringify(completion)]);
@@ -82,6 +82,35 @@ export class PostgresWorkflowFollowThroughStore {
     id=waitId(id); agentId=waitText(agentId,'agentId');
     return row((await this.pool.query('SELECT * FROM workflow_follow_through_waits WHERE id=$1 AND agent_id=$2',[id,agentId])).rows[0]);
   }
+  async listActivity({ agentId, sessionId, conversationId, resetIdentity }, liveProgress = () => null) {
+    // Walk only the ancestors of active rows in this conversation generation.
+    // A successor may be registered before its parent settles; use the deepest
+    // active stage instead of publishing a second row or changing the UI key.
+    const {rows} = await this.pool.query(`WITH RECURSIVE active AS (
+      SELECT id,mod_return_id,source,status,activity_progress,registered_at
+      FROM workflow_follow_through_waits
+      WHERE agent_id=$1 AND session_id=$2 AND conversation_id=$3 AND reset_identity=$4
+        AND status IN ('waiting','matched','claimed','report_ready')
+    ), ancestry AS (
+      SELECT id AS stage_id,id,source->>'handoffId' AS parent,0 AS depth FROM active
+      UNION ALL
+      SELECT a.stage_id,p.id,p.source->>'handoffId',a.depth+1 FROM ancestry a
+      JOIN workflow_follow_through_waits p ON p.id=(a.parent)::uuid AND p.agent_id=$1 AND p.session_id=$2
+        AND p.conversation_id=$3 AND p.reset_identity=$4
+    ), roots AS (
+      SELECT DISTINCT ON (stage_id) stage_id,id AS root_id,depth FROM ancestry ORDER BY stage_id,depth DESC
+    ), leaves AS (
+      SELECT DISTINCT ON (roots.root_id) roots.root_id,active.* FROM roots JOIN active ON active.id=roots.stage_id
+      ORDER BY roots.root_id,roots.depth DESC,active.registered_at DESC,active.id DESC
+    )
+    SELECT leaves.*,m.owner_mod_id FROM leaves LEFT JOIN mod_follow_through_returns m ON m.id=leaves.mod_return_id
+    ORDER BY leaves.registered_at,leaves.id`, [agentId,sessionId,conversationId,resetIdentity]);
+    return rows.map(r => ({ id: r.root_id, agentId, sessionId, originRunId: r.source.runId,
+      kind: r.mod_return_id ? 'mod' : 'github', ...(r.owner_mod_id ? { modId: r.owner_mod_id } : {}),
+      status: ['waiting','matched'].includes(r.status) ? 'waiting' : 'running',
+      progress: liveProgress(r.id) || r.activity_progress,
+    }));
+  }
   async claim() {
     return withPostgresTransaction(this.pool,async c=>{
       const r=(await c.query(`SELECT w.* FROM workflow_follow_through_waits w WHERE w.status='matched'
@@ -90,11 +119,11 @@ export class PostgresWorkflowFollowThroughStore {
         ORDER BY w.matched_at,w.id FOR UPDATE OF w SKIP LOCKED LIMIT 1`)).rows[0];
       if(!r) return null;
       const session=`workflow-follow-through-${r.id}`, run=`workflow-follow-through-${r.id}`;
-      return row((await c.query(`UPDATE workflow_follow_through_waits SET status='claimed',claimed_at=now(),execution_session_id=$2,execution_run_id=$3 WHERE id=$1 AND status='matched' RETURNING *`,[r.id,session,run])).rows[0]);
+      return row((await c.query(`UPDATE workflow_follow_through_waits SET status='claimed',claimed_at=now(),execution_session_id=$2,execution_run_id=$3 WHERE id=$1 AND status='matched' RETURNING *`,[r.id,session,run])).rows[0], true);
     });
   }
   async finish(id, outcome = {}) { return this.settle(id, outcome); }
-  async settle(id,{status,result=null,error=null}={}) {
+  async settle(id,{status,result=null,error=null,activityProgress=null}={}) {
     id=waitId(id); if(!['report_ready','continued','failed','fenced'].includes(status)) throw new Error('workflow_follow_through_invalid_outcome');
     if(status==='report_ready') {
       const answer=result?.answerText;
@@ -110,7 +139,7 @@ export class PostgresWorkflowFollowThroughStore {
         const next = (await c.query(`SELECT id FROM workflow_follow_through_waits WHERE agent_id=$1 AND source->>'handoffId'=$2 ORDER BY registered_at,id`,[current.agent_id,id])).rows;
         if (next.length) { status='continued'; result={ nextWaitIds: next.map(x=>x.id) }; error=null; }
       }
-      return row((await c.query(`UPDATE workflow_follow_through_waits SET status=$2,result=$3::jsonb,error=$4,finished_at=CASE WHEN $2='report_ready' THEN NULL ELSE now() END WHERE id=$1 RETURNING *`,[id,status,result==null?null:JSON.stringify(result),error])).rows[0]);
+      return row((await c.query(`UPDATE workflow_follow_through_waits SET status=$2,result=$3::jsonb,error=$4,finished_at=CASE WHEN $2='report_ready' THEN NULL ELSE now() END,activity_progress=COALESCE($5::jsonb,activity_progress) WHERE id=$1 RETURNING *`,[id,status,result==null?null:JSON.stringify(result),error,activityProgress==null?null:JSON.stringify(activityProgress)])).rows[0]);
     });
   }
   async flushDeliveries({ conversations, limit=16 }={}) {

@@ -1029,3 +1029,65 @@ it('starts following latest on conversation switches without resetting on same-c
   rerender(<Chat {...props} sessionId="next" selected={{ ...agent, id: 'another' }} />);
   expect(transcript()).not.toBe(second);
 });
+
+it('keeps the same passive Runtime Actions card expanded as work resumes, without locking chat', () => {
+  const activity = {
+    id: 'wait-1',
+    originRunId: 'initiating-run',
+    waiting: true,
+    activity: {
+      runId: 'wait-1',
+      liveLabel: 'Waiting for Auditor',
+      items: [{ id: 'registered', label: 'Register audit', status: 'ok' as const }],
+    },
+  };
+  const { props, container, rerender, onSend } = renderChat({
+    draft: 'Ordinary chat still works',
+    backgroundActivities: [activity],
+  });
+  const waiting = screen.getByText('Waiting for Auditor').closest('details')!;
+  waiting.open = true;
+  expect(screen.getByText('Register audit')).toBeTruthy();
+  expect(container.querySelector('.chat-messages')?.getAttribute('aria-busy')).toBe('false');
+  expect(container.querySelector('textarea')?.disabled).toBe(false);
+  expect(screen.queryByText('Stop')).toBeNull();
+  fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' });
+  expect(onSend).toHaveBeenCalledTimes(1);
+  rerender(
+    <Chat
+      {...props}
+      backgroundActivities={[
+        {
+          ...activity,
+          waiting: false,
+          activity: { ...activity.activity, liveLabel: 'Following up on Auditor' },
+        },
+      ]}
+    />,
+  );
+  const resumed = screen.getByText('Following up on Auditor').closest('details');
+  expect(resumed).toBe(waiting);
+  expect(resumed?.open).toBe(true);
+  expect(screen.getAllByText('Register audit')).toHaveLength(1);
+  expect(container.querySelector('textarea')?.disabled).toBe(false);
+  expect(container.querySelectorAll('.chat-messages article')).toHaveLength(0);
+  rerender(
+    <Chat
+      {...props}
+      backgroundActivities={[activity]}
+      activeRunId="initiating-run"
+      activeToolActivity={activity.activity}
+      isSending
+    />,
+  );
+  expect(screen.queryByRole('region', { name: 'Background runtime actions' })).toBeNull();
+  expect(container.querySelectorAll('.tool-activity')).toHaveLength(1);
+  rerender(<Chat {...props} activeRunId="initiating-run" isSending />);
+  expect(screen.getByRole('region', { name: 'Background runtime actions' })).toBeTruthy();
+  expect(container.querySelectorAll('.tool-activity')).toHaveLength(1);
+  rerender(
+    <Chat {...props} activeRunId="unrelated" activeToolActivity={activity.activity} isSending />,
+  );
+  expect(screen.getByRole('region', { name: 'Background runtime actions' })).toBeTruthy();
+  expect(container.querySelectorAll('.tool-activity')).toHaveLength(2);
+});

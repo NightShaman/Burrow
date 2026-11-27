@@ -1,3 +1,4 @@
+import { createWorkflowFollowThroughProgress } from './workflow-follow-through-progress.mjs';
 import { createBackgroundLifecycle } from './background-lifecycle.mjs';
 import { runChatTurnFromBody } from './chat-turn-controller.mjs';
 import { classifyRuntimeOutcome } from './runtime-outcome.mjs';
@@ -24,7 +25,13 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
   let running, timer, started = false, initialized = false, requested = false, pendingFinish;
   const failure = (reason, wait) => ({ status: 'report_ready', error: reason,
     result: { ok: false, answerText: `Background work could not continue: \`${reason}\`. The requested outcome has not been verified.${wait.modReturnId ? ' The mod result is retained.' : ''}` } });
+  // The live overlay is private to the one worker owning the claimed stage.
+  // Final/successor progress is durable before the overlay is removed.
+  let activeProgress;
+  function progressFor(id) { return activeProgress?.id === id ? activeProgress.projector.snapshot() : null; }
   async function run(wait) {
+    const projector = createWorkflowFollowThroughProgress(wait.executionRunId, wait.activityProgress);
+    activeProgress = { id: wait.id, projector };
     let outcome;
     try {
       const session = await stores.conversations.getMetadata({ agentId: wait.agentId, sessionId: wait.sessionId });
@@ -39,7 +46,7 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
           metadata: { workflowFollowThroughExecution: { waitId: wait.id } } });
         lifecycle.signal.throwIfAborted();
         const result = await execute({ rootDir, stores, agentRuntime, resolveAgentRuntime, telemetry,
-          turnSource: source, runSource: source, recoveryPolicy: source, workflowFollowThrough: wait,
+          turnSource: source, runSource: source, recoveryPolicy: source, workflowFollowThrough: wait, onTraceRecord: projector.observe,
           body: { sessionId: wait.executionSessionId, runId: wait.executionRunId, message: task(wait), abortSignal: lifecycle.signal } });
         const classification = classifyRuntimeOutcome(result, { cancelled: lifecycle.signal.aborted });
         const answer = typeof result?.answerText === 'string' ? store.boundAnswer(result.answerText.trim()).trim() : '';
@@ -51,7 +58,10 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
     }
     // Retrying persistence must not invoke the model twice. A successor wait
     // is durable authority to suppress an intermediate answer, even on crash.
-    pendingFinish = () => store.settle(wait.id, outcome);
+    pendingFinish = async () => {
+      await store.settle(wait.id, { ...outcome, activityProgress: projector.snapshot() });
+      activeProgress = null;
+    };
     await pendingFinish();
     pendingFinish = null;
   }
@@ -83,5 +93,5 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
   const unsubscribe = store.subscribe(wake);
   const unsubscribeRuns = stores.agentRuns?.subscribe(wake);
   function stop(reason) { clearTimeout(timer); timer = null; unsubscribe(); unsubscribeRuns?.(); lifecycle.stop(reason); }
-  return { start() { started = true; wake(); }, wake, stop, close(reason) { stop(reason); return lifecycle.close(reason); }, health: lifecycle.health };
+  return { start() { started = true; wake(); }, wake, stop, progressFor, close(reason) { stop(reason); return lifecycle.close(reason); }, health: lifecycle.health };
 }

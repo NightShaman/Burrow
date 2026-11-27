@@ -120,6 +120,7 @@ export function useChatSession(selectedAgentId: string) {
     a2aActivities,
     runtimeRun,
     runtimeChildActivities,
+    backgroundActivities,
     clearActivity,
     cancelRuntimeRun,
     retireRuntimeRun,
@@ -508,6 +509,7 @@ export function useChatSession(selectedAgentId: string) {
     a2aActivities,
     runtimeRun,
     runtimeChildActivities,
+    backgroundActivities,
     cancelRuntimeRun,
     retireRuntimeRun,
   };

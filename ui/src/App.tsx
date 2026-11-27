@@ -234,6 +234,7 @@ function AppContent() {
     a2aActivities,
     runtimeRun,
     runtimeChildActivities,
+    backgroundActivities,
     cancelRuntimeRun,
     retireRuntimeRun,
   } = useChatSession(selectedAgentId);
@@ -821,6 +822,7 @@ function AppContent() {
                       : runtimeRun?.toolActivity
                   }
                   runtimeChildActivities={runtimeChildActivities}
+                  backgroundActivities={backgroundActivities}
                   liveProgress={activeRunForSelection ? liveProgress : (runtimeRun?.progress ?? [])}
                   liveStage={activeRunForSelection ? liveStage : runtimeRun?.stage}
                   liveAnswer={activeRunForSelection ? liveAnswer : (runtimeRun?.answerText ?? '')}

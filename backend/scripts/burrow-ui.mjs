@@ -277,7 +277,7 @@ const {
 const chatSession = createChatSessionService({
   runtime: { projectRoot, postgresApplication, requestLifecycle, resolveAgentRuntime,
     resolveModelConnectionChatBody, runChatTurnFromBody, serializeSessionExecution,
-    telemetry: otelRuntime, logger: serverLogger, getCompletionDispatch: () => completionDispatch,
+    telemetry: otelRuntime, logger: serverLogger, getCompletionDispatch: () => completionDispatch, getBackgroundProgress: (id) => workflowFollowThroughRunner.progressFor(id),
     cancellationGraceMs: RUN_CANCELLATION_GRACE_MS },
   http: { readJsonBody, validateBoundaryBody, sendJson, correlateHttpRun, recordHttpFailure,
     observeHttpResult, observeHttpRunEvent },

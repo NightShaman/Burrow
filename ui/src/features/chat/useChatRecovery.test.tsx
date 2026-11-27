@@ -548,3 +548,46 @@ it('continues child-session reconciliation and updates elapsed child activity wi
   await act(async () => vi.advanceTimersByTimeAsync(2000));
   expect(opts.onRefresh).toHaveBeenCalledTimes(5);
 });
+
+it('keeps passive actions across unrelated foreground polls and until terminal reconciliation applies', async () => {
+  const wait = {
+    id: 'durable-row',
+    originRunId: 'initial',
+    agentId: 'a',
+    sessionId: 's',
+    kind: 'mod',
+    modId: 'burrow-auditor',
+    status: 'waiting',
+  } as const;
+  const opts = options();
+  let active: ActiveChatRunsResponse = { ok: true, runs: [], backgroundFollowThrough: [wait] };
+  apiMock.mockImplementation(async () => active);
+  const { result } = renderHook(() => useChatRecovery(opts));
+  const tick = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+  await act(async () => {});
+  expect(result.current.backgroundActivities[0]?.waiting).toBe(true);
+  expect(result.current.runtimeRun).toBeNull();
+  active = { ...response('unrelated'), backgroundFollowThrough: [{ ...wait, status: 'running' }] };
+  await tick();
+  expect(result.current.runtimeRun?.runId).toBe('unrelated');
+  const resumed = result.current.backgroundActivities;
+  expect(resumed[0]?.waiting).toBe(false);
+  opts.onRefresh.mockClear();
+  opts.onRefresh.mockRejectedValueOnce(new Error('transient conversation read failure'));
+  active = { ...response('unrelated'), backgroundFollowThrough: [] };
+  await tick();
+  expect(opts.onRefresh).toHaveBeenCalledTimes(1);
+  expect(result.current.backgroundActivities).toBe(resumed);
+  expect(result.current.runtimeRun?.runId).toBe('unrelated');
+  await tick();
+  expect(opts.onRefresh).toHaveBeenCalledTimes(2);
+  expect(result.current.backgroundActivities).toEqual([]);
+  active = { ok: true, runs: [], backgroundFollowThrough: [] };
+  await tick();
+  expect(opts.onRefresh).toHaveBeenCalledTimes(3); // Foreground settles independently.
+  await tick();
+  expect(opts.onRefresh).toHaveBeenCalledTimes(3);
+});

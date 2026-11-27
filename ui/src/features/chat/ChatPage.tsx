@@ -1,3 +1,4 @@
+import type { BackgroundRuntimeActivity } from './chatActivityProjection';
 import {
   loadSwitchboardSessionLabels,
   type SwitchboardSessionLabel,
@@ -43,6 +44,7 @@ export function Chat({
   submittedMessage,
   activeToolActivity,
   runtimeChildActivities,
+  backgroundActivities,
   liveProgress,
   liveAnswer,
   liveStage,
@@ -77,6 +79,7 @@ export function Chat({
   submittedMessage?: string;
   activeToolActivity?: ToolActivity;
   runtimeChildActivities?: ToolActivity[];
+  backgroundActivities?: BackgroundRuntimeActivity[];
   liveProgress: ProgressEntry[];
   liveAnswer: string;
   liveStage?: ChatLiveStage;
@@ -368,6 +371,7 @@ export function Chat({
         runtimeUserMessage={runtimeUserMessage}
         runtimeUserMessageMetadata={runtimeUserMessageMetadata}
         runtimeChildActivities={runtimeChildActivities}
+        backgroundActivities={backgroundActivities}
         attachmentAgentId={resourceAgentId ?? selected.id}
         chatInputs={inputs.inputs}
         onPromote={promote}

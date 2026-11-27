@@ -1,3 +1,4 @@
+import { workflowOrigin } from '../../src/workflow-follow-through-tools.mjs';
 import { classifyModelFailure } from '../../src/model-failure.mjs';
 import { performance } from 'node:perf_hooks';
 import { chatResultMetadata } from '../../src/chat-result-metadata.mjs';
@@ -86,7 +87,7 @@ export function createChatSessionService({ runtime, http, commands, sessions, ob
   const {
     projectRoot, postgresApplication, requestLifecycle, resolveAgentRuntime,
     resolveModelConnectionChatBody, runChatTurnFromBody, serializeSessionExecution,
-    telemetry: otelRuntime, logger: serverLogger, getCompletionDispatch = () => null,
+    telemetry: otelRuntime, logger: serverLogger, getCompletionDispatch = () => null, getBackgroundProgress = () => null,
     postgresContinuity = postgresContinuityDefault, registerActiveAgentRun: registerActiveAgentRunImpl = registerActiveAgentRun, cancelActiveChatRun: cancelActiveChatRunImpl = cancelActiveChatRun,
     createChatTurnRunId: createChatTurnRunIdImpl = createChatTurnRunId,
     retireCancelledRun: retireCancelledRunImpl = null,
@@ -570,6 +571,7 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
   const allRuns = activeChatRunSummaries(activeChatRuns, { agentId });
   const runs = [];
   const childRecords = [];
+  let backgroundFollowThrough;
   // Observability reads stored identity/data, not permission to execute a turn.
   const runtimes = agentId ? [await resolveAgentContext(agentId)] : await Promise.all((await agentsStore().list({ includeDisabled: true })).map((agent) => resolveAgentContext(agent.id)));
   for (const agentRuntime of runtimes) {
@@ -578,6 +580,10 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
       readMinionSettings(metadataStore(), agentRuntime.agentId),
       sessionId ? postgresApplication.stores.conversations.getMetadata({ agentId: agentRuntime.agentId, sessionId }) : null,
     ]);
+    if (agentId && sessionId && postgresApplication.stores.workflowFollowThrough) {
+      const origin = workflowOrigin(metadata, sessionId);
+      backgroundFollowThrough = origin ? await postgresApplication.stores.workflowFollowThrough.listActivity({ agentId, sessionId, ...origin }, getBackgroundProgress) : [];
+    }
     const requested = sessionId ? sessionMinionAncestry({ sessionId, metadata, maxDepth: settings.maxDepth }) : null;
     const agentRuns = allRuns.filter(run => run.agentId === agentRuntime.agentId);
     const activeSessions = await Promise.all(agentRuns.map(async run => ({
@@ -607,7 +613,7 @@ async function currentActiveChatRunSummaries({ agentId = null, sessionId = null 
     }
   }
   runs.sort((a, b) => a.agentId.localeCompare(b.agentId) || a.depth - b.depth);
-  return { runs, subagents: childRecords, pendingForgeDeliveries: await postgresApplication.stores.forge.pendingChatDeliveryCount({ agentId, sessionId }) };
+  return { runs, subagents: childRecords, ...(backgroundFollowThrough ? { backgroundFollowThrough } : {}), pendingForgeDeliveries: await postgresApplication.stores.forge.pendingChatDeliveryCount({ agentId, sessionId }) };
 }
 
   return Object.freeze({

@@ -431,12 +431,25 @@ export type ActiveChatRun = MinionAncestry & {
   a2a?: { parentAgentId?: string; parentRunId?: string; messageMode?: string } | null;
   a2aActivities?: ActiveA2AActivity[];
 };
+/** Passive follow-through for the originating chat, never a foreground run. */
+export type ActiveBackgroundFollowThrough = {
+  id: string;
+  agentId: string;
+  sessionId: string;
+  originRunId?: string;
+  kind: 'mod' | 'github';
+  modId?: string;
+  status: 'waiting' | 'running';
+  progress?: ActiveChatRun['progress'];
+};
+
 export type ActiveChatRunsResponse = {
   ok: boolean;
   runs: ActiveChatRun[];
   subagents?: ActiveSubagent[];
   /** Pending Forge deliveries for the requested agent/session, not active model runs. */
   pendingForgeDeliveries?: number;
+  backgroundFollowThrough?: ActiveBackgroundFollowThrough[];
 };
 
 export type SessionAttachment = {

@@ -416,4 +416,9 @@ ALTER TABLE workflow_follow_through_waits ADD CONSTRAINT workflow_follow_through
 CREATE UNIQUE INDEX workflow_follow_through_mod_return_unique_idx ON workflow_follow_through_waits(mod_return_id) WHERE mod_return_id IS NOT NULL;
 CREATE INDEX mod_follow_through_report_ready_idx ON mod_follow_through_returns(completed_at,id) WHERE state='ready' AND wait_only=false;
 ` },
+  { version: 115, name: 'workflow-follow-through-runtime-activity', sql: `
+ALTER TABLE workflow_follow_through_waits ADD COLUMN activity_progress JSONB NOT NULL DEFAULT '[]'::jsonb;
+CREATE INDEX workflow_follow_through_activity_idx ON workflow_follow_through_waits(agent_id,session_id,conversation_id,reset_identity)
+ WHERE status IN ('waiting','matched','claimed','report_ready');
+` },
 ]);

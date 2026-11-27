@@ -1,3 +1,4 @@
+import type { BackgroundRuntimeActivity } from './chatActivityProjection';
 import { contextReport } from './contextReport';
 import type { ChatInput } from './chatInputs';
 import { chatTerminalMetadata } from './chatTerminal';
@@ -55,8 +56,11 @@ type ChatTranscriptProps = {
   runtimeUserMessage?: string;
   runtimeUserMessageMetadata?: SessionTurn['metadata'];
   runtimeChildActivities?: ToolActivity[];
+  backgroundActivities?: BackgroundRuntimeActivity[];
   attachmentAgentId?: string;
 };
+
+const noBackgroundActivities: BackgroundRuntimeActivity[] = [];
 
 export const ChatTranscript = memo(function ChatTranscript({
   selected,
@@ -83,6 +87,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   runtimeUserMessage = '',
   runtimeUserMessageMetadata,
   runtimeChildActivities = [],
+  backgroundActivities = noBackgroundActivities,
   attachmentAgentId,
   chatInputs = [],
   onPromote,
@@ -164,8 +169,28 @@ export const ChatTranscript = memo(function ChatTranscript({
   const activeActivity = activeRunId
     ? (activeToolActivity ?? activityByRun.get(activeRunId))
     : undefined;
+  const showLiveAssistantTurn =
+    isSending &&
+    !waitingForUserTurn &&
+    !messages.some(
+      (turn) =>
+        turn.role === 'assistant' &&
+        turn.runId === activeRunId &&
+        Boolean(
+          turn.metadata?.progress ||
+            turn.metadata?.toolActivity ||
+            turn.content ||
+            chatTerminalMetadata(turn.metadata),
+        ),
+    );
   const visibleRuntimeChildActivities = runtimeChildActivities.filter(
     (activity) => activity.runId !== activeActivity?.runId,
+  );
+  const visibleBackgroundActivities = backgroundActivities.filter(
+    // Only suppress the passive card when the initiating sender still renders
+    // its own live card. A stale/empty run must not hide the durable receipt.
+    ({ originRunId }) =>
+      !(showLiveAssistantTurn && activeActivity && activeRunId && originRunId === activeRunId),
   );
   // An externally started task run can reach this destination session before
   // its first durable turn. Keep the live run visible instead of replacing it
@@ -176,6 +201,7 @@ export const ChatTranscript = memo(function ChatTranscript({
     !runtimeUserMessage &&
     !a2aActivities.length &&
     !visibleRuntimeChildActivities.length &&
+    !visibleBackgroundActivities.length &&
     (isNewSession || !messages.length);
   const { messagesRef, showJumpToLatest, updateScrollIntent, loadOlder, jumpToLatest } =
     useTranscriptScroll({
@@ -186,6 +212,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       liveProgress,
       liveAnswer,
       activeActivity,
+      backgroundActivities,
       chatInputs,
       error,
       onLoadOlder,
@@ -344,6 +371,18 @@ export const ChatTranscript = memo(function ChatTranscript({
                 ))}
               </section>
             )}
+            {visibleBackgroundActivities.length > 0 && (
+              <section aria-label="Background runtime actions">
+                {visibleBackgroundActivities.map(({ id, waiting, activity }) => (
+                  <ToolActivityCard
+                    key={id}
+                    activity={activity}
+                    waiting={waiting}
+                    live={!waiting}
+                  />
+                ))}
+              </section>
+            )}
             {visibleRuntimeChildActivities.length > 0 && (
               <section className="a2a-activity-list" aria-label="Minion activity">
                 {visibleRuntimeChildActivities.map((activity) => (
@@ -355,28 +394,16 @@ export const ChatTranscript = memo(function ChatTranscript({
                 ))}
               </section>
             )}
-            {isSending &&
-              !waitingForUserTurn &&
-              !messages.some(
-                (turn) =>
-                  turn.role === 'assistant' &&
-                  turn.runId === activeRunId &&
-                  Boolean(
-                    turn.metadata?.progress ||
-                      turn.metadata?.toolActivity ||
-                      turn.content ||
-                      chatTerminalMetadata(turn.metadata),
-                  ),
-              ) && (
-                <LiveAssistantTurn
-                  name={selected.name}
-                  avatar={selected.avatar}
-                  progress={liveProgress}
-                  activity={activeActivity}
-                  answer={liveAnswer}
-                  stage={liveStage}
-                />
-              )}
+            {showLiveAssistantTurn && (
+              <LiveAssistantTurn
+                name={selected.name}
+                avatar={selected.avatar}
+                progress={liveProgress}
+                activity={activeActivity}
+                answer={liveAnswer}
+                stage={liveStage}
+              />
+            )}
           </>
         )}
         {error && (

@@ -53,7 +53,7 @@ export async function executeWorkflowFollowThroughTool({ tool, args = {}, agentI
     if (!origin || (handoff ? handoff.agentId !== agentId || handoff.executionRunId !== runId || handoff.executionSessionId !== sessionId || origin.resetIdentity !== handoff.resetIdentity || origin.conversationId !== handoff.conversationId
       : Number(session.resetGeneration || 0) !== context.followThroughOrigin.resetGeneration)) throw new Error('workflow_follow_through_origin_changed');
     context.abortSignal?.throwIfAborted();
-    const owner = { agentId, sessionId: handoff?.sessionId || sessionId, ...origin,
+    const owner = { activityProgress: context.followThroughProgress?.snapshot(tool), agentId, sessionId: handoff?.sessionId || sessionId, ...origin,
       runId: handoff?.source.runId || runId, ...(handoff ? { handoffId: handoff.id, executionRunId: runId, executionSessionId: sessionId } : {}) };
     const wait = tool === 'mod_wait' ? await workflows.registerModWait(args, owner) : await workflows.register(args, owner);
     return { tool, ok: true, wait, error: null };

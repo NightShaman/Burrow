@@ -666,7 +666,8 @@
   color: var(--text);
   font-weight: 700;
 }
-.tool-activity-check {
+.tool-activity-check,
+.tool-activity-wait {
   display: grid;
   place-items: center;
   width: 18px;
@@ -676,6 +677,16 @@
   color: #66bf8c;
   font-size: 11px;
   line-height: 1;
+}
+.tool-activity-wait {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+.tool-activity-wait::before {
+  content: '';
+  width: 6px;
+  height: 7px;
+  border-inline: 2px solid currentColor;
 }
 .tool-activity-spinner {
   display: inline-block;
