@@ -4,7 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const collector = 'https://burrow-install-counts.robert-stack.workers.dev/v1/install';
-const publicVersion = /^\d{4}\.\d{2}\.\d{2}$/;
+const releaseVersion = /^\d{4}\.\d{2}\.\d{2}(?:\.[1-9]\d{0,8})?$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const clientTimeoutMs = 5_000;
 const retryMs = [60_000, 5 * 60_000, 30 * 60_000, 60 * 60_000];
@@ -35,23 +35,23 @@ async function installationId(file) {
   return id;
 }
 
-export async function reportPublicInstallation({
+export async function reportInstallation({
   runtimeRoot, version, provenance, signal, env = process.env, send = fetch, pause = delay,
 }) {
-  // Public promotion writes a plain UTC date to both fields. Development
-  // assembly always adds a revision; loose source has no release provenance.
-  if (version?.length !== 10 || !publicVersion.test(version) || provenance?.assembly !== version ||
+  // Both packaged channels stamp the running version into release provenance.
+  // Loose source is not an install; CI and package smoke runs are not adoption.
+  if (typeof version !== 'string' || version.trim() !== version || !releaseVersion.test(version) || provenance?.assembly !== version ||
       env.CI || env.GITHUB_ACTIONS || env.BURROW_SMOKE_TOKEN || env.BURROW_INSTALL_TEST_ROOT) return;
   const identityFile = path.join(runtimeRoot, 'install-id');
   const ackFile = path.join(runtimeRoot, 'install-id.reported');
   for (let attempt = 0; !signal?.aborted; attempt++) {
     try {
       const id = await installationId(identityFile);
-      const record = `${id}\n`;
+      const record = `${id}\n${version}\n`;
       if ((await readIfPresent(ackFile)) === record || signal?.aborted) return;
       const deadline = AbortSignal.timeout(clientTimeoutMs);
       const response = await send(collector, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ installId: id }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ installId: id, version }),
         redirect: 'error', signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
       });
       await response.body?.cancel().catch(() => {});

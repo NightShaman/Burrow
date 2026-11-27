@@ -68,7 +68,7 @@ import { brainDiagnosticSummary, brainDiagnosticMemories, brainDiagnosticEmbeddi
 import { runtimeDiagnosticSessionSummaries } from '../src/runtime-diagnostic-sessions.mjs';
 import { runtimeDiagnosticSessionDetail, runtimeDiagnosticContextSummary, runtimeDiagnosticActiveRuns, runtimeDiagnosticTraces } from '../src/runtime-diagnostic-details.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
-import { reportPublicInstallation } from '../src/install-reporting.mjs';
+import { reportInstallation } from '../src/install-reporting.mjs';
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -2105,7 +2105,7 @@ const bundledSkillRuntime = await runtimeConfig();
 await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, skillStore: postgresApplication.stores.skills });
 
 server.listen(port, host, () => {
-  void reportPublicInstallation({ runtimeRoot, version: releaseVersion, provenance: healthReleaseProvenance, signal: installReportingAbort.signal })
+  void reportInstallation({ runtimeRoot, version: releaseVersion, provenance: healthReleaseProvenance, signal: installReportingAbort.signal })
     .catch(() => {}); // Registration never blocks readiness or shutdown.
   void startupLifecycle.track(async () => {
   try {
