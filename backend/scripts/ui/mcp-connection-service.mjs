@@ -1,6 +1,7 @@
 import {
   diagnoseMcpConnection,
   discoverMcpTools,
+  publicMcpDiscoveryFailure,
   reconcilePersistentMcpConnection,
 } from '../../src/mcporter-adapter.mjs';
 import { createCatalogRefreshDiagnostics } from '../../src/http-operational-log.mjs';
@@ -62,16 +63,21 @@ export function createMcpConnectionService({
   }
 
   async function discoverMcpConnection(body = {}) {
+    let connection;
+    let credentials;
     try {
-      const connection = await mcpStore().get(body.connectionId);
+      connection = await mcpStore().get(body.connectionId);
       if (!connection) return { ok: false, status: 404, error: 'mcp_connection_not_found' };
-      const tools = await discoverMcpToolsImpl(connection, { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) });
+      credentials = { apiKey: await mcpStore().apiKey(connection.id), headers: await mcpStore().secretHeaders(connection.id), environmentVariables: await mcpStore().secretEnvironment(connection.id) };
+      const tools = await discoverMcpToolsImpl(connection, credentials);
+      // Only errors from the provider may carry a discovery diagnostic.
+      credentials = undefined;
       const refreshed = await mcpStore().refreshTools(connection.id, tools);
       mcpCatalogDiagnostics('mcp_catalog_refresh', true, { connectionId: connection.id });
       return { ok: true, connection: refreshed, tools };
     } catch (error) {
       mcpCatalogDiagnostics('mcp_catalog_refresh', false, { connectionId: body.connectionId, error });
-      return { ok: false, status: 400, error: String(error?.message || error) };
+      return publicMcpDiscoveryFailure(error, connection, credentials);
     }
   }
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { redactProtectedText } from './redaction.mjs';
+import { providerErrorSecrets, sanitizeProviderMessage } from './model-failure.mjs';
 
 function runtimeRootOrThrow(runtimeRoot = null) {
   const resolved = String(runtimeRoot || process.env.BURROW_RUNTIME_ROOT || '').trim();
@@ -168,6 +169,26 @@ export function publicMcpFailureDetail(error, protectedValues = []) {
   const toolErrorCode = safeProviderCode(error?.toolErrorCode, protectedValues);
   const httpStatus = safeHttpStatus(error?.httpStatus);
   return { ...(toolErrorCode ? { toolErrorCode } : {}), ...(httpStatus ? { httpStatus } : {}), ...(detail ? { diagnostic: detail } : {}) };
+}
+
+/** Project only the mcporter list command's structured failure, not process streams. */
+export function publicMcpDiscoveryFailure(error, connection, credentials) {
+  const code = publicMcpError(error);
+  const failure = { ok: false, status: 400, error: code };
+  if (!credentials || code !== 'mcp_runtime_failed' || typeof error?.stdout !== 'string' || error.stdout.length > 64_000) return failure;
+  const { apiKey, headers = {}, environmentVariables = {} } = credentials;
+  let result;
+  try { result = JSON.parse(error.stdout); } catch { return failure; }
+  // Discovery uses `list connection --json`; only this documented server-error
+  // shape can supply UI details. Do not expose the rendered envelope or stderr.
+  if (result?.mode !== 'server' || result.name !== 'connection' || !result.issue || result.status === 'ok') return failure;
+  const secrets = providerErrorSecrets({ apiKey, baseUrl: connection?.baseUrl }, headers);
+  const connectionValues = [...Object.values(headers || {}), ...Object.values(environmentVariables || {})].filter(value => typeof value === 'string' && value);
+  const protectedValues = [...new Set([...secrets, ...connectionValues.flatMap(value => [value, encodeURIComponent(value.toWellFormed()), JSON.stringify(value).slice(1, -1)])])];
+  const message = sanitizeProviderMessage(result.issue.rawMessage, protectedValues)
+    || sanitizeProviderMessage(result.error, protectedValues);
+  const httpStatus = safeHttpStatus(result.issue.statusCode);
+  return { ...failure, ...(message ? { message } : {}), ...(httpStatus ? { httpStatus } : {}) };
 }
 
 // This environment is passed only to this connection's mcporter subprocess
