@@ -68,6 +68,7 @@ import { brainDiagnosticSummary, brainDiagnosticMemories, brainDiagnosticEmbeddi
 import { runtimeDiagnosticSessionSummaries } from '../src/runtime-diagnostic-sessions.mjs';
 import { runtimeDiagnosticSessionDetail, runtimeDiagnosticContextSummary, runtimeDiagnosticActiveRuns, runtimeDiagnosticTraces } from '../src/runtime-diagnostic-details.mjs';
 import { releaseVersion } from '../src/release-version.mjs';
+import { reportPublicInstallation } from '../src/install-reporting.mjs';
 import { createServer } from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -2020,6 +2021,7 @@ async function handleRequest(req, res) {
 }
 
 let shuttingDown = false;
+const installReportingAbort = new AbortController();
 const configuredShutdownDrainMs = Number(process.env.BURROW_SHUTDOWN_DRAIN_MS || 10_000);
 const SHUTDOWN_DRAIN_MS = Number.isFinite(configuredShutdownDrainMs) ? Math.max(1_000, configuredShutdownDrainMs) : 10_000;
 let shutdownReason = 'service_shutdown';
@@ -2044,6 +2046,7 @@ const closeRuntimeResources = createCoordinatedShutdown({
   drainMs: SHUTDOWN_DRAIN_MS,
   stopAdmission: () => {
     shuttingDown = true;
+    installReportingAbort.abort();
     httpClosePromise = new Promise(resolve => server.close(() => resolve()));
     server.closeIdleConnections?.();
   },
@@ -2102,6 +2105,8 @@ const bundledSkillRuntime = await runtimeConfig();
 await ensureDefaultGlobalWorkspace({ installDir: projectRoot, workspaceRoot: bundledSkillRuntime.runtimeState.workspaceRoot, skillStore: postgresApplication.stores.skills });
 
 server.listen(port, host, () => {
+  void reportPublicInstallation({ runtimeRoot, version: releaseVersion, provenance: healthReleaseProvenance, signal: installReportingAbort.signal })
+    .catch(() => {}); // Registration never blocks readiness or shutdown.
   void startupLifecycle.track(async () => {
   try {
   await serverLogger.event('startup_summary', {
