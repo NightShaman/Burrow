@@ -106,7 +106,7 @@ Signed ping is acknowledged without creating work. Accepted completed events are
 
 ### Wait for one exact workflow from an existing task
 
-On development builds exposing `tasks_wait_for_workflow`, an agent in its default conversation can save a checkpoint on an existing assigned To Do or In Progress task. Supply the exact repository, displayed workflow name, run ID, run attempt and head SHA. Finish the turn after checking the registration. A matching signed completion can resume the same task once, even on failure; this is not a new standing watch or polling job. A cancelled, reassigned, ineligible or superseded task can skip the wait. Check the task History or `tasks_list_workflow_waits` for the checkpoint, exact trigger, continuation and terminal receipt. **Resumed** means the continuation was admitted, not that it succeeded or independently verified publication.
+Starting with public Burrow **2026.11.26**, an agent in its default conversation can use `tasks_wait_for_workflow` to save a checkpoint on an existing assigned To Do or In Progress task. Supply the exact repository, displayed workflow name, run ID, run attempt and head SHA. Finish the turn after checking the registration. A matching signed completion can resume the same task once, even on failure; this is not a new standing watch or polling job. A cancelled, reassigned, ineligible or superseded task can skip the wait. Check the task History or `tasks_list_workflow_waits` for the checkpoint, exact trigger, continuation and terminal receipt. **Resumed** means the continuation was admitted, not that it succeeded or independently verified publication.
 
 ## Work delegated to minions
 
