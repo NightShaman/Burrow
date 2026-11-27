@@ -107,6 +107,7 @@ export function summarizeToolResults(toolResults = []) {
   } : ['tasks_wait_for_workflow','tasks_list_workflow_waits','workflow_wait','mod_wait','workflow_wait_status'].includes(toolResult.tool) ? {
     activityId: toolResult.activityId || `tool-${index + 1}`, tool: toolResult.tool, toolCallId: toolResult.toolCallId || null, ok: toolResult.ok ?? null, error: toolResult.error || null,
     ...(toolResult.wait ? {wait:toolResult.wait} : {}),
+    ...(toolResult.tool === 'workflow_wait' && toolResult.diagnostic ? { diagnostic: toolResult.diagnostic } : {}),
     ...(Array.isArray(toolResult.waits) ? {waits:toolResult.waits,hasMore:toolResult.hasMore,nextCursor:toolResult.nextCursor ?? null} : {}),
   } : toolResult.tool === 'agents_list' ? {
     // Keep the small public page compact in shape as well as size. A generic

@@ -3,6 +3,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { withPostgresTransaction } from './postgres-foundation.mjs';
 import { normalizeWaitTarget, waitText, waitId, lockWaitIdentity } from './task-workflow-wait.mjs';
 import { buildSessionEntry } from './session-entry.mjs';
+import { boundedRedactedValue } from './redaction.mjs';
+import { readGitHubWorkflowAttempt, sameWorkflowTarget } from './github-workflow-attempt.mjs';
+import { workflowFollowThroughToolActivity } from './workflow-follow-through-progress.mjs';
 
 function row(r, includeProgress = false) {
   if (!r) return null;
@@ -18,23 +21,34 @@ function row(r, includeProgress = false) {
  * subscribe(fn)/publish(), claim(), finish(id,{status,result,error}), reconcile(). Checkpoints must
  * contain no credentials. claim is one-shot: claimed rows are never replayed after restart. */
 export class PostgresWorkflowFollowThroughStore {
-  constructor({ pool, maxAnswerChars = 12000 } = {}) {
+  constructor({ pool, maxAnswerChars = 12000, fetchAttempt } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error('workflow_follow_through_postgres_pool_required');
-    this.pool=pool; this.listeners=new Set(); this.maxAnswerChars=maxAnswerChars;
+    this.pool=pool; this.listeners=new Set(); this.maxAnswerChars=maxAnswerChars; this.fetchAttempt=fetchAttempt;
   }
   subscribe(fn) { if (typeof fn!=='function') throw new Error('workflow_follow_through_invalid_subscriber'); this.listeners.add(fn); return () => this.listeners.delete(fn); }
   publish() { for (const fn of this.listeners) { try { fn(); } catch {} } }
   boundAnswer(answer) {
     return answer.replaceAll('\u0000', '').slice(0, this.maxAnswerChars).replace(/[\uD800-\uDBFF]$/, '').toWellFormed();
   }
-  async register(input={}, owner={}) {
+  async signedCompletion(db, target) {
+    const { rows } = await db.query('SELECT completion FROM github_completion_inbox WHERE repository=$1 AND run_id=$2 AND run_attempt=$3', [target.repository, target.runId, target.runAttempt]);
+    const completion = rows[0]?.completion;
+    return sameWorkflowTarget(target, completion) ? completion : null;
+  }
+  async lookup(target, signal) {
+    if (await this.signedCompletion(this.pool, target)) return { signed: true };
+    return readGitHubWorkflowAttempt(target, { fetchAttempt: this.fetchAttempt, signal });
+  }
+  async register(input={}, owner={}, options={}) {
     const target=normalizeWaitTarget(input);
     const checkpoint=waitText(input.checkpoint,'checkpoint',20000);
     const agentId=waitText(owner.agentId,'agentId'), sessionId=waitText(owner.sessionId,'sessionId'), conversationId=waitText(owner.conversationId,'conversationId'), resetIdentity=waitText(owner.resetIdentity,'resetIdentity');
     const originRunId=waitText(owner.runId,'originRunId'), executionRunId=owner.executionRunId==null?null:waitText(owner.executionRunId,'executionRunId'), executionSessionId=owner.executionSessionId==null?null:waitText(owner.executionSessionId,'executionSessionId');
     const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitId(owner.handoffId)}: {})};
+    const lookup = options.lookup ?? await this.lookup(target);
     const id=await withPostgresTransaction(this.pool,async c=>{
       await lockWaitIdentity(c,target.repository,target.runId,target.runAttempt);
+      options.signal?.throwIfAborted();
       if (owner.handoffId) {
         const { rows: ancestor } = await c.query(`WITH RECURSIVE chain AS (
           SELECT * FROM workflow_follow_through_waits WHERE id=$1 AND agent_id=$2
@@ -44,12 +58,20 @@ export class PostgresWorkflowFollowThroughStore {
         if (ancestor.length) throw new Error('workflow_follow_through_cycle');
       }
       const prior=(await c.query(`SELECT * FROM workflow_follow_through_waits WHERE agent_id=$1 AND session_id=$2 AND conversation_id=$3 AND reset_identity=$4 AND source=$5::jsonb AND repository=$6 AND workflow=$7 AND run_id=$8 AND run_attempt=$9 AND head_sha=$10`,[agentId,sessionId,conversationId,resetIdentity,JSON.stringify(source),target.repository,target.workflow,target.runId,target.runAttempt,target.headSha])).rows[0];
-      if(prior){ if(prior.checkpoint!==checkpoint) throw new Error('workflow_follow_through_registration_conflict'); return prior.id; }
-      const id=randomUUID();
-      await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,activity_progress)
+      // Re-read under the ingestion lock. A signed delivery can land during
+      // the API request or readiness check and takes precedence at admission.
+      const signed = await this.signedCompletion(c, target);
+      const completion = signed || lookup.completion;
+      if (prior) {
+        if (prior.checkpoint !== checkpoint) throw new Error('workflow_follow_through_registration_conflict');
+        if (prior.status !== 'waiting') return prior.id;
+      }
+      if (!completion && !prior && lookup.diagnostic === 'github_api_identity_mismatch') throw new Error(lookup.diagnostic);
+      if (!completion && options.receiverError) throw new Error(options.receiverError);
+      const id = prior?.id ?? randomUUID();
+      if (!prior) await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,activity_progress)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)`,[id,agentId,sessionId,conversationId,resetIdentity,target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,checkpoint,JSON.stringify(source),JSON.stringify(owner.activityProgress || [])]);
-      const early=(await c.query('SELECT completion FROM github_completion_inbox WHERE repository=$1 AND run_id=$2 AND run_attempt=$3',[target.repository,target.runId,target.runAttempt])).rows[0]?.completion;
-      if(early) await matchWorkflowFollowThrough(c,early);
+      if (completion) await matchWorkflowFollowThrough(c, completion);
       return id;
     });
     this.publish(); return this.getOwned({id,agentId});
@@ -170,7 +192,12 @@ export class PostgresWorkflowFollowThroughStore {
         // The existing chat revalidation cursor is millisecond-resolution.
         // Publish a strictly newer revision even when two writes share a tick.
         const now=new Date(Math.max(Date.now(), new Date(conv.updated_at).getTime()+1)).toISOString();
-        const entry=buildSessionEntry({sessionId:selected.session_id,type:'message',role:'assistant',content:answer,runId:`${selected.execution_run_id}-report`,clock:()=>now,metadata:{source:'workflow-follow-through',workflowFollowThrough:{waitId:selected.id,originRunId:selected.source?.runId,completion:selected.mod_return_id ? { modId:selected.completion?.modId,receiptId:selected.mod_return_id } : selected.completion,isolatedExecutionSessionId:selected.execution_session_id,isolatedExecutionRunId:selected.execution_run_id}}});
+        const runId = `${selected.execution_run_id}-report`;
+        const toolActivity = workflowFollowThroughToolActivity(selected.activity_progress, runId);
+        const entry=buildSessionEntry({sessionId:selected.session_id,type:'message',role:'assistant',content:answer,runId,clock:()=>now,metadata:{source:'workflow-follow-through',workflowFollowThrough:{waitId:selected.id,originRunId:selected.source?.runId,completion:selected.mod_return_id ? { modId:selected.completion?.modId,receiptId:selected.mod_return_id } : selected.completion,isolatedExecutionSessionId:selected.execution_session_id,isolatedExecutionRunId:selected.execution_run_id}}});
+        // The progress projection holds up to 60 items. Redact it separately
+        // so the generic metadata array limit cannot insert a non-item marker.
+        if (toolActivity) entry.metadata.toolActivity = boundedRedactedValue(toolActivity, { maxItems: toolActivity.items.length });
         await conversations.appendLocked(c,{agentId:selected.agent_id,sid:selected.session_id,entry,idempotencyKey:`workflow-follow-through:${selected.id}`,now});
         await c.query(`UPDATE workflow_follow_through_waits SET status='delivered',finished_at=$2 WHERE id=$1 AND status='report_ready'`,[selected.id,now]);
         return {id:selected.id,status:'delivered'};
@@ -179,6 +206,20 @@ export class PostgresWorkflowFollowThroughStore {
       done.push(outcome);
     }
     return {processed:done.length,results:done};
+  }
+  async reconcileWaitingGitHub(signal) {
+    const { rows } = await this.pool.query(`SELECT DISTINCT repository,workflow,run_id AS "runId",run_attempt AS "runAttempt",head_sha AS "headSha"
+      FROM workflow_follow_through_waits WHERE status='waiting' AND mod_return_id IS NULL`);
+    for (const target of rows) {
+      if (signal?.aborted) break;
+      const { completion } = await this.lookup(target, signal);
+      if (!completion || signal?.aborted) continue;
+      const matched = await withPostgresTransaction(this.pool, async c => {
+        await lockWaitIdentity(c, target.repository, target.runId, target.runAttempt);
+        return matchWorkflowFollowThrough(c, await this.signedCompletion(c, target) || completion);
+      });
+      if (matched.length) this.publish();
+    }
   }
   async reconcile() {
     // The singleton Core producer owns this queue. Never replay an ambiguous
