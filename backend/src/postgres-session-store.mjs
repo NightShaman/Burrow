@@ -12,7 +12,7 @@ import { normalizePostgresPool } from './postgres-foundation.mjs';
 import { PostgresAgentDeliveryStore } from './postgres-agent-delivery-store.mjs';
 import { closeContinuityOwners } from './postgres-continuity-owner.mjs';
 import { randomUUID } from 'node:crypto';
-import { closePostgresPool, withPostgresTransaction, migrationLockKey } from './postgres-foundation.mjs';
+import { closePostgresPool, withPostgresTransaction, postgresTransactionContext, migrationLockKey } from './postgres-foundation.mjs';
 
 // Caller holds the session row lock: append, compact and delivery share one boundary.
 export async function findSessionReplay(client, agentId, sessionId, entryId, key) {
@@ -189,6 +189,16 @@ export class PostgresSessionStore {
     if (!existing.rows[0]) throw new Error('session_entry_conflict');
     return { ...rowEntry(existing.rows[0]), idempotent: true };
 
+  }
+
+  // Hold the canonical append/reset lock through a composed acceptance boundary.
+  // The borrowed store and transaction must not escape the callback.
+  async withSessionLock({ agentId, sessionId, signal }, work) {
+    return withPostgresTransaction(this.pool, async client => {
+      await client.query('SELECT 1 FROM conversation_sessions WHERE agent_id=$1 AND session_id=$2 FOR UPDATE', [agentId, sessionId]);
+      const transaction = postgresTransactionContext(client);
+      return work(new PostgresSessionStore({ pool: transaction, clock: this.clock }), transaction);
+    }, { signal });
   }
 
   async append({ agentId: rawAgentId, sessionId: rawSessionId, entry, idempotencyKey = null } = {}) {

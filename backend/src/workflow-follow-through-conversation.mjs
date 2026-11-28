@@ -9,7 +9,7 @@ import { buildSessionEntry } from './session-entry.mjs';
 // Operator and peer roles, provider-turn provenance and source IDs survive.
 export function createFollowThroughConversation({ stores, wait, signal }) {
   const conversations = stores.conversations;
-  const authority = conversationAuthority({ store: conversations, agentId: wait.agentId });
+  const authority = (store = conversations) => conversationAuthority({ store, agentId: wait.agentId });
   const originScope = { agentId: wait.agentId, sessionId: wait.sessionId };
   const executionScope = { agentId: wait.agentId, sessionId: wait.executionSessionId };
   const seen = new Set();
@@ -20,7 +20,7 @@ export function createFollowThroughConversation({ stores, wait, signal }) {
       throw new Error('workflow_follow_through_origin_changed');
     }
   }
-  async function copy(entries, initial = false) {
+  async function copy(entries, initial = false, store = conversations) {
     const fresh = [];
     for (const entry of entries) {
       signal?.throwIfAborted();
@@ -31,7 +31,7 @@ export function createFollowThroughConversation({ stores, wait, signal }) {
         || (initial && (entry.type === 'context_state' || entry.metadata?.compressionSummary));
       if (!retained) continue;
       const { sequence: _sequence, ...original } = entry;
-      await conversations.appendIfAbsent({ ...executionScope, idempotencyKey: `follow-through-context:${entry.id}`,
+      await store.appendIfAbsent({ ...executionScope, idempotencyKey: `follow-through-context:${entry.id}`,
         entry: { ...original, sessionId: wait.executionSessionId, metadata: { ...entry.metadata,
           followThroughContext: { sessionId: wait.sessionId, entryId: entry.id } } } });
       fresh.push(entry);
@@ -39,27 +39,27 @@ export function createFollowThroughConversation({ stores, wait, signal }) {
     return fresh;
   }
   async function initialize() {
-    const snapshot = await authority.sessionSnapshot(wait.sessionId, { signal });
+    const snapshot = await authority().sessionSnapshot(wait.sessionId, { signal });
     assertOrigin(snapshot.metadata);
     await copy(snapshot.entries, true);
-    assertOrigin(await authority.metadata(wait.sessionId, { signal }));
+    assertOrigin(await authority().metadata(wait.sessionId, { signal }));
   }
-  async function updates() {
+  async function updates(store) {
     signal?.throwIfAborted();
-    assertOrigin(await authority.metadata(wait.sessionId, { signal }));
+    assertOrigin(await authority(store).metadata(wait.sessionId, { signal }));
     const fresh = [];
     for (;;) {
-      const page = typeof conversations.page === 'function'
-        ? await conversations.page({ ...originScope, after, limit: 256, signal })
-        : { entries: await conversations.read({ ...originScope, after, limit: 256, signal }) };
+      const page = typeof store.page === 'function'
+        ? await store.page({ ...originScope, after, limit: 256, signal })
+        : { entries: await store.read({ ...originScope, after, limit: 256, signal }) };
       const entries = page.entries || [];
       const previous = after;
       fresh.push(...entries.filter(entry => !seen.has(entry.id)));
       if (entries.at(-1)?.sequence != null) after = entries.at(-1).sequence;
-      if (typeof conversations.page === 'function' ? !page.hasMore : !entries.length) break;
+      if (typeof store.page === 'function' ? !page.hasMore : !entries.length) break;
       if (!entries.length || String(after) === String(previous)) throw new Error('conversation_store_paging_invalid');
     }
-    assertOrigin(await authority.metadata(wait.sessionId, { signal }));
+    assertOrigin(await authority(store).metadata(wait.sessionId, { signal }));
     const context = buildConversationContext({ transcript: fresh, limits: { rawRecentChars: Infinity, priorSummaryChars: Infinity } });
     return { entries: fresh, providerMessages: conversationProviderMessages(context).slice(0, -1) };
   }
@@ -71,15 +71,20 @@ export function createFollowThroughConversation({ stores, wait, signal }) {
         if (identity.agentId !== wait.agentId || identity.sessionId !== wait.executionSessionId || identity.runId !== wait.executionRunId || options.finish) {
           return target.boundary(identity, options);
         }
-        const { entries, providerMessages } = await updates();
-        if (providerMessages.length && options.terminal && options.precedingAssistant) {
-          await conversations.append({ ...executionScope, entry: buildSessionEntry({ sessionId: wait.executionSessionId, role: 'assistant',
-            content: options.precedingAssistant, runId: wait.executionRunId, metadata: { steeringContinuation: true } }) });
-        }
-        await copy(entries);
-        const inputs = await target.boundary(identity, providerMessages.length
-          ? { ...options, terminal: false, precedingAssistant: null } : options);
-        return [...(providerMessages.length ? [{ providerMessages }] : []), ...inputs];
+        if (typeof conversations.withSessionLock !== 'function') throw new Error('conversation_store_session_lock_required');
+        // Source append/reset and terminal acceptance share one commit boundary.
+        // Lock source before execution, matching final delivery's lock order.
+        return conversations.withSessionLock({ ...originScope, signal }, async (locked, transaction) => {
+          const { entries, providerMessages } = await updates(locked);
+          if (providerMessages.length && options.terminal && options.precedingAssistant) {
+            await locked.append({ ...executionScope, entry: buildSessionEntry({ sessionId: wait.executionSessionId, role: 'assistant',
+              content: options.precedingAssistant, runId: wait.executionRunId, metadata: { steeringContinuation: true } }) });
+          }
+          await copy(entries, false, locked);
+          const inputs = await target.boundary(identity, { ...options, ...(transaction ? { transaction } : {}),
+            ...(providerMessages.length ? { terminal: false, precedingAssistant: null } : {}) });
+          return [...(providerMessages.length ? [{ providerMessages }] : []), ...inputs];
+        });
       };
       const value = target[property];
       return typeof value === 'function' ? value.bind(target) : value;

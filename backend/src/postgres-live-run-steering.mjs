@@ -77,9 +77,9 @@ export class PostgresLiveRunSteering {
     const { rows } = await this.pool.query('SELECT * FROM chat_steering_inputs WHERE agent_id=$1 AND session_id=$2 AND run_id=$3 ORDER BY ordinal', ids);
     return rows.map(view);
   }
-  async boundary(args, { terminal = false, finish = false, project = null, precedingAssistant = null } = {}) {
+  async boundary(args, { terminal = false, finish = false, project = null, precedingAssistant = null, transaction = this.pool } = {}) {
     const ids = identity(args);
-    return withPostgresTransaction(this.pool, async client => {
+    return withPostgresTransaction(transaction, async client => {
       const run = await this.lock(client, ids);
       finish ||= run.reset;
       const { rows } = await client.query(`SELECT * FROM chat_steering_inputs WHERE agent_id=$1 AND session_id=$2 AND run_id=$3 AND status='pending' ORDER BY ordinal`, ids);
