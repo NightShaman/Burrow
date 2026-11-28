@@ -21,7 +21,9 @@ export const releaseTargets = Object.freeze({
   burrowBackdoor: { title: 'Burrow Backdoor', projects: [['burrowBackdoor', 'Burrow Backdoor']] },
   burrowTutor: { title: 'Burrow Tutor', projects: [['burrowTutor', 'Burrow Tutor']] },
   burrowTheater: { title: 'Burrow Theater', projects: [['burrowTheater', 'Burrow Theater']] },
-  burrowSwitchboard: { title: 'Burrow Switchboard', projects: [['burrowSwitchboard', 'Burrow Switchboard']] }
+  burrowSwitchboard: { title: 'Burrow Switchboard', projects: [['burrowSwitchboard', 'Burrow Switchboard']] },
+  burrowAuditor: { title: 'Burrow Auditor', publicSummary: 'Run independent investigations and review the original reports in Burrow Archive.' },
+  burrowPlug: { title: 'Burrow Plug-ins', publicSummary: 'Connect apps through a broker and grant individual actions to eligible goblins.' }
 });
 
 function git(root, args) {
@@ -50,6 +52,13 @@ function commits(root, from, to) {
 export function generateReleaseNotes({ target, releaseDate, sources, previousSources = {}, roots }) {
   const definition = releaseTargets[target];
   if (!definition) throw new Error(`unknown release-note target: ${target}`);
+
+  if (definition.publicSummary) {
+    const change = previousSources[target] === sources[target]
+      ? 'The mod source is unchanged in this coordinated release.'
+      : definition.publicSummary;
+    return `# ${definition.title} ${releaseDate}\n\n${change}\n\nInstall or update from Burrow Settings → Mods → Mod sources. Use the corresponding Burrow Public release or a compatible newer release.\n`;
+  }
 
   const sections = [];
   for (const [key, label] of definition.projects) {

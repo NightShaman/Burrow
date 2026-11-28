@@ -111,3 +111,17 @@ test('Burrow notes include only assembled Burrow, backend, and UI changes', () =
 test('rejects unknown release-note targets', () => {
   assert.throws(() => generateReleaseNotes({ target: 'wat', releaseDate: '2026.10.19', sources: {}, roots: {} }), /unknown release-note target/);
 });
+
+test('companion release notes use public copy without private commit subjects', () => {
+  const repo = fixture(['private audit and setup']);
+  try {
+    for (const [target, title] of [['burrowAuditor', 'Burrow Auditor'], ['burrowPlug', 'Burrow Plug-ins']]) {
+      const args = { target, releaseDate: '2026.11.28', sources: { [target]: repo.current }, roots: { [target]: repo.root } };
+      const notes = generateReleaseNotes(args);
+      assert.ok(notes.startsWith(`# ${title} 2026.11.28\n`));
+      assert.match(notes, /Mod sources/);
+      assert.doesNotMatch(notes, /private audit|setup/);
+      assert.match(generateReleaseNotes({ ...args, previousSources: args.sources }), /unchanged/);
+    }
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});

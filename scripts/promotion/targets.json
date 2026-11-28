@@ -82,6 +82,28 @@
         "burrowSwitchboard",
         "burrowBackend"
       ]
+    },
+    "burrowAuditor": {
+      "repository": "Burrow-Auditor",
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrowAuditor",
+        "burrowBackend",
+        "burrowUi"
+      ]
+    },
+    "burrowPlug": {
+      "repository": "Burrow-Plug",
+      "releaseAssets": [
+        "source-snapshot"
+      ],
+      "dependsOn": [
+        "burrowPlug",
+        "burrowBackend",
+        "burrowUi"
+      ]
     }
   }
 }

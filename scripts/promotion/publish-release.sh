@@ -5,7 +5,7 @@ set -eu
 repository=$1; version=$2; notes=$3; shift 3
 repo=${repository##*/}
 if ! gh release view "v$version" --repo "$repository" >/dev/null 2>&1; then
-  gh release create "v$version" --repo "$repository" --title "$repo $version" --notes-file "$notes" "$@"
+  gh release create "v$version" --repo "$repository" --title "${PUBLIC_RELEASE_TITLE:-$repo} $version" --notes-file "$notes" "$@"
 fi
 if [ "$#" -gt 0 ]; then
   asset_check=$(mktemp -d)

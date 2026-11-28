@@ -12,6 +12,8 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
 - `Burrow-Tutor`
 - `Burrow-Theater`
 - `Burrow-Switchboard`
+- `Burrow-Auditor` (Auditor)
+- `Burrow-Plug` (Plug-ins)
 
 ## Release contract
 
@@ -39,9 +41,12 @@ promotion workflow publishes reviewed, allowlisted snapshots to the public
   provenance attestations in an OCI index. The terminal verifier follows the
   digest-bound runtime manifest without mistaking its config ID for that index.
 - Burrow owns only its assembled source snapshot and GHCR image; Burrow releases do not contain Node Goblin assets or adopt Node Goblin's version.
-- GSS, Skills, Backdoor, Tutor, Theater, and Switchboard own their public source snapshots.
-- Complete Backend, UI, Node Goblin, GSS/Core integration, Backdoor/Core integration, installer, assembly, and packaged-image validation runs here against the frozen source set before publication. NightShaman push workflows remain fast development gates.
-- Public GitHub releases use coordinated notes generated from the NightShaman commit ranges since the previous public manifest, with generated assembly/release commits omitted.
+- GSS, Skills, Backdoor, Tutor, Theater, Switchboard, Auditor, and Plug-ins own their public source snapshots.
+- Complete Backend, UI, Node Goblin, GSS/Core integration, Backdoor/Core integration, Auditor/Core integration, Plug-ins/Core integration, installer, assembly, and packaged-image validation runs here against the frozen source set before publication. NightShaman push workflows remain fast development gates.
+- Public GitHub releases use coordinated notes. Auditor and Plug-ins use public
+  summaries keyed to source changes. The existing targets use NightShaman
+  commit ranges since the previous public manifest and omit generated
+  assembly/release commits.
 - Public snapshots use explicit allowlists. Development workflows, audit notes,
   secrets, caches, runtime data, and Git history are not mirrored.
 - Staged trees, manifests and release notes cross the Actions artifact handoff
@@ -60,19 +65,44 @@ complete frozen-source gate without publishing, including when today's immutable
 release already exists. The `public-promotion` environment and
 these Actions secrets are required in the private NightShaman Burrow repository:
 
-- `PUBLIC_PROMOTION_SOURCE_TOKEN`: read access to required NightShaman sources, including Theater and Switchboard.
-- `PUBLIC_PROMOTION_DESTINATION_TOKEN`: write access to the eight public
+- `PUBLIC_PROMOTION_SOURCE_TOKEN`: read access to required NightShaman sources, including Auditor, Plug-ins and Skills.
+- `PUBLIC_PROMOTION_DESTINATION_TOKEN`: write access to the ten public
   repositories, releases, and `ghcr.io/goblinking-burrow/burrow`.
 
-The destination repositories must already exist. In particular,
-`GoblinKing-Burrow/Burrow-Backdoor`, `GoblinKing-Burrow/Burrow-Tutor`, `GoblinKing-Burrow/Burrow-Theater`, and `GoblinKing-Burrow/Burrow-Switchboard` must exist before promotion;
-the publisher intentionally does not create repositories implicitly.
+The publisher requires all ten destination repositories to exist, including
+`GoblinKing-Burrow/Burrow-Auditor` and `GoblinKing-Burrow/Burrow-Plug`.
 
-## Bounded Burrow public-outcome pilot
+## Auditor and Plug-ins prerequisites
 
-The publish job makes **one terminal outcome check**, after the final Burrow
-publication step or after an earlier publication failure when the validated
-artifact was restored successfully. `verify-public-outcome.mjs prepare` runs
+- Both frozen mod revisions need a tracked `LICENSE` and their existing
+  `docs/assets/hero.png` (preserved at its native aspect), and the runtime paths in `companion-snapshots.mjs`.
+  Keep the public file list current when either mod adds or moves a module.
+  Staging supplies the public READMEs and runtime-only package metadata.
+- Auditor uses the generic mod minion bridge, execution-host discovery,
+  owner-scoped completion feeds, caller-bound `mod_wait` and managed skills.
+  The inspected Auditor source declares Core minimum `2026.11.27.3`. The
+  frozen Skills revision must contain `burrow-auditor/SKILL.md`. The Auditor
+  manifest registers it from the Public Skills repository, and promotion
+  publishes Skills before Auditor.
+- Plug-ins needs Core's registry-derived agent identity metadata and the
+  native mod Settings contribution and shared draft guard in the assembled
+  UI. The inspected Plug-ins source declares Core minimum `2026.11.26.2`.
+  Its public legacy Outlook catalog and digest-verified connector are
+  served from the same immutable Plug-ins tag.
+- Both mod Core suites use the pinned Backend and disposable PostgreSQL 17.
+  Auditor uses its lockfile for test dependencies. Plug-ins bundles its
+  validator and currently declares no dependencies. The daily gate runs both
+  build, unit and Core integration suites and validates the staged manifests
+  with the pinned Core parser. Browser and live account checks are separate.
+- Users add the public repository URL in **Settings → Mods → Mod sources**,
+  refresh the source, then install or update and enable the mod.
+
+## Public outcome checks
+
+The publish job checks Burrow once and checks Auditor and Plug-ins once each
+when the restored artifact includes them. Each check runs after the publication
+steps, including when an earlier publication or outcome step failed, provided
+restore succeeded. `verify-public-outcome.mjs prepare` runs
 before any publication. It validates the intended date, original run/manifest,
 frozen plan sources, publish disposition and `tested-image.json`. From the
 checksum-validated `tested-image.tar.gz`, it reads the single Docker-save
@@ -85,6 +115,9 @@ or checksum/config-digest disagreement fail before publication. It records:
 - the Git tree of the restored `staged/Burrow` payload, calculated with a
   disposable Git directory/index and the publisher's `git add -A` / `write-tree`
   semantics (not the development assembly commit SHA);
+- the Git trees of the restored Auditor and Plug-ins payloads using the same
+  semantics, with each intent bound to its public repository and the original
+  release date;
 - the exact archived smoke-tested **config digest** required by the canonical
   verifier and fixed public image repository, not an assumed Docker `.Id`.
   `tested-image.json.imageId` is unchanged: the publisher still compares the
@@ -95,40 +128,36 @@ or checksum/config-digest disagreement fail before publication. It records:
   origin**, even when handled on a later UTC date.
 
 `verify-public-outcome.mjs verify` dynamically imports the assembled canonical
-Backend `backend/src/outcome-verification.mjs`; the promotion adapter does not
-copy the verifier or implement HTTP. The assembly must contain that exact
-canonical module. It independently observes the exact public, non-draft,
-non-prerelease GitHub release and tag's source tree, and the anonymous GHCR date
-tag's single-platform image config identity. Neither a green publishing step,
-`main`, `latest`, nor a manifest digest substituted for an image ID can prove the
-intended outcome. Missing/unusable canonical verifier code also fails closed.
+Backend `backend/src/outcome-verification.mjs`. It independently observes each
+intended repository's exact public, non-draft, non-prerelease GitHub release
+and the date tag's source tree. Burrow also requires the anonymous GHCR date
+tag's single-platform image config identity. Missing or unusable canonical
+verifier code produces an unverified receipt.
 
-The receipt is `public-outcome.json`, uploaded as a **separate** Actions artifact
-named `public-outcome-<date>-<handling-run>-<attempt>` whenever it exists, including
-on publication/check failure, with the existing seven-day retention. Only
-`verified` returns zero; both `mismatch` and `unverified` fail the job. A failed
-publication stays failed even if its terminal outcome happens to verify. This
-closes false-green publication into the existing failure-only webhook loop;
-there is no new notification or successful-agent wakeup.
+Burrow's `public-outcome.json` is uploaded as
+`public-outcome-<date>-<handling-run>-<attempt>`. The two companion receipt files
+are uploaded as `public-companion-outcomes-<date>-<handling-run>-<attempt>`.
+Both artifacts retain available receipts for seven days, including on
+publication or check failure. Only `verified` returns zero. A `mismatch` or
+`unverified` receipt fails the job. Earlier publication failures still fail the
+job if a subsequent check verifies.
 
-Unchanged, deferred and `validate_only` invocations never publish or run this
-check. A restore/identity failure prevents publication and the check because no
-validated frozen intent is available. This pilot checks Burrow's release/source
-and image only, not every coordinated component's final outcome. It adds no
-polling, retries, cron, repair or deployment action; the existing daily schedule,
-date immutability and original-artifact resume behavior remain unchanged.
+Unchanged, deferred and `validate_only` invocations skip publication and these
+checks. Restore or identity failure prevents publication and outcome checks.
+Resuming an original eight-target artifact checks Burrow's release, source and
+image under the artifact's original date.
 
 ## Local verification
 
 ```sh
 node --test scripts/promotion/verify-public-outcome.test.mjs
 node --test scripts/promotion/*.test.mjs
-node scripts/promotion/validate-public-readiness.mjs ..
+node scripts/promotion/validate-public-readiness.mjs staged sources/Burrow-Backend
 ```
 
-The outcome adapter tests use injected inert verification and disposable local
-Git and synthetic Docker archive fixtures; workflow tests assert string contracts. They do not dispatch
-Actions, publish/pull an image, or validate a live public release.
+The outcome adapter tests use disposable Git, synthetic Docker archive fixtures,
+and mock HTTP responses through the canonical verifier. Workflow tests check
+step order and failure conditions. Live publication is outside these tests.
 
 `targets.json` describes target repositories, provenance source subsets and asset
 metadata. `plan.mjs` compares the complete frozen source set once: any change
@@ -144,8 +173,9 @@ existing release tag.
 `PUBLIC_RELEASE.json` records the originating Actions run ID. A new invocation
 checks the terminal, non-draft Burrow GitHub Release before deciding sources are
 unchanged. If that release is missing, it downloads **the original validated tar
-artifact** from that run and resumes the same date; it does not rebuild from
-moving Development pins. Missing/expired artifacts fail closed (currently retained
+artifact** from that run and resumes the same date with the original frozen sources and target
+set. An artifact from before Auditor and Plug-ins were introduced finishes its
+original eight targets. A fresh promotion freezes both added sources. Missing/expired artifacts fail closed (currently retained
 seven days). Recover the original run/artifact rather than minting another version.
 Legacy incomplete manifests without an origin ID also fail closed and require
 operator recovery of their original frozen artifact. A validate-only invocation

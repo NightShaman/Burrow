@@ -38,38 +38,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Freeze source revisions
-        env:
-          GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
-        run: |
-          set -eu
-          burrow=$(git -C orchestrator rev-parse HEAD)
-          backend=$(awk '$1=="Burrow-Backend" {print $2}' orchestrator/SOURCE_VERSIONS)
-          ui=$(awk '$1=="Burrow-UI" {print $2}' orchestrator/SOURCE_VERSIONS)
-          node_goblin=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)
-          gss=$(gh api repos/NightShaman/Goblin-Secret-Store/commits/main --jq .sha)
-          skills=$(gh api repos/NightShaman/Burrow-Skills/commits/main --jq .sha)
-          backdoor=$(gh api repos/NightShaman/Burrow-Backdoor/commits/main --jq .sha)
-          tutor=$(gh api repos/NightShaman/Burrow-Tutor/commits/main --jq .sha)
-          theater=$(gh api repos/NightShaman/Burrow-Theater/commits/main --jq .sha)
-          switchboard=$(gh api repos/NightShaman/Burrow-Switchboard/commits/main --jq .sha)
-          for item in \
-            "burrow $burrow NightShaman/Burrow" \
-            "burrowBackend $backend NightShaman/Burrow-Backend" \
-            "burrowUi $ui NightShaman/Burrow-UI" \
-            "nodeGoblin $node_goblin NightShaman/Node-Goblin" \
-            "goblinSecretStore $gss NightShaman/Goblin-Secret-Store" \
-            "burrowSkills $skills NightShaman/Burrow-Skills" \
-            "burrowBackdoor $backdoor NightShaman/Burrow-Backdoor" \
-            "burrowTutor $tutor NightShaman/Burrow-Tutor" \
-            "burrowTheater $theater NightShaman/Burrow-Theater" \
-            "burrowSwitchboard $switchboard NightShaman/Burrow-Switchboard"; do
-            set -- $item
-            resolved=$(gh api "repos/$3/commits/$2" --jq .sha)
-            [ "$resolved" = "$2" ] || { echo "source resolution changed for $1" >&2; exit 1; }
-          done
-          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s","burrowBackdoor":"%s","burrowTutor":"%s","burrowTheater":"%s","burrowSwitchboard":"%s"}\n' \
-            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" "$tutor" "$theater" "$switchboard" > sources.json
       - name: Read last public manifest
         run: |
           set -eu
@@ -95,9 +63,50 @@ jobs:
             esac
           fi
           printf 'PROMOTION_TERMINAL_COMPLETE=%s\n' "$complete" >> "$GITHUB_ENV"
+      - name: Freeze source revisions
+        if: env.PROMOTION_TERMINAL_COMPLETE != 'false'
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+        run: |
+          set -eu
+          burrow=$(git -C orchestrator rev-parse HEAD)
+          backend=$(awk '$1=="Burrow-Backend" {print $2}' orchestrator/SOURCE_VERSIONS)
+          ui=$(awk '$1=="Burrow-UI" {print $2}' orchestrator/SOURCE_VERSIONS)
+          node_goblin=$(gh api repos/NightShaman/Node-Goblin/commits/main --jq .sha)
+          gss=$(gh api repos/NightShaman/Goblin-Secret-Store/commits/main --jq .sha)
+          skills=$(gh api repos/NightShaman/Burrow-Skills/commits/main --jq .sha)
+          backdoor=$(gh api repos/NightShaman/Burrow-Backdoor/commits/main --jq .sha)
+          tutor=$(gh api repos/NightShaman/Burrow-Tutor/commits/main --jq .sha)
+          theater=$(gh api repos/NightShaman/Burrow-Theater/commits/main --jq .sha)
+          switchboard=$(gh api repos/NightShaman/Burrow-Switchboard/commits/main --jq .sha)
+          auditor=$(gh api repos/NightShaman/Burrow-Auditor/commits/main --jq .sha)
+          plug=$(gh api repos/NightShaman/Burrow-Plug/commits/main --jq .sha)
+          for item in \
+            "burrow $burrow NightShaman/Burrow" \
+            "burrowBackend $backend NightShaman/Burrow-Backend" \
+            "burrowUi $ui NightShaman/Burrow-UI" \
+            "nodeGoblin $node_goblin NightShaman/Node-Goblin" \
+            "goblinSecretStore $gss NightShaman/Goblin-Secret-Store" \
+            "burrowSkills $skills NightShaman/Burrow-Skills" \
+            "burrowBackdoor $backdoor NightShaman/Burrow-Backdoor" \
+            "burrowTutor $tutor NightShaman/Burrow-Tutor" \
+            "burrowTheater $theater NightShaman/Burrow-Theater" \
+            "burrowSwitchboard $switchboard NightShaman/Burrow-Switchboard" \
+            "burrowAuditor $auditor NightShaman/Burrow-Auditor" \
+            "burrowPlug $plug NightShaman/Burrow-Plug"; do
+            set -- $item
+            resolved=$(gh api "repos/$3/commits/$2" --jq .sha)
+            [ "$resolved" = "$2" ] || { echo "source resolution changed for $1" >&2; exit 1; }
+          done
+          printf '{"burrow":"%s","burrowBackend":"%s","burrowUi":"%s","nodeGoblin":"%s","goblinSecretStore":"%s","burrowSkills":"%s","burrowBackdoor":"%s","burrowTutor":"%s","burrowTheater":"%s","burrowSwitchboard":"%s","burrowAuditor":"%s","burrowPlug":"%s"}\n' \
+            "$burrow" "$backend" "$ui" "$node_goblin" "$gss" "$skills" "$backdoor" "$tutor" "$theater" "$switchboard" "$auditor" "$plug" > sources.json
       - name: Build immutable promotion plan
         id: plan
         run: |
+          set -eu
+          if [ "$PROMOTION_TERMINAL_COMPLETE" = false ]; then
+            node -p "JSON.stringify(require('./previous.json').sources)" > sources.json
+          fi
           node orchestrator/scripts/promotion/plan.mjs orchestrator/scripts/promotion/targets.json sources.json previous.json > plan.json
           cat plan.json
           resume_run=$(node -p "require('./plan.json').resumeRunId || ''")
@@ -117,7 +126,7 @@ jobs:
         if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         id: frozen
         run: |
-          for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard; do
+          for key in burrow burrowBackend burrowUi nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard burrowAuditor burrowPlug; do
             printf '%s=%s\n' "$key" "$(node -p "require('./plan.json').sources.$key")" >> "$GITHUB_OUTPUT"
           done
       - uses: actions/checkout@v4
@@ -200,6 +209,24 @@ jobs:
           token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
           path: sources/Burrow-Switchboard
           fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
+        with:
+          repository: NightShaman/Burrow-Auditor
+          ref: ${{ steps.frozen.outputs.burrowAuditor }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          persist-credentials: false
+          path: sources/Burrow-Auditor
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
+        with:
+          repository: NightShaman/Burrow-Plug
+          ref: ${{ steps.frozen.outputs.burrowPlug }}
+          token: ${{ secrets.PUBLIC_PROMOTION_SOURCE_TOKEN }}
+          persist-credentials: false
+          path: sources/Burrow-Plug
+          fetch-depth: 0
       - name: Install PostgreSQL 17 and pgvector for critical release validation
         if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         run: |
@@ -229,21 +256,50 @@ jobs:
           (cd sources/Burrow-Tutor && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" timeout --kill-after=15s 10m npm test)
           (cd sources/Burrow-Theater && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run build && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" timeout --kill-after=15s 10m npm test)
           (cd sources/Burrow-Switchboard && npm run build && node --test test/server.test.mjs test/discord.test.mjs test/room-history.test.mjs test/ui.test.mjs && BURROW_CORE_ROOT="$GITHUB_WORKSPACE/sources/Burrow-Backend" npm run test:core)
-          find sources/Burrow-Skills -name SKILL.md -type f -size +0c | grep -q .
+      - name: Validate frozen Auditor and Plug-ins against pinned Core
+        if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
+        timeout-minutes: 25
+        env:
+          BURROW_CORE_ROOT: ${{ github.workspace }}/sources/Burrow-Backend
+          PG_BINDIR: /usr/lib/postgresql/17/bin
+          PLAYWRIGHT_MODULE: ''
+          UI_EVIDENCE: ''
+        run: |
+          set -eu
+          test -s sources/Burrow-Skills/burrow-auditor/SKILL.md
+          (
+            cd sources/Burrow-Auditor
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run build
+            npm test
+            timeout --kill-after=15s 10m npm run test:core
+          )
+          (
+            cd sources/Burrow-Plug
+            # Plug-ins bundles its validator and currently has no dependencies or lockfile.
+            if [ -f package-lock.json ]; then
+              npm ci --ignore-scripts --no-audit --no-fund
+            else
+              node -e 'const p=require("./package.json"); if ([p.dependencies, p.devDependencies, p.optionalDependencies, p.peerDependencies].some(d => Object.keys(d || {}).length)) throw Error("Plug-ins dependency lockfile required")'
+            fi
+            npm run build
+            npm test
+            timeout --kill-after=15s 10m npm run test:core
+          )
       - name: Stage allowlisted public trees and release notes
         if: steps.plan.outputs.validation_required == 'true' && steps.plan.outputs.resume != 'true'
         env:
           RELEASE_DATE: ${{ steps.plan.outputs.release_date }}
         run: |
           cat > roots.json <<JSON
-          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard"}
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard","burrowAuditor":"$GITHUB_WORKSPACE/sources/Burrow-Auditor","burrowPlug":"$GITHUB_WORKSPACE/sources/Burrow-Plug"}
           JSON
           cat > note-roots.json <<JSON
-          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard"}
+          {"burrow":"$GITHUB_WORKSPACE/sources/Burrow","burrowBackend":"$GITHUB_WORKSPACE/sources/Burrow-Backend","burrowUi":"$GITHUB_WORKSPACE/sources/Burrow-UI","nodeGoblin":"$GITHUB_WORKSPACE/sources/Node-Goblin","goblinSecretStore":"$GITHUB_WORKSPACE/sources/Goblin-Secret-Store","burrowSkills":"$GITHUB_WORKSPACE/sources/Burrow-Skills","burrowBackdoor":"$GITHUB_WORKSPACE/sources/Burrow-Backdoor","burrowTutor":"$GITHUB_WORKSPACE/sources/Burrow-Tutor","burrowTheater":"$GITHUB_WORKSPACE/sources/Burrow-Theater","burrowSwitchboard":"$GITHUB_WORKSPACE/sources/Burrow-Switchboard","burrowAuditor":"$GITHUB_WORKSPACE/sources/Burrow-Auditor","burrowPlug":"$GITHUB_WORKSPACE/sources/Burrow-Plug"}
           JSON
           node orchestrator/scripts/promotion/stage-snapshots.mjs roots.json staged "$RELEASE_DATE" sources.json
           mkdir -p release-notes
-          for target in burrow nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard; do
+          for target in burrow nodeGoblin goblinSecretStore burrowSkills burrowBackdoor burrowTutor burrowTheater burrowSwitchboard burrowAuditor burrowPlug; do
             node orchestrator/scripts/promotion/release-notes.mjs "$target" "$RELEASE_DATE" sources.json previous.json note-roots.json "release-notes/$target.md"
             cat "release-notes/$target.md"
           done
@@ -252,7 +308,7 @@ jobs:
         run: |
           set -eu
           node --test orchestrator/scripts/promotion/*.test.mjs
-          node orchestrator/scripts/promotion/validate-public-readiness.mjs staged
+          node orchestrator/scripts/promotion/validate-public-readiness.mjs staged sources/Burrow-Backend
           (cd staged/Burrow && node --test scripts/install/*.test.mjs)
           sh -n staged/Burrow/install.sh staged/Node-Goblin/install.sh
           node -e "for (const name of ['Burrow-Backdoor', 'Burrow-Tutor', 'Burrow-Theater', 'Burrow-Switchboard']) { const root='staged/'+name; const version=require('./'+root+'/package.json').version; if (version !== process.env.VERSION || require('./'+root+'/burrow.mod.json').version !== version) throw Error(name+' version mismatch'); }"
@@ -275,7 +331,7 @@ jobs:
           docker save burrow-public-candidate | gzip -1 > tested-image.tar.gz
           sha256sum tested-image.tar.gz > tested-image.tar.gz.sha256
           test -s tested-image.tar.gz
-          for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor Burrow-Tutor Burrow-Theater Burrow-Switchboard; do
+          for target in Burrow Node-Goblin Goblin-Secret-Store Burrow-Skills Burrow-Backdoor Burrow-Tutor Burrow-Theater Burrow-Switchboard Burrow-Auditor Burrow-Plug; do
             test ! -d "staged/$target/.git"
             ! find "staged/$target" -type f \( -name '*.env' -o -name '*.pem' -o -name '*.key' \) -print -quit | grep -q .
           done
@@ -357,6 +413,10 @@ jobs:
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Tutor staged/Burrow-Tutor "$VERSION" "Release Burrow Tutor $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Theater staged/Burrow-Theater "$VERSION" "Release Burrow Theater $VERSION"
           orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Switchboard staged/Burrow-Switchboard "$VERSION" "Release Burrow Switchboard $VERSION"
+          if [ "${{ steps.restore.outputs.publish_auditor_and_plug }}" = true ]; then
+            orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Auditor staged/Burrow-Auditor "$VERSION" "Release Burrow Auditor $VERSION"
+            orchestrator/scripts/promotion/publish-snapshot.sh Burrow-Plug staged/Burrow-Plug "$VERSION" "Release Burrow Plug-ins $VERSION"
+          fi
       - name: Publish component releases with coordinated notes
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_PROMOTION_DESTINATION_TOKEN }}
@@ -372,6 +432,10 @@ jobs:
           orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow-Tutor" "$VERSION" release-notes/burrowTutor.md
           orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow-Theater" "$VERSION" release-notes/burrowTheater.md
           orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow-Switchboard" "$VERSION" release-notes/burrowSwitchboard.md
+          if [ "${{ steps.restore.outputs.publish_auditor_and_plug }}" = true ]; then
+            PUBLIC_RELEASE_TITLE="Burrow Auditor" orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow-Auditor" "$VERSION" release-notes/burrowAuditor.md
+            PUBLIC_RELEASE_TITLE="Burrow Plug-ins" orchestrator/scripts/promotion/publish-release.sh "$PUBLIC_OWNER/Burrow-Plug" "$VERSION" release-notes/burrowPlug.md
+          fi
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -419,11 +483,33 @@ jobs:
           PROMOTION_PUBLISHABLE: ${{ needs.stage.outputs.publishable }}
           PROMOTION_VALIDATE_ONLY: ${{ inputs.validate_only == true }}
         run: node orchestrator/scripts/promotion/verify-public-outcome.mjs verify public-outcome-intent.json public-outcome.json
+      - name: Check exact public Auditor outcome once
+        if: ${{ always() && needs.stage.outputs.publishable == 'true' && steps.restore.outcome == 'success' && steps.restore.outputs.publish_auditor_and_plug == 'true' }}
+        env:
+          PROMOTION_PUBLISHABLE: ${{ needs.stage.outputs.publishable }}
+          PROMOTION_VALIDATE_ONLY: ${{ inputs.validate_only == true }}
+        run: node orchestrator/scripts/promotion/verify-public-outcome.mjs verify public-outcome-intent-burrowAuditor.json public-outcome-burrowAuditor.json burrowAuditor
+      - name: Check exact public Plug-ins outcome once
+        if: ${{ always() && needs.stage.outputs.publishable == 'true' && steps.restore.outcome == 'success' && steps.restore.outputs.publish_auditor_and_plug == 'true' }}
+        env:
+          PROMOTION_PUBLISHABLE: ${{ needs.stage.outputs.publishable }}
+          PROMOTION_VALIDATE_ONLY: ${{ inputs.validate_only == true }}
+        run: node orchestrator/scripts/promotion/verify-public-outcome.mjs verify public-outcome-intent-burrowPlug.json public-outcome-burrowPlug.json burrowPlug
       - name: Upload public outcome receipt even on publication or check failure
         if: ${{ always() && hashFiles('public-outcome.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: public-outcome-${{ needs.stage.outputs.release_date }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: public-outcome.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload companion outcome receipts even on publication or check failure
+        if: ${{ always() && hashFiles('public-outcome-burrowAuditor.json', 'public-outcome-burrowPlug.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-companion-outcomes-${{ needs.stage.outputs.release_date }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            public-outcome-burrowAuditor.json
+            public-outcome-burrowPlug.json
           if-no-files-found: error
           retention-days: 7

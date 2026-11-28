@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { COMPANION_TARGETS, hasCompanionSources } from './companion-targets.mjs';
+
 const SHA = /^[0-9a-f]{40}$/;
 
 export function utcReleaseDate(now = new Date()) {
@@ -33,7 +35,10 @@ export function createPromotionPlan({ config, sources, previous = null, terminal
     frozenSources = priorSources;
   }
   const action = resume ? 'resume' : !changed ? 'skip-unchanged' : publishedToday ? 'defer-next-utc-day' : 'stage';
-  const targets = Object.entries(config.targets).map(([id, target]) => {
+  // A pending release from before these targets were introduced retains its original scope.
+  const legacyResume = resume && !hasCompanionSources(frozenSources);
+  const targetEntries = Object.entries(config.targets).filter(([id]) => !legacyResume || !Object.hasOwn(COMPANION_TARGETS, id));
+  const targets = targetEntries.map(([id, target]) => {
     const selected = Object.fromEntries((target.dependsOn || []).map((name) => {
       if (!frozenSources[name]) throw new Error(`promotion_source_missing:${id}:${name}`);
       return [name, frozenSources[name]];

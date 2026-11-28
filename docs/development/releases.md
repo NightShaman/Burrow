@@ -24,6 +24,15 @@ Development assembly builds use a date with an optional same-day counter (for ex
 
 Development assembly now also publishes a versioned source archive of the exact assembled commit, its `SOURCE_VERSIONS`, and `SHA256SUMS`. Verify the downloaded archive against those checksums and its recorded source revisions. This development release is independent of public daily promotion; artifact publication does not update a running installation.
 
+## Installing Auditor and Plug-ins
+
+Use the corresponding Burrow Public release or a compatible newer release.
+Open **Settings → Mods → Mod sources** and add the repository URL for the
+mod you want. Refresh the source, install or update the mod, then enable it.
+
+- **Auditor** uses `https://github.com/GoblinKing-Burrow/Burrow-Auditor.git`. Core provides the official Auditor skill from Burrow Skills when the mod is loaded.
+- **Plug-ins** uses `https://github.com/GoblinKing-Burrow/Burrow-Plug.git`. Configure your broker and goblin action grants in **Settings → Plug-ins**.
+
 ## Executable permissions in promoted source
 
 Current promotion packages the validated source trees inside a tar archive before the Actions artifact handoff. Uploading loose files at that boundary loses executable modes. After extraction, promotion verifies the recorded executable-file manifest and checks both Burrow and Node Goblin installers before publishing snapshots, assets or images.
@@ -36,4 +45,4 @@ Checked **7 November 2026**: a change in the frozen source set now triggers one 
 
 The public Burrow image is smoke-tested, archived with its image ID and checksum, restored for publication and pushed without rebuilding. The tested local image ID and remote tag manifest digests are different identifiers; verify the recorded provenance rather than equating them. Publication remains separate from updating an installed instance.
 
-The current development promotion pilot performs one terminal check of Burrow’s public release and tag tree against the frozen staging tree and compares the dated public GHCR image config ID with the originally smoke-tested image. A mismatch or unverifiable result fails the check. When generated, `public-outcome.json` is a separate `public-outcome-<date>-<handling-run>-<attempt>` Actions artifact retained for seven days. It is not the staging tarball or an Archive Proof record. The November 24 release used the earlier workflow and does not demonstrate this receipt. The pilot checks Burrow’s source release and image, not standalone mod Pages deployments or every coordinated target.
+For each promotion, the publish job checks Burrow’s exact date-tagged release and source tree against the restored artifact, and compares the dated public GHCR image config ID with the smoke-tested image. When the artifact includes Auditor and Plug-ins, their exact releases and source trees are checked independently. A mismatch or unverifiable result fails the job. The Actions artifacts `public-outcome-<date>-<handling-run>-<attempt>` and `public-companion-outcomes-<date>-<handling-run>-<attempt>` retain available receipts for seven days, including on publication failure.

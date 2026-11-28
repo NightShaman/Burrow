@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { COMPANION_TARGETS } from './companion-targets.mjs';
+import { COMPANION_SNAPSHOTS, exportCompanionFiles, stampCompanionSnapshot } from './companion-snapshots.mjs';
+
 export const PUBLIC_SKILL_IDS = ['burrow-runtime', 'burrow-backdoor', 'goblin-secret-store', 'node-goblin-operations', 'burrow-menagerie', 'burrow-auditor'];
 
 export const TARGETS = {
@@ -19,7 +22,7 @@ export const TARGETS = {
     excludes: []
   },
   burrowSkills: {
-    paths: ['LICENSE', 'README.md', 'docs', ...PUBLIC_SKILL_IDS],
+    paths: ['LICENSE', 'README.md', 'docs', ...PUBLIC_SKILL_IDS.map(id => id === 'burrow-auditor' ? `${id}/SKILL.md` : id)],
     excludes: []
   },
   burrowBackdoor: {
@@ -37,7 +40,8 @@ export const TARGETS = {
   burrowSwitchboard: {
     paths: ['README.md', 'LICENSE', 'burrow.mod.json', 'docs', 'package.json', 'server', 'test', 'ui'],
     excludes: []
-  }
+  },
+  ...COMPANION_SNAPSHOTS
 };
 
 
@@ -64,16 +68,16 @@ export function validateInputs({ releaseDate, sources }) {
   for (const [name, sha] of Object.entries(sources || {})) {
     if (!SHA.test(String(sha || ''))) throw new Error(`promotion_source_sha_invalid:${name}`);
   }
-  for (const required of ['burrow', 'burrowBackend', 'burrowUi', 'nodeGoblin', 'goblinSecretStore', 'burrowSkills', 'burrowBackdoor', 'burrowTutor', 'burrowTheater', 'burrowSwitchboard']) {
+  for (const required of [...Object.keys(TARGETS), 'burrowBackend', 'burrowUi']) {
     if (!sources?.[required]) throw new Error(`promotion_source_missing:${required}`);
   }
 }
 
-function archiveTracked(root, output, spec) {
+function archiveTracked(root, output, spec, revision) {
   fs.rmSync(output, { recursive: true, force: true });
   fs.mkdirSync(output, { recursive: true });
   const archive = path.join(output, '.snapshot.tar');
-  execFileSync('git', ['archive', '--format=tar', `--output=${archive}`, 'HEAD', '--', ...spec.paths], { cwd: root, stdio: 'inherit' });
+  execFileSync('git', ['archive', '--format=tar', `--output=${archive}`, revision, '--', ...spec.paths], { cwd: root, stdio: 'inherit' });
   execFileSync('tar', ['-xf', archive, '-C', output], { stdio: 'inherit' });
   fs.rmSync(archive);
   for (const relative of spec.excludes) fs.rmSync(path.join(output, relative), { recursive: true, force: true });
@@ -162,11 +166,16 @@ export function stageSnapshots({ roots, outputRoot, releaseDate, sources }) {
   for (const [id, spec] of Object.entries(TARGETS)) {
     const root = path.resolve(roots[id]);
     const actual = run('git', ['rev-parse', 'HEAD'], { cwd: root });
-    const sourceKey = id === 'burrow' ? 'burrow' : id;
-    if (actual !== sources[sourceKey]) throw new Error(`promotion_checkout_mismatch:${id}`);
-    const directory = { burrow: 'Burrow', nodeGoblin: 'Node-Goblin', goblinSecretStore: 'Goblin-Secret-Store', burrowSkills: 'Burrow-Skills', burrowBackdoor: 'Burrow-Backdoor', burrowTutor: 'Burrow-Tutor', burrowTheater: 'Burrow-Theater', burrowSwitchboard: 'Burrow-Switchboard' }[id];
+    if (actual !== sources[id]) throw new Error(`promotion_checkout_mismatch:${id}`);
+    const directory = COMPANION_TARGETS[id]?.repository || { burrow: 'Burrow', nodeGoblin: 'Node-Goblin', goblinSecretStore: 'Goblin-Secret-Store', burrowSkills: 'Burrow-Skills', burrowBackdoor: 'Burrow-Backdoor', burrowTutor: 'Burrow-Tutor', burrowTheater: 'Burrow-Theater', burrowSwitchboard: 'Burrow-Switchboard' }[id];
     const output = path.resolve(outputRoot, directory);
-    archiveTracked(root, output, spec);
+    if (Object.hasOwn(COMPANION_TARGETS, id)) {
+      fs.rmSync(output, { recursive: true, force: true });
+      exportCompanionFiles(root, output, actual, spec.paths);
+      stampCompanionSnapshot(output, id, releaseDate, sources);
+    } else {
+      archiveTracked(root, output, spec, actual);
+    }
     staged[id] = output;
   }
   stampBurrow(staged.burrow, releaseDate, sources);

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { COMPANION_TARGETS, restoredCompanions } from './companion-targets.mjs';
 
 const REPOSITORY = 'GoblinKing-Burrow/Burrow';
 const IMAGE_REPOSITORY = 'ghcr.io/goblinking-burrow/burrow';
@@ -96,7 +97,7 @@ export function testedImageConfigId(artifactRoot) {
   } catch { fail('promotion_outcome_tested_image_archive_invalid'); }
 }
 
-export function preparePublicOutcomeIntent({
+export function preparePublicOutcomeIntents({
   artifactRoot = '.', releaseDate, originRunId, handlingRepository,
   handlingRunId, handlingRunAttempt, serverUrl = 'https://github.com',
   publishable, validateOnly,
@@ -128,7 +129,13 @@ export function preparePublicOutcomeIntent({
   }
   if (image.schemaVersion !== 1 || !fullMatch(IMAGE_ID, image.imageId)) fail('promotion_outcome_tested_image_invalid');
   const originRun = `${serverUrl}/${handlingRepository}/actions/runs/${originRunId}`;
-  return {
+  const sourceRefs = [
+    originRun,
+    // This names the original artifact, not a made-up downloadable GitHub URL.
+    `actions-artifact:${handlingRepository}/${originRunId}/public-promotion-${releaseDate}/public-promotion.tar`,
+    `${serverUrl}/${handlingRepository}/actions/runs/${handlingRunId}/attempts/${handlingRunAttempt}`,
+  ];
+  const burrow = {
     repository: REPOSITORY,
     version: releaseDate,
     expectedArtifact: {
@@ -136,23 +143,45 @@ export function preparePublicOutcomeIntent({
       imageRepository: IMAGE_REPOSITORY,
       imageId: testedImageConfigId(root),
     },
-    sourceRefs: [
-      originRun,
-      // This names the original artifact, not a made-up downloadable GitHub URL.
-      `actions-artifact:${handlingRepository}/${originRunId}/public-promotion-${releaseDate}/public-promotion.tar`,
-      `${serverUrl}/${handlingRepository}/actions/runs/${handlingRunId}/attempts/${handlingRunAttempt}`,
-    ],
+    sourceRefs,
   };
+  const intents = { burrow };
+  if (restoredCompanions(plan)) {
+    for (const [key, { repository }] of Object.entries(COMPANION_TARGETS)) {
+      const payload = path.join(root, 'staged', repository);
+      if (!isDeepStrictEqual(readJson(path.join(payload, 'PUBLIC_RELEASE.json')), manifest)) {
+        fail('promotion_outcome_companion_artifact_mismatch');
+      }
+      if (!fs.readFileSync(path.join(root, 'release-notes', `${key}.md`), 'utf8').trim()) {
+        fail('promotion_outcome_companion_notes_missing');
+      }
+      intents[key] = {
+        repository: `GoblinKing-Burrow/${repository}`,
+        version: releaseDate,
+        expectedArtifact: { sourceTreeSha: stagedSourceTree(payload) },
+        sourceRefs,
+      };
+    }
+  }
+  return intents;
 }
 
-function assertPreparedIntent(intent) {
-  if (!record(intent) || intent.repository !== REPOSITORY || !calendarDate(intent.version) ||
+export function preparePublicOutcomeIntent(options) {
+  return preparePublicOutcomeIntents(options).burrow;
+}
+
+function assertPreparedIntent(intent, target) {
+  const isBurrow = target === 'burrow';
+  const companion = Object.hasOwn(COMPANION_TARGETS, target) ? COMPANION_TARGETS[target] : null;
+  const repository = isBurrow ? REPOSITORY : companion && `GoblinKing-Burrow/${companion.repository}`;
+  const artifactKeys = isBurrow ? ['imageId', 'imageRepository', 'sourceTreeSha'] : ['sourceTreeSha'];
+  if (!repository || !record(intent) || intent.repository !== repository || !calendarDate(intent.version) ||
       !record(intent.expectedArtifact) || !fullMatch(TREE, intent.expectedArtifact.sourceTreeSha) ||
-      intent.expectedArtifact.imageRepository !== IMAGE_REPOSITORY || !fullMatch(IMAGE_ID, intent.expectedArtifact.imageId) ||
+      (isBurrow && (intent.expectedArtifact.imageRepository !== IMAGE_REPOSITORY || !fullMatch(IMAGE_ID, intent.expectedArtifact.imageId))) ||
       !Array.isArray(intent.sourceRefs) || intent.sourceRefs.length !== 3 ||
       !intent.sourceRefs.every(ref => typeof ref === 'string' && ref.length > 0 && !/[\u0000-\u001f\u007f]/.test(ref)) ||
       !isDeepStrictEqual(Object.keys(intent).sort(), ['expectedArtifact', 'repository', 'sourceRefs', 'version']) ||
-      !isDeepStrictEqual(Object.keys(intent.expectedArtifact).sort(), ['imageId', 'imageRepository', 'sourceTreeSha'])) {
+      !isDeepStrictEqual(Object.keys(intent.expectedArtifact).sort(), artifactKeys)) {
     fail('promotion_outcome_prepared_intent_invalid');
   }
 }
@@ -163,12 +192,14 @@ function safeFailureCode(error) {
 }
 
 function unverifiedReceipt(intent, clock, reasonCode, detail = '') {
+  const artifact = { sourceTreeSha: null };
+  if (intent.expectedArtifact.imageRepository) {
+    Object.assign(artifact, { imageRepository: intent.expectedArtifact.imageRepository, imageId: null, manifestDigest: null });
+  }
   return {
     schemaVersion: 1, kind: 'outcome-check', verifier: 'github_public_release', status: 'unverified',
     expected: { repository: intent.repository, version: intent.version, artifact: intent.expectedArtifact },
-    observed: { repository: intent.repository, version: null, artifact: {
-      sourceTreeSha: null, imageRepository: intent.expectedArtifact.imageRepository, imageId: null, manifestDigest: null,
-    } },
+    observed: { repository: intent.repository, version: null, artifact },
     checkedAt: clock().toISOString(), reasonCode,
     reason: `The canonical public outcome verifier did not return a receipt bound to the frozen promotion intent. Public outcome remains unverified.${detail ? ` Reason: ${detail}.` : ''}`,
     evidenceSources: [], intentSource: { kind: 'caller_supplied', sourceRefs: intent.sourceRefs },
@@ -187,14 +218,16 @@ function receiptMatchesIntent(result, intent) {
   const observed = check.observed;
   return observed?.repository === intent.repository && observed.version === intent.version &&
     observed.artifact?.sourceTreeSha === intent.expectedArtifact.sourceTreeSha &&
-    observed.artifact?.imageRepository === intent.expectedArtifact.imageRepository &&
-    observed.artifact?.imageId === intent.expectedArtifact.imageId && fullMatch(IMAGE_ID, observed.artifact?.manifestDigest);
+    (intent.expectedArtifact.imageRepository
+      ? observed.artifact.imageRepository === intent.expectedArtifact.imageRepository &&
+        observed.artifact.imageId === intent.expectedArtifact.imageId && fullMatch(IMAGE_ID, observed.artifact.manifestDigest)
+      : isDeepStrictEqual(observed.artifact, intent.expectedArtifact));
 }
 
 /** Exactly one verifier invocation. No producer/job status is accepted as proof. */
-export async function verifyPreparedPublicOutcome({ intent, outputFile = 'public-outcome.json', publishable, validateOnly }, { verifyOutcome, clock = () => new Date() } = {}) {
+export async function verifyPreparedPublicOutcome({ intent, target = 'burrow', outputFile = 'public-outcome.json', publishable, validateOnly }, { verifyOutcome, clock = () => new Date() } = {}) {
   assertPublishDisposition({ publishable, validateOnly });
-  assertPreparedIntent(intent);
+  assertPreparedIntent(intent, target);
   // Keep the expected identity independent even if an injected adapter mutates
   // its argument. Production imports the canonical module only in the CLI below.
   const frozenIntent = structuredClone(intent);
@@ -211,23 +244,29 @@ export async function verifyPreparedPublicOutcome({ intent, outputFile = 'public
 }
 
 async function main() {
-  const [command, intentFile = 'public-outcome-intent.json', outputFile = 'public-outcome.json', ...extra] = process.argv.slice(2);
-  if (!['prepare', 'verify'].includes(command) || extra.length) fail('usage: node verify-public-outcome.mjs prepare|verify [INTENT_JSON] [OUTCOME_JSON]');
+  const [command, intentFile = 'public-outcome-intent.json', outputFile = 'public-outcome.json', target = 'burrow', ...extra] = process.argv.slice(2);
+  if (!['prepare', 'verify'].includes(command) || extra.length) fail('usage: node verify-public-outcome.mjs prepare|verify [INTENT_JSON] [OUTCOME_JSON] [TARGET]');
   const disposition = {
     publishable: process.env.PROMOTION_PUBLISHABLE === 'true',
     validateOnly: process.env.PROMOTION_VALIDATE_ONLY === 'false' ? false : true,
   };
   assertPublishDisposition(disposition);
   if (command === 'prepare') {
-    const intent = preparePublicOutcomeIntent({
+    const intents = preparePublicOutcomeIntents({
       ...disposition, releaseDate: process.env.EXPECTED_DATE, originRunId: process.env.EXPECTED_RUN,
       handlingRepository: process.env.GITHUB_REPOSITORY, handlingRunId: process.env.GITHUB_RUN_ID,
       handlingRunAttempt: process.env.GITHUB_RUN_ATTEMPT, serverUrl: process.env.GITHUB_SERVER_URL,
     });
-    writeJson(intentFile, intent);
+    writeJson(intentFile, intents.burrow);
+    for (const key of Object.keys(COMPANION_TARGETS)) {
+      if (intents[key]) writeJson(`public-outcome-intent-${key}.json`, intents[key]);
+    }
+    if (process.env.GITHUB_OUTPUT) {
+      fs.appendFileSync(process.env.GITHUB_OUTPUT, `publish_auditor_and_plug=${Boolean(intents.burrowAuditor)}\n`);
+    }
     return;
   }
-  const result = await verifyPreparedPublicOutcome({ ...disposition, intent: readJson(intentFile), outputFile }, {
+  const result = await verifyPreparedPublicOutcome({ ...disposition, intent: readJson(intentFile), outputFile, target }, {
     verifyOutcome: async intent => {
       const { verifyPublicReleaseOutcome } = await import('../../backend/src/outcome-verification.mjs');
       return verifyPublicReleaseOutcome(intent);

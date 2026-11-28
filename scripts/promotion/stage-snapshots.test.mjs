@@ -6,7 +6,7 @@ import test from 'node:test';
 import { setBurrowReleaseAuthority, setNodeGoblinReleaseAuthority, stampSkills, PUBLIC_SKILL_IDS, TARGETS, validateInputs } from './stage-snapshots.mjs';
 
 const sha = 'a'.repeat(40);
-const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha, burrowTheater: sha, burrowSwitchboard: sha };
+const sources = { burrow: sha, burrowBackend: sha, burrowUi: sha, nodeGoblin: sha, goblinSecretStore: sha, burrowSkills: sha, burrowBackdoor: sha, burrowTutor: sha, burrowTheater: sha, burrowSwitchboard: sha, burrowAuditor: sha, burrowPlug: sha };
 
 test('accepts the complete frozen source set', () => {
   assert.doesNotThrow(() => validateInputs({ releaseDate: '2026.10.17', sources }));
@@ -15,7 +15,7 @@ test('accepts the complete frozen source set', () => {
 test('public skills snapshot includes every supported skill directory', () => {
   for (const directory of ['burrow-backdoor', 'burrow-runtime', 'goblin-secret-store', 'node-goblin-operations', 'burrow-menagerie', 'burrow-auditor']) {
     assert.ok(PUBLIC_SKILL_IDS.includes(directory), `missing public skill version stamping: ${directory}`);
-    assert.ok(TARGETS.burrowSkills.paths.includes(directory), `missing public skill directory: ${directory}`);
+    assert.ok(TARGETS.burrowSkills.paths.includes(directory === 'burrow-auditor' ? `${directory}/SKILL.md` : directory), `missing public skill directory: ${directory}`);
   }
 });
 

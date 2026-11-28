@@ -111,3 +111,23 @@ test('new invocations check terminal evidence and download original frozen artif
   assert.match(workflow, /promotion_artifact_identity_mismatch/);
   assert.match(workflow, /steps.plan.outputs.resume != 'true'/);
 });
+
+test('freezes and gates both new mods and publishes them from the original artifact before Burrow', () => {
+  const freeze = workflow.indexOf('- name: Freeze source revisions');
+  assert.ok(workflow.indexOf('- name: Check terminal Burrow release evidence') < freeze);
+  assert.match(workflow.slice(freeze), /if: env.PROMOTION_TERMINAL_COMPLETE != 'false'/);
+  assert.match(workflow, /PG_BINDIR: \/usr\/lib\/postgresql\/17\/bin/);
+  const skill = workflow.indexOf('publish-release.sh "$PUBLIC_OWNER/Burrow-Skills"');
+  const terminal = workflow.indexOf('- name: Publish Burrow snapshot and coordinated release last');
+  for (const [key, name] of [['burrowAuditor', 'Burrow-Auditor'], ['burrowPlug', 'Burrow-Plug']]) {
+    assert.ok(workflow.includes(`repos/NightShaman/${name}/commits/main`));
+    assert.ok(workflow.includes(`ref: \${{ steps.frozen.outputs.${key} }}`));
+    const checks = workflow.slice(workflow.indexOf('- name: Validate frozen Auditor'), workflow.indexOf('- name: Stage allowlisted public trees'));
+    const check = checks.split(/\n {10}\(\n/).find(block => block.includes(`cd sources/${name}`));
+    assert.match(check, /npm ci[\s\S]*npm run build\s+npm test\s+timeout.*npm run test:core/);
+    const snapshot = workflow.indexOf(`publish-snapshot.sh ${name} staged/${name}`);
+    const release = workflow.indexOf(`publish-release.sh "$PUBLIC_OWNER/${name}"`);
+    assert.ok(snapshot > 0 && snapshot < release && skill < release && release < terminal);
+  }
+  assert.equal(workflow.split('if [ "${{ steps.restore.outputs.publish_auditor_and_plug }}" = true ]; then').length - 1, 2);
+});

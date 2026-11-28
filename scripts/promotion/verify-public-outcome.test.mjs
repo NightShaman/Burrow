@@ -8,8 +8,9 @@ import { tmpdir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  preparePublicOutcomeIntent, stagedSourceTree, testedImageConfigId, verifyPreparedPublicOutcome,
+  preparePublicOutcomeIntent, preparePublicOutcomeIntents, stagedSourceTree, testedImageConfigId, verifyPreparedPublicOutcome,
 } from './verify-public-outcome.mjs';
+import { COMPANION_TARGETS } from './companion-targets.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./verify-public-outcome.mjs', import.meta.url));
 const NOW = new Date('2026-11-24T23:59:00.000Z');
@@ -406,15 +407,18 @@ test('CLI prepare freezes intent without loading Backend; inert fixture Backend 
   const backend = path.join(f.root, 'backend/src/outcome-verification.mjs');
   fs.mkdirSync(path.dirname(script), { recursive: true });
   fs.copyFileSync(SCRIPT, script);
+  fs.copyFileSync(new URL('./companion-targets.mjs', import.meta.url), path.join(path.dirname(script), 'companion-targets.mjs'));
   const env = {
     ...process.env, PROMOTION_PUBLISHABLE: 'true', PROMOTION_VALIDATE_ONLY: 'false',
     EXPECTED_DATE: f.options.releaseDate, EXPECTED_RUN: f.options.originRunId,
     GITHUB_REPOSITORY: f.options.handlingRepository, GITHUB_RUN_ID: f.options.handlingRunId,
     GITHUB_RUN_ATTEMPT: f.options.handlingRunAttempt, GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_OUTPUT: path.join(f.root, 'outputs'),
   };
   const invoke = (command, extraEnv = {}) => spawnSync(process.execPath, [script, command], { cwd: f.root, env: { ...env, ...extraEnv }, encoding: 'utf8' });
   const prepare = invoke('prepare');
   assert.equal(prepare.status, 0, prepare.stderr);
+  assert.equal(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), 'publish_auditor_and_plug=false\n');
   const intent = read(path.join(f.root, 'public-outcome-intent.json'));
   fs.mkdirSync(path.dirname(backend), { recursive: true });
   fs.writeFileSync(backend, 'export async function verifyPublicReleaseOutcome() { return JSON.parse(process.env.INERT_OUTCOME_RESULT); }\n');
@@ -434,7 +438,7 @@ test('CLI prepare freezes intent without loading Backend; inert fixture Backend 
   assert.equal(fs.existsSync(f.outputFile), false);
 });
 
-test('workflow contract: one terminal read after final publication, guarded restored intent, separate seven-day receipt upload even on failure', () => {
+test('workflow runs each exact check after publication and uploads receipts even on failure', () => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/daily-public-promotion.yml', import.meta.url), 'utf8');
   const restore = workflow.indexOf('- name: Restore snapshots and verify executable permissions before publishing');
   const prepare = workflow.indexOf('verify-public-outcome.mjs prepare public-outcome-intent.json');
@@ -446,7 +450,7 @@ test('workflow contract: one terminal read after final publication, guarded rest
   assert.match(workflow.slice(restore, prepare), /id: restore/);
   assert.match(workflow.slice(restore, prepare), /EXPECTED_DATE: \$\{\{ needs.stage.outputs.release_date \}\}/);
   assert.match(workflow.slice(restore, prepare), /EXPECTED_RUN: \$\{\{ needs.stage.outputs.artifact_run_id \}\}/);
-  assert.equal(workflow.match(/verify-public-outcome\.mjs verify /g)?.length, 1);
+  assert.equal(workflow.match(/verify-public-outcome\.mjs verify /g)?.length, 3);
   assert.match(workflow.slice(check, upload), /if: \$\{\{ always\(\) && needs.stage.outputs.publishable == 'true' && steps.restore.outcome == 'success' \}\}/);
   assert.match(workflow.slice(check, upload), /PROMOTION_VALIDATE_ONLY: \$\{\{ inputs.validate_only == true \}\}/);
   assert.doesNotMatch(workflow.slice(check), /continue-on-error|retry|sleep |curl|gh api|docker push|webhook|notify/);
@@ -454,11 +458,110 @@ test('workflow contract: one terminal read after final publication, guarded rest
   assert.match(workflow.slice(upload), /uses: actions\/upload-artifact@v4/);
   assert.match(workflow.slice(upload), /path: public-outcome\.json\s+if-no-files-found: error\s+retention-days: 7/);
   assert.match(workflow.slice(upload), /name: public-outcome-.*github.run_id.*github.run_attempt/);
+  for (const [key, label] of [['burrowAuditor', 'Auditor'], ['burrowPlug', 'Plug-ins']]) {
+    const step = workflow.slice(check, upload).split(/\n      - name: /).find(step => step.startsWith(`Check exact public ${label} outcome once`));
+    assert.ok(step);
+    assert.ok(step.includes("always() && needs.stage.outputs.publishable == 'true' && steps.restore.outcome == 'success' && steps.restore.outputs.publish_auditor_and_plug == 'true'"));
+    assert.ok(step.includes(`verify public-outcome-intent-${key}.json public-outcome-${key}.json ${key}`));
+    assert.ok(workflow.slice(upload).includes(`\n            public-outcome-${key}.json`));
+  }
+  assert.match(workflow.slice(upload), /always\(\) && hashFiles\('public-outcome-burrowAuditor.json', 'public-outcome-burrowPlug.json'\) != ''/);
   assert.match(workflow, /if: needs.stage.outputs.publishable == 'true'/);
   assert.match(workflow, /validate_only.*then validation_required=true; publishable=false; fi/);
   assert.equal(workflow.match(/cron:/g)?.length, 1);
   assert.match(workflow, /cron: '30 5 \* \* \*'/);
   assert.match(workflow, /run-id: \$\{\{ needs.stage.outputs.artifact_run_id \}\}/);
+});
+
+function addCompanions(f) {
+  const manifestPath = path.join(f.payload, 'PUBLIC_RELEASE.json');
+  const planPath = path.join(f.root, 'plan.json');
+  const manifest = read(manifestPath);
+  const plan = read(planPath);
+  fs.mkdirSync(path.join(f.root, 'release-notes'));
+  for (const [key, { repository }] of Object.entries(COMPANION_TARGETS)) {
+    manifest.sources[key] = (key === 'burrowAuditor' ? 'a' : 'b').repeat(40);
+    plan.targets.push({
+      id: key, repository: `GoblinKing-Burrow/${repository}`, version: manifest.releaseDate, action: 'stage',
+      sources: Object.fromEntries([key, 'burrowBackend', 'burrowUi'].map(source => [source, manifest.sources[source]])),
+    });
+    fs.writeFileSync(path.join(f.root, 'release-notes', `${key}.md`), repository);
+  }
+  json(planPath, { ...plan, sources: manifest.sources });
+  json(manifestPath, manifest);
+  for (const { repository } of Object.values(COMPANION_TARGETS)) {
+    const payload = path.join(f.root, 'staged', repository);
+    fs.mkdirSync(payload);
+    json(path.join(payload, 'PUBLIC_RELEASE.json'), manifest);
+    fs.writeFileSync(path.join(payload, 'README.md'), repository);
+  }
+}
+
+test('legacy artifact freezes only Burrow, and divergent companion identity fails before publication', t => {
+  const f = fixture(t);
+  assert.deepEqual(Object.keys(preparePublicOutcomeIntents(f.options)), ['burrow']);
+  addCompanions(f);
+  const manifestPath = path.join(f.root, 'staged/Burrow-Plug/PUBLIC_RELEASE.json');
+  json(manifestPath, { ...read(manifestPath), promotionRunId: '777' });
+  assert.throws(() => preparePublicOutcomeIntents(f.options), /promotion_outcome_companion_artifact_mismatch/);
+});
+
+test('companion CLI receipts use the canonical verifier and either failed exact check exits nonzero', t => {
+  const f = fixture(t);
+  addCompanions(f);
+  const githubOutput = path.join(f.root, 'outputs');
+  const env = {
+    ...process.env, PROMOTION_PUBLISHABLE: 'true', PROMOTION_VALIDATE_ONLY: 'false',
+    EXPECTED_DATE: f.options.releaseDate, EXPECTED_RUN: f.options.originRunId,
+    GITHUB_REPOSITORY: f.options.handlingRepository, GITHUB_RUN_ID: f.options.handlingRunId,
+    GITHUB_RUN_ATTEMPT: f.options.handlingRunAttempt, GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_OUTPUT: githubOutput,
+  };
+  const prepare = spawnSync(process.execPath, [SCRIPT, 'prepare'], { cwd: f.root, env, encoding: 'utf8' });
+  assert.equal(prepare.status, 0, prepare.stderr);
+  assert.equal(fs.readFileSync(githubOutput, 'utf8'), 'publish_auditor_and_plug=true\n');
+  for (const [key, { repository }] of Object.entries(COMPANION_TARGETS)) {
+    const intentFile = `public-outcome-intent-${key}.json`;
+    const receiptFile = `public-outcome-${key}.json`;
+    const payload = path.join(f.root, 'staged', repository);
+    const intent = read(path.join(f.root, intentFile));
+    assert.equal(intent.repository, `GoblinKing-Burrow/${repository}`);
+    assert.equal(intent.version, f.options.releaseDate);
+    assert.deepEqual(intent.expectedArtifact, { sourceTreeSha: stagedSourceTree(payload) });
+    fs.appendFileSync(path.join(payload, 'README.md'), ' later mutation');
+    assert.notEqual(stagedSourceTree(payload), intent.expectedArtifact.sourceTreeSha);
+    const api = `https://api.github.com/repos/${intent.repository}`;
+    const releaseUrl = `${api}/releases/tags/v${intent.version}`;
+    const commitUrl = `${api}/commits/v${intent.version}`;
+    const preload = path.join(f.root, 'mock-fetch.mjs');
+    const calls = path.join(f.root, 'fetch.log');
+    fs.writeFileSync(preload, `
+      import fs from 'node:fs';
+      globalThis.fetch = async url => {
+        fs.appendFileSync(${JSON.stringify(calls)}, url + '\\n');
+        if (url === ${JSON.stringify(releaseUrl)}) {
+          return Response.json({ tag_name: ${JSON.stringify(`v${intent.version}`)}, draft: false, prerelease: false });
+        }
+        if (url === ${JSON.stringify(commitUrl)}) {
+          return Response.json({ commit: { tree: { sha: process.env.OBSERVED_TREE } } });
+        }
+        throw new Error('unexpected URL');
+      };
+    `);
+    for (const status of ['verified', 'mismatch']) {
+      fs.writeFileSync(calls, '');
+      const observedTree = status === 'verified' ? intent.expectedArtifact.sourceTreeSha : 'e'.repeat(40);
+      const result = spawnSync(process.execPath, ['--import', preload, SCRIPT, 'verify', intentFile, receiptFile, key], {
+        cwd: f.root, env: { ...env, OBSERVED_TREE: observedTree }, encoding: 'utf8',
+      });
+      assert.equal(result.status, status === 'verified' ? 0 : 1, result.stderr);
+      assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n').sort(), [commitUrl, releaseUrl].sort());
+      const receipt = read(path.join(f.root, receiptFile));
+      assert.equal(receipt.status, status);
+      assert.deepEqual(receipt.expected, { repository: intent.repository, version: intent.version, artifact: intent.expectedArtifact });
+      assert.deepEqual(receipt.observed.artifact, { sourceTreeSha: observedTree });
+    }
+  }
 });
 
 

@@ -14,7 +14,19 @@ test('enforces the shared public hero contract',async()=>{
   for(const name of names){ await fs.mkdir(path.join(root,name,'docs/assets'),{recursive:true}); await fs.writeFile(path.join(root,name,'docs/assets/hero.png'),png(1536,1024)); await fs.writeFile(path.join(root,name,'README.md'),'<img src="docs/assets/hero.png" width="720" alt="Useful art" />'); await fs.writeFile(path.join(root,name,'LICENSE'),'license text\n'); }
   await fs.writeFile(path.join(root,'Burrow-Skills/PUBLIC_RELEASE.json'),JSON.stringify({releaseDate:'2026.10.30'}));
   for(const id of PUBLIC_SKILL_IDS){ await fs.mkdir(path.join(root,'Burrow-Skills',id),{recursive:true}); await fs.writeFile(path.join(root,'Burrow-Skills',id,'SKILL.md'),`---\nname: ${id}\nversion: 2026.10.30\n---\nBody\n`); }
-  assert.deepEqual(await validatePublicReadiness(root),[]);
+  const missing = await validatePublicReadiness(root);
+  assert.ok(missing.length > 0);
+  assert.ok(missing.every(failure => /^(Auditor|Plug-ins):/.test(failure)));
+  assert.ok(missing.some(failure => /^Auditor: missing or invalid docs\/assets\/hero\.png/.test(failure)));
+  assert.ok(missing.some(failure => /^Plug-ins: LICENSE unavailable/.test(failure)));
+  for (const [name, width, height] of [['Burrow-Auditor',1672,941],['Burrow-Plug',1448,1086]]) {
+   await fs.mkdir(path.join(root,name,'docs/assets'),{recursive:true});
+   await fs.writeFile(path.join(root,name,'docs/assets/hero.png'),png(width,height));
+  }
+  assert.ok(!(await validatePublicReadiness(root)).some(failure=>/hero/.test(failure)));
+  await fs.writeFile(path.join(root,'Burrow-Auditor/docs/assets/hero.png'),png(0,941));
+  assert.ok((await validatePublicReadiness(root)).some(failure=>/Auditor: hero must have positive dimensions/.test(failure)));
+  await fs.writeFile(path.join(root,'Burrow-Auditor/docs/assets/hero.png'),png(1672,941));
   const skillFile=path.join(root,'Burrow-Skills/burrow-backdoor/SKILL.md');
   const correctSkill=await fs.readFile(skillFile,'utf8');
   for(const wrong of ['2026.10.29.1','2026.10.29','2026.10.30.1']){
