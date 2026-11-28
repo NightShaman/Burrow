@@ -131,21 +131,21 @@ function touchedFilesFromUnifiedPatch(patch) {
   return [...files];
 }
 
-function touchedFilesFromStructuredPatch(patch) {
+function touchedFilesFromStructuredPatch(patch, remote) {
   const files = new Set();
   for (const line of String(patch || '').split(/\r?\n/)) {
     const update = line.match(/^\*\*\* Update File:\s*(.+)$/);
     const add = line.match(/^\*\*\* Add File:\s*(.+)$/);
     const del = line.match(/^\*\*\* Delete File:\s*(.+)$/);
     const file = update?.[1] || add?.[1] || del?.[1] || null;
-    if (file) files.add(path.isAbsolute(file) ? path.resolve(file) : stripDiffPrefix(file));
+    if (file) files.add(!remote && path.isAbsolute(file) ? path.resolve(file) : stripDiffPrefix(file));
   }
   return [...files];
 }
 
-export function touchedFilesFromPatch(patch) {
+export function touchedFilesFromPatch(patch, { remote = false } = {}) {
   const dialect = detectPatchDialect(patch);
-  if (dialect === 'structured_patch') return touchedFilesFromStructuredPatch(patch);
+  if (dialect === 'structured_patch') return touchedFilesFromStructuredPatch(patch, remote);
   return touchedFilesFromUnifiedPatch(patch);
 }
 

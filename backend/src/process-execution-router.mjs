@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { createHash } from 'node:crypto';
 import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 import { startExecutionDispatch } from './execution-operational-telemetry.mjs';
@@ -43,6 +44,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     const target = request.target || localExecutionTarget();
     if (target.kind === 'local') {
       const processRequest = request.process || request;
+      if (processRequest.commandShell !== undefined) throw new Error('command_shell_requires_remote');
       return localExecute(context.abortSignal ? { ...processRequest, abortSignal: context.abortSignal } : processRequest, context);
     }
     if (target.kind !== 'remote') throw new Error('execution_target_invalid');
@@ -57,8 +59,10 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
     if (process.args != null && (!Array.isArray(process.args) || process.args.some((value) => typeof value !== 'string'))) throw new Error('args_invalid');
     const command = process.command?.trim() || '';
     const executable = process.executable?.trim() || '';
+    if (process.commandShell !== undefined && (!['powershell', 'cmd'].includes(process.commandShell) || !command || executable)) throw new Error('command_shell_invalid');
     if (command && executable) throw new Error('command_and_executable_mutually_exclusive');
     if (!command && !executable) throw new Error('command_or_executable_required');
+    if (process.cwd && !isAbsoluteRemotePath(process.cwd, context.workspaceRoot || target.workspaceRoot)) throw new Error('cwd_must_be_absolute');
     if (command && process.args?.length) throw new Error('args_with_command_invalid');
     // This private transport is owned by the run, never by request/process.
     const telemetryConfiguration = remoteTelemetryConfiguration(context.telemetry?.remoteConfiguration?.(parentRunId));
@@ -70,7 +74,7 @@ export function createProcessExecutionRouter({ localExecute, remoteController = 
       ...(context.traceContext ? { traceContext: { ...context.traceContext } } : {}),
       ...(telemetryConfiguration ? { telemetryConfiguration } : {}),
       process: {
-        ...(command ? { command } : { executable, args: process.args ? [...process.args] : [] }),
+        ...(command ? { command, ...(process.commandShell !== undefined ? { commandShell: process.commandShell } : {}) } : { executable, args: process.args ? [...process.args] : [] }),
         ...(process.cwd ? { cwd: String(process.cwd) } : {}),
         // Ordinary env remains compatible; protected values use a distinct,
         // operation-scoped field so controllers cannot accidentally journal it.

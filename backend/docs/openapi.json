@@ -11584,6 +11584,9 @@
           },
           "contextConfig": {
             "$ref": "#/components/schemas/JsonObject"
+          },
+          "executionEnvironment": {
+            "$ref": "#/components/schemas/AgentExecutionEnvironment"
           }
         },
         "additionalProperties": false
@@ -11609,9 +11612,88 @@
           },
           "contextConfig": {
             "$ref": "#/components/schemas/JsonObject"
+          },
+          "executionEnvironment": {
+            "$ref": "#/components/schemas/AgentExecutionEnvironment"
           }
         },
         "additionalProperties": false
+      },
+      "AgentExecutionEnvironment": {
+        "description": "Default execution host and working directory. Use null to clear an assignment.",
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "workspaceRoot"
+            ],
+            "properties": {
+              "kind": {
+                "const": "local"
+              },
+              "workspaceRoot": {
+                "type": "string",
+                "description": "Absolute path using the Core host filesystem semantics."
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "providerId",
+              "targetId",
+              "workspaceRoot"
+            ],
+            "properties": {
+              "kind": {
+                "const": "remote"
+              },
+              "providerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "targetId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "workspaceRoot": {
+                "type": "string",
+                "description": "Absolute POSIX, fully qualified Windows drive, or UNC server and share path on the assigned host. Core preserves the remote path spelling."
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind",
+              "legacyKind",
+              "targetId",
+              "workspaceRoot"
+            ],
+            "properties": {
+              "kind": {
+                "const": "unresolved"
+              },
+              "legacyKind": {
+                "type": "string"
+              },
+              "targetId": {
+                "type": "string"
+              },
+              "workspaceRoot": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
       },
       "ChatRequest": {
         "type": "object",

@@ -94,7 +94,7 @@ function evaluationFailure(status, timeoutMs) {
   return { ok: false, blockers: [`blast_radius:hard_policy_block:execution_boundary_evaluation_${status}`], matches: [], evaluation: { status, timeoutMs } };
 }
 
-export async function evaluateExecutionBoundaries({ boundaries = null, operation = null, command = '', paths = [], baseRoot = null, signal = null, deadline = null, timeoutMs = DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS } = {}) {
+export async function evaluateExecutionBoundaries({ boundaries = null, operation = null, command = '', paths = [], readScope = 'direct', baseRoot = null, remote = false, signal = null, deadline = null, timeoutMs = DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS } = {}) {
   const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_BOUNDARY_EVALUATION_TIMEOUT_MS;
   const end = Math.min(performance.now() + budget, Number.isFinite(deadline) ? deadline : Infinity);
   const remaining = end - performance.now();
@@ -125,7 +125,7 @@ export async function evaluateExecutionBoundaries({ boundaries = null, operation
       onAbort = () => { void finish(evaluationFailure('cancelled', budget)); };
       try {
         worker = new Worker(new URL('./execution-boundary-worker.mjs', import.meta.url), {
-          workerData: { boundaries, operation, command, paths, baseRoot },
+          workerData: { boundaries, operation, command, paths, readScope, baseRoot, remote },
         });
         worker.once('message', (result) => { void finish(performance.now() >= end ? evaluationFailure('timeout', budget) : signal?.aborted ? evaluationFailure('cancelled', budget) : result); });
         worker.once('error', () => { void finish(evaluationFailure('worker_error', budget)); });

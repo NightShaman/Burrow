@@ -1,6 +1,8 @@
+import { isAbsoluteRemotePath, isInvalidRemotePath } from './remote-execution-path.mjs';
 import { workflowFollowThroughToolSchemas, WORKFLOW_FOLLOW_THROUGH_TOOLS } from './workflow-follow-through-tools.mjs';
 import { taskWorkflowWaitToolSchemas } from './task-workflow-wait-tools.mjs';
 import path from 'node:path';
+import { touchedFilesFromPatch } from './harness/apply-patch.mjs';
 import { forgeToolSchemas } from './forge-agent-tools.mjs';
 import { outcomeToolSchema } from './outcome-tools.mjs';
 
@@ -31,22 +33,26 @@ function extractJsonCandidate(text) {
   return null;
 }
 
-function normalizeSpawnTarget(target, errors) {
+function normalizeSpawnTarget(target, errors, isAbsolute = path.isAbsolute, remote = false) {
   if (!target || typeof target !== 'object' || Array.isArray(target)) {
     errors.push('target_required');
     return null;
   }
   const requestedKind = String(target.kind || '').trim();
   const kind = TARGET_KIND_ALIASES.get(requestedKind) || null;
-  const root = typeof target.root === 'string' ? target.root.trim() : '';
+  const root = typeof target.root === 'string' ? (remote ? target.root : target.root.trim()) : '';
   if (!requestedKind) errors.push('target_kind_required');
   else if (!kind) errors.push(`unsupported_target_kind:${requestedKind}`);
   if (!root) errors.push('target_root_required');
-  else if (!path.isAbsolute(root)) errors.push('target_root_must_be_absolute');
+  else if (!isAbsolute(root)) errors.push('target_root_must_be_absolute');
   return kind && root ? { kind, root } : null;
 }
 
-function normalizeAction(action, index) {
+function normalizeAction(action, index, executionContext = null) {
+  const remote = (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.kind === 'remote';
+  const workspaceRoot = executionContext?.target?.kind === 'filesystem' ? executionContext.target.root
+    : executionContext?.workspaceRoot || (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.workspaceRoot;
+  const isAbsolute = remote ? value => isAbsoluteRemotePath(value, workspaceRoot) : path.isAbsolute;
   const tool = String(action?.tool || '').trim();
   const errors = [];
   if (!tool) errors.push('tool_required');
@@ -65,6 +71,7 @@ function normalizeAction(action, index) {
     ...(tool === 'verify_outcome' ? { outcomeArguments: action.outcomeArguments ?? Object.fromEntries(Object.entries(action).filter(([key]) => !['tool', 'toolCallId', 'index'].includes(key))) } : {}),
     requiresApproval: Boolean(action?.requiresApproval),
     command: action?.command ? String(action.command) : null,
+    ...(action?.commandShell !== undefined ? { commandShell: action.commandShell } : {}),
     protectedBindings: action?.protectedBindings && typeof action.protectedBindings === 'object' && !Array.isArray(action.protectedBindings) ? action.protectedBindings : {},
     // cwd is an ordinary per-tool execution argument. It is chosen by the
     // model for this call, never retained as a UI/session project selection.
@@ -171,11 +178,18 @@ function normalizeAction(action, index) {
     errors,
   };
 
+  if (normalized.commandShell !== undefined) {
+    if (!['powershell', 'cmd'].includes(normalized.commandShell) || tool !== 'shell_exec' || typeof action.command !== 'string' || !action.command.trim() || action.executable != null || action.args != null) errors.push('command_shell_invalid');
+    else if (!remote) errors.push('command_shell_requires_remote');
+  }
   if (tool === 'shell_exec' && !normalized.command) errors.push('command_required');
-  if (tool === 'shell_exec' && normalized.cwd && !path.isAbsolute(normalized.cwd)) errors.push('cwd_must_be_absolute');
+  if (tool === 'shell_exec' && normalized.cwd && !isAbsolute(normalized.cwd)) errors.push('cwd_must_be_absolute');
   if ((tool === 'files_read' || tool === 'files_write' || tool === 'files_edit') && !normalized.filePath) errors.push('filePath_required');
   if (tool === 'files_inspect' && !normalized.path) errors.push('path_required');
-  if ((tool === 'files_list' || tool === 'files_find' || tool === 'files_search' || tool === 'git_status' || tool === 'git_diff') && normalized.dirPath && !path.isAbsolute(normalized.dirPath)) errors.push('dirPath_must_be_absolute');
+  const filePath = normalized.filePath || (tool === 'files_inspect' ? normalized.path : null);
+  if (remote && [filePath, ...(tool === 'files_patch' ? touchedFilesFromPatch(normalized.patch, { remote: true }) : [])]
+    .some(value => value && isInvalidRemotePath(value, workspaceRoot))) errors.push('remote_path_invalid');
+  if ((tool === 'files_list' || tool === 'files_find' || tool === 'files_search' || tool === 'git_status' || tool === 'git_diff') && normalized.dirPath && !isAbsolute(normalized.dirPath)) errors.push('dirPath_must_be_absolute');
   if (tool === 'files_find' && !normalized.pattern) errors.push('pattern_required');
   if (tool === 'files_search' && !normalized.query) errors.push('query_required');
   if (tool === 'files_edit' && (normalized.oldText === null || normalized.newText === null)) errors.push('oldText_and_newText_required');
@@ -217,7 +231,11 @@ function normalizeAction(action, index) {
   if (tool === 'spawn_subagent') {
     if (normalized.harness !== null && !['burrow', 'codex', 'claude', 'gemini'].includes(normalized.harness)) errors.push('harness_invalid');
     if (!normalized.task) errors.push('task_required');
-    normalized.target = normalizeSpawnTarget(action?.target, errors);
+    // A profile can select a different host. The selected host validates the root before use.
+    const isSpawnRootAbsolute = normalized.minionProfileId
+      ? (root) => isAbsoluteRemotePath(root) || path.isAbsolute(root)
+      : isAbsolute;
+    normalized.target = normalizeSpawnTarget(action?.target, errors, isSpawnRootAbsolute, remote || Boolean(normalized.minionProfileId));
   }
   if (tool === 'forge_list_gallery_folders' && normalized.galleryName !== undefined && normalized.galleryName !== null &&
       (typeof normalized.galleryName !== 'string' || !normalized.galleryName.trim())) errors.push('forge_gallery_request_invalid');
@@ -248,7 +266,7 @@ function normalizeAction(action, index) {
   return normalized;
 }
 
-export function parseActionProposal(text) {
+export function parseActionProposal(text, executionContext = null) {
   const rawText = String(text || '');
   const candidate = extractJsonCandidate(rawText);
   if (!candidate) {
@@ -263,7 +281,7 @@ export function parseActionProposal(text) {
   }
 
   const envelope = Array.isArray(data) ? { actions: data } : data;
-  const actions = Array.isArray(envelope.actions) ? envelope.actions.map(normalizeAction) : [];
+  const actions = Array.isArray(envelope.actions) ? envelope.actions.map((action, index) => normalizeAction(action, index, executionContext)) : [];
   const errors = actions.flatMap((action) => action.errors.map((message) => `action_${action.index}:${message}`));
   const answerText = envelope.answer === undefined || envelope.answer === null ? rawText : String(envelope.answer);
 
@@ -300,7 +318,7 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
         parameters: {
           type: 'object',
           additionalProperties: false,
-          properties: { command: { type: 'string' }, cwd: { type: 'string', description: 'Optional absolute working directory for this command only.' }, protectedBindings: { type: 'object', additionalProperties: { type: 'string', pattern: '^protected://' }, description: 'One-turn protected value references from earlier tool results, injected as environment variables without exposing their values.' }, reason: { type: 'string' } },
+          properties: { command: { type: 'string' }, commandShell: { type: 'string', enum: ['powershell', 'cmd'], description: 'Optional explicit shell for a remote Windows command. Omit to use the execution host default.' }, cwd: { type: 'string', description: 'Optional absolute working directory for this command only.' }, protectedBindings: { type: 'object', additionalProperties: { type: 'string', pattern: '^protected://' }, description: 'One-turn protected value references from earlier tool results, injected as environment variables without exposing their values.' }, reason: { type: 'string' } },
           required: ['command'],
         },
       },
@@ -532,11 +550,11 @@ export function nativeToolSchemas({ includeSpawnSubagent = true, includeForge = 
     && (includeMcpMenu || !['mcp_providers', 'mcp_capabilities', 'mcp_call'].includes(tool.function?.name)));
 }
 
-export function actionFromNativeToolCall(call = {}, index = 0) {
+export function actionFromNativeToolCall(call = {}, index = 0, executionContext = null) {
   // Defense in depth: never turn a malformed native call into an optional-
   // argument tool targeting the agent home. Invalid calls remain undispatchable.
   if (call.argumentsError || !call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments)) {
-    const action = normalizeAction({ tool: call.name, toolCallId: call.id }, index);
+    const action = normalizeAction({ tool: call.name, toolCallId: call.id }, index, executionContext);
     action.errors.push('model_tool_call_arguments_invalid');
     if (call.name === 'mod_agent_tool') action.errors.push('mod_tool_envelope_invalid');
     return action;
@@ -545,14 +563,15 @@ export function actionFromNativeToolCall(call = {}, index = 0) {
   const tool = call.name;
   // Preserve provider call identity for every native tool. Remote execution
   // derives its stable operation identity from this runtime metadata.
-  const normalizeNative = (action) => normalizeAction({ ...action, toolCallId: call.id }, index);
+  const normalizeNative = (action) => normalizeAction({ ...action, toolCallId: call.id }, index, executionContext);
   if (tool === 'mod_agent_tool') {
     const action = normalizeNative({ tool, modToolName: args.name, modToolArguments: args.arguments });
     if (!call.arguments || typeof call.arguments !== 'object' || Array.isArray(call.arguments) || Object.keys(args).some(key => !['name', 'arguments'].includes(key))) action.errors.push('mod_tool_envelope_invalid');
     return action;
   }
+  if (args.commandShell !== undefined && tool !== 'shell_exec') return normalizeNative({ tool, commandShell: args.commandShell });
   if (tool?.startsWith('brain_')) return normalizeNative({tool,...args});
-  if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, cwd: args.cwd, protectedBindings: args.protectedBindings });
+  if (tool === 'shell_exec') return normalizeNative({ tool, reason: args.reason, command: args.command, commandShell: args.commandShell, executable: args.executable, args: args.args, cwd: args.cwd, protectedBindings: args.protectedBindings });
   if (tool === 'files_read') return normalizeNative({ tool, reason: args.reason, filePath: args.filePath, offsetBytes: args.offsetBytes, maxBytes: args.maxBytes });
   if (tool === 'attachment_view') return normalizeNative({ tool, reason: args.reason, attachmentId: args.attachmentId || args.id });
   if (tool === 'verify_outcome') return normalizeNative({ tool, outcomeArguments: args, reason: args.reason });

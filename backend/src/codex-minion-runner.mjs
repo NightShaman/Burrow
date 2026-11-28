@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { createNativeMinionActivity, createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { projectCodexCheckpoint, codexHandoffContext, codexObservedEvidence } from './codex-native-checkpoint.mjs';
@@ -109,7 +110,7 @@ export async function runCodexMinion({ id, task, target, dataRoot, childSessionI
     const boundaries = parentExecutionContext?.executionBoundaries;
     if (boundaries && (!Array.isArray(boundaries.hardBlocks) || boundaries.hardBlocks.some(rule => rule.enabled !== false))) fail('codex_execution_boundaries_unsupported');
     if (!id || !task?.trim() || !dataRoot || !childSessionId) fail('codex_runner_input_required');
-    if (target?.kind !== 'filesystem' || !path.isAbsolute(target.root || '')) fail('codex_target_invalid');
+    if (target?.kind !== 'filesystem' || !(remote ? isAbsoluteRemotePath(target.root) : path.isAbsolute(target.root || ''))) fail('codex_target_invalid');
     if (!remote && !(await fs.stat(target.root)).isDirectory()) fail('codex_target_invalid');
     if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('codex_owner_invalid');
     const models = parentExecutionContext?.stores?.models;

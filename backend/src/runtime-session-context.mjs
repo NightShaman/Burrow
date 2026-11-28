@@ -1,11 +1,10 @@
-import path from 'node:path';
 import { conversationAuthority } from './conversation-authority.mjs';
 import { turnWorkspaceFacts } from './turn-workspace-facts.mjs';
 import { applyWorkingContextEvents, verifiedEventsFromTurnInput, workingContextFromSession } from './working-context.mjs';
 import { loadWorkingContinuityAsync, normalizeContinuityScope, projectHandoffsIntoWorkingContinuity } from './working-memory-continuity.mjs';
 import { validateReadEvidence } from './read-evidence.mjs';
 import { readSessionReadEvidence } from './read-evidence-store.mjs';
-import { recentFileReferentSummaryFromTurns } from './file-referents.mjs';
+import { recentFileReferentSummaryFromTurns, resolveFileReferent } from './file-referents.mjs';
 
 export function agentExecutionWorkspaceRoot(agentRuntime) {
   return agentRuntime?.executionEnvironment?.workspaceRoot || agentRuntime?.agentWorkspaceRoot || null;
@@ -55,29 +54,32 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   // Execution assignments select the host's working directory, not the
   // controller-owned agent data/attachment root. Keep those namespaces separate.
   const configuredWorkingRoot = agentExecutionWorkspaceRoot(agentRuntime) || runtimeState.agentWorkspaceRoot || runtimeState.workspaceRoot;
+  const remote = agentRuntime?.executionEnvironment?.kind === 'remote';
   const workspaceResolution = turnWorkspaceFacts({
+    remote,
     configuredWorkspaceRoot: configuredWorkingRoot,
     requestedWorkspaceRoot: workspaceRoot ?? normalizedArgs.workspace_root ?? null,
   });
   const resolvedWorkingRoot = resolvedTarget?.root || workspaceRoot || normalizedArgs.workspace_root || configuredWorkingRoot || null;
-  const priorWorkingContext = workingContextFromSession(priorSession);
+  const pathContext = { workspaceRoot: resolvedWorkingRoot, remote };
+  const priorWorkingContext = workingContextFromSession(priorSession, pathContext);
   // Working-context file lists are only a compatibility cache. Rebuild their
   // active references from the same bounded persisted turn/receipt window used
   // by conversation context, so stale metadata cannot keep naming files when
   // no recent file-bearing turns exist. The durable receipts remain untouched.
-  const recentFileSummary = recentFileReferentSummaryFromTurns(sessionSnapshot.entries, { workspaceRoot: resolvedWorkingRoot });
+  const recentFileSummary = recentFileReferentSummaryFromTurns(sessionSnapshot.entries, pathContext);
   const recentFileTargets = recentFileSummary.recentFiles
     .filter((file) => ['changed', 'created', 'read'].includes(file.role))
-    .map((file) => path.isAbsolute(file.path) ? file.path : path.resolve(resolvedWorkingRoot || process.cwd(), file.path));
+    .map((file) => resolveFileReferent(file.path, pathContext));
   const activeWorkingContext = {
     ...priorWorkingContext,
     targets: recentFileTargets,
-    referents: recentFileSummary.recentFiles.map((file) => path.isAbsolute(file.path) ? file.path : path.resolve(resolvedWorkingRoot || process.cwd(), file.path)),
+    referents: recentFileSummary.recentFiles.map((file) => resolveFileReferent(file.path, pathContext)),
   };
   // ReadEvidence is an active-session aid, not ambient new-session memory. A
   // fresh session without an interrupted run must begin from its actual
   // conversation/handoff state, never arbitrary prior file excerpts.
-  const validReadEvidence = (!isFreshConversation || interruptedRun)
+  const validReadEvidence = !remote && (!isFreshConversation || interruptedRun)
     ? await validateReadEvidence(await readSessionReadEvidence({ rootDir: sessionRoot, sessionId: resolvedSessionId, conversationStore:stores?.conversations, agentId }))
     : [];
   const compatibilityScope = normalizeContinuityScope(normalizedArgs.continuity_scope ?? normalizedArgs.continuityScope ?? normalizedArgs.working_project ?? normalizedArgs.workingProject);
@@ -87,7 +89,7 @@ export async function prepareRuntimeSessionContext({ sessionRoot, resolvedSessio
   const initialWorkingContext = applyWorkingContextEvents({ ...activeWorkingContext, readEvidence: validReadEvidence, continuityScope }, await verifiedEventsFromTurnInput({
     message,
     workspaceResolution: resolvedTarget ? { workspaceRoot: resolvedTarget.root, resolved: true, reason: 'explicit_turn_target' } : workspaceResolution,
-  }));
+  }), pathContext);
   const deicticFiles = { files: explicitWorkspaceFiles, summary: null, applied: false, ambiguous: false, question: null };
   const workspaceFiles = deicticFiles.files.length ? deicticFiles.files : explicitWorkspaceFiles;
   const workingContinuity = projectHandoffsIntoWorkingContinuity({

@@ -1,4 +1,13 @@
 import path from 'node:path';
+import { resolveRemotePath } from './remote-execution-path.mjs';
+
+export function resolveFileReferent(filePath, { workspaceRoot, remote } = {}) {
+  if (remote) {
+    try { return resolveRemotePath(filePath, workspaceRoot); }
+    catch { return null; }
+  }
+  return path.isAbsolute(filePath) ? filePath : path.resolve(workspaceRoot || process.cwd(), filePath);
+}
 
 const VALID_FILE_REFERENT_ROLES = new Set(['changed', 'created', 'read', 'mentioned', 'deleted']);
 const DEFAULT_FILE_REFERENT_ROLE = 'mentioned';
@@ -38,7 +47,11 @@ function relativePathIfInsideWorkspace(filePath, workspaceRoot = null) {
 }
 
 function compactFileReferent(value = {}, context = {}) {
-  const normalizedPath = relativePathIfInsideWorkspace(value.path || value.filePath, context.workspaceRoot);
+  const filePath = value.path || value.filePath;
+  if (typeof filePath !== 'string' || !filePath.trim()) return null;
+  const normalizedPath = context.remote
+    ? resolveFileReferent(filePath, context)
+    : relativePathIfInsideWorkspace(filePath, context.workspaceRoot);
   if (!normalizedPath) return null;
   return {
     path: normalizedPath,
@@ -123,21 +136,30 @@ function uniqueByPath(referents = []) {
   return unique;
 }
 
-export function recentFileReferentSummaryFromTurns(turns = [], { limit = 12, workspaceRoot = null } = {}) {
-  const eligibleTurns = (turns || []).filter(isReferentBearingTurn);
+export function recentFileReferentSummaryFromTurns(turns = [], { limit = 12, workspaceRoot = null, remote = false } = {}) {
+  const isRemoteFileResult = (entry) => remote && entry.type === 'tool_result'
+    && entry.metadata?.canonicalExecution === true
+    && ['files_read', 'files_write', 'files_edit', 'files_patch'].includes(entry.metadata.tool)
+    && entry.metadata.normalizedResult?.execution?.kind === 'remote';
+  const eligibleTurns = (turns || []).filter(entry => isReferentBearingTurn(entry) || isRemoteFileResult(entry));
   const recentTurns = eligibleTurns.slice(Math.max(0, eligibleTurns.length - limit)).reverse();
   const referents = [];
   for (const turn of recentTurns) {
-    const turnReferents = normalizeRecentFileReferents(turn.metadata?.recentFiles || [], {
+    const context = {
       workspaceRoot,
+      remote,
       turnId: turn.id,
       runId: turn.runId,
       traceDir: turn.traceDir,
       at: turn.ts,
-    });
+    };
+    const recorded = turn.metadata?.recentFiles;
+    const turnReferents = recorded || !isRemoteFileResult(turn)
+      ? normalizeRecentFileReferents(recorded || [], context)
+      : recentFileReferentsFromToolResults([turn.metadata.normalizedResult], { ...context, workspaceRoot: turn.metadata.normalizedResult.workspaceRoot });
     referents.push(...turnReferents);
   }
-  const latestFirst = normalizeRecentFileReferents(referents, { workspaceRoot });
+  const latestFirst = normalizeRecentFileReferents(referents, { workspaceRoot, remote });
   const targetCandidates = uniqueByPath(latestFirst.filter((referent) => ['changed', 'created'].includes(referent.role)));
   return {
     latestChangedFile: firstByRole(latestFirst, ['changed']),

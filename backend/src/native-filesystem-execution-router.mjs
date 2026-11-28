@@ -1,3 +1,5 @@
+import { isAbsoluteRemotePath, isInvalidRemotePath, resolveRemotePath } from './remote-execution-path.mjs';
+import { touchedFilesFromPatch } from './harness/apply-patch.mjs';
 import { createHash } from 'node:crypto';
 import { remoteTelemetryConfiguration } from './remote-telemetry-configuration.mjs';
 import { startExecutionDispatch } from './execution-operational-telemetry.mjs';
@@ -59,6 +61,18 @@ export function createNativeFilesystemExecutionRouter({ localExecute, remoteCont
     let result;
     try {
       if (!available) throw new Error('remote_native_filesystem_controller_unavailable');
+      const args = operation.arguments || {};
+      const workspaceRoot = context.workspaceRoot || target.workspaceRoot || args.workspaceRoot || args.baseRoot;
+      for (const root of [args.workspaceRoot, args.baseRoot, args.dirPath]) {
+        if (root != null && !isAbsoluteRemotePath(root, workspaceRoot)) throw new Error('remote_path_invalid');
+      }
+      const paths = [args.filePath, args.path, ...(tool === 'files_patch' ? touchedFilesFromPatch(args.patch, { remote: true }) : [])];
+      for (const value of paths) {
+        if (value == null) continue;
+        const base = args.baseRoot || workspaceRoot;
+        if (base) resolveRemotePath(value, base);
+        else if (isInvalidRemotePath(value)) throw new Error('remote_path_invalid');
+      }
       // Resolve only after toolStart's observer has opened the Core span; a
       // carrier computed by the proposal before routing would point at the run.
       const traceContext = context.telemetry?.traceContextForTool?.(parentRunId, activityId || toolCallId) || context.traceContext;

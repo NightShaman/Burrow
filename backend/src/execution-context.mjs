@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { canSpawnMinion, normalizeMinionDepth } from './minion-depth.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -13,12 +14,12 @@ function freeze(value) {
   return Object.freeze(value);
 }
 
-function absolute(value, field) {
+function absolute(value, field, remote = false) {
   if (value == null) return null;
-  if (typeof value !== 'string' || !value.trim() || !path.isAbsolute(value.trim())) {
+  if (typeof value !== 'string' || !value.trim() || !(remote ? isAbsoluteRemotePath(value) : path.isAbsolute(value.trim()))) {
     throw new Error(`${field}_must_be_absolute`);
   }
-  return path.resolve(value.trim());
+  return remote ? value : path.resolve(value.trim());
 }
 
 function optionalAbsolute(value, field) {
@@ -107,7 +108,7 @@ export function createExecutionContext({
     conversationId: conversationId == null ? null : String(conversationId),
     continuityScope: continuityScope == null ? null : String(continuityScope).trim() || null,
     agentId: agentId == null ? null : String(agentId),
-    workspaceRoot: absolute(workspaceRoot, 'workspace_root'),
+    workspaceRoot: absolute(workspaceRoot, 'workspace_root', (processExecutionTarget || executionEnvironment)?.kind === 'remote'),
     target,
     dataRoot: absolute(dataRoot, 'data_root'),
     cacheRoot: absolute(cacheRoot, 'cache_root'),

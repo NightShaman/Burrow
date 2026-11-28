@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { createNativeMinionActivity, createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { createProcessDiagnostics, diagnosticText, collectDiagnosticSecrets, attachDiagnostics } from './native-minion-diagnostics.mjs';
 import { createClaudePoolRouting } from './claude-pool-routing.mjs';
@@ -207,7 +208,7 @@ export async function runClaudeMinion({ id, task, target, dataRoot, childSession
     if (!policy.mayInspect || !policy.capabilities.readWorkspace || !policy.mayMutate || !policy.capabilities.mutateWorkspace) fail('claude_execution_policy_unsupported');
     if (!id || typeof task !== 'string' || !task.trim() || !childSessionId || !dataRoot) fail('claude_runner_input_required');
     if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('claude_owner_invalid');
-    if (target?.kind !== 'filesystem' || !path.isAbsolute(target.root || '')) fail('claude_target_invalid');
+    if (target?.kind !== 'filesystem' || !(remote ? isAbsoluteRemotePath(target.root) : path.isAbsolute(target.root || ''))) fail('claude_target_invalid');
     if (!remote && !(await fs.stat(target.root)).isDirectory()) fail('claude_target_invalid');
     const controller = parentExecutionContext?.processExecutionController;
     if (remote && typeof controller?.codexRpc !== 'function') fail('claude_remote_process_unavailable');

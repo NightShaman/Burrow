@@ -743,7 +743,7 @@ export async function runPlainModelTurn({
     await traceLogger?.event?.('group-reply-finished', {});
   }
   if (finishedByWorkflowWait && model?.ok) await traceLogger?.event?.('workflow-wait-yielded', {});
-  const proposal = (finishedByGroupReply || finishedByWorkflowWait) && model?.ok ? null : model ? parseActionProposal(model.choice?.text ?? '') : null;
+  const proposal = (finishedByGroupReply || finishedByWorkflowWait) && model?.ok ? null : model ? parseActionProposal(model.choice?.text ?? '', executionContext) : null;
   // Keep source bytes/file handles on this ephemeral internal field only. They
   // are persisted by the plain-chat finalizer before any session serialization.
   const generatedArtifactSources = adapterOutputArtifactsFromResult(model);

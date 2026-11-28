@@ -54,9 +54,14 @@ export async function runRuntimeModelExecution({ continuityAuthority = null, run
   const stillCurrent = await continuityAuthority.current({ rootDir: sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation });
   if (!stillCurrent) return supersededModelExecutionResult({ continuityAuthority, command, json, resolvedRunId, resolvedSessionId, sessionRoot });
   const toolResults = modelTurn.chatToolLoop?.toolResults || [];
+  const pathContext = {
+    workspaceRoot: resolvedWorkingRoot,
+    remote: (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.kind === 'remote',
+  };
   const finalWorkingContext = applyWorkingContextEvents(initialWorkingContext, [
-    ...verifiedEventsFromToolResults(toolResults, { workspaceRoot: resolvedWorkingRoot, runId: logger.runId, traceDir: logger.traceDir }),
-    { readEvidence: retainedReadEvidenceFromToolResults(toolResults) },
-  ]);
+    ...verifiedEventsFromToolResults(toolResults, { ...pathContext, runId: logger.runId, traceDir: logger.traceDir }),
+    // Retained excerpts are version-checked on the controller filesystem.
+    { readEvidence: pathContext.remote ? [] : retainedReadEvidenceFromToolResults(toolResults) },
+  ], pathContext);
   return { superseded: false, modelTurn, finalWorkingContext };
 }

@@ -1,3 +1,4 @@
+import { resolveRemotePath } from './remote-execution-path.mjs';
 import { redactText } from './redaction.mjs';
 import { runExec } from './harness/exec.mjs';
 import { createProcessExecutionRouter, resolveProcessExecutionTarget } from './process-execution-router.mjs';
@@ -9,12 +10,6 @@ import { editFileEnvelope, gitDiffEnvelope, gitStatusEnvelope, globEnvelope, lis
 import { activeModToolConnection } from './mod-agent-tools.mjs';
 import { resolveManagedProtectedBindings } from './protected-values.mjs';
 import path from 'node:path';
-
-function workspacePath(filePath, workspaceRoot, rootDir) {
-  if (!filePath) return filePath;
-  if (path.isAbsolute(filePath)) return filePath;
-  return path.resolve(workspaceRoot || rootDir || process.cwd(), filePath);
-}
 
 function withExecutionProvenance(result, target, executionContext, toolCallId) {
   if (!result || typeof result !== 'object') return result;
@@ -49,20 +44,31 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
     const result = await routeFilesystem({ target, operation: { tool: action.tool, arguments: args } }, {
       parentRunId: executionContext?.parentRunId || traceLogger?.runId,
       toolCallId: action.toolCallId,
+      workspaceRoot: executionRoot,
       // The remote router starts the Core tool span before resolving its carrier.
       telemetry: executionContext?.telemetry || null,
       traceContext: executionContext?.traceContext || null,
       abortSignal,
     });
-    return withExecutionProvenance(result, target, executionContext, action.toolCallId);
+    const receipt = withExecutionProvenance(result, target, executionContext, action.toolCallId);
+    // Relative receipt paths belong to the workspace used for this dispatch.
+    return target.kind === 'remote' && receipt ? { ...receipt, workspaceRoot: executionRoot } : receipt;
+  };
+
+  const workspacePath = (filePath) => {
+    if (!filePath) return filePath;
+    if (resolveNativeFilesystemExecutionTarget(executionContext || {}).kind === 'remote') return resolveRemotePath(filePath, executionRoot);
+    if (path.isAbsolute(filePath)) return filePath;
+    return path.resolve(executionRoot || rootDir || process.cwd(), filePath);
   };
 
   return async function executeNativeTool(action, { observedToolResults = [] } = {}) {
     if (action.tool === 'shell_exec') {
       const target = resolveProcessExecutionTarget(executionContext || {});
+      const cwd = action.cwd && target.kind === 'local' ? path.resolve(action.cwd) : action.cwd || executionRoot;
       const traceDetails = {
         command: redactText(action.command).slice(0, 2000),
-        cwd: redactText(action.cwd ? path.resolve(action.cwd) : executionRoot).slice(0, 1000),
+        cwd: redactText(cwd).slice(0, 1000),
         reason: typeof action.reason === 'string' ? action.reason.slice(0, 500) : null,
         providerId: target.kind === 'remote' ? target.providerId : null,
       };
@@ -89,7 +95,7 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
         },
       });
       if (protectedInput.errors.length) {
-        const result = { tool: 'shell_exec', ok: false, command: action.command, cwd: action.cwd ? path.resolve(action.cwd) : executionRoot, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
+        const result = { tool: 'shell_exec', ok: false, command: action.command, cwd, error: protectedInput.errors.join(','), protectedBindings: protectedInput.bindings };
         return { result, finishTrace: () => (traceLogger?.toolEnd || traceLogger?.tool)?.({
           ...traceDetails,
           tool: 'shell_exec',
@@ -103,7 +109,8 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
       }
       const process = {
         command: action.command,
-        cwd: action.cwd ? path.resolve(action.cwd) : executionRoot,
+        ...(action.commandShell !== undefined ? { commandShell: action.commandShell } : {}),
+        cwd,
         env: protectedInput.env,
         traceLogger,
         // This proposal boundary owns the one logical shell tool activity.
@@ -124,6 +131,7 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
           ...(target.kind === 'remote' && protectedInput.bindings.length ? { protectedValues: protectedInput.env, protectedBindingMetadata: protectedInput.bindings } : {}) }, {
           parentRunId: executionContext?.parentRunId || traceLogger?.runId,
           toolCallId: action.toolCallId,
+          workspaceRoot: executionRoot,
           telemetry: executionContext?.telemetry || null,
           traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
           abortSignal,
@@ -157,10 +165,10 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
       }) };
     }
 
-    if (action.tool === 'files_read') { return { result: await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), workspaceRoot: executionRoot, rootDir, traceLogger, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`, reason: action.reason, offsetBytes: action.offsetBytes ?? 0, ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}) }) }; }
+    if (action.tool === 'files_read') { return { result: await executeFilesystem(action, { filePath: workspacePath(action.filePath), workspaceRoot: executionRoot, rootDir, traceLogger, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-read`, reason: action.reason, offsetBytes: action.offsetBytes ?? 0, ...(action.maxBytes ? { maxBytes: action.maxBytes } : {}) }) }; }
     if (action.tool === 'files_list') { return { result: await executeFilesystem(action, { dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-list`, reason: action.reason }) }; }
     if (action.tool === 'files_find') { return { result: await executeFilesystem(action, { pattern: action.pattern, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxEntries: action.maxEntries, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-files_find`, reason: action.reason }) }; }
-    if (action.tool === 'files_inspect') { return { result: await executeFilesystem(action, { path: workspacePath(action.path, executionRoot, rootDir), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason }) }; }
+    if (action.tool === 'files_inspect') { return { result: await executeFilesystem(action, { path: workspacePath(action.path), workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-stat`, reason: action.reason }) }; }
     if (action.tool === 'files_search') { return { result: await executeFilesystem(action, { query: action.query, dirPath: action.dirPath || executionRoot, workspaceRoot: executionRoot, maxDepth: action.maxDepth, maxMatches: action.maxMatches, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-search`, reason: action.reason }) }; }
     if (action.tool === 'git_status' || action.tool === 'git_diff') {
       const target = resolveProcessExecutionTarget(executionContext || {});
@@ -171,6 +179,7 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
       const execute = (process) => routeProcess({ target, process }, {
         parentRunId: executionContext?.parentRunId || traceLogger?.runId,
         toolCallId: action.toolCallId,
+        workspaceRoot: executionRoot,
         telemetry: executionContext?.telemetry || null,
         traceContext: executionContext?.telemetry?.traceContextForTool?.(executionContext?.parentRunId || traceLogger?.runId, action.toolCallId) || executionContext?.traceContext || null,
         abortSignal,
@@ -185,11 +194,11 @@ export function createNativeToolExecutor({ executionContext = null, executionRoo
       });
       return { result: withExecutionProvenance(result, target, executionContext, action.toolCallId) };
     }
-    if (action.tool === 'files_edit') { return { result: await executeFilesystem(action, { filePath: workspacePath(action.filePath, executionRoot, rootDir), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason }) }; }
+    if (action.tool === 'files_edit') { return { result: await executeFilesystem(action, { filePath: workspacePath(action.filePath), oldText: action.oldText, newText: action.newText, workspaceRoot: executionRoot, traceLogger, rootDir, artifactPrefix: `${artifactPrefix || 'proposal'}-${action.index}-edit`, reason: action.reason }) }; }
 
     if (action.tool === 'files_write') {
       return { result: await executeFilesystem(action, {
-        filePath: workspacePath(action.filePath, executionRoot, rootDir),
+        filePath: workspacePath(action.filePath),
         content: action.content,
         workspaceRoot: executionRoot,
         traceLogger,

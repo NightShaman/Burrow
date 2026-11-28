@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { normalizeAgentContextConfig } from './agent-context-config.mjs';
@@ -11,28 +12,29 @@ function executionEnvironment(value) {
   if (value == null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('agent_execution_environment_invalid');
   const kind = text(value.kind);
-  const workspaceRoot = text(value.workspaceRoot);
-  if (!workspaceRoot || !path.isAbsolute(workspaceRoot)) throw new Error('agent_execution_environment_invalid');
+  const workspaceRoot = kind === 'local' ? text(value.workspaceRoot)
+    : (typeof value.workspaceRoot === 'string' ? value.workspaceRoot : '');
+  if (!(kind === 'local' ? path.isAbsolute(workspaceRoot) : isAbsoluteRemotePath(workspaceRoot))) throw new Error('agent_execution_environment_invalid');
   if (kind === 'local') return { kind, workspaceRoot: path.resolve(workspaceRoot) };
   // Preserve legacy provider-less assignments as unresolved data. Core cannot
   // truthfully decide which independently installed mod owns them.
   if (kind === 'gateway') {
     const targetId = text(value.hostId || value.targetId);
     if (!targetId) throw new Error('agent_execution_environment_target_required');
-    return { kind: 'unresolved', legacyKind: 'gateway', targetId, workspaceRoot: path.resolve(workspaceRoot) };
+    return { kind: 'unresolved', legacyKind: 'gateway', targetId, workspaceRoot };
   }
   if (kind === 'unresolved') {
     const legacyKind = text(value.legacyKind);
     const targetId = text(value.targetId);
     if (!legacyKind || !targetId) throw new Error('agent_execution_environment_invalid');
-    return { kind, legacyKind, targetId, workspaceRoot: path.resolve(workspaceRoot) };
+    return { kind, legacyKind, targetId, workspaceRoot };
   }
   if (kind !== 'remote') throw new Error('agent_execution_environment_invalid');
   const providerId = text(value.providerId);
   const targetId = text(value.targetId);
   if (!providerId) throw new Error('agent_execution_environment_provider_required');
   if (!targetId) throw new Error('agent_execution_environment_target_required');
-  return { kind, providerId, targetId, workspaceRoot: path.resolve(workspaceRoot) };
+  return { kind, providerId, targetId, workspaceRoot };
 }
 function bootstrapSampleIdentitiesEnabled(value = process.env.BURROW_BOOTSTRAP_SAMPLE_IDENTITIES) { return ['1', 'true', 'yes', 'on'].includes(String(value ?? '0').trim().toLowerCase()); }
 

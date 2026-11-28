@@ -1,3 +1,4 @@
+import { resolveRemotePath } from '../remote-execution-path.mjs';
 import { promises as fs, createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
@@ -201,7 +202,7 @@ export async function editFileEnvelope({ filePath, oldText, newText, workspaceRo
 }
 
 async function gitEnvelope({ tool, args, dirPath, workspaceRoot, traceLogger, rootDir, runId, artifactPrefix, reason, execute = runExec, abortSignal = null, toolCallId = null, executionTarget = 'local', providerId = null, targetId = null }) {
-  const cwd = resolved(dirPath, workspaceRoot);
+  const cwd = executionTarget === 'remote' ? resolveRemotePath(dirPath || workspaceRoot, workspaceRoot) : resolved(dirPath, workspaceRoot);
   const traceDetails = { cwd, reason, toolCallId, executionTarget, providerId, targetId };
   const context = await toolContext({ tool, rootDir, runId, traceLogger, artifactPrefix, payload: traceDetails });
   let result;

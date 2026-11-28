@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { resolveModelConfig } from './config.mjs';
 import { CLAUDE_SELECTION_ACTIONS, validateClaudeModelSelection } from './claude-model-selection.mjs';
 import { compactSubagentEvidence, evidenceDeliveryCounts } from './subagent-evidence.mjs';
@@ -88,7 +89,7 @@ function spawnRequestIdentity({ parentSessionId, parentConversationId, parentRun
     parentSessionId: compactString(parentSessionId) || 'default',
     parentConversationId: compactString(parentConversationId) || null,
     parentRunId: compactString(parentRunId) || null,
-    targetRoot: compactString(targetRoot) || null,
+    targetRoot: targetRoot || null,
     harness,
     capability: compactString(capability) || 'spawn_subagent',
     model: compactString(model) || null,
@@ -179,13 +180,14 @@ function childFrom({ parentSessionId, parentConversationId, parentRunId, childSe
 export async function resolveRemoteTarget(targetRequest, executionContext, runId, abortSignal) {
   if (!targetRequest || typeof targetRequest !== 'object') throw new Error('target_required');
   if (targetRequest.kind !== 'filesystem') throw new Error(`unsupported_target_kind:${targetRequest.kind || 'missing'}`);
-  const root = compactString(targetRequest.root);
-  if (!path.isAbsolute(root)) throw new Error('target_root_must_be_absolute');
+  const root = typeof targetRequest.root === 'string' ? targetRequest.root : '';
+  const workspaceRoot = (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.workspaceRoot;
+  if (!isAbsoluteRemotePath(root, workspaceRoot)) throw new Error('target_root_must_be_absolute');
   const route = createNativeFilesystemExecutionRouter({
     localExecute: async ({ arguments: args }) => statPathEnvelope(args),
     remoteController: executionContext?.processExecutionController || null,
   });
-  const result = await route({ target: resolveNativeFilesystemExecutionTarget(executionContext || {}), operation: { tool: 'files_inspect', arguments: { path: root } } }, {
+  const result = await route({ target: resolveNativeFilesystemExecutionTarget(executionContext || {}), operation: { tool: 'files_inspect', arguments: { path: root, workspaceRoot } } }, {
     parentRunId: executionContext?.parentRunId || runId || 'subagent-target-validation',
     toolCallId: `spawn-target-${Date.now()}`,
     abortSignal,
@@ -193,7 +195,9 @@ export async function resolveRemoteTarget(targetRequest, executionContext, runId
     traceContext: executionContext?.traceContext || null,
   });
   if (!result?.ok || result.type !== 'directory') throw new Error(result?.error || 'target_root_not_found');
-  return Object.freeze({ kind: 'filesystem', root: result.path || root, boundaries: [] });
+  const resolvedRoot = result.path || root;
+  if (!isAbsoluteRemotePath(resolvedRoot, workspaceRoot)) throw new Error('target_root_must_be_absolute');
+  return Object.freeze({ kind: 'filesystem', root: resolvedRoot, boundaries: [] });
 }
 
 export async function executeSpawnSubagentTool({

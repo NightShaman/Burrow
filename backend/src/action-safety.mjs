@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath, resolveRemotePath } from './remote-execution-path.mjs';
 import path from 'node:path';
 import { touchedFilesFromPatch, resolvePatchBaseRoot } from './harness/apply-patch.mjs';
 import { grantedMcpTool } from './mcp-menu.mjs';
@@ -36,8 +37,8 @@ function validationReview({ action = 'plan', tool = null, targets = [], workspac
   };
 }
 
-async function addBoundaryBlockers({ blockers, review, boundaries, operation, command = '', paths = [], workspaceRoot = null, signal = null, deadline = null, timeoutMs = undefined } = {}) {
-  const boundary = await evaluateExecutionBoundaries({ boundaries, operation, command, paths, baseRoot: workspaceRoot, signal, deadline, timeoutMs });
+async function addBoundaryBlockers({ blockers, review, boundaries, operation, command = '', paths = [], readScope = 'direct', remote = false, workspaceRoot = null, signal = null, deadline = null, timeoutMs = undefined } = {}) {
+  const boundary = await evaluateExecutionBoundaries({ boundaries, operation, command, paths, readScope, baseRoot: workspaceRoot, remote, signal, deadline, timeoutMs });
   if (!boundary.ok) blockers.push(...boundary.blockers);
   if (review && typeof review === 'object') {
     review.boundary = boundary.matches.length || !boundary.ok ? boundary : null;
@@ -59,6 +60,18 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
   const boundaries = executionContext?.executionBoundaries || null;
 
   if (action.errors?.length) blockers.push(...action.errors);
+  const remote = (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.kind === 'remote';
+  const executionRoot = workspaceRoot || (executionContext?.target?.kind === 'filesystem' ? executionContext.target.root : executionContext?.workspaceRoot || (executionContext?.processExecutionTarget || executionContext?.executionEnvironment)?.workspaceRoot);
+  if (remote) {
+    workspaceRoot = executionRoot;
+    if (action.cwd && !isAbsoluteRemotePath(action.cwd, executionRoot)) blockers.push('cwd_must_be_absolute');
+    if (action.dirPath && !isAbsoluteRemotePath(action.dirPath, executionRoot)) blockers.push('dirPath_must_be_absolute');
+    const file = action.filePath || (action.tool === 'files_inspect' ? action.path : null);
+    if (file) {
+      try { resolveRemotePath(file, executionRoot); }
+      catch { blockers.push('remote_path_invalid'); }
+    }
+  }
 
   const runtime = executionContext?.agentRuntime;
   const agent = runtime?.agent;
@@ -82,7 +95,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
 
   if (['files_read', 'files_list', 'files_find', 'files_inspect', 'files_search', 'git_status', 'git_diff'].includes(action.tool)) {
     risk.push('read-only');
-    const target = action.filePath || action.path || action.dirPath || null;
+    const target = action.filePath || action.path || action.dirPath || executionRoot || process.cwd();
     const review = validationReview({
       message: action.intent || '',
       action: 'inspect',
@@ -92,6 +105,9 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
+    const readScope = ['git_status', 'git_diff'].includes(action.tool) ? 'repository'
+      : ['files_list', 'files_find', 'files_search'].includes(action.tool) ? 'recursive' : 'direct';
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'read', paths: [target], readScope, workspaceRoot: executionRoot, signal, deadline, timeoutMs });
     return {
       index: action.index,
       tool: action.tool,
@@ -154,7 +170,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
     risk.push('mutation');
     const review = validationReview({ message: action.intent || '', action: 'edit', tool: action.tool, targets: action.filePath ? [action.filePath] : [], workspaceRoot, errors: action.errors });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
     return { index: action.index, tool: action.tool, status: blockers.length ? 'blocked' : 'allowed', verificationRequired: true, risk, blockers: [...new Set(blockers)], warnings, review };
   }
 
@@ -169,7 +185,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'write', paths: action.filePath ? [action.filePath] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -185,11 +201,17 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
 
   if (action.tool === 'files_patch') {
     risk.push('mutation');
-    const paths = patchPaths(action.patch);
+    const paths = patchPaths(action.patch, { remote });
     const fallbackRoot = executionContext?.target?.kind === 'filesystem'
       ? executionContext.target.root
       : executionContext?.workspaceRoot || workspaceRoot || process.cwd();
-    const patchBaseRoot = await resolvePatchBaseRoot({ patch: action.patch, fallbackRoot: path.resolve(fallbackRoot) });
+    const patchBaseRoot = remote ? fallbackRoot : await resolvePatchBaseRoot({ patch: action.patch, fallbackRoot: path.resolve(fallbackRoot) });
+    if (remote) {
+      for (const file of paths) {
+        try { resolveRemotePath(file, patchBaseRoot); }
+        catch { blockers.push('remote_path_invalid'); }
+      }
+    }
     const review = validationReview({
       message: action.intent || '',
       action: 'patch',
@@ -199,7 +221,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'write', paths, workspaceRoot: patchBaseRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'write', paths, workspaceRoot: patchBaseRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -237,7 +259,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'delegate', paths: targetRoot ? [targetRoot] : [], workspaceRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'delegate', paths: targetRoot ? [targetRoot] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     return {
       index: action.index,
@@ -262,7 +284,7 @@ async function reviewAction(action = {}, { workspaceRoot = null, executionContex
       errors: action.errors
     });
     blockers.push(...review.blockers);
-    await addBoundaryBlockers({ blockers, review, boundaries, operation: 'execute', command, paths: action.cwd ? [action.cwd] : [], workspaceRoot, signal, deadline, timeoutMs });
+    await addBoundaryBlockers({ blockers, review, boundaries, remote, operation: 'execute', command, paths: action.cwd ? [action.cwd] : [], workspaceRoot, signal, deadline, timeoutMs });
     warnings.push(...review.warnings);
     if (/^(npm\s+(run\s+)?(test|check|lint|build)|node\s+--test|node\s+--check|git\s+status\b|git\s+diff\b|grep\b|cat\b|ls\b|pwd\b|test\b)/i.test(command)) risk.push('safe-check');
     if (!risk.length) risk.push('unknown-shell_exec');

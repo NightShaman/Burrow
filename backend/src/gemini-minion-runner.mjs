@@ -1,3 +1,4 @@
+import { isAbsoluteRemotePath } from './remote-execution-path.mjs';
 import { createNativeMinionActivity, createNativeMinionTelemetry } from './native-minion-telemetry.mjs';
 import { diagnosticText, collectDiagnosticSecrets } from './native-minion-diagnostics.mjs';
 import { spawn } from 'node:child_process';
@@ -195,7 +196,7 @@ export async function runGeminiMinion({ id, task, target, dataRoot, childSession
     if (!policy.mayInspect || !policy.capabilities.readWorkspace || !policy.mayMutate || !policy.capabilities.mutateWorkspace) fail('gemini_execution_policy_unsupported');
     if (!id || typeof task !== 'string' || !task.trim() || !childSessionId || !dataRoot) fail('gemini_runner_input_required');
     if (!owner.agentId || (parentExecutionContext?.agentId && owner.agentId !== parentExecutionContext.agentId)) fail('gemini_owner_invalid');
-    if (target?.kind !== 'filesystem' || !path.isAbsolute(target.root || '')) fail('gemini_target_invalid');
+    if (target?.kind !== 'filesystem' || !(remote ? isAbsoluteRemotePath(target.root) : path.isAbsolute(target.root || ''))) fail('gemini_target_invalid');
     if (!remote && !(await fs.stat(target.root)).isDirectory()) fail('gemini_target_invalid');
     const controller = parentExecutionContext?.processExecutionController;
     if (remote && typeof controller?.codexRpc !== 'function') fail('gemini_remote_process_unavailable');

@@ -128,7 +128,7 @@ function normalizeSpawnRequest(spawnRequest = null) {
     parentSessionId: compactString(spawnRequest.parentSessionId) || null,
     parentConversationId: compactString(spawnRequest.parentConversationId) || null,
     parentRunId: compactString(spawnRequest.parentRunId) || null,
-    targetRoot: compactString(spawnRequest.targetRoot) || null,
+    targetRoot: typeof spawnRequest.targetRoot === 'string' ? spawnRequest.targetRoot || null : null,
     harness: ['codex','claude','gemini'].includes(spawnRequest.harness) ? spawnRequest.harness : 'burrow',
     capability: compactString(spawnRequest.capability) || null,
     model: compactString(spawnRequest.model) || null,

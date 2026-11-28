@@ -101,7 +101,7 @@ export async function completeVerificationAfterMutation({ adapter, prompt, messa
 
 function proposalFromNativeToolCalls(toolCalls = [], fallbackText = '', executionContext = null) {
   if (!Array.isArray(toolCalls) || !toolCalls.length) return null;
-  const actions = toolCalls.map((call, index) => actionFromNativeToolCall(call, index));
+  const actions = toolCalls.map((call, index) => actionFromNativeToolCall(call, index, executionContext));
   const errors = actions.flatMap((action) => action.errors.map((message) => `action_${action.index}:${message}`));
   return {
     ok: errors.length === 0,
@@ -153,7 +153,7 @@ export async function runProposalLoop({
   }
 
   const resolvedToolResults = [...initialToolResults];
-  let proposal = proposalFromNativeToolCalls(model?.choice?.toolCalls, model?.choice?.text ?? '', executionContext) || (model ? parseActionProposal(model.choice?.text ?? '') : null);
+  let proposal = proposalFromNativeToolCalls(model?.choice?.toolCalls, model?.choice?.text ?? '', executionContext) || (model ? parseActionProposal(model.choice?.text ?? '', executionContext) : null);
   let proposalReview = (await reviewProposalActions({ actions: proposal?.actions ?? [], workspaceRoot, executionContext }));
   let proposalExecution = executeProposals && proposal
     ? await executeReviewedProposalActions({
@@ -193,7 +193,7 @@ export async function runProposalLoop({
   if (!missingTargetFallback && requiresMutation && adapter && hasExecutedInspectionEvidence(proposalExecution.toolResults) && shouldFollowReadOnlyInspection({ mode, ok, model, proposalExecution })) {
     const preflightToolResults = proposalExecution.toolResults;
     const mutationFollowup = await completeMutationAfterInspection({ adapter, prompt, message, toolResults: preflightToolResults, modelConfig, contextThreshold, traceLogger });
-    let mutationProposal = proposalFromNativeToolCalls(mutationFollowup?.choice?.toolCalls, mutationFollowup?.choice?.text ?? '', executionContext) || (mutationFollowup ? parseActionProposal(mutationFollowup.choice?.text ?? '') : null);
+    let mutationProposal = proposalFromNativeToolCalls(mutationFollowup?.choice?.toolCalls, mutationFollowup?.choice?.text ?? '', executionContext) || (mutationFollowup ? parseActionProposal(mutationFollowup.choice?.text ?? '', executionContext) : null);
     let mutationReview = (await reviewProposalActions({ actions: mutationProposal?.actions ?? [], workspaceRoot, executionContext }));
     let mutationExecution = executeProposals && mutationProposal
       ? await executeReviewedProposalActions({
@@ -242,7 +242,7 @@ export async function runProposalLoop({
           mutationRepairHistory.push({ attempt: repairAttempt, status: 'provider_failed', failureClass: lastFailure?.failureClass || null, tool: lastFailure?.tool || null, error: repair.error || 'model_failed' });
           break;
         }
-        const repairProposal = proposalFromNativeToolCalls(repair?.choice?.toolCalls, repair?.choice?.text ?? '', executionContext) || (repair ? parseActionProposal(repair.choice?.text ?? '') : null);
+        const repairProposal = proposalFromNativeToolCalls(repair?.choice?.toolCalls, repair?.choice?.text ?? '', executionContext) || (repair ? parseActionProposal(repair.choice?.text ?? '', executionContext) : null);
         const repairReview = (await reviewProposalActions({ actions: repairProposal?.actions ?? [], workspaceRoot, executionContext }));
         const repairExecution = executeProposals && repairProposal
           ? await executeReviewedProposalActions({
@@ -342,7 +342,7 @@ export async function runProposalLoop({
       const continuationTools = executionContext?.toolSchemas || nativeToolSchemas();
       inspectionFollowup = await adapter.complete({ ...structuredFollowupInput({ prompt, content: followupPrompt }), tools: continuationTools, toolChoice: 'auto', traceLogger });
       if (!inspectionFollowup?.ok) break;
-      const followupProposal = proposalFromNativeToolCalls(inspectionFollowup.choice?.toolCalls, inspectionFollowup.choice?.text ?? '', executionContext) || parseActionProposal(inspectionFollowup.choice?.text ?? '');
+      const followupProposal = proposalFromNativeToolCalls(inspectionFollowup.choice?.toolCalls, inspectionFollowup.choice?.text ?? '', executionContext) || parseActionProposal(inspectionFollowup.choice?.text ?? '', executionContext);
       if (!followupProposal?.actions?.length) {
         model = { ...inspectionFollowup, inspectionFollowup: true, initialModel: model };
         proposal = followupProposal;
@@ -393,7 +393,7 @@ export async function runProposalLoop({
       });
       const finalModel = await adapter.complete({ ...structuredFollowupInput({ prompt, content: finalPrompt }), traceLogger });
       if (finalModel?.ok) {
-        const finalProposal = proposalFromNativeToolCalls(finalModel.choice?.toolCalls, finalModel.choice?.text ?? '', executionContext) || parseActionProposal(finalModel.choice?.text ?? '');
+        const finalProposal = proposalFromNativeToolCalls(finalModel.choice?.toolCalls, finalModel.choice?.text ?? '', executionContext) || parseActionProposal(finalModel.choice?.text ?? '', executionContext);
         model = { ...finalModel, inspectionFollowup: true, inspectionNoProgress: true, initialModel: model };
         proposal = finalProposal?.actions?.length
           ? { ok: true, format: 'plain-text', answerText: finalModel.choice?.text || 'I collected the available evidence but could not safely complete the final synthesis.', actions: [], errors: [], raw: null }

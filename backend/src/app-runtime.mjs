@@ -404,7 +404,7 @@ async function runAskChatUnserialized({
   };
   const logger = createTraceLogger({ rootDir: traceRoot, runId: resolvedRunId, sessionId: resolvedSessionId, conversationId, onRecord: observeTrace });
   if (latencyTiming) await logger.event('chat-admission-timing', { ...latencyTiming, clockDomain: 'server-process' });
-  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, objective: message, traceRef: logger.traceDir, logger,
+  const commitTerminalResult = createTerminalCommitter({ stores, agentId:runtimeState.agentId, continuityAuthority, rootDir, sessionRoot, sessionId: resolvedSessionId, runId: resolvedRunId, generation: continuity.generation, command, json, initialWorkingContext, pathContext: { workspaceRoot: resolvedWorkingRoot, remote: agentRuntime?.executionEnvironment?.kind === 'remote' }, objective: message, traceRef: logger.traceDir, logger,
     onCompletionTransaction: completionState && stores.agentRuns?.recordInTransaction && completionMetadata
       ? async (client, value, completedAt) => {
           const outcome = classifyRuntimeOutcome(value).status;

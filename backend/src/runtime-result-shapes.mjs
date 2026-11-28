@@ -168,6 +168,8 @@ export function summarizeToolResults(toolResults = []) {
     } : {}),
     reason: toolResult.reason ? compactText(toolResult.reason, 500) : null,
     filePath: toolResult.filePath || null,
+    ...(toolResult.execution?.kind === 'remote' && toolResult.tool === 'files_write' && typeof toolResult.created === 'boolean'
+      ? { created: toolResult.created } : {}),
     path: toolResult.path || undefined,
     dirPath: toolResult.dirPath || undefined,
     pattern: toolResult.pattern || undefined,

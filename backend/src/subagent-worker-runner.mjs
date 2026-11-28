@@ -112,8 +112,8 @@ function childPrompt({ task, target }) {
   ].join('\n');
 }
 
-function proposalFromNativeToolCalls(toolCalls = [], fallbackText = '') {
-  const actions = toolCalls.map(actionFromNativeToolCall);
+function proposalFromNativeToolCalls(toolCalls = [], fallbackText = '', executionContext = null) {
+  const actions = toolCalls.map((call, index) => actionFromNativeToolCall(call, index, executionContext));
   return { actions, answerText: fallbackText };
 }
 
@@ -156,7 +156,7 @@ async function appendChildToolRound({ authority, rootDir, sessionId, runId, trac
 async function runSubagentToolCalls({ toolCalls = [], target, dataRoot, childSessionId, conversationId = null, traceLogger = null, executionPolicy: executionPolicyInput = null, modelConfig = null, observedToolResults = [], parentExecutionContext = null, signal = null, onToolProgress = null } = {}) {
   const executionPolicy = normalizeExecutionPolicyInput(executionPolicyInput);
   toolCalls = toolCalls.map((call, index) => ({ ...call, id: call.id || `tool-call-${index}` }));
-  const proposal = proposalFromNativeToolCalls(toolCalls);
+  const proposal = proposalFromNativeToolCalls(toolCalls, '', parentExecutionContext);
   const reviews = (await reviewProposalActions({ actions: proposal.actions, workspaceRoot: target.root, executionContext: parentExecutionContext, signal: signal || parentExecutionContext?.abortSignal }));
   const executionContext = createExecutionContext({
     conversationStore: parentExecutionContext?.conversationStore || parentExecutionContext?.stores?.conversations,
