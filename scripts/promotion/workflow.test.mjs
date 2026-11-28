@@ -15,10 +15,11 @@ test('validation-only dispatch disables publication while retaining tests', () =
   assert.match(workflow, /inputs.validate_only.*then validation_required=true; publishable=false; fi/);
   assert.match(workflow, /if: needs.stage.outputs.publishable == 'true'/);
 });
-test('manifest lookup distinguishes missing manifests from request failures', () => {
-  assert.match(workflow, /404\) printf 'null/);
-  assert.match(workflow, /public manifest HTTP \$status.*exit 1/);
-  assert.doesNotMatch(workflow, /output previous.json \|\|/);
+test('all-target pending discovery runs before source freezing', () => {
+  const discovery = workflow.indexOf('- name: Discover pending publication across every Public snapshot');
+  assert.ok(discovery > 0 && discovery < workflow.indexOf('- name: Freeze source revisions'));
+  assert.match(workflow, /node orchestrator\/scripts\/promotion\/discover-publication\.mjs orchestrator\/scripts\/promotion\/targets\.json previous\.json/);
+  assert.doesNotMatch(workflow, /Read last public manifest|Check terminal Burrow release evidence/);
 });
 test('Public promotion runs only selected backend critical files and retains component checks', () => {
   const gate = workflow.slice(workflow.indexOf('- name: Run critical frozen-source test suites'), workflow.indexOf('- name: Stage allowlisted public trees'));
@@ -103,9 +104,7 @@ esac
 });
 
 test('new invocations check terminal evidence and download original frozen artifact on resume', () => {
-  assert.match(workflow, /releases\/tags\/v\$version/);
-  assert.match(workflow, /404\) complete=false/);
-  assert.match(workflow, /terminal release HTTP \$status.*exit 1/);
+  assert.match(workflow, /discover-publication\.mjs/);
   assert.match(workflow, /run-id: \$\{\{ needs.stage.outputs.artifact_run_id \}\}/);
   assert.match(workflow, /github-token: \$\{\{ github.token \}\}/);
   assert.match(workflow, /promotion_artifact_identity_mismatch/);
@@ -114,7 +113,7 @@ test('new invocations check terminal evidence and download original frozen artif
 
 test('freezes and gates both new mods and publishes them from the original artifact before Burrow', () => {
   const freeze = workflow.indexOf('- name: Freeze source revisions');
-  assert.ok(workflow.indexOf('- name: Check terminal Burrow release evidence') < freeze);
+  assert.ok(workflow.indexOf('- name: Discover pending publication across every Public snapshot') < freeze);
   assert.match(workflow.slice(freeze), /if: env.PROMOTION_TERMINAL_COMPLETE != 'false'/);
   assert.match(workflow, /PG_BINDIR: \/usr\/lib\/postgresql\/17\/bin/);
   const skill = workflow.indexOf('publish-release.sh "$PUBLIC_OWNER/Burrow-Skills"');

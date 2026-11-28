@@ -38,31 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Read last public manifest
-        run: |
-          set -eu
-          status=$(curl --silent --show-error --retry 3 \
-            "https://raw.githubusercontent.com/$PUBLIC_OWNER/Burrow/main/PUBLIC_RELEASE.json" \
-            --output previous.json --write-out '%{http_code}')
-          case "$status" in
-            200) node -e "const m=require('./previous.json'); if(m.schemaVersion!==1 || !m.releaseDate || !m.sources) throw Error('invalid public manifest')" ;;
-            404) printf 'null\n' > previous.json ;;
-            *) echo "public manifest HTTP $status" >&2; exit 1 ;;
-          esac
-      - name: Check terminal Burrow release evidence
-        run: |
-          set -eu
-          complete=true
-          if [ "$(node -p "require('./previous.json') !== null")" = true ]; then
-            version=$(node -p "require('./previous.json').releaseDate")
-            status=$(curl --silent --show-error --retry 3 "https://api.github.com/repos/$PUBLIC_OWNER/Burrow/releases/tags/v$version" --output terminal.json --write-out '%{http_code}')
-            case "$status" in
-              200) node -e "const r=require('./terminal.json'); if(r.draft || r.prerelease) process.exit(1)" ;;
-              404) complete=false ;;
-              *) echo "terminal release HTTP $status" >&2; exit 1 ;;
-            esac
-          fi
-          printf 'PROMOTION_TERMINAL_COMPLETE=%s\n' "$complete" >> "$GITHUB_ENV"
+      - name: Discover pending publication across every Public snapshot
+        run: node orchestrator/scripts/promotion/discover-publication.mjs orchestrator/scripts/promotion/targets.json previous.json
       - name: Freeze source revisions
         if: env.PROMOTION_TERMINAL_COMPLETE != 'false'
         env:

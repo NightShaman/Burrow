@@ -168,11 +168,14 @@ and release date. `stage-snapshots.mjs` materializes explicit public trees.
 `publish-snapshot.sh` replaces only a destination snapshot and refuses to move an
 existing release tag.
 
-### Restart after the final snapshot push
+### Restart after any Public snapshot push
 
 `PUBLIC_RELEASE.json` records the originating Actions run ID. A new invocation
-checks the terminal, non-draft Burrow GitHub Release before deciding sources are
-unchanged. If that release is missing, it downloads **the original validated tar
+reads the manifest from **every configured Public repository**, including a
+component main pushed before its tag or release and before the final Burrow
+snapshot. It checks the terminal, non-draft Burrow GitHub Release for each
+observed date before freezing newer sources. If that release is missing, it
+downloads **the original validated tar
 artifact** from that run and resumes the same date with the original frozen sources and target
 set. An artifact from before Auditor and Plug-ins were introduced finishes its
 original eight targets. A fresh promotion freezes both added sources. Missing/expired artifacts fail closed (currently retained
@@ -181,3 +184,7 @@ Legacy incomplete manifests without an origin ID also fail closed and require
 operator recovery of their original frozen artifact. A validate-only invocation
 is rejected while publication is pending, rather than claiming validation ran.
 API failures other than a definitive 404 never authorize a resume.
+
+Discovery fails closed on conflicting manifests for a date, multiple pending
+dates, malformed manifests, and network/API errors other than a definitive 404.
+A missing new repository has no prior snapshot; it is not evidence of completion.
