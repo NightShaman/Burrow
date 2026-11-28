@@ -88,6 +88,30 @@ Names allow letters/digits/`.`/`_`/`-`; schemas must be JSON-serializable object
 
 Tools publish under `mod.<id>`. Default `grant-required` availability uses per-agent MCP grants; installation grants nothing. Advanced `mod-authorized` tools must enforce their own per-agent/per-record authorization. Secrets require documented protected-result envelopes; ordinary JSON is visible.
 
+## Automatic shared context
+
+Where supported, `context.agents.context.registerShared(provider)` may register
+once during activation. The provider returns `{context:[{name,content}]}` and
+receives Core-resolved recipient/session and addressed participant identities.
+Only authenticated routing establishes participants; names in prose do not.
+Registration grants no tools, agent ownership or execution authority.
+
+Core carries automatic records as attributed Mod source content, **not Core
+instructions, operator speech or authorization**. The provider-facing body names
+the owning Mod. The non-instruction `user` role is a data channel here, not an
+operator identity; runtime provenance distinguishes it from the current request.
+Enabling a Mod does not give its contributions authority over configured agent
+instructions or operator directions. Core does not choose which engineering
+policy is correct. Configured profiles and deliberately selected skills retain
+their existing mechanisms.
+
+This boundary applies to initial turns, continuations and side questions.
+Compression preserves the captured contribution; historical snapshots do not
+become fresh guidance. Mod-owned agent `profileFiles` remain configured identity,
+while ordinary `context` records are attributed source content. Older Core may
+place shared context in the developer channel; test against the exact release
+you support rather than assuming that older boundary has changed.
+
 ## Generic Core capabilities
 
 Ordinary mods may call `agents.list`, operator identity/timezone, paged conversation list/read, model list/generateText, and owner-scoped scheduler list/read/create/update/delete/runs/trigger. Model credentials remain in Core; generation uses `tools:null` and does not mutate chat. Scheduler jobs are bound to the mod. Use the scheduler, not private recurring timers. At most four generic capability calls are active per mod.
