@@ -29,7 +29,7 @@ async function readResponse(response) {
 
 export async function readGitHubWorkflowAttempt(input, { fetchAttempt = fetch, signal, apiToken = process.env.BURROW_GITHUB_ACTIONS_READ_TOKEN } = {}) {
   const target = normalizeWaitTarget(input);
-  const unavailable = diagnostic => ({ diagnostic });
+  const unavailable = (diagnostic, retryAfterMs) => ({ diagnostic, ...(retryAfterMs == null ? {} : { retryAfterMs }) });
   const [owner, repo] = target.repository.split('/');
   // URL parsers normalize dot segments even when the dots are percent-encoded.
   if ([owner, repo].some(segment => segment === '.' || segment === '..')) return unavailable('github_api_identity_mismatch');
@@ -42,8 +42,20 @@ export async function readGitHubWorkflowAttempt(input, { fetchAttempt = fetch, s
       headers: { accept: 'application/vnd.github+json', ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}) },
     });
     if (!response.ok) {
+      const retryValue = response.headers?.get?.('retry-after')?.trim();
+      const retryAfter = retryValue === '' || retryValue == null ? NaN : Number(retryValue);
+      const reset = Number(response.headers?.get?.('x-ratelimit-reset'));
+      const retryDelay = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000
+        : retryValue && !Number.isFinite(retryAfter) && Number.isFinite(Date.parse(retryValue)) ? Date.parse(retryValue) - Date.now() : null;
+      // Restrictions are cumulative: a short Retry-After never permits a
+      // request before an exhausted primary quota resets.
+      const rateLimited = response.status === 403 || response.status === 429;
+      const exhausted = rateLimited && response.headers?.get?.('x-ratelimit-remaining') === '0';
+      const explicitDelay = retryDelay != null && Number.isFinite(retryDelay) && retryDelay > 0 ? retryDelay : 0;
+      const resetDelay = exhausted && Number.isFinite(reset) && reset > 0 ? Math.max(1000, reset * 1000 - Date.now()) : 0;
+      const retryAfterMs = Math.max(explicitDelay, resetDelay) || (rateLimited ? 60_000 : undefined);
       void response.body?.cancel().catch(() => {});
-      return unavailable(`github_api_http_${response.status}`);
+      return unavailable(`github_api_http_${response.status}`, retryAfterMs);
     }
     const run = await readResponse(response);
     const repository = run?.repository?.full_name;

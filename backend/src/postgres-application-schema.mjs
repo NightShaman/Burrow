@@ -421,4 +421,20 @@ ALTER TABLE workflow_follow_through_waits ADD COLUMN activity_progress JSONB NOT
 CREATE INDEX workflow_follow_through_activity_idx ON workflow_follow_through_waits(agent_id,session_id,conversation_id,reset_identity)
  WHERE status IN ('waiting','matched','claimed','report_ready');
 ` },
+  { version: 116, name: 'workflow-follow-through-github-recovery-schedule', sql: `
+ALTER TABLE workflow_follow_through_waits ADD COLUMN github_poll_due_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE workflow_follow_through_waits ADD COLUMN github_poll_lease_until TIMESTAMPTZ;
+ALTER TABLE workflow_follow_through_waits ADD COLUMN github_poll_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow_follow_through_waits ADD COLUMN github_poll_diagnostic TEXT;
+CREATE INDEX workflow_follow_through_github_poll_idx ON workflow_follow_through_waits(github_poll_due_at,id)
+ WHERE status='waiting' AND mod_return_id IS NULL;
+` },
+  { version: 117, name: 'workflow-follow-through-github-provider-cooldown', sql: `
+CREATE TABLE workflow_follow_through_github_cooldown (
+ singleton BOOLEAN PRIMARY KEY CHECK (singleton),
+ due_at TIMESTAMPTZ NOT NULL,
+ diagnostic TEXT,
+ consecutive_limits INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_limits BETWEEN 0 AND 7)
+);
+` },
 ]);

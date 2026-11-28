@@ -8,7 +8,7 @@ const properties = Object.fromEntries(Object.entries(taskWorkflowWaitToolSchemas
 properties.checkpoint = { ...properties.checkpoint, description: 'Saved progress and next action for the authorized work. Do not include credentials.' };
 export const workflowFollowThroughToolSchemas = [
   { type: 'function', function: { name: 'workflow_wait',
-    description: 'Continue authorized work when one exact GitHub workflow run, attempt and commit completes. No task, standing watch or GitHub poll. Save a credential-free checkpoint including intended outcome, scope, proof to check, and next action. A signed completion or an exact GitHub API completion resumes work off-chat; only the final outcome or genuine blocker returns to this conversation. Finish this turn after registration. A workflow conclusion is not outcome verification.',
+    description: 'Continue authorized work when one exact GitHub workflow run, attempt and commit completes. No task or standing repository-wide watch. Exact-target API recovery handles missing completion events. Save a credential-free checkpoint including intended outcome, scope, proof to check, and next action. A signed completion or an exact GitHub API completion resumes work off-chat; only the final outcome or genuine blocker returns to this conversation. Finish this turn after registration. A workflow conclusion is not outcome verification.',
     parameters: { type: 'object', additionalProperties: false, properties, required: Object.keys(properties).filter(key => key !== 'reason') } } },
   { type: 'function', function: { name: 'mod_wait',
     description: 'Suspend authorized work until an exact passive receipt returned by a mod tool in this turn is complete. Call this by itself, with a credential-free checkpoint stating the original scope, progress, remaining steps and how to use the result. Work resumes in the background; no standalone report, status polling, or taskboard card. A terminal result is evidence, not acceptance or publication proof.',
@@ -41,17 +41,13 @@ export async function executeWorkflowFollowThroughTool({ tool, args = {}, agentI
     const handoff = context?.workflowFollowThrough;
     if (!conversations || !sessionId || !runId || (!handoff && !Number.isSafeInteger(context?.followThroughOrigin?.resetGeneration))) throw new Error('workflow_follow_through_source_required');
     context.abortSignal?.throwIfAborted();
-    let lookup, receiverError;
+    let receiverError;
     if (target) {
-      lookup = await workflows.lookup(target, context.abortSignal);
-      // A signed inbox hit or a completed API result needs no future delivery.
-      if (!lookup.completion && !lookup.signed) {
-        try {
-          const receiver = await receiverSettings?.read();
-          if (!receiver?.ready) receiverError = `workflow_follow_through_webhook_${receiver?.readiness || 'unavailable'}`;
-        } catch {
-          receiverError = 'workflow_follow_through_webhook_unavailable';
-        }
+      try {
+        const receiver = await receiverSettings?.read();
+        if (!receiver?.ready) receiverError = `workflow_follow_through_webhook_${receiver?.readiness || 'unavailable'}`;
+      } catch {
+        receiverError = 'workflow_follow_through_webhook_unavailable';
       }
     }
     const { continuityHead } = await continuityStateStore(conversations, agentId).read(sessionId);
@@ -63,9 +59,9 @@ export async function executeWorkflowFollowThroughTool({ tool, args = {}, agentI
     context.abortSignal?.throwIfAborted();
     const owner = { activityProgress: context.followThroughProgress?.snapshot(tool), agentId, sessionId: handoff?.sessionId || sessionId, ...origin,
       runId: handoff?.source.runId || runId, ...(handoff ? { handoffId: handoff.id, executionRunId: runId, executionSessionId: sessionId } : {}) };
-    const wait = tool === 'mod_wait' ? await workflows.registerModWait(args, owner) : await workflows.register(args, owner, { lookup, receiverError, signal: context.abortSignal });
+    const { diagnostic, ...wait } = tool === 'mod_wait' ? await workflows.registerModWait(args, owner) : await workflows.register(args, owner, { receiverError, signal: context.abortSignal });
     return { tool, ok: true, wait, error: null,
-      ...(wait.status === 'waiting' && lookup?.diagnostic ? { diagnostic: lookup.diagnostic } : {}) };
+      ...(wait.status === 'waiting' && diagnostic ? { diagnostic } : {}) };
   } catch (error) {
     return { tool, ok: false, error: error?.message || 'workflow_follow_through_failed' };
   }

@@ -35,9 +35,35 @@ export class PostgresWorkflowFollowThroughStore {
     const completion = rows[0]?.completion;
     return sameWorkflowTarget(target, completion) ? completion : null;
   }
-  async lookup(target, signal) {
-    if (await this.signedCompletion(this.pool, target)) return { signed: true };
-    return readGitHubWorkflowAttempt(target, { fetchAttempt: this.fetchAttempt, signal });
+  async lookup(target, signal, { recovery = false } = {}) {
+    // Provider cooldown is request state, not wait-admission state. Commit it
+    // independently so a rejected registration cannot roll back retry limits.
+    // One Core read credential (or anonymous quota) serves this entire feature;
+    // conservatively share its gate across all endpoints, without storing tokens.
+    return withPostgresTransaction(this.pool, async db => {
+      await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', ['workflow-follow-through-github-provider']);
+      signal?.throwIfAborted();
+      if (await this.signedCompletion(db, target)) return { signed: true };
+      const deferred = (await db.query(`SELECT diagnostic,due_at FROM (
+        SELECT diagnostic,due_at FROM workflow_follow_through_github_cooldown WHERE singleton
+        UNION ALL
+        SELECT github_poll_diagnostic,GREATEST(github_poll_due_at,CASE WHEN $4 THEN github_poll_due_at ELSE COALESCE(github_poll_lease_until,github_poll_due_at) END)
+          FROM workflow_follow_through_waits WHERE status='waiting' AND repository=$1 AND run_id=$2 AND run_attempt=$3
+        ) schedules WHERE due_at>clock_timestamp() ORDER BY due_at DESC LIMIT 1`,
+        [target.repository,target.runId,target.runAttempt,recovery])).rows[0];
+      // Validation fields (workflow/SHA) do not change the HTTP endpoint.
+      if (deferred) return { deferred: true, dueAt: deferred.due_at, diagnostic: deferred.diagnostic };
+      const outcome = await readGitHubWorkflowAttempt(target, { fetchAttempt: this.fetchAttempt, signal });
+      const limited = outcome.diagnostic === 'github_api_http_403' || outcome.diagnostic === 'github_api_http_429';
+      const prior = (await db.query('SELECT consecutive_limits FROM workflow_follow_through_github_cooldown WHERE singleton')).rows[0];
+      const consecutive = limited ? Math.min(7, Number(prior?.consecutive_limits || 0) + 1) : 0;
+      const delay = Math.max(outcome.retryAfterMs || 0, limited ? Math.min(900_000, 60_000 * 2 ** (consecutive - 1)) : 0);
+      const saved = (await db.query(`INSERT INTO workflow_follow_through_github_cooldown(singleton,due_at,diagnostic,consecutive_limits)
+        VALUES(true,clock_timestamp()+($1::bigint * interval '1 millisecond'),$2,$3)
+        ON CONFLICT(singleton) DO UPDATE SET due_at=EXCLUDED.due_at,diagnostic=EXCLUDED.diagnostic,consecutive_limits=EXCLUDED.consecutive_limits
+        RETURNING due_at`, [delay,outcome.diagnostic || null,consecutive])).rows[0];
+      return { ...outcome, ...(delay > 0 ? { retryAfterMs: delay, dueAt: saved.due_at } : {}) };
+    });
   }
   async register(input={}, owner={}, options={}) {
     const target=normalizeWaitTarget(input);
@@ -45,7 +71,7 @@ export class PostgresWorkflowFollowThroughStore {
     const agentId=waitText(owner.agentId,'agentId'), sessionId=waitText(owner.sessionId,'sessionId'), conversationId=waitText(owner.conversationId,'conversationId'), resetIdentity=waitText(owner.resetIdentity,'resetIdentity');
     const originRunId=waitText(owner.runId,'originRunId'), executionRunId=owner.executionRunId==null?null:waitText(owner.executionRunId,'executionRunId'), executionSessionId=owner.executionSessionId==null?null:waitText(owner.executionSessionId,'executionSessionId');
     const source={agentId,sessionId,conversationId,resetIdentity,runId:originRunId,...(executionSessionId?{executionSessionId}:{}),...(executionRunId?{executionRunId}:{}),...(owner.handoffId?{handoffId:waitId(owner.handoffId)}: {})};
-    const lookup = options.lookup ?? await this.lookup(target);
+    const lookup = await this.lookup(target, options.signal);
     const id=await withPostgresTransaction(this.pool,async c=>{
       await lockWaitIdentity(c,target.repository,target.runId,target.runAttempt);
       options.signal?.throwIfAborted();
@@ -71,10 +97,24 @@ export class PostgresWorkflowFollowThroughStore {
       const id = prior?.id ?? randomUUID();
       if (!prior) await c.query(`INSERT INTO workflow_follow_through_waits(id,agent_id,session_id,conversation_id,reset_identity,repository,workflow,run_id,run_attempt,head_sha,checkpoint,source,activity_progress)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)`,[id,agentId,sessionId,conversationId,resetIdentity,target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,checkpoint,JSON.stringify(source),JSON.stringify(owner.activityProgress || [])]);
+      // Admission has already made an exact-attempt request. Preserve any
+      // provider retry instruction before publishing the wake, including on
+      // idempotent registration. Do not shorten an existing target's delay or
+      // clear an in-flight recovery lease.
+      if (!completion && lookup.deferred) await c.query(`UPDATE workflow_follow_through_waits
+        SET github_poll_due_at=GREATEST(github_poll_due_at,$6::timestamptz),github_poll_diagnostic=$7
+        WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5`,
+        [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,lookup.dueAt,lookup.diagnostic || null]);
+      if (!completion && lookup.retryAfterMs > 0) await c.query(`UPDATE workflow_follow_through_waits
+        SET github_poll_due_at=GREATEST(github_poll_due_at,$6::timestamptz),
+          github_poll_diagnostic=$7
+        WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5`,
+        [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,lookup.dueAt,lookup.diagnostic || null]);
       if (completion) await matchWorkflowFollowThrough(c, completion);
       return id;
     });
-    this.publish(); return this.getOwned({id,agentId});
+    this.publish();
+    return { ...await this.getOwned({id,agentId}), ...(lookup.diagnostic ? { diagnostic: lookup.diagnostic } : {}) };
   }
   async registerModWait({ id, checkpoint }, owner = {}) {
     id=waitId(id); checkpoint=waitText(checkpoint,'checkpoint',20000);
@@ -207,19 +247,59 @@ export class PostgresWorkflowFollowThroughStore {
     }
     return {processed:done.length,results:done};
   }
-  async reconcileWaitingGitHub(signal) {
-    const { rows } = await this.pool.query(`SELECT DISTINCT repository,workflow,run_id AS "runId",run_attempt AS "runAttempt",head_sha AS "headSha"
-      FROM workflow_follow_through_waits WHERE status='waiting' AND mod_return_id IS NULL`);
-    for (const target of rows) {
+  async reconcileWaitingGitHub(signal, { limit = 8 } = {}) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 32) throw new Error('workflow_follow_through_invalid_poll_limit');
+    // Claim a bounded number of exact targets durably. A lease recovers after
+    // process loss; moving due_at before the request prevents multiple cores
+    // from hammering the same target while the request is in flight.
+    const claimed = await withPostgresTransaction(this.pool, async c => {
+      const { rows } = await c.query(`SELECT repository,workflow,run_id AS "runId",run_attempt AS "runAttempt",head_sha AS "headSha"
+        FROM workflow_follow_through_waits WHERE status='waiting' AND mod_return_id IS NULL
+          AND github_poll_due_at<=now() AND (github_poll_lease_until IS NULL OR github_poll_lease_until<now())
+        GROUP BY repository,workflow,run_id,run_attempt,head_sha ORDER BY min(github_poll_due_at),repository,workflow,run_id,run_attempt LIMIT $1`, [limit]);
+      const claimed = [];
+      for (const target of rows) {
+        // Each request is bounded to four seconds. Lease the whole serial batch
+        // plus twenty seconds of database/cleanup margin so no target is stolen
+        // while an earlier lookup is still running.
+        const updated = await c.query(`UPDATE workflow_follow_through_waits SET github_poll_lease_until=now()+($6::int * interval '1 second')
+          WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5
+            AND github_poll_due_at<=now() AND (github_poll_lease_until IS NULL OR github_poll_lease_until<now()) RETURNING id`,
+          [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,limit * 4 + 20]);
+        if (updated.rowCount) claimed.push(target);
+      }
+      return claimed;
+    });
+    for (const target of claimed) {
       if (signal?.aborted) break;
-      const { completion } = await this.lookup(target, signal);
-      if (!completion || signal?.aborted) continue;
+      const outcome = await this.lookup(target, signal, { recovery: true });
       const matched = await withPostgresTransaction(this.pool, async c => {
+        signal?.throwIfAborted();
         await lockWaitIdentity(c, target.repository, target.runId, target.runAttempt);
-        return matchWorkflowFollowThrough(c, await this.signedCompletion(c, target) || completion);
+        const signed = await this.signedCompletion(c, target);
+        if (signed || outcome.completion) return matchWorkflowFollowThrough(c, signed || outcome.completion);
+        if (outcome.deferred) {
+          await c.query(`UPDATE workflow_follow_through_waits SET github_poll_lease_until=NULL,github_poll_due_at=GREATEST(github_poll_due_at,$6::timestamptz),github_poll_diagnostic=$7
+            WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5`,
+            [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,outcome.dueAt,outcome.diagnostic || null]);
+          return [];
+        }
+        const attempts = Number((await c.query(`SELECT max(github_poll_attempts) AS n FROM workflow_follow_through_waits
+          WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5`,
+          [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha])).rows[0]?.n || 0) + 1;
+        const rateLimited = outcome.diagnostic === 'github_api_http_403' || outcome.diagnostic === 'github_api_http_429';
+        const backoff = Math.min(15 * 60_000, (rateLimited ? 60_000 : 15_000) * (2 ** Math.min(attempts - 1, 6)));
+        await c.query(`UPDATE workflow_follow_through_waits SET github_poll_attempts=$6,github_poll_diagnostic=$7,
+          github_poll_due_at=GREATEST(github_poll_due_at,clock_timestamp()+($8::bigint * interval '1 millisecond'),$9::timestamptz),github_poll_lease_until=NULL
+          WHERE status='waiting' AND repository=$1 AND workflow=$2 AND run_id=$3 AND run_attempt=$4 AND head_sha=$5`,
+          [target.repository,target.workflow,target.runId,target.runAttempt,target.headSha,attempts,outcome.diagnostic || null,backoff,outcome.dueAt || null]);
+        return [];
       });
       if (matched.length) this.publish();
     }
+    const next = (await this.pool.query(`SELECT GREATEST(0,EXTRACT(epoch FROM min(GREATEST(github_poll_due_at,COALESCE(github_poll_lease_until,github_poll_due_at)))-now())*1000)::numeric AS ms
+      FROM workflow_follow_through_waits WHERE status='waiting' AND mod_return_id IS NULL`)).rows[0]?.ms;
+    return { checked: claimed.length, nextDelayMs: next == null ? null : Math.max(1000, Number(next)) };
   }
   async reconcile() {
     // The singleton Core producer owns this queue. Never replay an ambiguous

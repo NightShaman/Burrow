@@ -22,7 +22,7 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
   const store = stores?.workflowFollowThrough;
   if (!store || !stores?.conversations || typeof resolveAgentRuntime !== 'function') throw new Error('workflow_follow_through_dependencies_required');
   const lifecycle = createBackgroundLifecycle({ name: 'workflow_follow_through', logger });
-  let running, timer, started = false, initialized = false, requested = false, pendingFinish;
+  let running, timer, pollTimer, pollInFlight = null, pollRequested = false, started = false, initialized = false, requested = false, pendingFinish;
   const failure = (reason, wait) => ({ status: 'report_ready', error: reason,
     result: { ok: false, answerText: `Background work could not continue: \`${reason}\`. The requested outcome has not been verified.${wait.modReturnId ? ' The mod result is retained.' : ''}` } });
   // The live overlay is private to the one worker owning the claimed stage.
@@ -67,6 +67,7 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
   }
   function wake() {
     requested = true;
+    if (started && !lifecycle.stopped) schedulePoll(0);
     if (!started || running || timer || lifecycle.stopped) return;
     running = lifecycle.track(async () => {
       if (pendingFinish) { await pendingFinish(); pendingFinish = null; }
@@ -90,14 +91,38 @@ export function createWorkflowFollowThroughRunner({ stores, rootDir, resolveAgen
       }
     });
   }
+  function schedulePoll(delay) {
+    if (!started || lifecycle.stopped) return;
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      if (pollInFlight) { pollRequested = true; return; }
+      pollInFlight = lifecycle.track(pollWaiting, 'github_completion_recovery');
+      void pollInFlight.finally(() => {
+        pollInFlight = null;
+        if (pollRequested && started && !lifecycle.stopped) { pollRequested = false; schedulePoll(0); }
+      }).catch(() => {});
+    }, Math.min(2147483647, Math.max(0, delay)));
+    pollTimer.unref?.();
+  }
+  async function pollWaiting() {
+    if (!started || lifecycle.stopped) return;
+    try {
+      const result = await store.reconcileWaitingGitHub(lifecycle.signal, { limit: 1 });
+      if (result.nextDelayMs != null && started && !lifecycle.stopped) schedulePoll(Math.max(1000, result.nextDelayMs));
+    } catch (error) {
+      if (!lifecycle.stopped) lifecycle.reportFailure(error, 'github_completion_recovery');
+      if (started && !lifecycle.stopped) schedulePoll(retryMs);
+    }
+  }
   const unsubscribe = store.subscribe(wake);
   const unsubscribeRuns = stores.agentRuns?.subscribe(wake);
-  function stop(reason) { clearTimeout(timer); timer = null; unsubscribe(); unsubscribeRuns?.(); lifecycle.stop(reason); }
+  function stop(reason) { clearTimeout(timer); clearTimeout(pollTimer); timer = pollTimer = null; unsubscribe(); unsubscribeRuns?.(); lifecycle.stop(reason); }
   function start() {
     if (started || lifecycle.stopped) return;
     started = true;
-    // The one-time remote reconciliation must not delay ordinary queue work.
-    lifecycle.track(() => store.reconcileWaitingGitHub(lifecycle.signal), 'startup_github_reconciliation');
+    // Exact pending-target recovery must not delay ordinary queue work.
+    schedulePoll(0);
     wake();
   }
   return { start, wake, stop, progressFor, close(reason) { stop(reason); return lifecycle.close(reason); }, health: lifecycle.health };
