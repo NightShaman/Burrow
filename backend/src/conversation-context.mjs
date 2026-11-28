@@ -49,7 +49,7 @@ function projectPriorSummary(summary, maxChars) {
   return `${text.slice(0, included).trim()}${marker}`;
 }
 
-function isPromptChatMessage(entry) {
+export function isPromptChatMessage(entry) {
   const content = String(entry?.content || '').trim();
   const decision = String(entry?.metadata?.decision || '');
   const isToolProtocolRecord = decision === 'chat_tool_call'
