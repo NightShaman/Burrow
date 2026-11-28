@@ -19,6 +19,7 @@ import { normalizeExecutionPolicyInput } from './execution-policy.mjs';
 import { normalizeProviderMessages } from './provider-messages.mjs';
 import { inspectAssembledPromptBudget } from './prompt-budget.mjs';
 import { serializeFinalAnswerEvidence } from './final-answer-evidence.mjs';
+import { plainChatKernel } from './plain-chat-kernel.mjs';
 
 function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
@@ -226,7 +227,7 @@ export async function runBurrow({
     dataRoot,
     sessionId,
     preparedContext,
-    kernel: 'You are Hatchet. For direct questions about who or what you are, identify yourself as Hatchet and do not mention Burrow, the runtime, or the app unless the user explicitly asks about that product or runtime. Burrow is only the local runtime/app you operate through. Follow eligible global and agent-owned skill instructions when relevant.',
+    kernel: plainChatKernel(),
     selectedSkills: route.promptPlan.selectedSkills,
     promptSkills: route.promptPlan.promptSkills,
     modelProfile: null,

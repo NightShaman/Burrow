@@ -1,4 +1,5 @@
 import { normalizeSessionContextState } from './session-context-state.mjs';
+import { isCurrentTurnSupport } from './provider-turn-replay.mjs';
 import { conversationAuthority } from './conversation-authority.mjs';
 
 function resolveAuthority({ conversationStore = null, stores = null, agentId = 'hatchet', sessionRoot = null, dataRoot = null } = {}) {
@@ -55,7 +56,7 @@ export async function appendRuntimeProviderTurn({ messages = [], ...scope } = {}
   // the current user message is not a durable capture contract. Keep only the
   // current provider support pack and current task; historical snapshots and
   // replayed dialogue already have their own durable owners.
-  const freshSupport = messages.filter((message) => message?.metadata?.providerMessageSource === 'support-context-provider');
+  const freshSupport = messages.filter(isCurrentTurnSupport);
   const turnMessages = [...freshSupport, current]
     .map(({ role, content, metadata }) => ({ role, content, ...(metadata ? { metadata } : {}) }));
   return appendRuntimeSessionEntry({ ...scope, type: 'provider_history',

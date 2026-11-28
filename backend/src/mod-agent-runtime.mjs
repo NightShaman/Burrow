@@ -43,7 +43,7 @@ function validateRecords(value) {
   };
   return { profileFiles: records(value.profileFiles), context: records(value.context) };
 }
-// Shared records are volatile support text, not owner identity. A shared-only
+// Shared records are volatile source context, not instructions or owner identity. A shared-only
 // publication must never make its mod an agent-owner provider.
 function activeSharedProvider(id) {
   const mod = providers.get(id);

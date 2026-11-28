@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { routeRequest } from '../src/request-router.mjs';
 import { assemblePrompt } from '../src/prompt-assembler.mjs';
+import { plainChatKernel } from '../src/plain-chat-kernel.mjs';
 import { createTraceLogger } from '../src/trace-logger.mjs';
 import { runBurrow } from '../src/runner.mjs';
 import { loadBurrowConfig, resolveModelConfig, resolveExecutionConfig, configDefaults, resolveRuntimeStateConfig, resolveRuntimeTracePath, resolveSkillsConfig, resolveContextConfig } from '../src/config.mjs';
@@ -521,7 +522,7 @@ async function main() {
 
   const prompt = await assemblePrompt({
     rootDir,
-    kernel: 'You are Hatchet. For direct questions about who or what you are, identify yourself as Hatchet and do not mention Burrow, the runtime, or the app unless the user explicitly asks about that product or runtime. Burrow is only the local runtime/app you operate through. Use routed skills and memory context only when provided.',
+    kernel: plainChatKernel(),
     selectedSkills: route.promptPlan.selectedSkills,
     modelProfile: null,
     task: message,

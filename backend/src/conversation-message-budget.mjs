@@ -1,4 +1,4 @@
-import { historicalProviderTurnMessages } from './provider-turn-replay.mjs';
+import { historicalProviderTurnMessages, isCurrentTurnSupport } from './provider-turn-replay.mjs';
 import { contextUsageFromRequest } from './model-adapters/adapter-primitives.mjs';
 
 // Retention and compression charge the same historical input that replay sends:
@@ -11,10 +11,10 @@ export function providerTurnsFromTranscript(entries = []) {
     try {
       const snapshot = JSON.parse(entry.content);
       if (snapshot?.version === 1 && Array.isArray(snapshot.messages)
-        && snapshot.messages.length <= 2 && snapshot.messages.length > 0
+        && snapshot.messages.length > 0
         && snapshot.messages.at(-1)?.role === 'user'
-        && snapshot.messages.slice(0, -1).every(message => message?.role === 'user'
-          || (message?.role === 'developer' && message?.metadata?.providerMessageSource === 'support-context-provider'))
+        && snapshot.messages.slice(0, -1).every(message => isCurrentTurnSupport(message)
+          || (snapshot.messages.length <= 2 && message?.role === 'user'))
         && (typeof snapshot.messages.at(-1).content === 'string' || Array.isArray(snapshot.messages.at(-1).content))) {
         // First dispatch wins; a retry cannot rewrite historical input.
         if (!turns.has(entry.runId)) turns.set(entry.runId, snapshot);

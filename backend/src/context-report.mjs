@@ -13,7 +13,7 @@ const labels = {
   'prior-execution-continuity': 'Prior execution continuity',
   'stable-context': 'Identity and fixed guidance',
   'request-support': 'Turn support',
-  'mod-shared-context-provider': 'Shared mod guidance',
+  'mod-shared-context-provider': 'Shared mod context',
   'mod-agent-context-provider': 'Mod context',
   'historical-user-turn': 'Conversation history',
   'current-message': 'Current message',

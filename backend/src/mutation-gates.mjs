@@ -512,7 +512,8 @@ export async function runCommitGate({
       commit = { ok: false, skipped: true, reason: 'git_context_required' };
     } else {
       const status = await runExec({
-        command: 'git status --short',
+        executable: 'git',
+        args: ['status', '--short'],
         cwd: workspaceRoot,
         traceLogger,
         artifactPrefix: 'commit-status-before',
@@ -528,14 +529,16 @@ export async function runCommitGate({
         commit = { ok: false, skipped: true, reason: 'unauthorized_dirty_paths', status, authorizedPaths, unauthorizedPaths };
       } else {
         const add = await runExec({
-          command: `git add -- ${authorizedPaths.map((file) => JSON.stringify(file)).join(' ')}`,
+          executable: 'git',
+          args: ['add', '--', ...authorizedPaths],
           cwd: workspaceRoot,
           traceLogger,
           artifactPrefix: 'commit-git-add',
         });
         const resolvedCommitMessage = commitMessage || `Burrow verified changes: ${String(message || 'model run').slice(0, 80)}`;
         const commitResult = add.ok ? await runExec({
-          command: `git commit -m ${JSON.stringify(resolvedCommitMessage)}`,
+          executable: 'git',
+          args: ['commit', '-m', resolvedCommitMessage],
           cwd: workspaceRoot,
           env: {
             GIT_AUTHOR_NAME: 'Burrow',
